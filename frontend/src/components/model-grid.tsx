@@ -2333,6 +2333,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       </Button>
                     ) : (
                       <div className="flex flex-wrap items-center justify-center gap-2">
+                        {user?.is_superuser && (
+                          <Button variant="outline" onClick={() => router.push("/getting-started")}>
+                            {t("setup.resume")}
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           size="sm"

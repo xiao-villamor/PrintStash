@@ -167,16 +167,19 @@ set -a; . deploy/manual-testing/.env; set +a
 if test -n "$requested_storage_backend"; then VAULT_STORAGE_BACKEND="$requested_storage_backend"; fi
 API=http://localhost:${PRINTSTASH_API_PORT:-8100}
 SETUP_JSON="$(jq -n \
-  --arg token "$VAULT_SETUP_TOKEN" \
   --arg s3 "$VAULT_S3_BUCKET" \
   --arg endpoint "$VAULT_S3_ENDPOINT_URL" \
   --arg region "$VAULT_S3_REGION" \
   --arg access "$SEAWEEDFS_ACCESS_KEY" \
   --arg secret "$SEAWEEDFS_SECRET_KEY" \
   --arg backend "${VAULT_STORAGE_BACKEND:-s3}" \
-  '{setup_token:$token,username:"manual-admin",password:"manual-admin-password",email:"manual-admin@example.test",storage_backend:$backend,s3_bucket:$s3,s3_endpoint_url:$endpoint,s3_region:$region,s3_access_key:$access,s3_secret_key:$secret}')"
+  '{username:"manual-admin",password:"manual-admin-password",email:"manual-admin@example.test",storage_backend:$backend,s3_bucket:$s3,s3_endpoint_url:$endpoint,s3_region:$region,s3_access_key:$access,s3_secret_key:$secret}')"
+setup_cookie_file="$(mktemp)"
+setup_csrf="$(curl -fsS -X POST "$API/api/v1/setup/session" -H "Origin: $API" -c "$setup_cookie_file" | jq -r .csrf)"
 ADMIN_TOKEN="$(curl -fsS -X POST "$API/api/v1/setup" \
+  -H "Origin: $API" -H "X-PrintStash-Setup-CSRF: $setup_csrf" -b "$setup_cookie_file" \
   -H 'Content-Type: application/json' --data "$SETUP_JSON" | jq -r .access_token)"
+rm -f "$setup_cookie_file"
 test -n "$ADMIN_TOKEN" && test "$ADMIN_TOKEN" != null
 curl -fsS "$API/api/v1/health" | jq
 ```

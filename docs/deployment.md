@@ -14,8 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docke
 docker compose up -d
 ```
 
-Open `http://localhost:3000` or `http://<server-ip>:3000`. Retrieve the setup token
-with `docker compose logs api | grep "setup token"` and paste it into the wizard.
+Open `http://localhost:3000` or `http://<server-ip>:3000`. Use a trusted network and create your administrator account in the browser.
+The first person to complete registration owns the installation.
 There is no default account. The API generates a new token on each start until
 setup is complete. Database migrations run automatically at startup.
 
@@ -62,10 +62,10 @@ add it to `api.environment`, either directly as above or by reference:
 services:
   api:
     environment:
-      VAULT_SETUP_TOKEN: ${VAULT_SETUP_TOKEN:?set VAULT_SETUP_TOKEN in .env}
+      VAULT_SETUP_ALLOWED_HOSTS: ${VAULT_SETUP_ALLOWED_HOSTS:-}
 ```
 
-Then put `VAULT_SETUP_TOKEN=your-own-random-token` in `.env`. Keep files containing
+For a custom hostname, put `VAULT_SETUP_ALLOWED_HOSTS=printstash.example.net` in `.env`. Keep files containing
 credentials private and outside version control. Do not copy the entire example
 environment just to get started.
 
@@ -163,7 +163,8 @@ These defaults apply when the setting is omitted.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `VAULT_SETUP_TOKEN` | Generated while unconfigured | Stable first-admin setup token if supplied. |
+| `VAULT_SETUP_MODE` | `disabled` in the API; `trusted_network` in local Compose | Enables browser registration only for an unconfigured installation. Production Compose defaults to disabled. |
+| `VAULT_SETUP_ALLOWED_HOSTS` | Empty | Extra comma-separated hostnames allowed for initial registration. Localhost, private addresses, `.local`, `.localhost`, and `.home.arpa` are already allowed. |
 | `VAULT_JWT_SECRET` | Generated and stored in the database | Manage your own signing secret; generate with `openssl rand -hex 32`. |
 | `VAULT_SECRETS_KEY` | Generated key file in `/data/db` | External key for stored credentials. Preserve it with backups; changing it requires a planned key migration. |
 | `VAULT_SESSION_COOKIE_SECURE` | `false` | Set `true` when accessed through HTTPS. |

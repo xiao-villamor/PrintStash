@@ -18,7 +18,6 @@ const apiPort = 8510;
 const webPort = 3410;
 const apiBase = `http://127.0.0.1:${apiPort}`;
 const webBase = `http://127.0.0.1:${webPort}`;
-const setupToken = "readme-media-setup-token";
 const admin = { username: "demo", password: "printstash-demo" };
 
 let token = "";
@@ -77,9 +76,17 @@ async function api(path, options = {}) {
 async function setup() {
   const status = await api("/api/v1/setup/status");
   if (!status.configured) {
-    await api("/api/v1/setup", {
+    const preparation = await fetch(`${apiBase}/api/v1/setup/session`, {
       method: "POST",
-      json: { ...admin, setup_token: setupToken, storage_backend: "local" },
+      headers: { Origin: apiBase },
+    });
+    if (!preparation.ok()) throw new Error("Browser preparation failed");
+    const cookie = preparation.headers.get("set-cookie").split(";")[0];
+    const { csrf } = await preparation.json();
+    await api("/api/v1/setup", {
+      headers: { Origin: apiBase, Cookie: cookie, "X-PrintStash-Setup-CSRF": csrf },
+      method: "POST",
+      json: { ...admin, storage_backend: "local" },
     });
   }
   const login = await api("/api/v1/auth/login", { method: "POST", json: admin });
@@ -694,7 +701,7 @@ async function main() {
       ...process.env,
       PLAYWRIGHT_REAL_API_PORT: String(apiPort),
       PLAYWRIGHT_REAL_DATA_DIR: dataRoot,
-      VAULT_SETUP_TOKEN: setupToken,
+      VAULT_SETUP_MODE: "trusted_network",
     },
   });
   const vite = start(

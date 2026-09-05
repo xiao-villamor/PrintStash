@@ -1,6 +1,7 @@
 export interface SetupStatus {
   configured: boolean;
-  setup_token_required?: boolean;
+  setup_available?: boolean;
+  recovery_required?: boolean;
   user_count: number;
   default_data_dir?: string;
   default_thumb_dir?: string;
@@ -20,7 +21,6 @@ export interface SetupStatus {
 }
 
 export interface SetupRequest {
-  setup_token: string;
   username: string;
   password: string;
   email?: string;
@@ -42,7 +42,16 @@ export interface SetupRequest {
   backup_s3_secret_key?: string;
 }
 
+export type SetupStorageRequest = Omit<SetupRequest, "username" | "password" | "email">;
+
+export interface SetupStorageCheck {
+  ready: boolean;
+  storage_provider: string;
+  checks: { code: string; free_bytes: number | null }[];
+}
+
 export interface SetupResponse {
+  storage_ready: boolean;
   configured: boolean;
   user_id: number;
   username: string;

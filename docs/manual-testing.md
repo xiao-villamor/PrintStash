@@ -132,9 +132,10 @@ docker compose --env-file deploy/manual-testing/.env \
 ## 4. Clean install, setup, and sessions
 
 - [ ] A clean start applies migrations and serves `/setup` without a default user.
-- [ ] An absent/incorrect setup token cannot create the first administrator.
-- [ ] The documented test setup token creates exactly one first administrator;
-      setup cannot be repeated.
+- [ ] Disabled registration, an unapproved host, a foreign Origin, and a missing
+      browser session or CSRF proof cannot create an administrator.
+- [ ] Browser setup creates exactly one administrator across concurrent processes;
+      setup cannot be repeated after a restart or removal of the preparation cookie.
 - [ ] Login with a wrong password fails without disclosing whether a user exists;
       repeated failures are rate-limited.
 - [ ] Login, refresh, remember-me, page reload, logout, and expired-session

@@ -91,6 +91,8 @@ def e2e_db(tmp_path: Path) -> Iterator[Session]:
     # VAULT_SECRETS_KEY and prevents one E2E case's generated key from leaking
     # into another case.
     _overlay["secrets_key"] = "printstash-e2e-secrets-key"
+    _overlay["setup_mode"] = "trusted_network"
+    _overlay["setup_allowed_hosts"] = "app"
     # Redirect every storage/data dir into the test's tmp dir so nothing touches
     # the real /data tree (overlay wins over the frozen Settings defaults).
     dir_keys = ("data_dir", "thumb_dir", "staging_dir", "backup_dir")
@@ -182,6 +184,12 @@ async def api(e2e_db: Session) -> "httpx.AsyncClient":
     await close_http_client()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://app") as client:
+        client.headers["Origin"] = "http://app"
+        status = await client.get("/api/v1/setup/status")
+        if not status.json()["configured"]:
+            preparation = await client.post("/api/v1/setup/session")
+            assert preparation.status_code == 200, preparation.text
+            client.headers["X-PrintStash-Setup-CSRF"] = preparation.json()["csrf"]
         yield client
     await close_http_client()
 

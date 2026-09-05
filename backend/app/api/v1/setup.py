@@ -14,33 +14,47 @@ path.
 
 from __future__ import annotations
 
+import json
+import shutil
 import tempfile
-import threading
+from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlmodel import Session, select
 
 from app.core.config import FrozenSettings, ensure_dirs, settings
 from app.core.logging import get_logger
+from app.core.ratelimit import rate_limit
+from app.core.security import require_auth, require_superuser
 from app.db.models import SystemConfig, User
 from app.db.session import get_session
-from app.schemas.setup import SetupRequest, SetupResponse, SetupStatus
-from app.services import runtime_config
+from app.schemas.setup import (
+    SetupCheckResponse,
+    SetupRequest,
+    SetupResponse,
+    SetupSessionResponse,
+    SetupStatus,
+    SetupStorageCheck,
+    SetupStorageRequest,
+)
+from app.services import runtime_config, setup_bootstrap
 from app.services.auth import create_access_token, hash_password, set_session_cookie
-from app.services.setup_token import verify_setup_token
 from app.services.storage_paths import (
     StoragePathOverlapError,
     sqlite_database_path,
     validate_disjoint_directories,
     validate_file_outside_roots,
 )
-from app.services.storage_providers import TransportKind, resolve_transport
+from app.services.storage_providers import (
+    StorageProviderConfig,
+    TransportKind,
+    resolve_transport,
+)
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/setup", tags=["setup"])
-_setup_lock = threading.Lock()
 
 
 # Pydantic Settings exposes its defaults via ``model_fields``. We pull the
@@ -115,17 +129,33 @@ def _validate_writable_dir(
 
 
 @router.get("/status", response_model=SetupStatus, response_model_exclude_none=True)
-def get_status(session: Session = Depends(get_session)) -> SetupStatus:
+def get_status(
+    request: Request, session: Session = Depends(get_session)
+) -> SetupStatus:
     """Lightweight probe — safe to call on every page load."""
-    config = runtime_config.get_config(session)
+    config = session.get(SystemConfig, 1)
     user_count = len(session.exec(select(User.id)).all())
-    configured = config.configured_at is not None and user_count > 0
-    if configured:
-        return SetupStatus(configured=True)
+    closed = bool(
+        user_count or (config is not None and config.configured_at is not None)
+    )
+    if closed:
+        return SetupStatus(
+            configured=True,
+            recovery_required=not bool(user_count)
+            or config is None
+            or config.configured_at is None
+            or config.setup_storage_pending,
+        )
+    available = (
+        settings.setup_mode == "trusted_network"
+        and setup_bootstrap.host_allowed(request.url.hostname or "")
+    )
+    if not available:
+        return SetupStatus(configured=False)
     provider_config = runtime_config.get_sanitized_storage_provider(session)
     return SetupStatus(
-        configured=configured,
-        setup_token_required=True,
+        configured=False,
+        setup_available=True,
         user_count=user_count,
         default_data_dir=_DEFAULT_DATA_DIR,
         default_thumb_dir=_DEFAULT_THUMB_DIR,
@@ -143,55 +173,121 @@ def get_status(session: Session = Depends(get_session)) -> SetupStatus:
         current_backup_s3_bucket=str(settings.backup_s3_bucket),
         current_backup_s3_endpoint_url=str(settings.backup_s3_endpoint_url),
         current_backup_s3_region=str(settings.backup_s3_region),
-        configured_at=config.configured_at,
+        configured_at=config.configured_at if config is not None else None,
     )
 
 
-@router.post("", response_model=SetupResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/session",
+    response_model=SetupSessionResponse,
+    dependencies=[Depends(rate_limit(30, 60))],
+)
+def begin_setup(
+    request: Request, response: Response, session: Session = Depends(get_session)
+) -> SetupSessionResponse:
+    return SetupSessionResponse(csrf=setup_bootstrap.begin(request, response, session))
+
+
+@router.post(
+    "/check-storage",
+    response_model=SetupCheckResponse,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
+def check_storage(
+    body: SetupStorageRequest, request: Request, session: Session = Depends(get_session)
+) -> SetupCheckResponse:
+    setup_bootstrap.verify(request)
+    setup_bootstrap.require_open(session)
+    prepared = _prepare_storage(body, session, provision=True)
+    checks = [SetupStorageCheck(code="configuration_valid")]
+    if prepared.storage_backend == "local":
+        for label, path in (
+            ("data", prepared.data_dir),
+            ("thumbnails", prepared.thumb_dir),
+        ):
+            try:
+                free = shutil.disk_usage(path).free if path is not None else None
+            except OSError:
+                free = None
+            checks.append(SetupStorageCheck(code=f"{label}_writable", free_bytes=free))
+    else:
+        try:
+            backend = _remote_backend(prepared.requested_provider, body)
+            backend.ensure_setup()
+            if not backend.capabilities.conditional_create:
+                raise ValueError("remote_write_unavailable")
+        except Exception as exc:
+            raise HTTPException(400, "setup_remote_storage_unavailable") from exc
+        checks.append(SetupStorageCheck(code="remote_read_write_verified"))
+    return SetupCheckResponse(
+        ready=True,
+        storage_provider=body.storage_provider or prepared.storage_backend,
+        checks=checks,
+    )
+
+
+@router.post(
+    "/prepare-storage",
+    response_model=SetupCheckResponse,
+    dependencies=[Depends(require_auth)],
+)
+def prepare_storage(
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> SetupCheckResponse:
+    config = runtime_config.get_config(session)
+    if config.configured_at is None:
+        raise HTTPException(409, "setup_not_completed")
+    if config.setup_storage_pending:
+        _finish_storage_setup(session, config)
+    return SetupCheckResponse(
+        ready=True,
+        storage_provider=str(settings.storage_backend),
+        checks=[SetupStorageCheck(code="storage_prepared")],
+    )
+
+
+@router.post(
+    "",
+    response_model=SetupResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit(20, 60))],
+)
 def complete_setup(
     body: SetupRequest,
+    request: Request,
     response: Response,
     session: Session = Depends(get_session),
 ) -> SetupResponse:
-    with _setup_lock:
-        try:
-            result = _complete_setup(body, session)
-        except Exception:
-            session.rollback()
-            raise
-        set_session_cookie(response, result.access_token)
-        return result
+    setup_bootstrap.require_origin(request)
+    setup_bootstrap.require_open(session)
+    setup_bootstrap.verify(request)
+    try:
+        setup_bootstrap.lock_installation(session)
+        result = _complete_setup(body, session)
+    except Exception:
+        session.rollback()
+        raise
+    setup_bootstrap.clear(response, request)
+    set_session_cookie(response, result.access_token)
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
-def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
-    """Create the first superuser and (optionally) persist storage paths.
+@dataclass(frozen=True)
+class _PreparedStorage:
+    requested_provider: StorageProviderConfig | None
+    storage_backend: str
+    data_dir: str | None
+    thumb_dir: str | None
+    s3_bucket: str | None
+    s3_endpoint_url: str | None
+    s3_region: str | None
 
-    Refuses to run if the vault is already configured. The wizard hands back a
-    JWT so the browser can flow straight into the authenticated app without a
-    second round-trip through ``/auth/login``.
-    """
-    if runtime_config.is_configured(session):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="already_configured",
-        )
 
-    if not verify_setup_token(body.setup_token):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="invalid_setup_token",
-        )
-
-    # Guard against a half-configured state (e.g. user table seeded out of band).
-    existing = session.exec(select(User).limit(1)).first()
-    if existing is not None:
-        # An admin already exists from a legacy ensure_default_user run.
-        # Block silent first-user creation; operator must use that account.
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="users_already_exist",
-        )
-
+def _prepare_storage(
+    body: SetupStorageRequest, session: Session, *, provision: bool
+) -> _PreparedStorage:
     legacy_storage_fields = {
         "storage_backend",
         "data_dir",
@@ -235,10 +331,10 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
             ) from exc
 
         # A remote SFTP root may be absent on a new NAS share.  Provision it
-        # only inside this authenticated-by-setup-token first-run flow; normal
+        # only inside this browser-authorized first-run flow; normal
         # startup and health checks remain read-only and fail closed when an
         # enrolled root disappears.
-        if transport is not None and transport.kind is TransportKind.SFTP:
+        if provision and transport is not None and transport.kind is TransportKind.SFTP:
             try:
                 from app.services.storage_opendal import OpenDALStorageBackend
 
@@ -345,6 +441,27 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         else str(settings.s3_region)
     )
 
+    return _PreparedStorage(
+        requested_provider,
+        storage_backend,
+        effective_data_dir,
+        effective_thumb_dir,
+        effective_s3_bucket,
+        effective_s3_endpoint_url,
+        effective_s3_region,
+    )
+
+
+def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
+    prepared = _prepare_storage(body, session, provision=True)
+    requested_provider = prepared.requested_provider
+    storage_backend = prepared.storage_backend
+    effective_data_dir = prepared.data_dir
+    effective_thumb_dir = prepared.thumb_dir
+    effective_s3_bucket = prepared.s3_bucket
+    effective_s3_endpoint_url = prepared.s3_endpoint_url
+    effective_s3_region = prepared.s3_region
+
     # 2. Persist storage and backup overrides into the runtime overlay.
     if requested_provider is not None:
         runtime_config.update_storage_provider(
@@ -392,9 +509,68 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
 
     # 4. Stamp the config as completed.
     config = runtime_config.mark_configured(session, commit=False)
+    config.setup_storage_pending = True
+    session.add(config)
     session.commit()
     session.refresh(user)
-    # Runtime state changes only after the DB transaction has committed.
+    # Runtime activation is part of the recoverable preparation below.
+    storage_ready = True
+    try:
+        _finish_storage_setup(session, config)
+    except Exception:
+        session.rollback()
+        storage_ready = False
+        logger.warning("first-run account created; storage preparation needs retry")
+
+    logger.info(
+        "first-run setup complete: user=%s data_dir=%s thumb_dir=%s",
+        user.username,
+        settings.data_dir,
+        settings.thumb_dir,
+    )
+
+    token = create_access_token(
+        user.id, user.username, scope="admin", auth_version=user.auth_version
+    )
+    return SetupResponse(
+        configured=True,
+        user_id=user.id,
+        username=user.username,
+        storage_backend=str(settings.storage_backend),
+        storage_provider=(body.storage_provider or str(settings.storage_backend)),
+        data_dir=str(settings.data_dir),
+        thumb_dir=str(settings.thumb_dir),
+        access_token=token,
+        storage_ready=storage_ready,
+    )
+
+
+def _remote_backend(
+    provider: StorageProviderConfig | None, legacy: SetupStorageRequest | None = None
+):
+    from app.services.storage_backend import S3StorageBackend
+    from app.services.storage_opendal import OpenDALStorageBackend
+
+    if provider is None and legacy is not None:
+        from app.services.storage_providers import S3ProviderConfig
+
+        provider = S3ProviderConfig(
+            provider="s3",
+            bucket=legacy.s3_bucket or settings.s3_bucket,
+            endpoint_url=legacy.s3_endpoint_url or settings.s3_endpoint_url,
+            region=legacy.s3_region or settings.s3_region,
+            access_key=legacy.s3_access_key or settings.s3_access_key,
+            secret_key=legacy.s3_secret_key or settings.s3_secret_key,
+        )
+    if provider is None:
+        return S3StorageBackend()
+    transport = resolve_transport(provider)
+    if transport.kind is TransportKind.S3:
+        return S3StorageBackend(transport=transport)
+    return OpenDALStorageBackend(transport)
+
+
+def _finish_storage_setup(session: Session, config: SystemConfig) -> None:
     runtime_config.activate_config(config)
     # A fresh setup owns the empty roots it just created.  Enroll them with
     # the persisted installation identity so the next startup can distinguish
@@ -436,24 +612,21 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
                 detail="storage_root_enrollment_failed",
             )
         bind_backend(active_backend)
+    else:
+        from app.services.storage_backend import bind_backend
+        from app.services.storage_providers import parse_provider_config
 
-    logger.info(
-        "first-run setup complete: user=%s data_dir=%s thumb_dir=%s",
-        user.username,
-        settings.data_dir,
-        settings.thumb_dir,
-    )
+        provider = (
+            parse_provider_config(json.loads(str(settings.storage_provider_config)))
+            if settings.storage_provider_config
+            else None
+        )
+        backend = _remote_backend(provider)
+        backend.ensure_setup()
+        if not backend.capabilities.conditional_create:
+            raise HTTPException(409, "setup_remote_storage_unavailable")
+        bind_backend(backend)
 
-    token = create_access_token(
-        user.id, user.username, scope="admin", auth_version=user.auth_version
-    )
-    return SetupResponse(
-        configured=True,
-        user_id=user.id,
-        username=user.username,
-        storage_backend=str(settings.storage_backend),
-        storage_provider=(body.storage_provider or str(settings.storage_backend)),
-        data_dir=str(settings.data_dir),
-        thumb_dir=str(settings.thumb_dir),
-        access_token=token,
-    )
+    config.setup_storage_pending = False
+    session.add(config)
+    session.commit()

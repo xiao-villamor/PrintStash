@@ -16,12 +16,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import TYPE_CHECKING, BinaryIO, Iterator
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.filesystem import FsKind, detect_fs_kind
 from app.services.storage_identity import StorageTargetIdentity
+
+if TYPE_CHECKING:
+    from app.services.storage_providers import TransportSpec
 
 logger = get_logger(__name__)
 
@@ -1947,51 +1950,60 @@ class S3StorageBackend(StorageBackend):
 
         return s3_target(endpoint=self._endpoint_url, bucket=self._bucket)
 
-    def __init__(self, *, check_bucket: bool = True) -> None:
+    def __init__(
+        self, *, check_bucket: bool = True, transport: TransportSpec | None = None
+    ) -> None:
         import boto3
         from botocore.config import Config as BotoConfig
 
-        if not settings.s3_bucket:
+        # An explicit transport is an isolated snapshot; setup checks must never
+        # change the process-wide settings or bind the candidate backend.
+        options = (
+            transport.options
+            if transport is not None
+            else {
+                "bucket": settings.s3_bucket,
+                "root": getattr(settings, "s3_root", "vault-data"),
+                "endpoint_url": settings.s3_endpoint_url,
+                "region": settings.s3_region,
+                "addressing_style": getattr(settings, "s3_addressing_style", "auto"),
+                "access_key": settings.s3_access_key,
+                "secret_key": settings.s3_secret_key,
+            }
+        )
+        self._bucket = str(options.get("bucket") or "")
+        if not self._bucket:
             raise RuntimeError("VAULT_S3_BUCKET is required when storage_backend=s3")
-
-        # The root is part of this adapter's identity.  Capture it once so a
-        # second runtime overlay/backend cannot make an already-live adapter
-        # read, list, or reclaim the other installation's namespace.
-        self._s3_root = self._normalized_root(
-            str(getattr(settings, "s3_root", "vault-data") or "vault-data")
+        self._s3_root = self._normalized_root(str(options.get("root") or "vault-data"))
+        self._endpoint_url = str(options.get("endpoint_url") or "")
+        self._region = str(options.get("region") or "auto")
+        self.provider_id = (
+            transport.provider
+            if transport is not None
+            else str(getattr(settings, "storage_provider", "") or "s3")
         )
-        # Provider identity is derived from the adapter's immutable target,
-        # never from mutable runtime settings after composition.
-        self._endpoint_url = str(getattr(settings, "s3_endpoint_url", "") or "")
-        self._region = str(getattr(settings, "s3_region", "auto") or "auto")
-        addressing_style = str(
-            getattr(settings, "s3_addressing_style", "auto") or "auto"
-        )
+        addressing_style = str(options.get("addressing_style") or "auto")
         if addressing_style not in {"auto", "path", "virtual"}:
             raise StorageConfigurationError("s3_addressing_style_invalid")
-        if (
-            addressing_style == "auto"
-            and str(getattr(settings, "storage_provider", "")) == "s3_self_hosted"
-        ):
+        if addressing_style == "auto" and self.provider_id == "s3_self_hosted":
             addressing_style = "path"
         self._addressing_style = addressing_style
-
         client_kwargs: dict = {
             "service_name": "s3",
-            "region_name": settings.s3_region or "auto",
-            "aws_access_key_id": settings.s3_access_key or None,
-            "aws_secret_access_key": settings.s3_secret_key or None,
+            "region_name": self._region,
+            "aws_access_key_id": options.get("access_key") or None,
+            "aws_secret_access_key": options.get("secret_key") or None,
             "config": BotoConfig(
                 signature_version="s3v4",
                 s3={"addressing_style": addressing_style},
+                connect_timeout=10,
+                read_timeout=20,
+                retries={"max_attempts": 2},
             ),
         }
-        if settings.s3_endpoint_url:
-            client_kwargs["endpoint_url"] = settings.s3_endpoint_url
-
+        if self._endpoint_url:
+            client_kwargs["endpoint_url"] = self._endpoint_url
         self._client = boto3.client(**client_kwargs)
-        self._bucket = settings.s3_bucket
-        self.provider_id = str(getattr(settings, "storage_provider", "") or "s3")
         self._capabilities = StorageCapabilities(
             conditional_create=True,
             object_identity=ObjectIdentity.ETAG,

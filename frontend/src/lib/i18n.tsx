@@ -3,6 +3,79 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const messages = {
   en: {
+    "setup.providerUnavailable": "Choose an available storage provider.",
+    "setup.modelsReady": "Models in your library: {count}",
+    "setup.previews": "Previews",
+    "setup.remoteFailure":
+      "The remote storage could not verify read and write access. Check the connection details and permissions, then try again.",
+    "setup.welcome": "Welcome to PrintStash",
+    "setup.account": "Your account",
+    "setup.files": "Your files",
+    "setup.start": "Get started",
+    "setup.accountHelp":
+      "Create a local account for this installation. No external registration is needed. You will be the administrator and can add users later.",
+    "setup.username": "Username",
+    "setup.password": "Password",
+    "setup.confirm": "Confirm password",
+    "setup.email": "Email (optional)",
+    "setup.emailHelp": "For your account profile. Password recovery by email is not available.",
+    "setup.passwordHelp": "At least 8 characters. Your password manager can save this account.",
+    "setup.show": "Show passwords",
+    "setup.hide": "Hide passwords",
+    "setup.next": "Continue",
+    "setup.back": "Back",
+    "setup.create": "Create my account and continue",
+    "setup.filesHelp": "Save the files I upload in PrintStash",
+    "setup.defaultHelp":
+      "The recommended storage uses the persistent volumes in your deployment for uploads and previews.",
+    "setup.existingHelp":
+      "Already have a folder of models? Connect it in the next step without moving its files.",
+    "setup.advanced": "View location and advanced options",
+    "setup.check": "Check storage",
+    "setup.checking": "Checking…",
+    "setup.creating": "Creating your account…",
+    "setup.availableSpace": "available",
+    "setup.ready": "Storage ready",
+    "setup.attention": "Needs attention",
+    "setup.checkHelp": "This checks access now. It is not a backup or a guarantee of recovery.",
+    "setup.remoteCheck": "The configuration is valid. A remote connection check is still required.",
+    "setup.summary": "Review before creating your account",
+    "setup.edit": "Edit",
+    "setup.loading": "Preparing your installation…",
+    "setup.retry": "Retry",
+    "setup.disabled":
+      "Initial registration is disabled. The installation administrator must enable trusted-network setup in the deployment before continuing.",
+    "setup.failed": "Could not complete this step. Your form has been preserved. Try again.",
+    "setup.exists": "An account already exists. Sign in with the account you created to continue.",
+    "setup.login": "Sign in",
+    "setup.badUsername": "Use at least 3 characters.",
+    "setup.badPassword": "Use at least 8 characters.",
+    "setup.mismatch": "Passwords do not match.",
+    "setup.badEmail": "Enter a valid email or leave this empty.",
+    "setup.populated":
+      "This folder already contains files. Use the recommended empty storage, then connect this folder as a Library source.",
+    "setup.paths":
+      "Use separate, empty directories with read and write permission. Review the advanced locations.",
+    "setup.session":
+      "Your preparation session needs renewing. Try again; your account has not been reserved.",
+    "setup.origin":
+      "Open PrintStash using its local address or a hostname allowed by your deployment.",
+    "setup.upload": "Upload my first files",
+    "setup.connect": "Connect an existing folder",
+    "setup.later": "I'll do this later",
+    "setup.startHelp":
+      "Your account is ready. Add your first models or return to this guide later from Settings.",
+    "setup.pending": "Account created; storage preparation pending. Retry before adding files.",
+    "setup.library": "Open my library",
+    "setup.backup": "Configure a backup",
+    "setup.printer": "Connect a printer",
+    "setup.folderHelp":
+      "Choose the path visible inside the API container, which may differ from the path on your NAS. Library sources start with writeback disabled.",
+    "setup.mountHelp": "Folder not available?",
+    "setup.mountInstructions":
+      "Add a read-only bind mount to the API service in Compose, for example /your/nas/models:/libraries/models:ro, then recreate the service. Enter /libraries/models as the source path. The browser cannot mount host folders.",
+    "setup.progress": "Setup progress",
+    "setup.resume": "Resume the getting-started guide",
     "storage.fullImageRequired": "This connection requires the full API image.",
     "storage.serviceMissing": "This API image does not include the required storage service.",
     "storage.useUnsupported": "This provider does not support this use.",
@@ -578,6 +651,84 @@ const messages = {
     "multipart.notFoundError": "This multipart model or collection no longer exists.",
   },
   es: {
+    "setup.providerUnavailable": "Elige un proveedor de almacenamiento disponible.",
+    "setup.modelsReady": "Modelos en tu biblioteca: {count}",
+    "setup.previews": "Vistas previas",
+    "setup.remoteFailure":
+      "No se ha podido verificar la lectura y escritura en el almacenamiento remoto. Revisa la conexión y los permisos e inténtalo de nuevo.",
+    "setup.welcome": "Bienvenido a PrintStash",
+    "setup.account": "Tu cuenta",
+    "setup.files": "Tus archivos",
+    "setup.start": "Empezar",
+    "setup.accountHelp":
+      "Crea una cuenta local para esta instalación. No necesitas registrarte en un servicio externo. Serás el administrador y podrás añadir usuarios después.",
+    "setup.username": "Usuario",
+    "setup.password": "Contraseña",
+    "setup.confirm": "Confirmar contraseña",
+    "setup.email": "Correo (opcional)",
+    "setup.emailHelp": "Para el perfil de tu cuenta. No hay recuperación de contraseña por correo.",
+    "setup.passwordHelp":
+      "Al menos 8 caracteres. Tu gestor de contraseñas puede guardar esta cuenta.",
+    "setup.show": "Mostrar contraseñas",
+    "setup.hide": "Ocultar contraseñas",
+    "setup.next": "Continuar",
+    "setup.back": "Atrás",
+    "setup.create": "Crear mi cuenta y continuar",
+    "setup.filesHelp": "Guardar los archivos que suba en PrintStash",
+    "setup.defaultHelp":
+      "El almacenamiento recomendado usa los volúmenes persistentes del despliegue para las cargas y sus vistas previas.",
+    "setup.existingHelp":
+      "¿Ya tienes una carpeta con modelos? Podrás conectarla en el siguiente paso sin mover sus archivos.",
+    "setup.advanced": "Ver ubicación y opciones avanzadas",
+    "setup.check": "Comprobar almacenamiento",
+    "setup.checking": "Comprobando…",
+    "setup.creating": "Creando tu cuenta…",
+    "setup.availableSpace": "disponibles",
+    "setup.ready": "Almacenamiento listo",
+    "setup.attention": "Necesita atención",
+    "setup.checkHelp":
+      "Esta comprobación verifica el acceso actual. No es una copia de seguridad ni garantiza la recuperación.",
+    "setup.remoteCheck": "La configuración es válida. Falta comprobar la conexión remota.",
+    "setup.summary": "Revisa antes de crear tu cuenta",
+    "setup.edit": "Editar",
+    "setup.loading": "Preparando tu instalación…",
+    "setup.retry": "Reintentar",
+    "setup.disabled":
+      "El registro inicial está deshabilitado. El administrador del despliegue debe habilitar la configuración en una red de confianza para continuar.",
+    "setup.failed":
+      "No se pudo completar este paso. Hemos conservado el formulario. Inténtalo de nuevo.",
+    "setup.exists":
+      "Ya existe una cuenta. Inicia sesión con la cuenta que has creado para continuar.",
+    "setup.login": "Iniciar sesión",
+    "setup.badUsername": "Usa al menos 3 caracteres.",
+    "setup.badPassword": "Usa al menos 8 caracteres.",
+    "setup.mismatch": "Las contraseñas no coinciden.",
+    "setup.badEmail": "Introduce un correo válido o deja este campo vacío.",
+    "setup.populated":
+      "Esta carpeta ya contiene archivos. Usa el almacenamiento vacío recomendado y conecta después esta carpeta como fuente de biblioteca.",
+    "setup.paths":
+      "Usa directorios vacíos y separados con permisos de lectura y escritura. Revisa las ubicaciones avanzadas.",
+    "setup.session":
+      "Hay que renovar la sesión de preparación. Inténtalo de nuevo; no se ha reservado ninguna cuenta.",
+    "setup.origin":
+      "Abre PrintStash con su dirección local o un nombre permitido por el despliegue.",
+    "setup.upload": "Subir mis primeros archivos",
+    "setup.connect": "Conectar una carpeta existente",
+    "setup.later": "Lo haré después",
+    "setup.startHelp":
+      "Tu cuenta está lista. Añade tus primeros modelos o retoma esta guía después desde Configuración.",
+    "setup.pending":
+      "Cuenta creada; preparación del almacenamiento pendiente. Reintenta antes de añadir archivos.",
+    "setup.library": "Abrir mi biblioteca",
+    "setup.backup": "Configurar una copia de seguridad",
+    "setup.printer": "Conectar una impresora",
+    "setup.folderHelp":
+      "Elige la ruta visible dentro del contenedor de la API, que puede ser distinta de la ruta del NAS. Las fuentes de biblioteca empiezan con la escritura deshabilitada.",
+    "setup.mountHelp": "¿No aparece tu carpeta?",
+    "setup.mountInstructions":
+      "Añade un montaje de solo lectura al servicio API de Compose, por ejemplo /tu/nas/modelos:/libraries/models:ro, y recrea el servicio. Usa /libraries/models como ruta de la fuente. El navegador no puede montar carpetas del host.",
+    "setup.progress": "Progreso de configuración",
+    "setup.resume": "Retomar la guía de primeros pasos",
     "storage.fullImageRequired": "Esta conexión requiere la imagen completa de la API.",
     "storage.serviceMissing":
       "Esta imagen de la API no incluye el servicio de almacenamiento necesario.",

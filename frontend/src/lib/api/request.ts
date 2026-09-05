@@ -305,10 +305,11 @@ export async function sendJson<T>(
   // index signature (microsoft/TypeScript#15300).
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- outbound payload, owned and typed by the calling wrapper
   body: unknown,
+  headers: Record<string, string> = {},
 ): Promise<T> {
   const res = await fetch(getUrl(path), {
     method,
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...headers },
     body: JSON.stringify(body),
   });
   const value = await handleResponse<T>(res);

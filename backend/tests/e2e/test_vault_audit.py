@@ -14,7 +14,6 @@ import pytest
 from sqlmodel import select
 
 from app.db.models import Model
-from app.services.setup_token import current_setup_token
 from app.services.storage_backend import get_backend, init_backend
 
 _STL = b"""solid audit_fixture
@@ -33,7 +32,6 @@ async def _setup_and_login(api, tmp_path) -> dict[str, str]:
     response = await api.post(
         "/api/v1/setup",
         json={
-            "setup_token": current_setup_token(),
             "username": "owner",
             "password": "Password123",
             "storage_backend": "local",

@@ -39,7 +39,8 @@ services:
       # Do not set it to an empty string; that is taken as a deliberate choice
       # and skips the generated secret.
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-changeme_jwt_secret_please_change}
-      VAULT_SETUP_TOKEN: ${VAULT_SETUP_TOKEN:-}
+      VAULT_SETUP_MODE: ${VAULT_SETUP_MODE:-trusted_network}
+      VAULT_SETUP_ALLOWED_HOSTS: ${VAULT_SETUP_ALLOWED_HOSTS:-}
       VAULT_SECRETS_KEY: ${VAULT_SECRETS_KEY:-}
       VAULT_SESSION_COOKIE_SECURE: ${VAULT_SESSION_COOKIE_SECURE:-false}
       VAULT_ACCESS_TOKEN_EXPIRE_MINUTES: ${VAULT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}

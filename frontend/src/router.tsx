@@ -33,6 +33,7 @@ const ModelDetailPage = lazyImport(() => import("@/pages/model-detail"));
 const MultipartModelDetailPage = lazyImport(() => import("@/pages/multipart-model-detail"));
 const DocumentDetailPage = lazyImport(() => import("@/pages/document-detail"));
 const LoginPage = lazyImport(() => import("@/pages/login"));
+const GettingStartedPage = lazyImport(() => import("@/pages/getting-started"));
 const SetupPage = lazyImport(() => import("@/pages/setup"));
 const ProfilesPage = lazyImport(() => import("@/pages/profiles"));
 const StatisticsPage = lazyImport(() => import("@/pages/statistics"));
@@ -103,6 +104,14 @@ export const router = createBrowserRouter([
         element: (
           <RouteChunk>
             <LoginPage />
+          </RouteChunk>
+        ),
+      },
+      {
+        path: "getting-started",
+        element: (
+          <RouteChunk>
+            <GettingStartedPage />
           </RouteChunk>
         ),
       },

@@ -83,6 +83,7 @@ def build_system_config(
     **overrides: Any,
 ) -> SystemConfig:
     """A persisted runtime configuration row for startup/overlay tests."""
+    overrides.setdefault("setup_storage_pending", False)
     return save(
         session,
         SystemConfig(

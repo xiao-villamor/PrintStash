@@ -9,7 +9,6 @@ import pytest
 from sqlmodel import select
 
 from app.db.models import File, OwnedStorageObject, StorageObjectState
-from app.services.setup_token import current_setup_token
 
 pytestmark = pytest.mark.e2e
 
@@ -38,7 +37,6 @@ class TestArtifactUpload:
         setup = await api.post(
             "/api/v1/setup",
             json={
-                "setup_token": current_setup_token(),
                 "username": "owner",
                 "password": "Password123",
                 "storage_provider": "webdav",

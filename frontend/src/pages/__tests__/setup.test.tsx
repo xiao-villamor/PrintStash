@@ -20,6 +20,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { I18nProvider } from "@/lib/i18n";
 import { usePathname } from "@/lib/navigation";
 import SetupPage, { type SetupPageDeps } from "@/pages/setup";
 import type { SetupResponse, SetupStatus, StorageProvider } from "@/types";
@@ -28,6 +29,12 @@ import type { SetupResponse, SetupStatus, StorageProvider } from "@/types";
 // navigates through the real router, so this test needs no module replacement.
 function stubDeps(): SetupPageDeps {
   return {
+    beginSetup: vi
+      .fn<SetupPageDeps["beginSetup"]>()
+      .mockResolvedValue({ csrf: "automatic-csrf", expires_in: 3600 }),
+    checkSetupStorage: vi
+      .fn<SetupPageDeps["checkSetupStorage"]>()
+      .mockResolvedValue({ ready: true, storage_provider: "local", checks: [] }),
     getSetupStatus: vi.fn<SetupPageDeps["getSetupStatus"]>(),
     getStorageProviders: vi.fn<SetupPageDeps["getStorageProviders"]>(),
     completeSetup: vi.fn<SetupPageDeps["completeSetup"]>(),
@@ -39,7 +46,7 @@ let deps = stubDeps();
 
 const status: SetupStatus = {
   configured: false,
-  setup_token_required: true,
+  setup_available: true,
   user_count: 0,
   default_data_dir: "/data/files",
   default_thumb_dir: "/data/thumbs",
@@ -175,6 +182,7 @@ const providers: StorageProvider[] = [
 ];
 
 const setupResponse: SetupResponse = {
+  storage_ready: true,
   configured: true,
   user_id: 1,
   username: "admin",
@@ -198,7 +206,9 @@ function currentPath(): string {
 function renderSetup() {
   render(
     <MemoryRouter initialEntries={["/setup"]}>
-      <SetupPage deps={deps} />
+      <I18nProvider>
+        <SetupPage deps={deps} />
+      </I18nProvider>
       <CurrentPath />
     </MemoryRouter>,
   );
@@ -207,16 +217,16 @@ function renderSetup() {
 async function reachStorage() {
   const user = userEvent.setup();
   renderSetup();
-  await screen.findByRole("heading", { name: "Welcome to PrintStash" });
-  await user.type(screen.getByLabelText("Setup token"), "operator-setup-token-123");
+  await screen.findByLabelText("Username");
   await user.type(screen.getByLabelText("Username"), "admin");
   await user.type(screen.getByLabelText("Password"), "Password123");
   await user.type(screen.getByLabelText("Confirm password"), "Password123");
-  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Continue" }));
   return user;
 }
 
 beforeEach(() => {
+  localStorage.setItem("printstash.locale", "en");
   deps = stubDeps();
   vi.mocked(deps.getSetupStatus).mockResolvedValue(status);
   vi.mocked(deps.getStorageProviders).mockResolvedValue(providers);
@@ -226,8 +236,8 @@ beforeEach(() => {
 describe("SetupPage", () => {
   it.each([
     ["unavailable", "Requires the full image"],
-    ["unknown", "Choose an available provider."],
-  ])("refuses completion for an %s configured provider", async (kind, message) => {
+    ["unknown", "Choose an available storage provider."],
+  ])("refuses a storage check for an %s provider", async (kind, message) => {
     vi.mocked(deps.getSetupStatus).mockResolvedValue({
       ...status,
       current_storage_provider: kind === "unknown" ? "removed-provider" : "s3",
@@ -240,178 +250,153 @@ describe("SetupPage", () => {
           : provider,
       ),
     );
-    const user = userEvent.setup();
-    renderSetup();
-    await screen.findByRole("heading", { name: "Welcome to PrintStash" });
-    for (const [label, value] of [
-      ["Setup token", "operator-setup-token-123"],
-      ["Username", "admin"],
-      ["Password", "Password123"],
-      ["Confirm password", "Password123"],
-    ]) {
-      fireEvent.change(screen.getByLabelText(label), { target: { value } });
-    }
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
-    await user.click(screen.getByRole("button", { name: "Complete setup" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent(message);
-    expect(deps.completeSetup).not.toHaveBeenCalled();
-    expect(deps.storeLogin).not.toHaveBeenCalled();
-  });
-
-  it("validates account fields inline before advancing", async () => {
-    const user = userEvent.setup();
-    renderSetup();
-    await screen.findByRole("heading", { name: "Welcome to PrintStash" });
-    await user.type(screen.getByLabelText("Setup token"), "operator-setup-token-123");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Username must be at least 3 characters");
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(deps.checkSetupStorage).not.toHaveBeenCalled();
     expect(deps.completeSetup).not.toHaveBeenCalled();
   });
 
-  it("authenticates and enters empty library after successful setup", async () => {
-    const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "Complete setup" }));
-
-    await waitFor(() =>
-      expect(deps.storeLogin).toHaveBeenCalledWith(
-        "token",
-        expect.objectContaining({ username: "admin" }),
-      ),
-    );
-    expect(deps.completeSetup).toHaveBeenCalledWith(
-      expect.objectContaining({ setup_token: "operator-setup-token-123" }),
-    );
-    await waitFor(() => expect(currentPath()).toBe("/"));
+  it("focuses the first invalid account field", async () => {
+    renderSetup();
+    await screen.findByLabelText("Username");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("Username")).toHaveFocus();
+    expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "true");
   });
-
-  it("preserves values after recoverable failure and allows safe retry", async () => {
-    vi.mocked(deps.completeSetup)
-      .mockRejectedValueOnce(new Error('HTTP 400: {"detail":"data_dir_not_writable"}'))
-      .mockResolvedValueOnce(setupResponse);
+  it("does not ask for a manual setup credential", async () => {
+    renderSetup();
+    await screen.findByLabelText("Username");
+    expect(screen.queryByLabelText(/setup token/i)).not.toBeInTheDocument();
+  });
+  it("preserves the account when going back", async () => {
     const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByLabelText("Password")).toHaveValue("Password123");
+  });
+  it("requires a successful check before creating an account", async () => {
+    await reachStorage();
+    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+  });
+  it("continues the guide with the authenticated administrator", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+    expect(deps.storeLogin).toHaveBeenCalledWith(
+      "token",
+      expect.objectContaining({ username: "admin" }),
+    );
+  });
+  it("retains the form after a recoverable creation error", async () => {
+    vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByLabelText("Password")).toHaveValue("Password123");
+  });
+  it("offers login when the creation response was lost after commit", async () => {
+    const user = await reachStorage();
+    vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("network lost"));
+    vi.mocked(deps.getSetupStatus).mockResolvedValue({ configured: true, user_count: 0 });
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
+    expect(deps.completeSetup).toHaveBeenCalledTimes(1);
+  });
+  it("explains how to connect a populated folder", async () => {
+    vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_empty"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Library source");
+  });
+  it("does not call unchecked remote storage ready", async () => {
+    vi.mocked(deps.checkSetupStorage).mockResolvedValueOnce({
+      ready: false,
+      storage_provider: "s3",
+      checks: [{ code: "remote_connection_not_checked", free_bytes: null }],
+    });
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    expect(await screen.findByText("Needs attention")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+  });
+  it("shows disabled registration without account inputs", async () => {
+    vi.mocked(deps.getSetupStatus).mockResolvedValue({
+      configured: false,
+      setup_available: false,
+      user_count: 0,
+    });
+    renderSetup();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Initial registration is disabled");
+    expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+  });
+  it("lets a password manager generated password be inspected", async () => {
+    renderSetup();
+    const password = await screen.findByLabelText("Password");
+    fireEvent.click(screen.getByRole("button", { name: "Show passwords" }));
+    expect(password).toHaveAttribute("type", "text");
+  });
+  it("offers Spanish from the first screen", async () => {
+    renderSetup();
+    await screen.findByLabelText("Username");
+    fireEvent.click(screen.getByRole("button", { name: /Language: English/ }));
+    expect(await screen.findByLabelText("Usuario")).toBeVisible();
+  });
+});
+
+describe("Storage form recovery", () => {
+  it("preserves storage locations when the language changes", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByText("View location and advanced options"));
     await user.clear(screen.getByLabelText("Data directory"));
-    await user.type(screen.getByLabelText("Data directory"), "/recoverable/path");
-    await user.click(screen.getByRole("button", { name: "Complete setup" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "cannot write to the data directory",
-    );
-    expect(screen.getByLabelText("Data directory")).toHaveValue("/recoverable/path");
-    await user.click(screen.getByRole("button", { name: "Complete setup" }));
-    await waitFor(() => expect(deps.completeSetup).toHaveBeenCalledTimes(2));
+    await user.type(screen.getByLabelText("Data directory"), "/custom/files");
+    await user.click(screen.getByRole("button", { name: /Language: English/ }));
+    expect(screen.getByDisplayValue("/custom/files")).toBeInTheDocument();
   });
 
-  it("explains that an existing library cannot be used as private vault storage", async () => {
-    vi.mocked(deps.completeSetup).mockRejectedValueOnce(
-      new Error('HTTP 400: {"detail":"data_dir_not_empty"}'),
-    );
-    const user = await reachStorage();
-
-    await user.click(screen.getByRole("button", { name: "Complete setup" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("dedicated empty directory");
-    expect(screen.getByRole("alert")).toHaveTextContent("Library sources");
-  });
-
-  it("blocks duplicate completion submissions while request is active", async () => {
-    let resolve!: (value: SetupResponse) => void;
-    vi.mocked(deps.completeSetup).mockReturnValue(
-      new Promise<SetupResponse>((done) => {
-        resolve = done;
+  it("invalidates a check when its storage values have changed", async () => {
+    let completeCheck!: (value: Awaited<ReturnType<SetupPageDeps["checkSetupStorage"]>>) => void;
+    vi.mocked(deps.checkSetupStorage).mockReturnValueOnce(
+      new Promise((resolve) => {
+        completeCheck = resolve;
       }),
     );
     const user = await reachStorage();
-    const submit = screen.getByRole("button", { name: "Complete setup" });
-    await user.dblClick(submit);
-    expect(deps.completeSetup).toHaveBeenCalledTimes(1);
-    resolve(setupResponse);
-  });
-
-  it("moves off-site backup setup to Remote storage", async () => {
-    await reachStorage();
-
-    expect(screen.getByText(/Settings → Remote storage/)).toBeVisible();
-    expect(screen.queryByLabelText("Backup bucket")).toBeNull();
-  });
-  it("refuses S3 storage with no bucket named", async () => {
-    // The wizard is the only chance to get this right: a vault that boots
-    // pointed at no bucket cannot write its first artifact, and the operator
-    // has no UI yet to fix it from.
-    const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
-    await user.click(screen.getByRole("button", { name: /Amazon S3/ }));
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Bucket is required.");
-  });
-
-  it("refuses local storage with a directory left blank", async () => {
-    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await user.click(screen.getByText("View location and advanced options"));
     await user.clear(screen.getByLabelText("Data directory"));
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Data directory is required.");
-  });
-
-  it("refuses a negative backup retention", async () => {
-    // Negative days would be read as a window, and the first scheduled purge
-    // would take everything.
-    const user = await reachStorage();
-    fireEvent.change(screen.getByLabelText("Retention days"), { target: { value: "-5" } });
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Backup retention must be 0 or more days.");
-  });
-
-  it("accepts a retention of zero, which means keep nothing", async () => {
-    const user = await reachStorage();
-    const days = screen.getByLabelText("Retention days");
-    await user.clear(days);
-    await user.type(days, "0");
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
-
-  it("requires the SFTP host key before completion", async () => {
-    const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "NAS over SFTP" }));
-    await user.click(screen.getByRole("button", { name: /^SFTP/ }));
-    await user.type(screen.getByLabelText("Host"), "nas.example.test");
-    await user.type(screen.getByLabelText("Username"), "printstash");
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Host key is required.");
-    expect(deps.completeSetup).not.toHaveBeenCalled();
-  });
-
-  it("submits the SFTP host key through provider configuration", async () => {
-    const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "NAS over SFTP" }));
-    await user.click(screen.getByRole("button", { name: /^SFTP/ }));
-    await user.type(screen.getByLabelText("Host"), "nas.example.test");
-    await user.type(screen.getByLabelText("Username"), "printstash");
-    await user.type(screen.getByLabelText("Host key"), "nas.example.test ssh-ed25519 AAAA");
-
-    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
-
+    await user.type(screen.getByLabelText("Data directory"), "/different/files");
+    completeCheck({ ready: true, storage_provider: "local", checks: [] });
     await waitFor(() =>
-      expect(deps.completeSetup).toHaveBeenCalledWith(
-        expect.objectContaining({
-          storage_provider: "sftp",
-          storage_provider_config: expect.objectContaining({
-            provider: "sftp",
-            host_key: "nas.example.test ssh-ed25519 AAAA",
-          }),
-        }),
-      ),
+      expect(screen.getByRole("button", { name: "Check storage" })).toBeEnabled(),
     );
+    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+  });
+
+  it("identifies measured capacity as available space", async () => {
+    vi.mocked(deps.checkSetupStorage).mockResolvedValueOnce({
+      ready: true,
+      storage_provider: "local",
+      checks: [{ code: "data_writable", free_bytes: 1024 }],
+    });
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    expect(await screen.findByText(/Your files:.*available/)).toBeVisible();
+  });
+
+  it("announces account creation while the request is pending", async () => {
+    vi.mocked(deps.completeSetup).mockReturnValueOnce(new Promise(() => {}));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    expect(await screen.findByText("Creating your account…")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   });
 });

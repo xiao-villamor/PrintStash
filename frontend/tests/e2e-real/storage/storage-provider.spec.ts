@@ -85,12 +85,12 @@ test.describe("storage provider setup", () => {
 
   test("@critical configures WebDAV through restart with safe GC preview", async ({ page }) => {
     await page.goto("/setup");
-    await page.getByLabel("Setup token").fill("playwright-storage-token-123");
     await page.getByLabel("Username").fill("storage-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
     await page.getByLabel("Confirm password").fill("playwright-password");
-    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
 
+    await page.getByText("View location and advanced options").click();
     await page.getByRole("button", { name: /Nextcloud and WebDAV/ }).click();
     await page.getByRole("button", { name: /^WebDAV/ }).click();
     await expect(page.getByText("Support: Beta")).toBeVisible();
@@ -99,8 +99,10 @@ test.describe("storage provider setup", () => {
     await page.getByLabel("Username").fill("webdav-user");
     await page.getByLabel("Password").fill("webdav-password");
     await page.getByLabel("Root").fill("vault-data");
-    await page.getByRole("button", { name: "Complete setup" }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await page.getByRole("button", { name: "Check storage" }).click();
+    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await expect(page).toHaveURL(/\/getting-started$/);
+    await page.getByRole("button", { name: "I'll do this later" }).click();
 
     await writeFile(restartTrigger, "restart\n", "utf8");
     await expect

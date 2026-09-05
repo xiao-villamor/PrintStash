@@ -10918,9 +10918,34 @@
         "title": "SetTemperature",
         "type": "object"
       },
+      "SetupCheckResponse": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/SetupStorageCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "storage_provider": {
+            "title": "Storage Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ready",
+          "storage_provider",
+          "checks"
+        ],
+        "title": "SetupCheckResponse",
+        "type": "object"
+      },
       "SetupRequest": {
         "additionalProperties": false,
-        "description": "Payload for ``POST /api/v1/setup`` — only accepted while unconfigured.",
         "properties": {
           "backup_retention_days": {
             "anyOf": [
@@ -11084,12 +11109,6 @@
             ],
             "title": "S3 Secret Key"
           },
-          "setup_token": {
-            "maxLength": 256,
-            "minLength": 16,
-            "title": "Setup Token",
-            "type": "string"
-          },
           "storage_backend": {
             "anyOf": [
               {
@@ -11146,7 +11165,6 @@
           }
         },
         "required": [
-          "setup_token",
           "username",
           "password"
         ],
@@ -11178,6 +11196,11 @@
             "title": "Storage Provider",
             "type": "string"
           },
+          "storage_ready": {
+            "default": true,
+            "title": "Storage Ready",
+            "type": "boolean"
+          },
           "thumb_dir": {
             "title": "Thumb Dir",
             "type": "string"
@@ -11205,6 +11228,24 @@
           "access_token"
         ],
         "title": "SetupResponse",
+        "type": "object"
+      },
+      "SetupSessionResponse": {
+        "properties": {
+          "csrf": {
+            "title": "Csrf",
+            "type": "string"
+          },
+          "expires_in": {
+            "default": 3600,
+            "title": "Expires In",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "csrf"
+        ],
+        "title": "SetupSessionResponse",
         "type": "object"
       },
       "SetupStatus": {
@@ -11381,16 +11422,15 @@
             ],
             "title": "Default Thumb Dir"
           },
-          "setup_token_required": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Setup Token Required"
+          "recovery_required": {
+            "default": false,
+            "title": "Recovery Required",
+            "type": "boolean"
+          },
+          "setup_available": {
+            "default": false,
+            "title": "Setup Available",
+            "type": "boolean"
           },
           "user_count": {
             "default": 0,
@@ -11402,6 +11442,230 @@
           "configured"
         ],
         "title": "SetupStatus",
+        "type": "object"
+      },
+      "SetupStorageCheck": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "SetupStorageCheck",
+        "type": "object"
+      },
+      "SetupStorageRequest": {
+        "additionalProperties": false,
+        "description": "Payload for ``POST /api/v1/setup`` — only accepted while unconfigured.",
+        "properties": {
+          "backup_retention_days": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Retention Days"
+          },
+          "backup_s3_access_key": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup S3 Access Key"
+          },
+          "backup_s3_bucket": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup S3 Bucket"
+          },
+          "backup_s3_endpoint_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup S3 Endpoint Url"
+          },
+          "backup_s3_region": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup S3 Region"
+          },
+          "backup_s3_secret_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup S3 Secret Key"
+          },
+          "data_dir": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Dir"
+          },
+          "s3_access_key": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S3 Access Key"
+          },
+          "s3_bucket": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S3 Bucket"
+          },
+          "s3_endpoint_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S3 Endpoint Url"
+          },
+          "s3_region": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S3 Region"
+          },
+          "s3_secret_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "S3 Secret Key"
+          },
+          "storage_backend": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Backend"
+          },
+          "storage_provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider"
+          },
+          "storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider Config"
+          },
+          "thumb_dir": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumb Dir"
+          }
+        },
+        "title": "SetupStorageRequest",
         "type": "object"
       },
       "ShareLinkCreate": {
@@ -20632,6 +20896,37 @@
         ]
       }
     },
+    "/api/v1/libraries/locations": {
+      "get": {
+        "description": "Show usable mounted folders before the explicit Library sources opt-in.",
+        "operationId": "discover_locations_api_v1_libraries_locations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Discover Locations Api V1 Libraries Locations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover Locations",
+        "tags": [
+          "external-libraries"
+        ]
+      }
+    },
     "/api/v1/libraries/{library_id}": {
       "delete": {
         "description": "Deletes the library and moves its indexed models/files to trash. The files on the NAS folder are never touched.",
@@ -27647,6 +27942,94 @@
           }
         },
         "summary": "Complete Setup",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/check-storage": {
+      "post": {
+        "operationId": "check_storage_api_v1_setup_check_storage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupStorageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Storage",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/prepare-storage": {
+      "post": {
+        "operationId": "prepare_storage_api_v1_setup_prepare_storage_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Prepare Storage",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/session": {
+      "post": {
+        "operationId": "begin_setup_api_v1_setup_session_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Begin Setup",
         "tags": [
           "setup"
         ]
