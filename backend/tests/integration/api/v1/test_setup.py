@@ -1049,3 +1049,34 @@ class TestRuntimeActivationRecovery:
         )
         assert recovered.status_code == 200
         assert recovered.json()["ready"] is True
+
+
+class TestSetupRequestLimits:
+    @pytest.mark.parametrize(
+        "path,limit,previous",
+        [("/session", 30, 1), ("/check-storage", 20, 0), ("", 20, 0)],
+    )
+    def test_rejects_a_burst_after_the_endpoint_limit(
+        self, client, path, limit, previous
+    ):
+        for _ in range(limit - previous):
+            response = client.post(
+                f"/api/v1/setup{path}",
+                json=_payload() if not path else {},
+                headers={"Origin": "https://untrusted.example"},
+            )
+            assert response.status_code == 403
+        response = client.post(
+            f"/api/v1/setup{path}",
+            json=_payload() if not path else {},
+            headers={"Origin": "https://untrusted.example"},
+        )
+        assert response.status_code == 429
+        assert response.json()["detail"] == "rate_limited"
+
+
+class TestLibraryLocationPermissions:
+    def test_member_cannot_discover_server_mounts(self, client, user_headers):
+        response = client.get("/api/v1/libraries/locations", headers=user_headers())
+        assert response.status_code == 403
+        assert response.json()["detail"] == "admin_required"

@@ -9,7 +9,7 @@ test.describe("Browser onboarding", () => {
   test(
     loseResponse
       ? "recovers a lost account response without creating another administrator"
-      : "creates the first account and Model entirely in the browser",
+      : "reaches its first Model entirely through browser controls",
     async ({ page }, testInfo) => {
       const sourcePath = `/tmp/printstash-onboarding-${process.env.PLAYWRIGHT_ONBOARDING_API_PORT ?? "8431"}/existing-models`;
       await mkdir(sourcePath, { recursive: true });
@@ -25,8 +25,12 @@ test.describe("Browser onboarding", () => {
       await page.getByLabel("Confirm password").fill("BrowserPassword123");
       await page.getByLabel("Confirm password").press("Enter");
       await expect(page.getByRole("heading", { name: "Your files", exact: true })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(page.getByText("View location and advanced options")).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("button", { name: "Check storage" })).toBeFocused();
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.getByRole("button", { name: "Check storage" }).click();
+      await page.getByRole("button", { name: "Check storage" }).press("Enter");
       await expect(page.getByText("Storage ready", { exact: true })).toBeVisible();
       await page.screenshot({ path: testInfo.outputPath("storage-desktop.png"), fullPage: true });
       if (loseResponse) {
@@ -41,36 +45,36 @@ test.describe("Browser onboarding", () => {
           { times: 1 },
         );
       }
-      await page.getByRole("button", { name: "Create my account and continue" }).click();
+      await page.getByRole("button", { name: "Create my account and continue" }).press("Enter");
       if (loseResponse) {
-        await page.getByRole("button", { name: "Sign in", exact: true }).click();
+        await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
         await page.getByLabel("Username").fill("first-owner");
         await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
-        await page.getByRole("button", { name: "Sign in", exact: true }).click();
+        await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
         await expect(page).toHaveURL(/\/$/);
         await page.goto("/getting-started");
       }
       await expect(page).toHaveURL(/\/getting-started$/);
-      await page.getByRole("button", { name: "Upload my first files" }).click();
+      await page.getByRole("button", { name: "Upload my first files" }).press("Enter");
       await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
         name: "first-model.gcode",
         mimeType: "text/plain",
         buffer: Buffer.from(gcodeFor("My first model")),
       });
       await page.getByPlaceholder("e.g. Bracket v2").fill("My first model");
-      await page.getByRole("button", { name: /upload to vault/i }).click();
-      await page.getByRole("link", { name: "My first model", exact: true }).click();
+      await page.getByRole("button", { name: /upload to vault/i }).press("Enter");
+      await page.getByRole("link", { name: "My first model", exact: true }).press("Enter");
       await expect(page).toHaveURL(/\/models\/\d+$/);
       await expect(
         page.getByRole("heading", { name: "My first model", exact: true }),
       ).toBeVisible();
       await page.goto("/getting-started");
-      await page.getByRole("button", { name: "Connect an existing folder" }).click();
-      await page.getByRole("switch", { name: "Library sources enabled" }).click();
+      await page.getByRole("button", { name: "Connect an existing folder" }).press("Enter");
+      await page.getByRole("switch", { name: "Library sources enabled" }).press("Enter");
       await page.getByLabel("Source name").fill("My existing folder");
       await page.getByLabel("Mounted folder path").fill(sourcePath);
-      await page.getByRole("button", { name: "Add source", exact: true }).click();
-      await page.getByRole("button", { name: "Scan now", exact: true }).click();
+      await page.getByRole("button", { name: "Add source", exact: true }).press("Enter");
+      await page.getByRole("button", { name: "Scan now", exact: true }).press("Enter");
       await expect(page.getByRole("link", { name: "Connected model", exact: true })).toBeVisible();
     },
   );

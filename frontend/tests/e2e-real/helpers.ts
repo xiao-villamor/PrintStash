@@ -25,7 +25,9 @@ async function ensureAuth(): Promise<{ token: string; user: string }> {
   try {
     const status = await (await ctx.get(`${API}/api/v1/setup/status`)).json();
     if (!status.configured) {
-      const preparation = await ctx.post(`${API}/api/v1/setup/session`, { headers: { Origin: API } });
+      const preparation = await ctx.post(`${API}/api/v1/setup/session`, {
+        headers: { Origin: API },
+      });
       if (!preparation.ok()) throw new Error(`Preparation failed: ${preparation.status()}`);
       const { csrf } = await preparation.json();
       const res = await ctx.post(`${API}/api/v1/setup`, {

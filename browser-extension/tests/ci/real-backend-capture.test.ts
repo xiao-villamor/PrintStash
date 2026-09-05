@@ -46,7 +46,10 @@ async function readJson<T>(response: Response, action: string): Promise<T> {
 describe("production extension capture against a real backend", () => {
   it("pairs a browser device, uploads a slot, and finalizes a Pending Import", async () => {
     const vault = requiredEnvironment("PRINTSTASH_EXTENSION_CAPTURE_BASE_URL").replace(/\/$/, "");
-    const preparation = await fetch(`${vault}/api/v1/setup/session`, { method: "POST", headers: { Origin: vault } });
+    const preparation = await fetch(`${vault}/api/v1/setup/session`, {
+      method: "POST",
+      headers: { Origin: vault },
+    });
     const cookie = preparation.headers.get("set-cookie")?.split(";")[0] ?? "";
     const { csrf } = await readJson<{ csrf: string }>(preparation, "browser preparation");
     const suffix = randomBytes(8).toString("hex");
@@ -56,7 +59,12 @@ describe("production extension capture against a real backend", () => {
     const setup = await readJson<SetupResponse>(
       await fetch(`${vault}/api/v1/setup`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Origin: vault, Cookie: cookie, "X-PrintStash-Setup-CSRF": csrf },
+        headers: {
+          "Content-Type": "application/json",
+          Origin: vault,
+          Cookie: cookie,
+          "X-PrintStash-Setup-CSRF": csrf,
+        },
         body: JSON.stringify({
           username,
           password,

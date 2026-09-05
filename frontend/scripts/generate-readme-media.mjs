@@ -76,7 +76,10 @@ async function api(path, options = {}) {
 async function setup() {
   const status = await api("/api/v1/setup/status");
   if (!status.configured) {
-    const preparation = await fetch(`${apiBase}/api/v1/setup/session`, { method: "POST", headers: { Origin: apiBase } });
+    const preparation = await fetch(`${apiBase}/api/v1/setup/session`, {
+      method: "POST",
+      headers: { Origin: apiBase },
+    });
     if (!preparation.ok()) throw new Error("Browser preparation failed");
     const cookie = preparation.headers.get("set-cookie").split(";")[0];
     const { csrf } = await preparation.json();
