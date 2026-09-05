@@ -10,8 +10,20 @@ import asyncssh
 
 
 class _AuthenticationServer(asyncssh.SSHServer):
-    def __init__(self, password: str | None) -> None:
+    def __init__(self, password: str | None, events: Path | None = None) -> None:
         self._password = password
+        self._events = events
+
+    def _record(self, event: str) -> None:
+        if self._events is not None:
+            with self._events.open("a") as output:
+                output.write(f"{event}\n")
+
+    def connection_made(self, conn: asyncssh.SSHServerConnection) -> None:
+        self._record("connected")
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        self._record("disconnected")
 
     def begin_auth(self, username: str) -> bool:
         del username
@@ -38,6 +50,7 @@ async def serve(
     root: Path,
     password: str | None,
     known_hosts: Path | None,
+    events: Path | None = None,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     host_key = asyncssh.generate_private_key("ssh-ed25519")
@@ -50,7 +63,7 @@ async def serve(
         host,
         port,
         server_host_keys=[host_key],
-        server_factory=lambda: _AuthenticationServer(password),
+        server_factory=lambda: _AuthenticationServer(password, events),
         sftp_factory=lambda channel: asyncssh.SFTPServer(
             channel, chroot=str(root).encode()
         ),
@@ -67,6 +80,7 @@ def main() -> None:
     parser.add_argument("--authorized-keys", type=Path)
     parser.add_argument("--password")
     parser.add_argument("--known-hosts", type=Path)
+    parser.add_argument("--events", type=Path)
     args = parser.parse_args()
     asyncio.run(
         serve(
@@ -75,6 +89,7 @@ def main() -> None:
             root=args.root,
             password=args.password,
             known_hosts=args.known_hosts,
+            events=args.events,
         )
     )
 

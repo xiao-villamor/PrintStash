@@ -164,6 +164,8 @@ def sftp_password_endpoint(tmp_path: Path):
             str(tmp_path / "password-server"),
             "--password",
             "contract-secret",
+            "--events",
+            str(tmp_path / "sftp-events"),
             "--known-hosts",
             str(known_hosts),
         ],
@@ -391,6 +393,44 @@ class TestOpenDALStorageBackend:
 
         assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
         assert receipt.size == len(payload)
+
+    def test_sftp_closes_an_abandoned_stream(
+        self,
+        sftp_password_endpoint,
+        tmp_path: Path,
+    ) -> None:
+        port, known_hosts = sftp_password_endpoint
+        source = tmp_path / "password-server" / "vault-data" / "stream.gcode"
+        source.parent.mkdir()
+        source.write_bytes(b"streamed" * 1024)
+        backend = OpenDALStorageBackend(
+            TransportSpec(
+                kind=TransportKind.SFTP,
+                provider="sftp",
+                namespace="vault-data",
+                options={
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "username": "printstash",
+                    "password": "contract-secret",
+                    "host_key": str(known_hosts),
+                    "root": "vault-data",
+                },
+            )
+        )
+        stream = backend.stream_chunks("vault-data/stream.gcode", 8)
+
+        assert next(stream) == b"streamed"
+        stream.close()
+
+        events_path = tmp_path / "sftp-events"
+        deadline = time.monotonic() + 5
+        events = events_path.read_text().splitlines()
+        while events.count("connected") != events.count("disconnected"):
+            assert time.monotonic() < deadline, events
+            time.sleep(0.01)
+            events = events_path.read_text().splitlines()
+        assert events == ["connected", "disconnected"]
 
     def test_sftp_accepts_a_pinned_known_host_entry(self, sftp_endpoint) -> None:
         port, private_key, known_hosts = sftp_endpoint
