@@ -608,9 +608,9 @@ def _operator_for(spec: TransportSpec) -> Any:
         endpoint = str(options.get("endpoint_url") or "")
         if endpoint:
             kwargs["endpoint"] = endpoint
-        region = str(options.get("region") or "")
-        if region and region != "auto":
-            kwargs["region"] = region
+        # The pinned Python binding requires an explicit signing region. R2's
+        # literal "auto" is a valid region, not a request for network discovery.
+        kwargs["region"] = str(options.get("region") or "auto")
         return opendal.Operator("s3", **kwargs)
     if spec.kind is TransportKind.WEBDAV:
         try:

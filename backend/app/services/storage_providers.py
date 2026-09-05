@@ -608,6 +608,10 @@ def provider_fields(
         default = None if field.is_required() else field.default
         required = field.is_required() or provider in extra.required_for
         label = field.title or name
+        if name == "region" and provider == "s3":
+            # Preserve the ordinary S3 form's default across all three uses.
+            # R2 still resolves to its required literal "auto" signing region.
+            default = "us-east-1"
         if name == "root":
             required = True
             if use != "vault":

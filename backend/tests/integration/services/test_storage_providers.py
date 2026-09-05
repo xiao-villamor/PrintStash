@@ -429,3 +429,12 @@ class TestSharedFieldMetadata:
             parse_connection_config(remote_kind, public, secrets)
         )
         assert connection == vault
+
+
+class TestProviderRegionDefaults:
+    def test_ordinary_s3_forms_offer_an_explicit_signing_region(self):
+        from app.services.storage_providers import provider_fields
+
+        for use in ("vault", "library", "backup"):
+            fields = {field.name: field for field in provider_fields("s3", use=use)}
+            assert fields["region"].default == "us-east-1"

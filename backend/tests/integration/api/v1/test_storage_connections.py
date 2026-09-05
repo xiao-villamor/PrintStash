@@ -852,3 +852,31 @@ class TestConnectionEditing:
         assert response.status_code == 403
         db_session.expire_all()
         assert db_session.get(StorageConnection, identifier).secret_json == before
+
+
+class TestDefaultS3Connection:
+    def test_unused_default_profile_can_be_removed(self, client, db_session):
+        admin = build_user(db_session, "default-s3-admin", superuser=True)
+        headers = _headers(admin)
+        response = client.post(
+            "/api/v1/storage-connections",
+            headers=headers,
+            json={
+                "name": "Default S3",
+                "kind": "s3",
+                "purpose": "both",
+                "configuration": {"provider": "s3", "bucket": "contract-default"},
+                "secrets": {
+                    "access_key": "contract-access",
+                    "secret_key": "contract-secret",
+                },
+            },
+        )
+        assert response.status_code == 201
+        identifier = response.json()["id"]
+        removed = client.delete(
+            f"/api/v1/storage-connections/{identifier}", headers=headers
+        )
+        assert removed.status_code == 204
+        db_session.expire_all()
+        assert db_session.get(StorageConnection, identifier) is None

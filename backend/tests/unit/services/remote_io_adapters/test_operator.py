@@ -120,32 +120,25 @@ class TestOperatorFor:
         else:
             assert options["enable_virtual_host_style"] == expected_virtual
 
-    def test_s3_leaves_region_discovery_to_opendal_when_configured_as_auto(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[dict[str, str]] = []
-        fake_opendal = ModuleType("opendal")
-        fake_opendal.Operator = (  # type: ignore[attr-defined]
-            lambda _kind, **options: calls.append(options) or object()
-        )
-        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+    @pytest.mark.parametrize(
+        "provider", ["s3", "cloudflare_r2"], ids=["aws-region", "r2-region"]
+    )
+    def test_constructs_an_explicit_auto_region_without_discovery(self, provider):
+        from app.services.storage_providers import S3ProviderConfig, resolve_transport
 
-        storage_opendal._operator_for(
-            _spec(
-                TransportKind.S3,
-                options={
-                    "bucket": "models",
-                    "root": "library",
-                    "region": "auto",
-                    "endpoint_url": "",
-                    "addressing_style": "auto",
-                    "access_key": "access",
-                    "secret_key": "secret",
-                },
+        spec = resolve_transport(
+            S3ProviderConfig(
+                provider=provider,
+                bucket="models",
+                region="auto",
+                account_id="contract-account",
+                access_key="contract-access",
+                secret_key="contract-secret",
             )
         )
-
-        assert "region" not in calls[0]
+        operator = storage_opendal._operator_for(spec)
+        assert operator.capability().read is True
+        assert operator.capability().stat is True
 
     def test_builds_a_google_drive_operator_from_oauth_secrets(
         self, monkeypatch: pytest.MonkeyPatch

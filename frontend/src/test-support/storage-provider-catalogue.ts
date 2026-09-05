@@ -215,7 +215,7 @@ export const storageProviderCatalogue: StorageProvider[] = [
         input_type: "text",
         required: false,
         secret: false,
-        default: "auto",
+        default: "us-east-1",
         options: [],
       },
       {
@@ -288,7 +288,7 @@ export const storageProviderCatalogue: StorageProvider[] = [
           input_type: "text",
           required: false,
           secret: false,
-          default: "auto",
+          default: "us-east-1",
           options: [],
         },
         {
@@ -360,7 +360,7 @@ export const storageProviderCatalogue: StorageProvider[] = [
           input_type: "text",
           required: false,
           secret: false,
-          default: "auto",
+          default: "us-east-1",
           options: [],
         },
         {
@@ -432,7 +432,7 @@ export const storageProviderCatalogue: StorageProvider[] = [
           input_type: "text",
           required: false,
           secret: false,
-          default: "auto",
+          default: "us-east-1",
           options: [],
         },
         {
@@ -2207,7 +2207,7 @@ export const storageProviderCatalogue: StorageProvider[] = [
     description: "NAS storage over SSH File Transfer Protocol.",
     expected_tier: "guarded",
     expected_tier_note:
-      "Publish uses SSH exclusive create (`x` mode); `host_key` is required and purge is manual and confirmed only.",
+      "Publish uses SSH exclusive create (`x` mode); `host_key` is required and confirmed catalog purge retains stored bytes.",
     consequences: [
       "Confirmed catalog removal retains stored bytes.",
       "Automatic physical deletion is unavailable.",
