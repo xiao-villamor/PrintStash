@@ -108,7 +108,8 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
         self._operator.check()
         from io import BytesIO
 
-        probe = f".printstash-probe/{uuid.uuid4().hex}"
+        probe_directory = f".printstash-probe/{uuid.uuid4().hex}"
+        probe = f"{probe_directory}/proof"
         first = b"printstash-conditional-create-proof"
         second = b"printstash-conditional-create-collision"
 
@@ -138,7 +139,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
         try:
             observed = self.read_bytes(self._key(probe))
             observed_size = self.stat_size(self._key(probe))
-            listed = self._key(probe) in set(self.walk_keys())
+            listed = self._key(probe) in self.walk_keys(self._key(probe_directory))
         except Exception:
             self._probe_diagnostics["probed"] = True
             self._probe_diagnostics["conditional_create"] = False

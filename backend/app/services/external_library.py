@@ -12,6 +12,7 @@ live indexed files, the scan aborts with an error and changes nothing.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import errno
 import json
@@ -21,14 +22,14 @@ import stat
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Optional
 
 from croniter import croniter
-from sqlalchemy import or_, update
+from sqlalchemy import exists, func, or_, update
 from sqlmodel import Session, select
 
 from app.core.logging import get_logger
@@ -38,6 +39,7 @@ from app.db.models import (
     ExternalLibrary,
     ExternalLibraryCheckpoint,
     ExternalLibraryCollectionMode,
+    ExternalLibraryObservation,
     ExternalLibraryScanStatus,
     ExternalLibraryTombstone,
     ExternalLibraryWatchMode,
@@ -880,7 +882,7 @@ def _index_remote_file(
     library: ExternalLibrary,
     source: LibrarySource,
     entry: SourceEntry,
-) -> None:
+) -> File:
     source_name = Path(entry.key)
     file_type = SUFFIX_TO_FILE_TYPE[source_name.suffix.lower()]
     with source.materialize(entry.key, expected=entry) as content:
@@ -928,6 +930,7 @@ def _index_remote_file(
         session.add(row)
         session.commit()
         upsert_detected_profiles(session, meta)
+        return row
 
 
 def _reindex_remote_file(
@@ -995,7 +998,12 @@ def _remote_checkpoint(
             ExternalLibraryCheckpoint.library_id == library.id
         )
     ).first()
-    if checkpoint is None or checkpoint.complete:
+    if (
+        checkpoint is None
+        or checkpoint.complete
+        or checkpoint.observed_keys_json != "[]"
+        or (checkpoint.cursor is not None and checkpoint.cursor.startswith("["))
+    ):
         if checkpoint is not None:
             session.delete(checkpoint)
             session.flush()
@@ -1020,6 +1028,10 @@ def scan_remote_library(
         return {"coalesced": True, "reason": "remote_scan_busy"}
     summary = ScanSummary()
     scan_started = monotonic()
+    from app.services.remote_deadline import remote_budget
+
+    budget = remote_budget(deadline=scan_started + _REMOTE_SLICE_MAX_SECONDS)
+    budget.__enter__()
     try:
         with session_factory.scoped_session() as session:
             library = session.get(ExternalLibrary, library_id)
@@ -1048,37 +1060,54 @@ def scan_remote_library(
                     cursor=checkpoint.cursor,
                     limit=_REMOTE_PAGE_LIMIT,
                 )
-                supported = [
-                    entry
-                    for entry in page.entries
-                    if Path(entry.key).suffix.lower() in SUFFIX_TO_FILE_TYPE
-                ]
                 selected: list[SourceEntry] = []
                 bytes_in_slice = 0
-                for entry in supported:
-                    if bytes_in_slice + entry.size > _REMOTE_SLICE_MAX_BYTES:
+                consumed = 0
+                for index, entry in enumerate(page.entries):
+                    supported = Path(entry.key).suffix.lower() in SUFFIX_TO_FILE_TYPE
+                    if (
+                        supported
+                        and bytes_in_slice + entry.size > _REMOTE_SLICE_MAX_BYTES
+                    ):
+                        if not page.entry_cursors or consumed == 0:
+                            raise LibrarySourceError("remote_scan_slice_byte_limit")
+                        page = replace(
+                            page,
+                            next_cursor=page.entry_cursors[consumed - 1],
+                            complete=False,
+                        )
                         break
-                    selected.append(entry)
-                    bytes_in_slice += entry.size
-                if len(selected) != len(supported):
-                    raise LibrarySourceError("remote_scan_slice_byte_limit")
-                observed = set(json.loads(checkpoint.observed_keys_json or "[]"))
-                tombstones = {
-                    row.source_key
-                    for row in session.exec(
-                        select(ExternalLibraryTombstone).where(
+                    consumed = index + 1
+                    if supported:
+                        selected.append(entry)
+                        bytes_in_slice += entry.size
+                cursors_by_key = dict(
+                    zip(
+                        (entry.key for entry in page.entries),
+                        page.entry_cursors,
+                        strict=False,
+                    )
+                )
+                page_keys = [entry.key for entry in selected]
+                tombstones = set(
+                    session.exec(
+                        select(ExternalLibraryTombstone.source_key).where(
                             ExternalLibraryTombstone.library_id == library_id,
                             ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+                            ExternalLibraryTombstone.source_key.in_(page_keys),
                         )
                     ).all()
-                }
+                )
                 live_files = session.exec(
                     select(File).where(
                         File.external_library_id == library_id,
                         live(File),
+                        File.source_key.in_(page_keys),
                     )
                 ).all()
                 by_key = {row.source_key: row for row in live_files if row.source_key}
+                from app.services.remote_discovery import key_hash
+
                 observation_time = utcnow()
                 for entry in selected:
                     # Blocking provider and parser calls cannot be interrupted safely.
@@ -1086,13 +1115,11 @@ def scan_remote_library(
                     # cannot turn one scheduled scan into an unbounded network job.
                     if monotonic() - scan_started >= _REMOTE_SLICE_MAX_SECONDS:
                         raise LibrarySourceError("remote_scan_slice_deadline")
-                    observed.add(entry.key)
+                    existing = by_key.get(entry.key)
                     if entry.key in tombstones:
                         summary.skipped += 1
-                        continue
-                    existing = by_key.get(entry.key)
-                    if existing is None:
-                        _index_remote_file(session, library, source, entry)
+                    elif existing is None:
+                        existing = _index_remote_file(session, library, source, entry)
                         summary.added += 1
                     elif _remote_markers_unchanged(
                         existing, entry
@@ -1102,20 +1129,68 @@ def scan_remote_library(
                         summary.updated += 1
                     else:
                         summary.skipped += 1
+                    observation = session.exec(
+                        select(ExternalLibraryObservation).where(
+                            ExternalLibraryObservation.checkpoint_id == checkpoint.id,
+                            ExternalLibraryObservation.key_hash == key_hash(entry.key),
+                        )
+                    ).first()
+                    if observation is None:
+                        observation = ExternalLibraryObservation(
+                            checkpoint_id=checkpoint.id, key_hash=key_hash(entry.key)
+                        )
+                    observation.file_id = existing.id if existing is not None else None
+                    session.add(observation)
+                    if entry.key in cursors_by_key:
+                        checkpoint.cursor = cursors_by_key[entry.key]
+                        checkpoint.updated_at = utcnow()
+                        session.add(checkpoint)
+                        session.commit()
                 checkpoint.cursor = page.next_cursor
                 checkpoint.complete = page.complete
-                checkpoint.observed_keys_json = json.dumps(sorted(observed))
                 checkpoint.metadata_ops += page.metadata_ops
                 checkpoint.bytes_read += bytes_in_slice
                 checkpoint.updated_at = utcnow()
                 if page.complete:
-                    missing = [
-                        row
-                        for key, row in by_key.items()
-                        if key not in observed and key not in tombstones
-                    ]
-                    removal_limit = min(25, max(1, len(by_key) // 100))
-                    if (not observed and by_key) or len(missing) > removal_limit:
+                    session.flush()
+                    total = session.exec(
+                        select(func.count())
+                        .select_from(File)
+                        .where(
+                            File.external_library_id == library_id,
+                            live(File),
+                            File.source_key != None,  # noqa: E711
+                        )
+                    ).one()
+                    removal_limit = min(25, max(1, total // 100))
+                    seen = exists().where(
+                        ExternalLibraryObservation.checkpoint_id == checkpoint.id,
+                        ExternalLibraryObservation.file_id == File.id,
+                    )
+                    suppressed = exists().where(
+                        ExternalLibraryTombstone.library_id == library_id,
+                        ExternalLibraryTombstone.source_key == File.source_key,
+                        ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+                    )
+                    missing = session.exec(
+                        select(File)
+                        .where(
+                            File.external_library_id == library_id,
+                            live(File),
+                            File.source_key != None,  # noqa: E711
+                            ~seen,
+                            ~suppressed,  # noqa: E711
+                        )
+                        .limit(removal_limit + 1)
+                    ).all()
+                    observed_count = session.exec(
+                        select(func.count())
+                        .select_from(ExternalLibraryObservation)
+                        .where(
+                            ExternalLibraryObservation.checkpoint_id == checkpoint.id,
+                        )
+                    ).one()
+                    if (not observed_count and total) or len(missing) > removal_limit:
                         summary.error = "remote_mass_removal_blocked"
                         summary.aborted = True
                     else:
@@ -1144,12 +1219,38 @@ def scan_remote_library(
                 library.updated_at = utcnow()
                 session.add(library)
                 session.commit()
+                if checkpoint.complete and page.inventory_id is not None:
+                    from sqlalchemy.exc import SQLAlchemyError
+
+                    from app.services.remote_discovery import retire_inventory
+
+                    try:
+                        retire_inventory(page.inventory_id)
+                    except SQLAlchemyError:
+                        logger.warning("remote discovery inventory cleanup deferred")
                 if job_id:
                     registry.update(job_id, state="completed", result=result)
                 return result
+            except asyncio.CancelledError as exc:
+                session.rollback()
+                checkpoint = _remote_checkpoint(session, library)
+                checkpoint.cursor = (
+                    getattr(exc, "discovery_cursor", None) or checkpoint.cursor
+                )
+                checkpoint.updated_at = utcnow()
+                library.last_scan_status = ExternalLibraryScanStatus.PARTIAL
+                summary.error = "remote_scan_cancelled"
+                summary.aborted = True
+                library.last_scan_summary = json.dumps(summary.as_dict())
+                session.add(checkpoint)
+                session.add(library)
+                session.commit()
+                raise
             except Exception as exc:
                 session.rollback()
                 checkpoint = _remote_checkpoint(session, library)
+                if getattr(exc, "discovery_cursor", None):
+                    checkpoint.cursor = exc.discovery_cursor
                 deadline_reached = str(exc) == "remote_scan_slice_deadline"
                 checkpoint.backoff_until = (
                     None if deadline_reached else utcnow() + timedelta(hours=24)
@@ -1171,6 +1272,7 @@ def scan_remote_library(
                     registry.update(job_id, state="failed", error=summary.error)
                 return summary.as_dict()
     finally:
+        budget.__exit__(None, None, None)
         _REMOTE_SCAN_LOCK.release()
 
 

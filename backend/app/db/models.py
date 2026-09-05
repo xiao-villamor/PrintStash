@@ -2230,6 +2230,83 @@ class ExternalLibraryCheckpoint(SQLModel, table=True):
     completed_at: Optional[datetime] = None
 
 
+class RemoteDiscoveryInventory(SQLModel, table=True):
+    """Target-bound snapshot; incomplete listings grant no absence evidence."""
+
+    __tablename__ = "remote_discovery_inventories"
+    id: str = Field(primary_key=True, max_length=64)
+    target_ref: str = Field(max_length=64, index=True)
+    prefix: str = Field(sa_column=Column(Text, nullable=False))
+    complete: bool = False
+    metadata_ops: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class RemoteDiscoveryDirectory(SQLModel, table=True):
+    __tablename__ = "remote_discovery_directories"
+    __table_args__ = (
+        UniqueConstraint("inventory_id", "path_hash", name="uq_discovery_directory"),
+        Index("ix_discovery_directory_pending", "inventory_id", "complete", "id"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    inventory_id: str = Field(
+        foreign_key="remote_discovery_inventories.id", ondelete="CASCADE", index=True
+    )
+    parent_id: Optional[int] = Field(
+        default=None,
+        foreign_key="remote_discovery_directories.id",
+        ondelete="CASCADE",
+        index=True,
+    )
+    path: str = Field(sa_column=Column(Text, nullable=False))
+    path_hash: str = Field(max_length=64)
+    complete: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class RemoteDiscoveryEntry(SQLModel, table=True):
+    __tablename__ = "remote_discovery_entries"
+    __table_args__ = (
+        UniqueConstraint("inventory_id", "key_hash", name="uq_discovery_entry"),
+        Index("ix_discovery_entry_page", "inventory_id", "id"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    inventory_id: str = Field(
+        foreign_key="remote_discovery_inventories.id", ondelete="CASCADE", index=True
+    )
+    directory_id: int = Field(
+        foreign_key="remote_discovery_directories.id", ondelete="CASCADE", index=True
+    )
+    source_key: str = Field(sa_column=Column(Text, nullable=False))
+    key_hash: str = Field(max_length=64)
+    size: int = Field(sa_column=Column(BigInteger, nullable=False))
+    modified_at: Optional[datetime] = None
+    etag: Optional[str] = None
+    version_id: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ExternalLibraryObservation(SQLModel, table=True):
+    """Indexed seen-key evidence bound to the epoch's linked File row."""
+
+    __tablename__ = "external_library_observations"
+    __table_args__ = (
+        UniqueConstraint("checkpoint_id", "key_hash", name="uq_library_observation"),
+        Index("ix_library_observation_file", "checkpoint_id", "file_id"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    checkpoint_id: int = Field(
+        foreign_key="external_library_checkpoints.id", ondelete="CASCADE", index=True
+    )
+    key_hash: str = Field(max_length=64)
+    file_id: Optional[int] = Field(
+        default=None, foreign_key="files.id", ondelete="CASCADE"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class PrintBatch(SQLModel, table=True):
     __tablename__ = "print_batches"
     __table_args__ = (

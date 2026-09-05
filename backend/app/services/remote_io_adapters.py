@@ -15,9 +15,10 @@ from io import BufferedReader, RawIOBase
 from itertools import islice
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, BinaryIO, Iterator
+from typing import Any, Awaitable, BinaryIO, Iterator, TypeVar
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from app.services.remote_deadline import operation_timeout
 from app.services.remote_io import (
     IdentityDeletion,
     ManagedCreation,
@@ -33,6 +34,8 @@ from app.services.storage_backend import (
 )
 from app.services.storage_identity import StorageTargetIdentity, target_for_transport
 from app.services.storage_providers import TransportKind, TransportSpec
+
+_Result = TypeVar("_Result")
 
 
 class _RemoteAdapter:
@@ -57,6 +60,16 @@ class _RemoteAdapter:
         self._read_only = False
         self._webdav_endpoint = str(spec.options.get("endpoint_url") or "").rstrip("/")
         self._webdav_root = str(spec.options.get("root") or "").strip("/")
+
+    @property
+    def _io_operator(self):
+        timeout = operation_timeout()
+        layer = getattr(self._operator, "layer", None)
+        if layer is None or self._spec.kind is TransportKind.SFTP:
+            return self._operator
+        import opendal
+
+        return layer(opendal.layers.TimeoutLayer(timeout=timeout, io_timeout=timeout))
 
     @property
     def storage_target(self) -> StorageTargetIdentity | None:
@@ -273,10 +286,11 @@ class _RemoteAdapter:
 
     def object_info(self, key: str) -> StorageObjectInfo | None:
         relative = self._relative(key)
+        operator = self._io_operator
         try:
-            if not self._operator.exists(relative):
+            if not operator.exists(relative):
                 return None
-            metadata = self._operator.stat(relative)
+            metadata = operator.stat(relative)
         except Exception as exc:
             if _is_not_found(exc):
                 return None
@@ -371,8 +385,10 @@ class _RemoteAdapter:
         with ExitStack() as resources:
             try:
                 reader = resources.enter_context(
-                    self._operator.open(self._relative(key), "rb", **options)
+                    self._io_operator.open(self._relative(key), "rb", **options)
                 )
+            except StorageConfigurationError:
+                raise
             except Exception as exc:
                 if _is_not_found(exc):
                     raise FileNotFoundError(key) from exc
@@ -391,6 +407,16 @@ class _RemoteAdapter:
             while chunk := reader.read(chunk_size):
                 yield bytes(chunk)
 
+    def _webdav_listing(self, directory: str):
+        from app.services.webdav_listing import iter_webdav_directory
+
+        return iter_webdav_directory(
+            self._webdav_url(directory),
+            root_url=self._webdav_url(""),
+            username=str(self._spec.options.get("username") or ""),
+            password=str(self._spec.options.get("password") or ""),
+        )
+
     @contextmanager
     def iter_directory(self, relative: str) -> Iterator[Iterator[RemoteEntry]]:
         directory = relative.strip("/")
@@ -398,10 +424,21 @@ class _RemoteAdapter:
         def observations():
             listing = None
             try:
+                if self._spec.kind is TransportKind.WEBDAV:
+                    with self._webdav_listing(directory) as entries:
+                        for entry in entries:
+                            if entry.key != directory:
+                                yield entry
+                    return
                 listing = iter(
-                    self._operator.list(f"{directory}/" if directory else "")
+                    self._io_operator.list(f"{directory}/" if directory else "")
                 )
-                for entry in listing:
+                while True:
+                    operation_timeout()
+                    try:
+                        entry = next(listing)
+                    except StopIteration:
+                        break
                     path = str(entry.path).strip("/")
                     if not path or path == directory:
                         continue
@@ -414,7 +451,10 @@ class _RemoteAdapter:
                         etag=getattr(metadata, "etag", None) or None,
                         version_id=getattr(metadata, "version", None) or None,
                     )
+            except StorageConfigurationError:
+                raise
             except Exception as exc:
+                operation_timeout()
                 raise StorageConfigurationError("remote_storage_list_failed") from exc
             finally:
                 close = getattr(listing, "close", None)
@@ -454,6 +494,7 @@ class _RemoteReader(RawIOBase):
         return True
 
     def readinto(self, buffer) -> int:
+        operation_timeout()
         try:
             read = getattr(self.reader, "read1", self.reader.read)
             chunk = read(len(buffer))
@@ -741,7 +782,9 @@ class _AsyncSSHSFTPOperator:
                 return await operation(client)
 
     def _run(self, operation):
-        return asyncio.run(self._perform(operation))
+        return asyncio.run(
+            asyncio.wait_for(self._perform(operation), operation_timeout())
+        )
 
     def check(self) -> None:
         async def operation(client) -> None:
@@ -885,6 +928,17 @@ class _AsyncSSHSFTPOperator:
 
         return bytes(self._run(operation))
 
+    def _await(
+        self, loop: asyncio.AbstractEventLoop, operation: Awaitable[_Result]
+    ) -> _Result:
+        try:
+            timeout = operation_timeout()
+        except BaseException:
+            if asyncio.iscoroutine(operation):
+                operation.close()
+            raise
+        return loop.run_until_complete(asyncio.wait_for(operation, timeout))
+
     def stream_chunks(self, relative: str, chunk_size: int) -> Iterator[bytes]:
         import asyncssh
 
@@ -894,19 +948,27 @@ class _AsyncSSHSFTPOperator:
         with ExitStack() as resources:
             loop = asyncio.new_event_loop()
             resources.callback(loop.close)
-            connection = loop.run_until_complete(
-                asyncssh.connect(**self._connection_options())
+            connection = self._await(
+                loop, asyncssh.connect(**self._connection_options())
             )
             resources.callback(
-                lambda: loop.run_until_complete(connection.wait_closed())
+                lambda: loop.run_until_complete(
+                    asyncio.wait_for(connection.wait_closed(), 5)
+                )
             )
             resources.callback(connection.close)
-            client = loop.run_until_complete(connection.start_sftp_client())
-            resources.callback(lambda: loop.run_until_complete(client.wait_closed()))
+            client = self._await(loop, connection.start_sftp_client())
+            resources.callback(
+                lambda: loop.run_until_complete(
+                    asyncio.wait_for(client.wait_closed(), 5)
+                )
+            )
             resources.callback(client.exit)
-            reader = loop.run_until_complete(client.open(self._path(relative), "rb"))
-            resources.callback(lambda: loop.run_until_complete(reader.close()))
-            while chunk := loop.run_until_complete(reader.read(chunk_size)):
+            reader = self._await(loop, client.open(self._path(relative), "rb"))
+            resources.callback(
+                lambda: loop.run_until_complete(asyncio.wait_for(reader.close(), 5))
+            )
+            while chunk := self._await(loop, reader.read(chunk_size)):
                 yield bytes(chunk)
 
     def delete(self, relative: str) -> None:
@@ -958,23 +1020,33 @@ class _AsyncSSHSFTPOperator:
         with ExitStack() as resources:
             loop = asyncio.new_event_loop()
             resources.callback(loop.close)
-            connection = loop.run_until_complete(
-                asyncssh.connect(**self._connection_options())
+            connection = self._await(
+                loop, asyncssh.connect(**self._connection_options())
             )
             resources.callback(
-                lambda: loop.run_until_complete(connection.wait_closed())
+                lambda: loop.run_until_complete(
+                    asyncio.wait_for(connection.wait_closed(), 5)
+                )
             )
             resources.callback(connection.close)
-            client = loop.run_until_complete(connection.start_sftp_client())
-            resources.callback(lambda: loop.run_until_complete(client.wait_closed()))
+            client = self._await(loop, connection.start_sftp_client())
+            resources.callback(
+                lambda: loop.run_until_complete(
+                    asyncio.wait_for(client.wait_closed(), 5)
+                )
+            )
             resources.callback(client.exit)
             iterator = client.scandir(self._path(directory)).__aiter__()
             close_listing = getattr(iterator, "aclose", None)
             if close_listing is not None:
-                resources.callback(lambda: loop.run_until_complete(close_listing()))
+                resources.callback(
+                    lambda: loop.run_until_complete(
+                        asyncio.wait_for(close_listing(), 5)
+                    )
+                )
             while True:
                 try:
-                    entry = loop.run_until_complete(anext(iterator))
+                    entry = self._await(loop, anext(iterator))
                 except StopAsyncIteration:
                     break
                 name = str(entry.filename)

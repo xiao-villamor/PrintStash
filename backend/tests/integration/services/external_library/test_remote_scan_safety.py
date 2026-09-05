@@ -71,6 +71,66 @@ def _indexed(session: Session, library: ExternalLibrary, key: str) -> File:
 
 
 class TestRemoteScanSafety:
+    def test_cancelled_discovery_preserves_linked_artifacts(
+        self, db_session, monkeypatch, make_external_library
+    ):
+        import asyncio
+        from app.db.models import ExternalLibraryCheckpoint, ExternalLibraryScanStatus
+
+        library = make_external_library("", source_kind=LibrarySourceKind.S3)
+        existing = _indexed(db_session, library, "models/retained.gcode")
+
+        class Source:
+            def list_page(self, *_args, **_kwargs):
+                raise asyncio.CancelledError()
+
+        monkeypatch.setattr(
+            external_library, "source_for_library", lambda _lib: Source()
+        )
+        with pytest.raises(asyncio.CancelledError):
+            external_library.scan_remote_library(library.id)
+        db_session.refresh(existing)
+        db_session.refresh(library)
+        assert existing.deleted_at is None
+        assert library.last_scan_status == ExternalLibraryScanStatus.PARTIAL
+        checkpoint = db_session.exec(
+            select(ExternalLibraryCheckpoint).where(
+                ExternalLibraryCheckpoint.library_id == library.id
+            )
+        ).one()
+        assert checkpoint.complete is False
+        assert external_library._REMOTE_SCAN_LOCK.acquire(blocking=False)
+        external_library._REMOTE_SCAN_LOCK.release()
+
+    def test_completed_scan_keeps_seen_keys_out_of_json(
+        self, db_session, monkeypatch, make_external_library
+    ):
+        from app.db.models import ExternalLibraryCheckpoint, ExternalLibraryObservation
+
+        library = make_external_library(
+            "", source_kind=LibrarySourceKind.S3, source_prefix="models"
+        )
+        path = FIXTURES_DIR / "sample.gcode"
+        key = "models/sample.gcode"
+        source = _Source(
+            SourcePage((SourceEntry(key, path.stat().st_size),), None, True, 1), path
+        )
+        monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)
+        result = external_library.scan_remote_library(library.id)
+        assert result.get("error") is None, result
+        checkpoint = db_session.exec(
+            select(ExternalLibraryCheckpoint).where(
+                ExternalLibraryCheckpoint.library_id == library.id
+            )
+        ).one()
+        assert checkpoint.observed_keys_json == "[]"
+        observation = db_session.exec(
+            select(ExternalLibraryObservation).where(
+                ExternalLibraryObservation.checkpoint_id == checkpoint.id
+            )
+        ).one()
+        assert db_session.get(File, observation.file_id).source_key == key
+
     @pytest.mark.parametrize("marker", ["etag", "version", "none"])
     def test_next_scan_detects_equal_size_replacements(
         self,
@@ -499,3 +559,47 @@ class TestRemoteScanSafety:
             )
         ).one()
         assert tombstone.cleared_at is not None
+
+
+class TestRemoteContentSlice:
+    def test_byte_budget_commits_progress_before_the_remaining_inventory(
+        self, db_session, monkeypatch, make_external_library
+    ):
+        library = make_external_library(
+            "", source_kind=LibrarySourceKind.S3, source_prefix="models"
+        )
+        keys = ("models/a.gcode", "models/b.gcode")
+        for key in keys:
+            row = _indexed(db_session, library, key)
+            row.size_bytes = 6
+            row.source_etag = "unchanged"
+            row.source_verified_at = utcnow()
+            db_session.add(row)
+        db_session.commit()
+        entries = tuple(SourceEntry(key, 6, etag="unchanged") for key in keys)
+        cursors = []
+
+        class Source:
+            def list_page(self, prefix, *, cursor, limit):
+                cursors.append(cursor)
+                if cursor is None:
+                    return SourcePage(
+                        entries, None, True, 1, entry_cursors=("one", "two")
+                    )
+                assert cursor == "one"
+                return SourcePage(entries[1:], None, True, 0, entry_cursors=("two",))
+
+        monkeypatch.setattr(
+            external_library, "source_for_library", lambda _lib: Source()
+        )
+        monkeypatch.setattr(external_library, "_REMOTE_SLICE_MAX_BYTES", 10)
+        first = external_library.scan_remote_library(library.id)
+        second = external_library.scan_remote_library(library.id)
+        assert first.get("error") is None, first
+        assert first["complete"] is False
+        assert first["bytes_read"] == 6
+        assert second.get("error") is None, second
+        assert second["complete"] is True
+        assert second["bytes_read"] == 12
+        assert second["removed"] == 0
+        assert cursors == [None, "one"]

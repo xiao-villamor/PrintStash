@@ -166,9 +166,7 @@ def probe_connection(
     try:
         if row.purpose.allows(StorageConnectionPurpose.BACKUP):
             return destination_from_connection(row).probe()
-        page = source_from_connection(row, scan_limits=True).list_page(
-            "", cursor=None, limit=1
-        )
+        sample_count = source_from_connection(row, scan_limits=True).probe()
     except (
         BackupDestinationError,
         LibrarySourceError,
@@ -177,7 +175,7 @@ def probe_connection(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "ok": True,
-        "sample_count": len(page.entries),
+        "sample_count": sample_count,
         "endpoint_proven": {"listing": True, "read": False},
     }
 

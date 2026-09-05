@@ -11,7 +11,10 @@
     "app/services/storage_utils.py",
     "app/services/task_queue.py",
     "app/services/remote_io.py",
-    "app/services/remote_io_adapters.py"
+    "app/services/remote_io_adapters.py",
+    "app/services/remote_discovery.py",
+    "app/services/remote_deadline.py",
+    "app/services/webdav_listing.py"
   ],
   "pythonVersion": "3.11",
   "venvPath": ".",
