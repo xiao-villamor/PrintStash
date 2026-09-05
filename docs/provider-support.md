@@ -260,7 +260,7 @@ same release has been exercised on the named public service or appliance.
 | Amazon S3 | Managed, read-only source and backup destination | Native managed adapter plus OpenDAL unit cases for region/address style/version identity | No release validation log yet | Compatible by protocol, not live-service certified |
 | Other S3-compatible services (MinIO, R2, B2, Wasabi, NAS object stores) | Managed, read-only source and backup destination | Native managed-storage contract plus OpenDAL source/replica tests; separate MinIO migration test | No complete public-service matrix | Beta compatibility; configure exact region, endpoint and address style |
 | Nextcloud WebDAV | Managed and read-only source | Real Nextcloud contract through the production OpenDAL adapter, including paged source discovery | Containerized contract service | Protocol-contract validated; appliance deployment remains beta |
-| Generic WebDAV | Managed and read-only source | Nextcloud contract plus adapter edge cases | No server matrix | Beta protocol compatibility |
+| Generic WebDAV | Managed and read-only source | Pinned Nextcloud and WsgiDAV contracts plus adapter edge cases | Conditional cleanup evidence matrix | Beta protocol compatibility |
 | OpenSSH SFTP | Managed, read-only source and backup destination | Real OpenSSH contract through the production adapter; remote-only API backup probe, listing, verification and byte-matching restore | Containerized contract service | Protocol-contract validated |
 | NAS SFTP | Managed, read-only source and backup destination | OpenSSH protocol contract | No model/firmware matrix | Beta protocol compatibility; pinned host key required |
 | Google Drive | Read-only source and backup destination | OpenDAL configuration, discovery, hash-verified restore and fail-closed retention tests | No live Google account validation | Beta; automatic remote retention and Vault-GC witness are disabled |
@@ -353,3 +353,12 @@ hashed on every scan. Connection pooling is not introduced.
 
 See [directory benchmark results](remote-discovery-benchmarks.md) for measured
 requests, connections, transferred bytes, temporary storage and memory.
+
+
+### WebDAV cleanup evidence
+
+Pinned Nextcloud and WsgiDAV contracts exercise conditional deletion, quarantine
+moves, replacement races, lost-client-response recovery and lock expiry.
+WsgiDAV's filesystem ETag can collide across equal-size rapid replacements, and
+Nextcloud's tested configuration does not implement LOCK. Physical deletion and
+automatic retention remain disabled; see the [measured cleanup evidence](webdav-cleanup-evidence.md).

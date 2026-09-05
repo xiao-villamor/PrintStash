@@ -21,6 +21,11 @@
 
 ### Fixed
 
+- Documented pinned Nextcloud and WsgiDAV cleanup evidence, including ETag
+  collisions, conditional quarantine and lock expiry. WebDAV physical deletion
+  and automatic retention remain disabled; replacement bytes stay protected by
+  the production adapter's guarded cleanup policy.
+
 - Remote Library sources and backup replicas use explicit streaming transport
   contracts. Reader and directory handles close on early exit, and replica
   publication no longer implies managed atomic creation. SFTP recovery is
