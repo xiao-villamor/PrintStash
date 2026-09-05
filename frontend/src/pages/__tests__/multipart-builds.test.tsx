@@ -255,16 +255,21 @@ describe("Multipart manufacturing", () => {
     await user.click(await screen.findByRole("button", { name: "Queue pieces" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(copy);
   });
-  it.each(["cancelled", "unavailable", "printing"])(
+  it.each(["cancelled", "unavailable"])(
     "retains the job identity when its state is %s",
     async (state) => {
       renderBuild(aBuild({ parts: [aBuildPart({ attempts: [aBuildAttempt({ state })] })] }));
       expect(await screen.findByRole("form", { name: "Job #1" })).toBeVisible();
-      if (state === "printing")
-        expect(screen.queryByLabelText("Confirmed usable")).not.toBeInTheDocument();
-      else expect(screen.getByLabelText("Confirmed usable")).toHaveValue(0);
+      expect(screen.getByLabelText("Confirmed usable")).toHaveValue(0);
     },
   );
+  it("keeps active output unavailable for confirmation", async () => {
+    renderBuild(
+      aBuild({ parts: [aBuildPart({ attempts: [aBuildAttempt({ state: "printing" })] })] }),
+    );
+    expect(await screen.findByRole("form", { name: "Job #1" })).toBeVisible();
+    expect(screen.queryByLabelText("Confirmed usable")).not.toBeInTheDocument();
+  });
   it("offers archived history as an explicit list filter", async () => {
     const app = renderApp(<MultipartBuildsPage />, {
       at: "/builds",

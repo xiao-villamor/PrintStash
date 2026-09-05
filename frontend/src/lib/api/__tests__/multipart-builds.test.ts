@@ -11,14 +11,15 @@ import {
   selectBuildRevision,
 } from "../multipart-builds";
 import { invalidateApiCache } from "../request";
-import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
+import { expectRequest, fetchMock, lastBody } from "./_wire";
+import { json } from "@/test-support/render";
 import { aBuild } from "@/test-support/factories";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   invalidateApiCache();
-  respondWith(aBuild());
+  fetchMock.mockImplementation(async () => json(aBuild()));
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -29,7 +30,7 @@ describe("Manufacturing wire contract", () => {
   });
   it("reads current results without a cached response", async () => {
     await getMultipartBuild(3);
-    respondWith(aBuild({ version: 2 }));
+    fetchMock.mockImplementation(async () => json(aBuild({ version: 2 })));
     expect((await getMultipartBuild(3)).version).toBe(2);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -55,7 +56,7 @@ describe("Manufacturing wire contract", () => {
     expectRequest("/api/v1/multipart-builds/3/parts/4/queue", "POST");
     expect(lastBody()).toEqual(body);
   });
-  it("preserves a confirmation's version and idempotency key", async () => {
+  it("preserves the confirmation concurrency tokens", async () => {
     await confirmBuildResult(3, 6, { version: 1, valid_units: 3, idempotency_key: "inspection-1" });
     expectRequest("/api/v1/multipart-builds/3/attempts/6/confirm", "POST");
     expect(lastBody()).toEqual({ version: 1, valid_units: 3, idempotency_key: "inspection-1" });

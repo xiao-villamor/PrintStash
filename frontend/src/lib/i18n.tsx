@@ -77,7 +77,6 @@ const messages = {
     "setup.progress": "Setup progress",
     "setup.resume": "Resume the getting-started guide",
 
-
     "build.title": "Builds",
     "build.help":
       "Track the pieces needed for a multipart object, including failed attempts and replacements.",
@@ -791,7 +790,6 @@ const messages = {
       "Añade un montaje de solo lectura al servicio API de Compose, por ejemplo /tu/nas/modelos:/libraries/models:ro, y recrea el servicio. Usa /libraries/models como ruta de la fuente. El navegador no puede montar carpetas del host.",
     "setup.progress": "Progreso de configuración",
     "setup.resume": "Retomar la guía de primeros pasos",
-
 
     "build.title": "Fabricaciones",
     "build.help":
