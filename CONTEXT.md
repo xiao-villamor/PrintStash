@@ -197,6 +197,14 @@ extensions. SFTP prevents competing creation but can expose a partial winning
 upload; Google Drive does not provide managed create-only publication. Native
 Local and S3 Vault backends keep the `StorageBackend` interface.
 
+**Backup run**:
+One archive creation with a durable snapshot of every selected destination.
+A destination result records committed publication separately from verification;
+a run is completed only when all selected results completed. Partial runs retain
+the successful replicas. A retry attempt copies the exact verified surviving
+archive to the failed result's original target, or reconciles an already committed
+publication; it never creates a replacement archive.
+
 **Storage connection**:
 A reusable remote-location profile. Non-secret configuration is stored separately
 from encrypted credentials, and API reads never return secret values. A

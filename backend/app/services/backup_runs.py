@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import (
     BackupDestinationResult,
+    BackupRetryAttempt,
     BackupRun,
     StorageConnection,
     StorageConnectionPurpose,
@@ -96,9 +97,7 @@ def begin_run(
                     run_id=run_id,
                     kind="local",
                     name="Local backup",
-                    configuration_json=json.dumps(
-                        {"directory": str(Path(settings.backup_dir).resolve())}
-                    ),
+                    configuration_json=json.dumps({"directory": local_directory}),
                 )
             )
         if s3_configuration[0]:
@@ -207,10 +206,24 @@ def run_detail(run_id: str) -> dict:
                 col(BackupDestinationResult.created_at), col(BackupDestinationResult.id)
             )
         ).all()
+        attempts = session.exec(
+            select(BackupRetryAttempt)
+            .join(BackupDestinationResult)
+            .where(BackupDestinationResult.run_id == run_id)
+            .order_by(col(BackupRetryAttempt.created_at), col(BackupRetryAttempt.id))
+        ).all()
+        by_destination: dict[str, list[dict]] = {}
+        for attempt in attempts:
+            by_destination.setdefault(attempt.destination_result_id, []).append(
+                attempt.model_dump(mode="json")
+            )
         return {
             **run.model_dump(mode="json"),
             "destinations": [
-                result.model_dump(mode="json", exclude={"configuration_json"})
+                {
+                    **result.model_dump(mode="json", exclude={"configuration_json"}),
+                    "retry_attempts": by_destination.get(result.id, []),
+                }
                 for result in results
             ],
         }
@@ -256,6 +269,7 @@ def publication_completed(result_id: str, meta) -> None:
 
 
 def list_runs(*, limit: int = 50, offset: int = 0) -> list[dict]:
+    reconcile_interrupted_runs()
     with get_session_factory().scoped_session() as session:
         ids = session.exec(
             select(BackupRun.id)
@@ -275,10 +289,12 @@ def retry_destination(result_id: str) -> dict:
     from app.services.backup_replica_retry import (
         RetryRefused,
         publish_retry,
+        reconcile_result,
         verified_survivor,
     )
 
     with backup._backup_restore_lock:
+        reconcile_interrupted_runs()
         with get_session_factory().scoped_session() as session:
             result = session.get(BackupDestinationResult, result_id)
             if result is None:
@@ -293,8 +309,9 @@ def retry_destination(result_id: str) -> dict:
                     col(BackupDestinationResult.outcome) == "failed",
                 )
                 .values(outcome="publishing", updated_at=utcnow())
+                .returning(col(BackupDestinationResult.id))
             )
-            if claimed.rowcount != 1:
+            if claimed.scalar_one_or_none() is None:
                 raise RetryRefused("backup_retry_in_progress")
             attempt = BackupRetryAttempt(
                 id=uuid.uuid4().hex,
@@ -318,8 +335,17 @@ def retry_destination(result_id: str) -> dict:
                 ).all()
             ]
         try:
-            published = False
-            for survivor in survivors:
+            published = (
+                reconcile_result(result, run) if result.target_identity_json else False
+            )
+            if published:
+                with get_session_factory().scoped_session() as session:
+                    attempt = session.get(BackupRetryAttempt, attempt_id)
+                    assert attempt is not None
+                    attempt.source_result_id = result.id
+                    session.add(attempt)
+                    session.commit()
+            for survivor in [] if published else survivors:
                 from contextlib import ExitStack
 
                 with ExitStack() as resources:
@@ -329,6 +355,7 @@ def retry_destination(result_id: str) -> dict:
                         continue
                     with get_session_factory().scoped_session() as session:
                         attempt = session.get(BackupRetryAttempt, attempt_id)
+                        assert attempt is not None
                         attempt.source_result_id = survivor.id
                         session.add(attempt)
                         session.commit()
@@ -346,6 +373,7 @@ def retry_destination(result_id: str) -> dict:
             update_result(result_id, outcome="failed", error_code=reason)
             with get_session_factory().scoped_session() as session:
                 attempt = session.get(BackupRetryAttempt, attempt_id)
+                assert attempt is not None
                 attempt.outcome, attempt.error_code, attempt.finished_at = (
                     "failed",
                     reason,
@@ -359,6 +387,7 @@ def retry_destination(result_id: str) -> dict:
             raise
         with get_session_factory().scoped_session() as session:
             attempt = session.get(BackupRetryAttempt, attempt_id)
+            assert attempt is not None
             attempt.outcome, attempt.finished_at = "completed", utcnow()
             session.add(attempt)
             session.commit()
@@ -366,3 +395,108 @@ def retry_destination(result_id: str) -> dict:
         return next(
             row for row in run_detail(run.id)["destinations"] if row["id"] == result_id
         )
+
+
+def reconcile_interrupted_runs() -> None:
+    """Recover execution status after acquiring the process-wide operation lock.
+
+    The supported deployment has one process. Once this lock is held, publishing
+    states from earlier operations are interrupted, never concurrent writers.
+    Storage reconciliation remains exact and is performed before a retry.
+    """
+    from app.db.models import BackupRetryAttempt
+    from app.services import backup
+
+    with backup._backup_restore_lock:
+        with get_session_factory().scoped_session() as session:
+            runs = session.exec(
+                select(BackupRun).where(BackupRun.outcome == "running")
+            ).all()
+            active_results = session.exec(
+                select(BackupDestinationResult).where(
+                    BackupDestinationResult.outcome == "publishing"
+                )
+            ).all()
+            run_ids = {run.id for run in runs} | {
+                result.run_id for result in active_results
+            }
+            for result in active_results:
+                result.outcome = "failed"
+                result.error_code = "backup_publication_interrupted"
+                result.updated_at = utcnow()
+                session.add(result)
+            attempts = session.exec(
+                select(BackupRetryAttempt).where(
+                    BackupRetryAttempt.outcome == "running"
+                )
+            ).all()
+            for attempt in attempts:
+                result = session.get(
+                    BackupDestinationResult, attempt.destination_result_id
+                )
+                attempt.outcome = (
+                    "completed"
+                    if result is not None and result.outcome == "completed"
+                    else "failed"
+                )
+                attempt.error_code = (
+                    None
+                    if attempt.outcome == "completed"
+                    else "backup_publication_interrupted"
+                )
+                attempt.finished_at = utcnow()
+                session.add(attempt)
+            session.commit()
+        for run_id in run_ids:
+            finish_run(run_id)
+
+
+def record_verification(
+    *, backup_id: str, source_ref: str | None, archive_path: Path, digest: str
+) -> None:
+    with get_session_factory().scoped_session() as session:
+        statement = (
+            select(BackupDestinationResult)
+            .join(BackupRun)
+            .where(
+                BackupRun.backup_id == backup_id,
+                BackupRun.archive_sha256 == digest,
+                BackupDestinationResult.outcome == "completed",
+            )
+        )
+        statement = (
+            statement.where(BackupDestinationResult.source_ref == source_ref)
+            if source_ref
+            else statement.where(
+                BackupDestinationResult.kind == "local",
+                BackupDestinationResult.key == str(archive_path),
+            )
+        )
+        for result in session.exec(statement).all():
+            result.verified_at = utcnow()
+            session.add(result)
+        session.commit()
+
+
+def execution_health() -> dict:
+    from sqlalchemy import func
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with get_session_factory().scoped_session() as session:
+            latest = session.exec(
+                select(BackupRun).order_by(col(BackupRun.created_at).desc()).limit(1)
+            ).first()
+            verified = session.exec(
+                select(func.max(BackupDestinationResult.verified_at)).where(
+                    BackupDestinationResult.outcome == "completed"
+                )
+            ).one()
+            return {
+                "ok": latest is None or latest.outcome not in {"partial", "failed"},
+                "latest_run_id": latest.id if latest else None,
+                "outcome": latest.outcome if latest else None,
+                "last_verified_at": verified.isoformat() if verified else None,
+            }
+    except SQLAlchemyError:
+        return {"ok": False, "error": "backup_execution_state_unavailable"}

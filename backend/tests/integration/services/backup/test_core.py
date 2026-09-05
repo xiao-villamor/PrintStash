@@ -974,6 +974,9 @@ class TestCreateBackup:
         backup_env: BackupEnv,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "backup-failure")
         store = _BackupObjectStore(b"", "unused", fail_put=OSError("offline"))
         monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
 

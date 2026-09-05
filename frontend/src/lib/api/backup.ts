@@ -9,7 +9,44 @@ import {
 } from "@/lib/api/request";
 import type { StorageOperations } from "@/types";
 
+export type BackupRunOutcome = "running" | "completed" | "partial" | "failed";
+
+export interface BackupDestinationResult {
+  id: string;
+  run_id: string;
+  name: string;
+  kind: string;
+  outcome: "pending" | "publishing" | "completed" | "failed";
+  error_code: string | null;
+  published_at: string | null;
+  verified_at: string | null;
+}
+
+export interface BackupRun {
+  id: string;
+  backup_id: string;
+  outcome: BackupRunOutcome;
+  created_at: string;
+  archive_sha256: string | null;
+  destinations: BackupDestinationResult[];
+}
+
+export function listBackupRuns(): Promise<BackupRun[]> {
+  return getJson<BackupRun[]>("/api/v1/backups/runs", { fresh: true });
+}
+
+export function retryBackupDestination(id: string): Promise<BackupDestinationResult> {
+  return sendJson<BackupDestinationResult>(
+    `/api/v1/backups/runs/destinations/${encodeURIComponent(id)}/retry`,
+    "POST",
+    undefined,
+  );
+}
+
 export interface BackupMeta {
+  run_id?: string | null;
+  outcome?: BackupRunOutcome | null;
+  destination_results?: BackupDestinationResult[] | null;
   operations?: StorageOperations;
   backup_id: string;
   created_at: string;

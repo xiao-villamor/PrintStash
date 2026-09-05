@@ -21,6 +21,9 @@ from sqlmodel import Session
 from app.core.time import utcnow
 from app.db.models import (
     BackgroundJob,
+    BackupDestinationResult,
+    BackupRetryAttempt,
+    BackupRun,
     Document,
     DocumentKind,
     ExternalLibrary,
@@ -405,6 +408,50 @@ def build_library_observation(
         ExternalLibraryObservation(
             checkpoint_id=checkpoint.id,
             key_hash=hashlib.sha256(key.encode()).hexdigest(),
+            **overrides,
+        ),
+    )
+
+
+def build_backup_run(session: Session, **overrides: Any) -> BackupRun:
+    identifier = overrides.pop("id", nth("backup-run"))
+    return save(
+        session,
+        BackupRun(
+            id=identifier,
+            backup_id=overrides.pop("backup_id", identifier),
+            archive_name=overrides.pop("archive_name", f"{identifier}.tar.gz"),
+            trigger=overrides.pop("trigger", "manual"),
+            storage_backend=overrides.pop("storage_backend", "local"),
+            app_version=overrides.pop("app_version", "0.1.0"),
+            **overrides,
+        ),
+    )
+
+
+def build_backup_destination_result(
+    session: Session, run: BackupRun, **overrides: Any
+) -> BackupDestinationResult:
+    return save(
+        session,
+        BackupDestinationResult(
+            id=overrides.pop("id", nth("backup-result")),
+            run_id=run.id,
+            kind=overrides.pop("kind", "local"),
+            name=overrides.pop("name", "Local backup"),
+            **overrides,
+        ),
+    )
+
+
+def build_backup_retry_attempt(
+    session: Session, result: BackupDestinationResult, **overrides: Any
+) -> BackupRetryAttempt:
+    return save(
+        session,
+        BackupRetryAttempt(
+            id=overrides.pop("id", nth("backup-retry")),
+            destination_result_id=result.id,
             **overrides,
         ),
     )

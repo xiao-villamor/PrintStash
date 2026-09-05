@@ -358,6 +358,36 @@ const messages = {
       "Register {key} from {connection} after rechecking its exact source and SHA-256 {hash}…",
     "settings.backupManualDescription":
       "Create a new archive or upload one exported from another PrintStash installation.",
+    "settings.backupRunsTitle": "Backup runs",
+    "settings.backupRunsDescription":
+      "Each destination has its own publication and verification status.",
+    "settings.backupRunsEmpty":
+      "No backup runs recorded yet. Older archives remain available below.",
+    "settings.backupRunRunning": "Running",
+    "settings.backupRunCompleted": "Completed",
+    "settings.backupRunPartial": "Partially completed",
+    "settings.backupRunFailed": "Failed",
+    "settings.backupReplicaPending": "Pending",
+    "settings.backupReplicaPublishing": "Publishing",
+    "settings.backupReplicaCompleted": "Published",
+    "settings.backupReplicaFailed": "Failed",
+    "settings.backupRetry": "Retry this destination",
+    "settings.backupRetrying": "Retrying…",
+    "settings.backupRetryDone": "Backup copy published.",
+    "settings.backupNeverVerified": "Not verified yet",
+    "settings.backupLastVerified": "Last verified",
+    "settings.backupPartialNotice":
+      "Backup created with destination failures. Review the run below.",
+    "settings.backupRunsLoadFailed": "Backup runs could not be loaded.",
+    "settings.backupRetryNewRequired": "No verified copy survives. Create a new backup.",
+    "settings.backupRetryTargetChanged":
+      "This destination changed. Restore its original configuration or create a new backup.",
+    "settings.backupRetryTargetUnverified":
+      "The original target could not be verified. Create a new backup.",
+    "settings.backupReplicaUnavailable": "The destination could not publish this copy.",
+    "settings.backupReplicaInterrupted":
+      "Publication was interrupted. Retry will check for an existing copy first.",
+    "settings.backupRunRefresh": "Refresh backup runs",
     "settings.backupUploadTitle": "Upload backup archive",
     "settings.backupUploadDescription":
       "The archive is fully validated before it is registered or offered for restore.",
@@ -914,6 +944,37 @@ const messages = {
       "Registrar {key} desde {connection} tras comprobar de nuevo su origen exacto y SHA-256 {hash}…",
     "settings.backupManualDescription":
       "Crea un archivo nuevo o sube uno exportado desde otra instalación de PrintStash.",
+    "settings.backupRunsTitle": "Ejecuciones de copia de seguridad",
+    "settings.backupRunsDescription":
+      "Cada destino tiene su propio estado de publicación y verificación.",
+    "settings.backupRunsEmpty":
+      "Aún no hay ejecuciones registradas. Los archivos anteriores siguen disponibles abajo.",
+    "settings.backupRunRunning": "En curso",
+    "settings.backupRunCompleted": "Completada",
+    "settings.backupRunPartial": "Completada parcialmente",
+    "settings.backupRunFailed": "Fallida",
+    "settings.backupReplicaPending": "Pendiente",
+    "settings.backupReplicaPublishing": "Publicando",
+    "settings.backupReplicaCompleted": "Publicada",
+    "settings.backupReplicaFailed": "Fallida",
+    "settings.backupRetry": "Reintentar este destino",
+    "settings.backupRetrying": "Reintentando…",
+    "settings.backupRetryDone": "Copia de seguridad publicada.",
+    "settings.backupNeverVerified": "Aún no verificada",
+    "settings.backupLastVerified": "Última verificación",
+    "settings.backupPartialNotice":
+      "Copia creada con fallos en algunos destinos. Revisa la ejecución abajo.",
+    "settings.backupRunsLoadFailed": "No se pudieron cargar las ejecuciones.",
+    "settings.backupRetryNewRequired":
+      "No queda ninguna copia verificada. Crea una copia de seguridad nueva.",
+    "settings.backupRetryTargetChanged":
+      "Este destino ha cambiado. Restaura su configuración original o crea una copia de seguridad nueva.",
+    "settings.backupRetryTargetUnverified":
+      "No se pudo verificar el destino original. Crea una copia de seguridad nueva.",
+    "settings.backupReplicaUnavailable": "El destino no pudo publicar esta copia.",
+    "settings.backupReplicaInterrupted":
+      "La publicación se interrumpió. El reintento comprobará primero si ya existe una copia.",
+    "settings.backupRunRefresh": "Actualizar ejecuciones",
     "settings.backupUploadTitle": "Subir copia de seguridad",
     "settings.backupUploadDescription":
       "El archivo se valida por completo antes de registrarlo u ofrecerlo para restauración.",

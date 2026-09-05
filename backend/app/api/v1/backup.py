@@ -100,8 +100,9 @@ def list_backup_runs(
     summary="Inspect one backup execution",
 )
 def get_backup_run(run_id: str) -> dict:
-    from app.services.backup_runs import run_detail
+    from app.services.backup_runs import reconcile_interrupted_runs, run_detail
 
+    reconcile_interrupted_runs()
     try:
         return run_detail(run_id)
     except LookupError as exc:

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { BackupRunHistory } from "@/components/backup-run-history";
 import {
   Bell,
   Boxes,
@@ -493,6 +494,7 @@ export function SettingsPanel() {
   const [trashStorageTier, setTrashStorageTier] = useState("verified");
   const [trashOperations, setTrashOperations] = useState<StorageOperations>();
   const [backingUp, setBackingUp] = useState(false);
+  const [backupRunRefresh, setBackupRunRefresh] = useState(0);
   const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
   const [unownedS3Backups, setUnownedS3Backups] = useState<UnownedS3BackupCandidate[]>([]);
@@ -884,11 +886,16 @@ export function SettingsPanel() {
       const meta = await createBackup();
       const mb = (meta.size_bytes / 1024 / 1024).toFixed(1);
       await loadBackups(meta);
-      toast.success(`Backup created — ${meta.file_count} files, ${mb} MB`);
+      if (meta.outcome === "partial") {
+        toast.warning(t("settings.backupPartialNotice"));
+      } else {
+        toast.success(`Backup created — ${meta.file_count} files, ${mb} MB`);
+      }
     } catch (e) {
       toast.error(e);
     } finally {
       setBackingUp(false);
+      setBackupRunRefresh((value) => value + 1);
     }
   }
 
@@ -2847,6 +2854,12 @@ export function SettingsPanel() {
                     </label>
                   </div>
                 </SettingsCard>
+                {user?.is_superuser && (
+                  <BackupRunHistory
+                    refreshKey={backupRunRefresh}
+                    onPublished={() => void loadBackups()}
+                  />
+                )}
                 <SettingsCard
                   icon={RotateCcw}
                   title="Restore backup"

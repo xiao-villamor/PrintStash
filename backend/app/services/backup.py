@@ -48,6 +48,10 @@ from app.db.models import (
 )
 from app.db.session import get_engine, get_session_factory
 from app.services import audit, storage
+from app.services.backup_catalogue import BackupCatalogue
+from app.services.backup_catalogue import (
+    BackupIdentityConflictError as BackupIdentityConflictError,
+)
 from app.services.backup_destination import (
     BackupDestinationError,
     BackupTrigger,
@@ -111,10 +115,6 @@ class BackupDeleteUnsupportedError(BackupOwnershipError):
 
 class _BackupConfigUnstableError(RuntimeError):
     """Settings changed during a target snapshot; retry the next operation."""
-
-
-class BackupIdentityConflictError(RuntimeError):
-    """More than one different archive claims the requested backup id."""
 
 
 @dataclass(frozen=True)
@@ -1081,7 +1081,10 @@ def _create_selected_backup(selected, *, backup_id, timestamp, archive_name, tri
 # ---------------------------------------------------------------------------
 
 
-def reconcile_backup_publications(limit: int = 100) -> int:
+@_exclusive_backup_operation
+def reconcile_backup_publications(
+    limit: int = 100, *, ownership_id: int | None = None
+) -> int:
     """Finish or block backup reservations left across a publication crash."""
     # Cache projections have a separate lifecycle from remote backup
     # publications.  Reconcile them before touching backup rows so an absent
@@ -1089,14 +1092,14 @@ def reconcile_backup_publications(limit: int = 100) -> int:
     reconcile_backup_caches(limit=limit)
     reconciled = 0
     with get_session_factory().session() as session:
+        statement = select(OwnedStorageObject).where(
+            OwnedStorageObject.object_kind == "backup",
+            OwnedStorageObject.state == StorageObjectState.PENDING,
+        )
+        if ownership_id is not None:
+            statement = statement.where(OwnedStorageObject.id == ownership_id)
         pending = session.exec(
-            select(OwnedStorageObject)
-            .where(
-                OwnedStorageObject.object_kind == "backup",
-                OwnedStorageObject.state == StorageObjectState.PENDING,
-            )
-            .order_by(OwnedStorageObject.id.asc())  # type: ignore[attr-defined]
-            .limit(limit)
+            statement.order_by(OwnedStorageObject.id.asc()).limit(limit)
         ).all()
         target = _get_backup_s3_target()
         s3 = target.client if target else None
@@ -1645,59 +1648,17 @@ def _list_opendal_backups() -> list[BackupMeta]:
 
 
 def list_backups() -> list[BackupMeta]:
-    """List all backups: local + S3, sorted by date descending."""
-    reconcile_backup_publications()
-    sources = list_backup_sources(reconcile=False)
-    grouped: dict[str, list[BackupMeta]] = {}
-    for item in sources:
-        grouped.setdefault(item.id, []).append(item)
-    merged: list[BackupMeta] = []
-    for candidates in grouped.values():
-        hashes = {m.archive_sha256 for m in candidates}
-        if len(candidates) > 1 and (None in hashes or len(hashes) != 1):
-            # Preserve visibility of an ambiguous id.  ``get_backup`` still
-            # fails closed until the caller supplies the exact source_ref.
-            merged.extend(candidates)
-        else:
-            merged.append(min(candidates, key=_backup_precedence))
-    merged.sort(key=lambda m: m.created_at, reverse=True)
-    return merged
+    """List logical archives, retaining visibility of ambiguous identities."""
+    return BackupCatalogue(list_backup_sources()).backups()
 
 
 def list_backup_sources(*, reconcile: bool = True) -> list[BackupMeta]:
-    """Return every owned source, including identical replicas.
-
-    This is the restart-stable source contract.  ``canonical`` is merely the
-    display winner under local > current S3 > legacy S3 precedence; operations
-    must always use the opaque ``source_ref``.
-    """
+    """Return every owned source; canonical display never authorizes a target."""
     if reconcile:
         reconcile_backup_publications()
-    sources = [*_list_local_backups(), *_list_s3_backups(), *_list_opendal_backups()]
-    grouped: dict[str, list[BackupMeta]] = {}
-    for item in sources:
-        grouped.setdefault(item.id, []).append(item)
-    for candidates in grouped.values():
-        ordered = sorted(candidates, key=_backup_precedence)
-        hashes = {item.archive_sha256 for item in candidates}
-        safe_canonical = len(candidates) == 1 or (
-            None not in hashes and len(hashes) == 1
-        )
-        for rank, item in enumerate(ordered):
-            item.precedence = rank
-            item.canonical = safe_canonical and rank == 0
-    sources.sort(key=lambda m: m.created_at, reverse=True)
-    return sources
-
-
-def _backup_precedence(meta: BackupMeta) -> tuple[int, str]:
-    if meta.location == "local":
-        return (0, meta.path)
-    if meta.path.startswith(_BACKUP_S3_PREFIX):
-        return (1, meta.path)
-    if meta.location.startswith("opendal:"):
-        return (2, f"{meta.location}:{meta.path}")
-    return (3, meta.path)
+    return BackupCatalogue(
+        [*_list_local_backups(), *_list_s3_backups(), *_list_opendal_backups()]
+    ).sources()
 
 
 def _read_manifest(archive_path: Path) -> BackupMeta | None:
@@ -2459,18 +2420,9 @@ def discover_unowned_local_backups() -> list[dict[str, object]]:
 
 
 def get_backup(backup_id: str, *, source_ref: str | None = None) -> BackupMeta | None:
-    matches = [meta for meta in list_backup_sources() if meta.id == backup_id]
-    if source_ref is not None:
-        for meta in matches:
-            if meta.source_ref == source_ref:
-                return meta
-        return None
-    hashes = {meta.archive_sha256 for meta in matches}
-    if len(matches) > 1 and (None in hashes or len(hashes) != 1):
-        raise BackupIdentityConflictError("backup_identity_conflict")
-    if matches:
-        return min(matches, key=_backup_precedence)
-    return None
+    return BackupCatalogue(list_backup_sources()).select(
+        backup_id, source_ref=source_ref
+    )
 
 
 def get_backup_archive_path(backup_id: str, *, source_ref: str | None = None) -> Path:
@@ -2859,6 +2811,15 @@ def verify_backup(
         findings=findings,
     )
     if not explicit_archive:
+        if result.valid and result.app_compatible:
+            from app.services.backup_runs import record_verification
+
+            record_verification(
+                backup_id=backup_id,
+                source_ref=source_ref,
+                archive_path=archive,
+                digest=_sha256_path(archive),
+            )
         cleanup_backup_cache(archive)
     if record_audit:
         with get_session_factory().session() as session:

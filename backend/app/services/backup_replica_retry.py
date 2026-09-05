@@ -9,6 +9,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 from app.core.config import settings
 from app.core.time import utcnow
@@ -20,7 +21,11 @@ from app.db.models import (
     StorageObjectState,
 )
 from app.db.session import get_session_factory
-from app.services.backup_destination import destination_from_connection
+from app.services.backup_destination import (
+    BackupDestinationError,
+    RemoteBackupDestination,
+    destination_from_connection,
+)
 from app.services.storage_backend import LocalStorageBackend
 from app.services.storage_identity import StorageTargetIdentity
 from app.services.storage_ownership import provider_ref_for_backend
@@ -30,11 +35,32 @@ class RetryRefused(RuntimeError):
     pass
 
 
+if TYPE_CHECKING:
+    from app.services.backup import _BackupS3Target
+
+
 @dataclass(frozen=True)
-class Binding:
-    target: object
-    destination: object
-    kind: str
+class LocalBinding:
+    target: StorageTargetIdentity | None
+    destination: LocalStorageBackend
+    kind: Literal["local"] = "local"
+
+
+@dataclass(frozen=True)
+class S3Binding:
+    target: StorageTargetIdentity | None
+    destination: _BackupS3Target
+    kind: Literal["s3"] = "s3"
+
+
+@dataclass(frozen=True)
+class RemoteBinding:
+    target: StorageTargetIdentity | None
+    destination: RemoteBackupDestination
+    kind: Literal["connection"] = "connection"
+
+
+Binding = LocalBinding | S3Binding | RemoteBinding
 
 
 def binding_for(result: BackupDestinationResult) -> Binding:
@@ -49,6 +75,8 @@ def binding_for(result: BackupDestinationResult) -> Binding:
     ):
         raise RetryRefused("backup_retry_target_unverified")
     expected = StorageTargetIdentity.model_validate_json(result.target_identity_json)
+    if expected.transport == "gdrive" and not expected.account:
+        raise RetryRefused("backup_retry_target_unverified")
     if result.kind == "local":
         backend = LocalStorageBackend()
         configuration = json.loads(result.configuration_json)
@@ -57,7 +85,7 @@ def binding_for(result: BackupDestinationResult) -> Binding:
         target = backend.storage_target
         namespace = backend.namespace_for(result.key)
         provider_ref = provider_ref_for_backend(backend, namespace=namespace)
-        destination = backend
+        binding: Binding = LocalBinding(target, backend)
     elif result.kind == "s3":
         destination = backup._get_backup_s3_target()
         if destination is None:
@@ -65,21 +93,26 @@ def binding_for(result: BackupDestinationResult) -> Binding:
         target = destination.storage_target
         namespace = f"{destination.bucket}/{backup._BACKUP_S3_PREFIX}"
         provider_ref = destination.provider_ref
+        binding = S3Binding(target, destination)
     else:
         with get_session_factory().scoped_session() as session:
             profile = session.get(StorageConnection, result.connection_id)
             if profile is None:
                 raise RetryRefused("backup_retry_target_unavailable")
-            destination = destination_from_connection(profile)
+            try:
+                destination = destination_from_connection(profile)
+            except BackupDestinationError as exc:
+                raise RetryRefused("backup_retry_target_unavailable") from exc
         target = destination.backend.storage_target
         namespace, provider_ref = destination.namespace, destination.provider_ref
+        binding = RemoteBinding(target, destination)
     if (
         target != expected
         or namespace != result.namespace
         or provider_ref != result.provider_ref
     ):
         raise RetryRefused("backup_retry_target_changed")
-    return Binding(target, destination, result.kind)
+    return binding
 
 
 def owned_for(result: BackupDestinationResult, run: BackupRun) -> OwnedStorageObject:
@@ -193,6 +226,8 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
         reserve_creation,
     )
 
+    if result.key is None or result.namespace is None or run.size_bytes is None:
+        raise RetryRefused("backup_retry_target_unverified")
     binding = binding_for(result)
     with get_session_factory().scoped_session() as session:
         existing = session.exec(
@@ -236,6 +271,8 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
     with get_session_factory().scoped_session() as session:
         if reservation_id is not None:
             existing = session.get(OwnedStorageObject, reservation_id)
+            if existing is None:
+                raise RetryRefused("backup_retry_publication_conflict")
             existing.state = StorageObjectState.PENDING
             existing.last_error = None
             existing.token = token if binding.kind == "s3" else existing.token
@@ -272,6 +309,8 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
                 provider_ref=result.provider_ref,
             )
             session.commit()
+    if reservation_id is None:
+        raise RetryRefused("backup_retry_publication_conflict")
     try:
         binding_for(result)
         with path.open("rb") as source:
@@ -346,3 +385,58 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
         provider_ref=meta.provider_ref,
     )
     backup_runs.publication_completed(result.id, meta)
+
+
+def reconcile_result(result: BackupDestinationResult, run: BackupRun) -> bool:
+    from sqlmodel import select
+
+    from app.services import backup, backup_runs
+
+    if not result.key or not result.provider_ref or not run.archive_sha256:
+        return False
+    binding_for(result)
+    with get_session_factory().scoped_session() as session:
+        row = session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.key == result.key,
+                OwnedStorageObject.namespace == result.namespace,
+                OwnedStorageObject.provider_ref == result.provider_ref,
+                OwnedStorageObject.object_kind == "backup",
+                OwnedStorageObject.sha256 == run.archive_sha256,
+            )
+        ).one_or_none()
+        if row is None:
+            return False
+        ownership_id = row.id
+    backup.reconcile_backup_publications(ownership_id=ownership_id)
+    with get_session_factory().scoped_session() as session:
+        row = session.get(OwnedStorageObject, ownership_id)
+        if row is None or row.state != StorageObjectState.COMMITTED:
+            return False
+    candidate = BackupDestinationResult.model_validate(result.model_dump())
+    candidate.ownership_id = ownership_id
+    with verified_survivor(candidate, run):
+        pass
+    binding = binding_for(result)
+    location = (
+        "local"
+        if binding.kind == "local"
+        else "s3"
+        if binding.kind == "s3"
+        else binding.destination.location
+    )
+    source_ref = backup._source_ref(
+        location=location,
+        namespace=result.namespace,
+        path=result.key,
+        provider_ref=result.provider_ref,
+    )
+    backup_runs.update_result(
+        result.id,
+        ownership_id=ownership_id,
+        source_ref=source_ref,
+        outcome="completed",
+        error_code=None,
+        published_at=result.published_at or utcnow(),
+    )
+    return True

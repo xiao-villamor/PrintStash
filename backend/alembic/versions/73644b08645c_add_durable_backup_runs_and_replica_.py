@@ -1,7 +1,7 @@
 """add durable backup runs and replica retry attempts
 
 Revision ID: 73644b08645c
-Revises: 046685afd7ea
+Revises: 5f0f887bdd0b
 Create Date: 2026-09-05 16:55:20.863198
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '73644b08645c'
-down_revision: Union[str, Sequence[str], None] = '046685afd7ea'
+down_revision: Union[str, Sequence[str], None] = '5f0f887bdd0b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1367,3 +1367,63 @@ class TestBackupRunAdministration:
         headers = user_headers_in_env(backup_env)
         response = client.get(path, headers=headers)
         assert response.status_code == 403
+
+    def test_non_admin_cannot_retry_a_destination(self, client, backup_env):
+        from sqlmodel import select
+
+        from app.db.models import BackupRetryAttempt, BackupRun
+
+        response = client.post(
+            "/api/v1/backups/runs/destinations/unknown/retry",
+            headers=user_headers_in_env(backup_env),
+        )
+        assert response.status_code == 403
+        with backup_env.new_session() as session:
+            assert session.exec(select(BackupRetryAttempt)).all() == []
+            assert session.exec(select(BackupRun)).all() == []
+
+    def test_all_failed_api_response_has_a_readable_run_reference(
+        self, client, backup_env, admin_headers
+    ):
+        from app.db.models import StorageConnectionPurpose, SystemConfig
+        from tests.factories import build_storage_connection
+
+        with backup_env.new_session() as session:
+            session.add(SystemConfig(id=1, manual_local_backup_enabled=False))
+            profile = build_storage_connection(
+                session, purpose=StorageConnectionPurpose.BACKUP
+            )
+            profile.config_json = "{}"
+            session.add(profile)
+            session.commit()
+        response = client.post("/api/v1/backups", headers=admin_headers)
+        assert response.status_code == 502
+        body = response.json()
+        assert body["detail"] == "backup_all_destinations_failed"
+        detail = client.get(
+            f"/api/v1/backups/runs/{body['run_id']}", headers=admin_headers
+        )
+        assert detail.status_code == 200
+        assert detail.json()["outcome"] == "failed"
+        assert (
+            detail.json()["destinations"][0]["error_code"]
+            == "storage_connection_invalid"
+        )
+
+    @pytest.mark.parametrize(
+        "method,path,code",
+        [
+            ("get", "/api/v1/backups/runs/missing", "backup_run_not_found"),
+            (
+                "post",
+                "/api/v1/backups/runs/destinations/missing/retry",
+                "backup_destination_result_not_found",
+            ),
+        ],
+    )
+    def test_unknown_execution_returns_stable_not_found(
+        self, client, backup_env, admin_headers, method, path, code
+    ):
+        response = getattr(client, method)(path, headers=admin_headers)
+        assert response.status_code == 404
+        assert response.json()["detail"] == code

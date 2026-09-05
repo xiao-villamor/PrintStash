@@ -120,6 +120,12 @@ class TestDatabaseProbe:
 
 
 class TestBackupProbe:
+    @pytest.fixture(autouse=True)
+    def healthy_execution_catalogue(self, monkeypatch):
+        from app.services import backup_runs
+
+        monkeypatch.setattr(backup_runs, "execution_health", lambda: {"ok": True})
+
     def test_reports_an_empty_backup_directory(self, tmp_path: Path) -> None:
         backups = tmp_path / "backups"
         backups.mkdir()

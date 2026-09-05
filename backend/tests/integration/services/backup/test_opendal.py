@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import backup
-from app.services.backup_destination import BackupTrigger, RemoteBackupDestination
+from app.services.backup_destination import RemoteBackupDestination
 from app.services.remote_io import RemoteEntry
 from app.services.storage_backend import CreationReceipt, StorageObjectInfo
 from tests.integration._backup_harness import BackupEnv
@@ -25,6 +25,14 @@ class _RemoteBackend:
     provider_id = "gdrive"
     transport = "gdrive"
     source_namespace = "gdrive/PrintStash"
+
+    @property
+    def storage_target(self):
+        from app.services.storage_identity import StorageTargetIdentity
+
+        return StorageTargetIdentity(
+            transport="gdrive", endpoint="https://www.googleapis.com"
+        )
 
     def __init__(self, key: str, payload: bytes) -> None:
         self.key = key
@@ -94,6 +102,28 @@ def _remote_destination(key: str, payload: bytes) -> RemoteBackupDestination:
     )
 
 
+def _select_replica(backup_env, monkeypatch, destination=None, *, keep_local=True):
+    from app.db.models import StorageConnectionPurpose, SystemConfig
+    from app.services import backup_replication
+    from tests.factories import build_storage_connection
+
+    with backup_env.new_session() as session:
+        config = session.get(SystemConfig, 1) or SystemConfig(id=1)
+        config.manual_local_backup_enabled = keep_local
+        session.add(config)
+        if destination is not None:
+            build_storage_connection(
+                session, id=7, purpose=StorageConnectionPurpose.BACKUP
+            )
+        session.commit()
+    if destination is not None:
+        monkeypatch.setattr(
+            backup_replication,
+            "destination_from_connection",
+            lambda _profile: destination,
+        )
+
+
 class TestOpenDalBackupReplication:
     def test_failed_replica_publication_keeps_its_durable_reservation(
         self, backup_env, db_session, tmp_path
@@ -144,17 +174,11 @@ class TestOpenDalBackupReplication:
             provider_ref="drive-profile-ref",
             backend=_PublishingBackend(writes),
         )
-        triggers: list[BackupTrigger] = []
-
-        def destinations(trigger: BackupTrigger) -> list[object]:
-            triggers.append(trigger)
-            return [destination]
-
-        monkeypatch.setattr(backup, "configured_destinations", destinations)
-
+        _select_replica(backup_env, monkeypatch, destination)
         meta = backup.create_backup()
+        from app.services.backup_runs import run_detail
 
-        assert triggers == [BackupTrigger.MANUAL]
+        assert run_detail(meta.run_id)["trigger"] == "manual"
         assert Path(meta.path).is_file()
         assert len(writes) == 1
         assert writes[0][0].endswith(f"-{meta.id}.tar.gz")
@@ -175,9 +199,7 @@ class TestOpenDalBackupReplication:
                 OSError("endpoint unavailable")
             ),
         )
-        monkeypatch.setattr(
-            backup, "configured_destinations", lambda _trigger: [failing]
-        )
+        _select_replica(backup_env, monkeypatch, failing)
 
         meta = backup.create_backup()
 
@@ -197,12 +219,7 @@ class TestOpenDalBackupReplication:
             provider_ref="drive-profile-ref",
             backend=_PublishingBackend(writes),
         )
-        monkeypatch.setattr(
-            backup, "local_destination_enabled", lambda _trigger: False, raising=False
-        )
-        monkeypatch.setattr(
-            backup, "configured_destinations", lambda _trigger: [destination]
-        )
+        _select_replica(backup_env, monkeypatch, destination, keep_local=False)
 
         meta = backup.create_backup()
 
@@ -215,10 +232,7 @@ class TestOpenDalBackupReplication:
         backup_env: BackupEnv,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(
-            backup, "local_destination_enabled", lambda _trigger: False, raising=False
-        )
-        monkeypatch.setattr(backup, "configured_destinations", lambda _trigger: [])
+        _select_replica(backup_env, monkeypatch, keep_local=False)
 
         with pytest.raises(RuntimeError, match="backup_destination_required"):
             backup.create_backup()
@@ -240,12 +254,7 @@ class TestOpenDalBackupReplication:
                 OSError("endpoint unavailable")
             ),
         )
-        monkeypatch.setattr(
-            backup, "local_destination_enabled", lambda _trigger: False, raising=False
-        )
-        monkeypatch.setattr(
-            backup, "configured_destinations", lambda _trigger: [failing]
-        )
+        _select_replica(backup_env, monkeypatch, failing, keep_local=False)
 
         with pytest.raises(RuntimeError, match="backup_all_destinations_failed"):
             backup.create_backup()

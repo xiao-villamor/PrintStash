@@ -452,3 +452,24 @@ class TestSpoolmanProbe:
 
         assert out["reachable"] is False
         assert out["version"] is None
+
+
+class TestBackupExecutionHealth:
+    def test_partial_backup_reports_its_durable_execution_failure(self, backup_env):
+        from app.db.models import StorageConnectionPurpose
+        from app.services import backup
+        from tests.factories import build_storage_connection
+
+        with backup_env.new_session() as session:
+            profile = build_storage_connection(
+                session, purpose=StorageConnectionPurpose.BACKUP
+            )
+            profile.config_json = "{}"
+            session.add(profile)
+            session.commit()
+        meta = backup.create_backup()
+        probe = health_mod._backup_probe()
+        assert probe["ok"] is False
+        assert probe["execution"]["latest_run_id"] == meta.run_id
+        assert probe["execution"]["outcome"] == "partial"
+        assert probe["execution"]["last_verified_at"] is None

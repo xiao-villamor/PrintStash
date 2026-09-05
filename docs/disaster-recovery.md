@@ -12,17 +12,17 @@ A PrintStash backup archive contains:
 - thumbnails
 - a manifest with backup id, timestamp, and app version
 
-Backup archives are written and committed locally first. Legacy S3/R2 settings
-remain readable for upgrades but are no longer configured in the UI. Reusable
-remote connections can replicate each archive independently to S3, WebDAV, SFTP,
-or Google Drive; one remote failure never discards the local archive or prevents
-another destination from receiving its copy.
+Backup archives are built once, then published to each selected destination.
+Legacy S3/R2 settings remain readable for upgrades but are no longer configured
+in the UI. Reusable remote connections can receive independent replicas on S3,
+WebDAV, SFTP or Google Drive. A failed destination does not discard successful
+copies or prevent another selected destination from receiving the archive.
 
 Under **Settings → Backup**, administrators can enable one automatic backup per
 UTC day, choose its time, and independently select each remote connection for
 manual and automatic replicas. Automatic backups are disabled by default. The
-local archive is always created for both modes; excluding every remote
-destination therefore never removes the local recovery copy.
+local destination is independently selectable for each mode. At least one
+destination must be selected; remote-only backups do not retain a local archive.
 
 Add those connections under **Settings → Remote storage** and allow **Backup
 replicas** (or both uses). Create, upload, retain, and restore archives under
@@ -38,6 +38,35 @@ PostgreSQL deployment must use an operator-managed `pg_dump`/restore workflow
 and back up the configured object/local storage separately. Query
 `GET /api/v1/backups/capabilities/database` to detect support before offering
 the built-in action.
+
+## Run History And Exact Replica Retry
+
+**Settings → Backup** shows each run as running, completed, partial or failed.
+Completed means every selected destination committed its publication, including
+any connection that was invalid when the run began. A publication timestamp is
+not a verification timestamp: last verified success advances only after the
+exact archive passes digest and compatibility checks. Operational health reports
+the latest outcome and last verified time.
+
+For a failed destination, **Retry** reads a live surviving owned copy, verifies
+its exact digest, and sends that same archive to the original saved target. It
+does not build a fresh backup or substitute a cached restore download. Edited,
+removed or unavailable targets cannot redirect a retry. If no verified copy
+survives, create a new backup. Google Drive retries remain unavailable until the
+authenticated account has a verifiable target identity; existing archives remain
+listable and recoverable.
+
+After an interruption, run history exposes the unfinished result. Retrying first
+reconciles the exact publication ownership record; a write committed before the
+response was lost can be recovered without a second publication. Retry attempts
+retain their outcome and the result supplying their verified bytes.
+
+Administrator APIs are `GET /api/v1/backups/runs`,
+`GET /api/v1/backups/runs/{run_id}` and
+`POST /api/v1/backups/runs/destinations/{result_id}/retry`.
+Create retains its successful response fields and HTTP 202, adding `run_id`,
+`outcome` and `destination_results`. An all-destinations-failed HTTP 502 response
+retains its error detail and includes `run_id` for inspection.
 
 ## Create A Backup Before Risky Work
 
