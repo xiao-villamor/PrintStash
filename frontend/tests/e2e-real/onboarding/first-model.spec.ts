@@ -55,6 +55,10 @@ test.describe("Browser onboarding", () => {
         await page.goto("/getting-started");
       }
       await expect(page).toHaveURL(/\/getting-started$/);
+      await page.getByRole("button", { name: "I'll do this later" }).press("Enter");
+      await expect(page).toHaveURL(/\/$/);
+      await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
+      await expect(page).toHaveURL(/\/getting-started$/);
       await page.getByRole("button", { name: "Upload my first files" }).press("Enter");
       await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
         name: "first-model.gcode",
@@ -68,7 +72,9 @@ test.describe("Browser onboarding", () => {
       await expect(
         page.getByRole("heading", { name: "My first model", exact: true }),
       ).toBeVisible();
-      await page.goto("/getting-started");
+      await page.goto("/settings");
+      await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
+      await expect(page).toHaveURL(/\/getting-started$/);
       await page.getByRole("button", { name: "Connect an existing folder" }).press("Enter");
       await page.getByRole("switch", { name: "Library sources enabled" }).press("Enter");
       await page.getByLabel("Source name").fill("My existing folder");
