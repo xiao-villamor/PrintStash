@@ -21,13 +21,14 @@ class TestWebDAVCleanupEvidence:
             assert client.put(key, content=b"original").is_success
             set_mtime("object", 1234)
             etag = client.head(key).headers["etag"]
-            assert client.put(key, content=b"replaced").is_success
+            # Different sizes force a new validator even within one timestamp tick.
+            assert client.put(key, content=b"replacement").is_success
             set_mtime("object", 1235)
             assert client.head(key).headers["etag"] != etag
             response = client.delete(key, headers={"If-Match": etag})
             print(provider, "stale-delete", response.status_code)
             assert response.status_code == 412
-            assert client.get(key).content == b"replaced"
+            assert client.get(key).content == b"replacement"
 
     def test_conditional_delete_retry_is_missing(self, cleanup_endpoint):
         provider, root, auth, set_mtime = cleanup_endpoint
@@ -49,7 +50,8 @@ class TestWebDAVCleanupEvidence:
             assert client.put(key, content=b"original").is_success
             set_mtime("object", 1234)
             etag = client.head(key).headers["etag"]
-            assert client.put(key, content=b"replaced").is_success
+            # Different sizes force a new validator even within one timestamp tick.
+            assert client.put(key, content=b"replacement").is_success
             set_mtime("object", 1235)
             assert client.head(key).headers["etag"] != etag
             response = client.request(
@@ -59,7 +61,7 @@ class TestWebDAVCleanupEvidence:
             )
             print(provider, "stale-move", response.status_code)
             assert response.status_code == 412
-            assert client.get(key).content == b"replaced"
+            assert client.get(key).content == b"replacement"
             assert client.get(quarantine).status_code == 404
 
     def test_quarantine_survives_client_interruption(self, cleanup_endpoint):
