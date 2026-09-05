@@ -242,8 +242,8 @@ same release has been exercised on the named public service or appliance.
 | Other S3-compatible services (MinIO, R2, B2, Wasabi, NAS object stores) | Managed, read-only source and backup destination | Native managed-storage contract plus OpenDAL source/replica tests; separate MinIO migration test | No complete public-service matrix | Beta compatibility; configure exact region, endpoint and address style |
 | Nextcloud WebDAV | Managed and read-only source | Real Nextcloud contract through the production OpenDAL adapter, including paged source discovery | Containerized contract service | Protocol-contract validated; appliance deployment remains beta |
 | Generic WebDAV | Managed and read-only source | Nextcloud contract plus adapter edge cases | No server matrix | Beta protocol compatibility |
-| OpenSSH SFTP | Managed and read-only source | Real OpenSSH contract through the production adapter, including host-key rejection and paged source discovery | Containerized contract service | Protocol-contract validated |
-| NAS SFTP | Managed and read-only source | OpenSSH protocol contract | No model/firmware matrix | Beta protocol compatibility; pinned host key required |
+| OpenSSH SFTP | Managed, read-only source and backup destination | Real OpenSSH contract through the production adapter; remote-only API backup probe, listing, verification and byte-matching restore | Containerized contract service | Protocol-contract validated |
+| NAS SFTP | Managed, read-only source and backup destination | OpenSSH protocol contract | No model/firmware matrix | Beta protocol compatibility; pinned host key required |
 | Google Drive | Read-only source and backup destination | OpenDAL configuration, discovery, hash-verified restore and fail-closed retention tests | No live Google account validation | Beta; automatic remote retention and Vault-GC witness are disabled |
 | Unraid, Synology DSM, TrueNAS SCALE, OpenMediaVault, QNAP QTS/QuTS, CasaOS/ZimaOS, Proxmox VE | Mounted source or host for a remote profile | The interface contracts above | No complete appliance validation rows | Installation recipes, not certification |
 

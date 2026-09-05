@@ -20,6 +20,11 @@ import asyncssh
 import opendal
 import pytest
 
+from app.db.models import LibrarySourceKind, StorageConnection, StorageConnectionPurpose
+from app.services.backup_destination import (
+    BackupDestinationError,
+    destination_from_connection,
+)
 from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,
@@ -280,6 +285,47 @@ class _RenameFailure:
 
 
 class TestOpenDALStorageBackend:
+    @pytest.mark.parametrize("password", ["contract-secret", "incorrect-secret"])
+    def test_sftp_backup_probe_uses_the_production_factory(
+        self, sftp_password_endpoint, password: str
+    ) -> None:
+        port, known_hosts = sftp_password_endpoint
+        profile = StorageConnection(
+            id=7,
+            name="SFTP archive",
+            kind=LibrarySourceKind.SFTP,
+            purpose=StorageConnectionPurpose.BACKUP,
+            config_json=json.dumps(
+                {
+                    "provider": "sftp",
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "username": "printstash",
+                    "host_key": str(known_hosts),
+                    "root": "vault-data",
+                }
+            ),
+            secret_json=json.dumps({"password": "contract-secret"}),
+        )
+        destination_from_connection(profile).backend.provision_root()
+        profile.secret_json = json.dumps({"password": password})
+        destination = destination_from_connection(profile)
+
+        if password != "contract-secret":
+            with pytest.raises(
+                BackupDestinationError, match="^storage_connection_probe_failed$"
+            ) as failure:
+                destination.probe()
+            assert password not in str(failure.value)
+            return
+        result = destination.probe()
+
+        assert result["ok"] is True
+        assert result["read"] is True
+        assert result["write"] is True
+        assert result["conditional_create"] is True
+        assert result["versioned_delete"] is False
+
     def test_webdav_rejects_invalid_credentials(self, webdav_endpoint: str) -> None:
         spec = _spec(webdav_endpoint)
         spec.options["password"] = "not-the-contract-password"

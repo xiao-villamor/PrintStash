@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
+from io import BufferedReader, RawIOBase
 from itertools import islice
 from pathlib import Path
 from types import SimpleNamespace
@@ -402,7 +403,7 @@ class OpenDALStorageBackend(StorageBackend):
 
     @property
     def operator_capabilities(self):
-        """Expose OpenDAL's measured operation surface to role-specific adapters."""
+        """Supported transport operations; endpoint guarantees require a probe."""
         return self._operator.capability()
 
     def check(self) -> None:
@@ -792,6 +793,61 @@ class _AsyncSSHMetadata:
 
 
 @dataclass(frozen=True)
+class _SFTPCapabilities:
+    """Supported operations; root access is probed separately.
+
+    Exclusive creation prevents overwrite but does not promise atomic visible
+    publication or an immutable version identity for deletion.
+    """
+
+    read: bool = True
+    write: bool = True
+    list: bool = True
+    write_with_if_not_exists: bool = True
+    delete_with_version: bool = False
+
+
+class _ChunkReader(RawIOBase):
+    """Adapt a bounded transport iterator to Python's streaming file contract."""
+
+    def __init__(self, chunks: Iterator[bytes]) -> None:
+        super().__init__()
+        self._chunks = chunks
+        self._pending = memoryview(b"")
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer) -> int:
+        if self.closed:
+            raise ValueError("read of closed remote stream")
+        if not buffer:
+            return 0
+        if not self._pending:
+            try:
+                self._pending = memoryview(next(self._chunks))
+            except StopIteration:
+                return 0
+            except Exception as exc:
+                raise StorageConfigurationError("remote_storage_read_failed") from exc
+        count = min(len(buffer), len(self._pending))
+        buffer[:count] = self._pending[:count]
+        self._pending = self._pending[count:]
+        return count
+
+    def close(self) -> None:
+        try:
+            close = getattr(self._chunks, "close", None)
+            if close is not None:
+                close()
+        except Exception as exc:
+            raise StorageConfigurationError("remote_storage_read_failed") from exc
+        finally:
+            self._pending = memoryview(b"")
+            super().close()
+
+
+@dataclass(frozen=True)
 class SourceDirectoryEntry:
     """One immediate child below a read-only library source directory."""
 
@@ -872,6 +928,14 @@ class _AsyncSSHSFTPOperator:
             await client.stat(self._root)
 
         self._run(operation)
+
+    def capability(self) -> _SFTPCapabilities:
+        return _SFTPCapabilities()
+
+    def open(self, relative: str, mode: str = "rb") -> BufferedReader:
+        if mode != "rb":
+            raise StorageConfigurationError("sftp_stream_mode_unsupported")
+        return BufferedReader(_ChunkReader(self.stream_chunks(relative, 64 * 1024)))
 
     def provision_root(self) -> None:
         async def operation(client) -> None:

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- SFTP backup profiles can probe, list, verify and restore remote-only archives.
+  Manifest reads stream through bounded buffers and close their remote handles
+  on early exit; failed downloads remove their temporary bytes.
+
 - The full container image includes the S3 transport used by remote Library
   sources and backup connections. Image checks now exercise remote-only S3
   recovery on both supported architectures.
