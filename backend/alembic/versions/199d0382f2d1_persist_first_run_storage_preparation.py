@@ -1,8 +1,8 @@
 """persist first run storage preparation
 
 Revision ID: 199d0382f2d1
-Revises: 5f0f887bdd0b
-Create Date: 2026-09-05 18:23:31.429994
+Revises: 73644b08645c
+Create Date: 2026-09-05 19:26:37.155244
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '199d0382f2d1'
-down_revision: Union[str, Sequence[str], None] = '5f0f887bdd0b'
+down_revision: Union[str, Sequence[str], None] = '73644b08645c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
