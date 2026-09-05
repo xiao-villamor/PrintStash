@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -96,9 +96,9 @@ class Settings(BaseSettings):
     sqlite_busy_timeout_ms: int = Field(default=30_000, ge=1)
 
     jwt_secret: str = DEFAULT_JWT_SECRET
-    # First-run setup credential. When empty, a random process-local token is
-    # generated and printed to the API log while the vault is unconfigured.
-    setup_token: str = ""
+    # Initial registration is explicitly enabled only on a trusted network.
+    setup_mode: Literal["trusted_network", "disabled"] = "disabled"
+    setup_allowed_hosts: str = ""
     # Credentials persisted in the database are encrypted with this external
     # key. Empty uses a generated 0600 key file beside the SQLite database.
     secrets_key: str = ""
@@ -238,6 +238,14 @@ class Settings(BaseSettings):
     # count is unknowable before Cascadio loads it. The child is killed on this
     # deadline; its RSS budget is derived from mesh_memory_budget_fraction and
     # the detected cgroup/host limit, just like other mesh work.
+    # Toolpath conversion runs in a bounded disposable official libbgcode process.
+    bgcode_executable: str = "bgcode"
+    toolpath_input_max_mb: int = Field(default=128, ge=1)
+    toolpath_output_max_mb: int = Field(default=32, ge=1)
+    toolpath_timeout_seconds: int = Field(default=30, ge=1)
+    toolpath_memory_max_mb: int = Field(default=512, ge=64)
+    toolpath_max_jobs: int = Field(default=2, ge=1, le=32)
+
     mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
     # Oversized STL previews run in a disposable, streaming worker. The worker

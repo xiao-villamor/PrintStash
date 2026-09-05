@@ -48,11 +48,10 @@ export async function getAuthenticatedBlob(path: string): Promise<Blob> {
 }
 
 /** Read a protected text resource while preserving the shared 401 handling. */
-export async function getAuthenticatedText(path: string): Promise<string> {
-  const res = await fetch(getUrl(path), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
+export async function getAuthenticatedText(path: string, signal?: AbortSignal): Promise<string> {
+  const options: RequestInit = { headers: authHeaders(), cache: "no-store" };
+  if (signal) options.signal = signal;
+  const res = await fetch(getUrl(path), options);
   if (!res.ok) throw await parseError(res);
   return res.text();
 }
@@ -305,10 +304,11 @@ export async function sendJson<T>(
   // index signature (microsoft/TypeScript#15300).
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- outbound payload, owned and typed by the calling wrapper
   body: unknown,
+  headers: Record<string, string> = {},
 ): Promise<T> {
   const res = await fetch(getUrl(path), {
     method,
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...headers },
     body: JSON.stringify(body),
   });
   const value = await handleResponse<T>(res);

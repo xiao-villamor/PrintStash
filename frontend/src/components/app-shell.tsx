@@ -12,7 +12,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Localized } from "@/components/ui/localized";
 
-const CHROMELESS_PREFIXES = ["/setup", "/login"];
+const CHROMELESS_PREFIXES = ["/setup", "/login", "/getting-started"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

@@ -93,6 +93,13 @@ from tests.factories.library import (
     tag_model,
     tag_multipart_model,
 )
+from tests.factories.manufacturing import (
+    build_multipart_build,
+    build_multipart_build_attempt,
+    build_multipart_build_confirmation,
+    build_multipart_build_part,
+    build_multipart_part,
+)
 from tests.factories.ops import (
     build_audit_finding,
     build_audit_run,
@@ -144,6 +151,11 @@ from tests.factories.storage import (
 )
 
 __all__ = [
+    "build_multipart_part",
+    "build_multipart_build",
+    "build_multipart_build_part",
+    "build_multipart_build_attempt",
+    "build_multipart_build_confirmation",
     "build_failure_domain_declaration",
     "PASSWORD",
     "a_member_who_can_see_one_collection",

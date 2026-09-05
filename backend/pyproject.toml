@@ -100,6 +100,7 @@ markers = [
     "e2e: the whole app over ASGITransport against the fakes (lane: e2e)",
     "critical: release-blocking workflows whose observable outcome must survive the whole stack (lane: critical)",
     # Resources. These gate a subset *inside* a tier and skip when the resource is absent.
+    "bgcode: builds and runs the official converter through Docker",
     "postgres: runs against a real PostgreSQL container (tests/containers.py)",
     "remote_storage: runs against real Nextcloud and OpenSSH containers (tests/containers.py)",
     "s3: runs against a real SeaweedFS container (tests/containers.py)",

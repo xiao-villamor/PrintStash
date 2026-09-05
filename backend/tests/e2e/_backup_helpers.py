@@ -1,13 +1,11 @@
 """Set up an isolated backup-recovery app through its public API."""
 
-from app.services.setup_token import current_setup_token
 
 
 async def setup_and_login(api, tmp_path) -> dict[str, str]:
     r = await api.post(
         "/api/v1/setup",
         json={
-            "setup_token": current_setup_token(),
             "username": "owner",
             "password": "Password123",
             "storage_backend": "local",

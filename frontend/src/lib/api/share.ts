@@ -19,7 +19,7 @@ export function sharedDownloadUrl(token: string, fileId: number): string {
 }
 
 export function sharedGcodeUrl(token: string, fileId: number): string {
-  return `/api/v1/share/${token}/files/${fileId}/gcode`;
+  return `/api/v1/share/${token}/files/${fileId}/toolpath`;
 }
 
 // Authenticated management.

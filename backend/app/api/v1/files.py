@@ -625,3 +625,22 @@ def rebuild_missing_thumbnails(
     return IngestResponse(
         job_id=job_id, state="pending", message="thumbnail rebuild queued"
     )
+
+
+@router.get(
+    "/{file_id}/toolpath", summary="Bounded ASCII toolpath from the original Artifact"
+)
+async def get_toolpath(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.services import toolpath
+
+    file = _accessible_file(session, file_id, current_user)
+    content = await toolpath.render(file)
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Cache-Control": "private, no-store"},
+    )

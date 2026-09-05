@@ -134,6 +134,6 @@ The capture boundary has a separate CI-only Vitest harness:
 creates a fresh owner and browser pairing, and runs the production adapter and
 transport through slot creation, raw PUT, and finalize. The harness requires
 `PRINTSTASH_EXTENSION_CAPTURE_BASE_URL` and
-`PRINTSTASH_EXTENSION_CAPTURE_SETUP_TOKEN`; missing provisioning fails the
+`VAULT_SETUP_MODE=trusted_network` on the isolated backend; missing provisioning fails the
 test. The loaded-browser WDIO job remains a separate popup/manifest smoke
 test and does not need Playwright browser downloads.

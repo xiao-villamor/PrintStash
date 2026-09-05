@@ -1,4 +1,5 @@
-"use client";
+import { ApiError } from "@/lib/errors";
+import { Button } from "@/components/ui/button";
 
 import React, { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
@@ -8,7 +9,8 @@ import { AlertTriangle, Layers, Loader2 } from "lucide-react";
 import { getAuthenticatedText } from "@/lib/api/request";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
-import { parseGcode, type ToolpathData } from "@/lib/gcode";
+import type { ToolpathData } from "@/lib/gcode";
+import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
 // ---- Three.js Scene ----
 
@@ -163,8 +165,6 @@ class GcodeErrorBoundary extends React.Component<
   }
 }
 
-class UnsupportedBinaryGcodeError extends Error {}
-
 function viewerCopy(
   i18n: ReturnType<typeof useOptionalI18n>,
   key: MessageKey,
@@ -199,7 +199,7 @@ function DefaultCanvasRenderer({ children, className, dpr, gl }: CanvasRendererP
 interface LoadedToolpath {
   url: string;
   data: ToolpathData | null;
-  errorKind: "binary" | "load" | null;
+  errorKind: "limit" | "resource" | "busy" | "invalid" | "load" | null;
 }
 
 export interface GcodeViewerProps {
@@ -207,15 +207,22 @@ export interface GcodeViewerProps {
   printerBedMm?: { x: number; y: number } | null;
   screenshotName?: string;
   canvasRenderer?: ComponentType<CanvasRendererProps>;
+  toolpathParser?: typeof parseGcodeInWorker;
 }
 
-export function GcodeViewer({ url, printerBedMm = null, canvasRenderer }: GcodeViewerProps) {
+export function GcodeViewer({
+  url,
+  printerBedMm = null,
+  canvasRenderer,
+  toolpathParser = parseGcodeInWorker,
+}: GcodeViewerProps) {
   const i18n = useOptionalI18n();
   const previewPreferences = usePreviewPreferences();
   const CanvasRenderer = canvasRenderer ?? DefaultCanvasRenderer;
   // One state for the fetch that has actually completed, tagged with its url,
   // so switching files derives "loading" during render instead of clearing the
   // previous file's toolpath from an effect.
+  const [retry, setRetry] = useState(0);
   const [loaded, setLoaded] = useState<LoadedToolpath | null>(null);
   const [currentLayer, setCurrentLayer] = useState(0);
   const [showTravel, setShowTravel] = useState(false);
@@ -231,16 +238,10 @@ export function GcodeViewer({ url, printerBedMm = null, canvasRenderer }: GcodeV
     // this url's toolpath.
     let live = true;
 
-    getAuthenticatedText(url)
-      .then((text) => {
-        // PrusaSlicer binary G-code (.bgcode) starts with the "GCDE" magic and
-        // carries no plain-text toolpath — its moves are heatshrink-compressed.
-        // Its metadata + thumbnail are indexed on the server, but there's
-        // nothing here to rasterise, so show a notice instead of an empty plot.
-        if (text.startsWith("GCDE")) {
-          throw new UnsupportedBinaryGcodeError();
-        }
-        const parsed = parseGcode(text);
+    const controller = new AbortController();
+    getAuthenticatedText(url, controller.signal)
+      .then((text) => toolpathParser(text, controller.signal))
+      .then((parsed) => {
         if (!live) return;
         setLoaded({ url, data: parsed, errorKind: null });
         setCurrentLayer(parsed.totalLayers - 1);
@@ -250,24 +251,47 @@ export function GcodeViewer({ url, printerBedMm = null, canvasRenderer }: GcodeV
         setLoaded({
           url,
           data: null,
-          errorKind: cause instanceof UnsupportedBinaryGcodeError ? "binary" : "load",
+          errorKind:
+            cause instanceof ToolpathParseError
+              ? cause.code === "limit"
+                ? "limit"
+                : "invalid"
+              : cause instanceof ApiError && [413, 504].includes(cause.status)
+                ? "resource"
+                : cause instanceof ApiError && cause.status === 429
+                  ? "busy"
+                  : cause instanceof ApiError && cause.status === 422
+                    ? "invalid"
+                    : "load",
         });
       });
 
     return () => {
       live = false;
+      controller.abort();
     };
-  }, [url]);
+  }, [url, toolpathParser, retry]);
 
   const loadingCopy = viewerCopy(i18n, "viewer.loadingToolpath", "Loading toolpath…");
   const renderFailedCopy = viewerCopy(i18n, "viewer.renderFailed", "G-code render failed");
-  const errorCopy = viewerCopy(
-    i18n,
-    errorKind === "binary" ? "viewer.binaryUnsupported" : "viewer.loadFailed",
-    errorKind === "binary"
-      ? "Binary G-code (.bgcode) can't be previewed in the browser — download the file to open it in a slicer."
-      : "Unable to load the toolpath preview.",
-  );
+  const errors = {
+    limit: [
+      "viewer.segmentLimit",
+      "This preview exceeds the one-million-segment limit. Download the original to inspect it in your slicer.",
+    ],
+    resource: [
+      "viewer.resourceLimit",
+      "This preview exceeds the server's size or time limit. Download the original to inspect it in your slicer.",
+    ],
+    busy: ["viewer.converterBusy", "Other previews are being prepared. Try again shortly."],
+    invalid: [
+      "viewer.invalidToolpath",
+      "This file could not be validated as a supported toolpath. The original remains available.",
+    ],
+    load: ["viewer.loadFailed", "Unable to load the toolpath preview."],
+  } as const;
+  const [errorKey, errorFallback] = errors[errorKind ?? "load"];
+  const errorCopy = viewerCopy(i18n, errorKey, errorFallback);
   const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData", "No toolpath data");
   const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound", "No toolpath found in file");
 
@@ -282,9 +306,21 @@ export function GcodeViewer({ url, printerBedMm = null, canvasRenderer }: GcodeV
 
   if (errorKind || !data) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+      <div
+        role="alert"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground"
+      >
         <AlertTriangle className="h-8 w-8" />
         <span className="font-mono text-xs">{errorKind ? errorCopy : noDataCopy}</span>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setLoaded(null);
+            setRetry((value) => value + 1);
+          }}
+        >
+          {viewerCopy(i18n, "viewer.retry", "Try preview again")}
+        </Button>
       </div>
     );
   }

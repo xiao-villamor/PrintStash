@@ -114,7 +114,8 @@ Raw G-code commands and measured filament consumption are not supported.
 BGCODE is validated locally before transfer, keeps its `.bgcode` suffix, and is
 uploaded as `application/octet-stream`; upload never implies start. Other
 providers remain plain-text-only until their capability contract declares
-otherwise. PrintStash does not currently render a BGCODE toolpath preview.
+otherwise. The integrated [BGCODE v1 toolpath preview](bgcode-preview.md)
+converts a temporary copy; downloads and printer uploads retain the original bytes.
 Physical-printer coverage is still expanding, so supervise first prints after
 adding or updating a PrusaLink device.
 

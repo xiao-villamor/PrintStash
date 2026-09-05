@@ -8,13 +8,14 @@ const webdavPort = Number(process.env.PLAYWRIGHT_CRITICAL_BACKUP_WEBDAV_PORT ?? 
 test.describe("remote-only backup recovery", () => {
   test("@critical creates then restores a remote-only backup in the browser", async ({ page }) => {
     await page.goto("/setup");
-    await page.getByLabel("Setup token").fill("playwright-critical-backup-token");
     await page.getByLabel("Username").fill("backup-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
     await page.getByLabel("Confirm password").fill("playwright-password");
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Complete setup" }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Check storage" }).click();
+    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await expect(page).toHaveURL(/\/getting-started$/);
+    await page.getByRole("button", { name: "I'll do this later" }).click();
 
     const destinationName = `WebDAV backup ${Date.now()}`;
     await page.goto("/settings?section=remote-storage");
@@ -177,11 +178,18 @@ test.describe("shared provider connection forms", () => {
     const { mkdir, rm } = await import("node:fs/promises");
     const { dirname, resolve } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
-    const status = await (await page.request.get("/api/v1/setup/status")).json();
+    const statusResponse = await page.request.get("/api/v1/setup/status");
+    const status = await statusResponse.json();
     if (!status.configured) {
+      const origin = new URL(statusResponse.url()).origin;
+      const preparation = await page.request.post("/api/v1/setup/session", {
+        headers: { Origin: origin },
+      });
+      expect(preparation.status(), await preparation.text()).toBe(200);
+      const { csrf } = await preparation.json();
       const setup = await page.request.post("/api/v1/setup", {
+        headers: { Origin: origin, "X-PrintStash-Setup-CSRF": csrf },
         data: {
-          setup_token: "playwright-critical-backup-token",
           username: "backup-admin",
           password: "playwright-password",
           storage_backend: "local",

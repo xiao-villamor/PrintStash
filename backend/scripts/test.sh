@@ -76,8 +76,8 @@ done
 # default full/coverage lanes run container-backed contracts in a second, serial
 # pass so every service starts once rather than once per xdist worker.
 parallel=(-n auto --dist worksteal)
-resource_expression="postgres or s3 or remote_storage"
-non_resource_expression="not postgres and not s3 and not remote_storage"
+resource_expression="postgres or s3 or remote_storage or bgcode"
+non_resource_expression="not postgres and not s3 and not remote_storage and not bgcode"
 
 # `${a[@]+"${a[@]}"}` rather than `"${a[@]}"` everywhere below. bash 3.2 — still
 # the default shell on macOS — treats `"${empty[@]}"` under `set -u` as an unbound

@@ -13,16 +13,18 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
-- Multipart Models currently reference existing Models as named pieces and
-  alternatives. They do not encode quantities, compatibility rules between
-  pieces, or selectable G-code revisions. Models and their files remain in the
-  main Models view; deleting a Multipart Model removes only the grouping.
+- Multipart Models reference existing Models as named pieces and alternatives.
+  `Unreleased` adds quantities and [manufacturing builds](multipart-builds.md)
+  with selected Revisions and confirmed physical output. Compatibility rules
+  between pieces, mixed-piece plates and automatic physical reprints remain
+  outside this workflow. Models and their files remain in the main Models view;
+  deleting a Multipart Model removes only the grouping.
   Members that are trashed or inaccessible remain visible as unavailable in the
   grouping until they are restored or replaced.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
   status, streamed plain-text G-code and validated `.bgcode` upload/start, file
-  inventory/deletion, and pause/resume/cancel are implemented. BGCODE preview,
-  Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
+  inventory/deletion, and pause/resume/cancel are implemented. BGCODE v1 toolpaths can be previewed within the
+  [conversion limits](bgcode-preview.md). Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
   consumption are not.
 - Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
   Carbon 2 have beta local status/control support and beta chunked HTTP

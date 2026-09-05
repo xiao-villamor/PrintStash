@@ -135,14 +135,16 @@ class TestSimpleCompose:
             (REPO_ROOT / "docs/deployment.md").read_text(),
             re.DOTALL,
         ),
-        ids=["session-lifetime", "setup-token", "host-folders", "upload-limit"],
+        ids=["session-lifetime", "setup-host", "host-folders", "upload-limit"],
     )
     def test_documented_overrides_preserve_startup(
         self, compose_dir: Path, fragment: str
     ) -> None:
         (compose_dir / "docker-compose.override.yml").write_text(fragment)
 
-        config = _render(compose_dir, VAULT_SETUP_TOKEN="test-setup-token")
+        config = _render(
+            compose_dir, VAULT_SETUP_ALLOWED_HOSTS="printstash.example.net"
+        )
 
         assert set(config["services"]) == {"frontend", "api"}
         assert (
@@ -151,4 +153,15 @@ class TestSimpleCompose:
         assert (
             config["services"]["frontend"]["depends_on"]["api"]["condition"]
             == "service_healthy"
+        )
+
+
+class TestBrowserRegistrationMode:
+    def test_simple_compose_enables_browser_registration_on_a_trusted_network(
+        self,
+        simple_config,
+    ):
+        assert (
+            simple_config["services"]["api"]["environment"]["VAULT_SETUP_MODE"]
+            == "trusted_network"
         )

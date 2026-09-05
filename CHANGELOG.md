@@ -9,17 +9,34 @@
   preserves omitted credentials, supports explicit replacement and prevents
   changing a target while linked sources or owned backups depend on it.
 
+- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
+  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
+  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
+  no longer create empty layers. Originals
+  remain unchanged for downloads and PrusaLink.
+
 - Backup run history records every selected destination, including invalid
   connections and partial failures. Administrators can retry an exact failed
   replica from a verified surviving archive; successful copies remain available.
   Publication, verification and retry history are reported separately in Settings
   and operational health.
 
+- Multipart builds snapshot part quantities and selected Revisions for a concrete
+  manufacturing run. Linked print jobs reserve units; explicit usable-output
+  confirmations track missing pieces and retain previous physical attempts.
+  Builds can be duplicated with fresh results or archived with their history.
+
 - Remote Library discovery streams large directories into a durable inventory.
   Completed pages resume without rereading the directory, interrupted discovery
   cannot remove linked Artifacts, and transport deadlines bound stalled requests.
   Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
   benchmarks cover 1,000, 10,000 and 100,000 entries.
+
+- Browser-based first-owner registration on explicitly enabled trusted networks,
+  with a guided account, storage-check and first-model flow. Local Compose no
+  longer requires a setup credential from API logs. Database serialization
+  prevents competing API processes from creating multiple initial administrators;
+  authenticated recovery preserves an account when storage preparation is pending.
 
 - A minimal, standalone Compose file for local deployment, with optional settings
   and customization examples in a separate deployment guide.

@@ -31,6 +31,11 @@ else
   ALEMBIC=(uv run alembic)
 fi
 
+if [ -z "${VAULT_BGCODE_EXECUTABLE:-}" ]; then
+  VAULT_BGCODE_EXECUTABLE="$("${PY[@]}" -m tests.bgcode_support "$DATA_ROOT/converter")"
+  export VAULT_BGCODE_EXECUTABLE
+fi
+
 "${ALEMBIC[@]}" upgrade head
 
 # Mirror the official container's restart policy so the real-browser suite can

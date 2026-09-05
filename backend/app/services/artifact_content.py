@@ -12,12 +12,11 @@ import os
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
-from itertools import chain
 from pathlib import Path
 from typing import Iterator
 
 from app.db.models import File
-from app.services.library_source import LibrarySourceError, source_for_file
+from app.services.library_source import LibrarySourceError, SourceEntry, source_for_file
 from app.services.storage_backend import StorageBackend, get_backend
 
 _CHUNK_SIZE = 1024 * 1024
@@ -45,7 +44,9 @@ class ArtifactHandle:
     def _verified_remote_copy(self) -> Path:
         try:
             source, key = source_for_file(self.file)
-            with source.materialize(key) as content:
+            with source.materialize(
+                key, expected=SourceEntry(key, self.file.size_bytes)
+            ) as content:
                 materialized = content.path
                 fd, raw_temp = tempfile.mkstemp(suffix=materialized.suffix)
                 temp = Path(raw_temp)
@@ -57,9 +58,11 @@ class ArtifactHandle:
                         os.fdopen(fd, "wb") as output,
                     ):
                         while chunk := incoming.read(_CHUNK_SIZE):
+                            copied += len(chunk)
+                            if copied > self.file.size_bytes:
+                                raise ArtifactContentChangedError(self.file.path)
                             output.write(chunk)
                             digest.update(chunk)
-                            copied += len(chunk)
                         output.flush()
                         os.fsync(output.fileno())
                     if (
@@ -91,6 +94,8 @@ class ArtifactHandle:
             raise ArtifactContentMissingError(self.file.path) from exc
         if not source.is_file() or source.is_symlink():
             raise ArtifactContentMissingError(self.file.path)
+        if before.st_size != self.file.size_bytes:
+            raise ArtifactContentChangedError(self.file.path)
 
         fd, raw_temp = tempfile.mkstemp(suffix=source.suffix)
         temp = Path(raw_temp)
@@ -100,9 +105,11 @@ class ArtifactHandle:
             source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             with os.fdopen(source_fd, "rb") as incoming, os.fdopen(fd, "wb") as output:
                 while chunk := incoming.read(_CHUNK_SIZE):
+                    copied += len(chunk)
+                    if copied > self.file.size_bytes:
+                        raise ArtifactContentChangedError(self.file.path)
                     output.write(chunk)
                     digest.update(chunk)
-                    copied += len(chunk)
                 output.flush()
                 os.fsync(output.fileno())
             after = source.stat(follow_symlinks=False)
@@ -155,7 +162,17 @@ class ArtifactHandle:
             return iter(())
         except (FileNotFoundError, NotADirectoryError) as exc:
             raise ArtifactContentMissingError(self.file.path) from exc
-        return chain((first,), chunks)
+
+        def managed_chunks() -> Iterator[bytes]:
+            try:
+                yield first
+                yield from chunks
+            finally:
+                close = getattr(chunks, "close", None)
+                if close is not None:
+                    close()
+
+        return managed_chunks()
 
     @contextmanager
     def materialize(self) -> Iterator[Path]:

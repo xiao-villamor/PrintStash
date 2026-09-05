@@ -33,6 +33,16 @@ RUN curl -fsSL \
 FROM scratch AS opendal-wheel
 COPY --from=opendal-builder /wheels /
 
+FROM python:3.11-slim AS bgcode-builder
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost-dev libboost-nowide-dev zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY scripts/build-bgcode.sh /tmp/build-bgcode.sh
+RUN sh /tmp/build-bgcode.sh
+
+FROM scratch AS bgcode-binary
+COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /bgcode
+
 FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -47,8 +57,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
     curl \
-    gosu \
+    gosu libstdc++6 zlib1g \
  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /usr/local/bin/bgcode
+COPY --from=bgcode-builder /opt/libbgcode/share/licenses/libbgcode /usr/local/share/licenses/libbgcode
 
 COPY --chmod=0644 pyproject.toml uv.lock ./
 COPY --chmod=0644 packages/printstash-core/pyproject.toml ./packages/printstash-core/pyproject.toml

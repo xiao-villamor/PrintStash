@@ -69,6 +69,7 @@ const populatedMobileDetail: MultipartModelRead = {
     {
       id: 1,
       name: "broom_holder_vcd_base_25mm",
+      quantity: 1,
       sort_order: 0,
       models: candidates.slice(0, 2).map((candidate, index) => ({
         ...candidate,
@@ -220,6 +221,7 @@ test.describe("multipart models", () => {
           parts: payload.parts.map((part, index) => ({
             id: index + 1,
             name: part.name,
+            quantity: 1,
             sort_order: index,
             models: part.choices.map((choice, choiceIndex) => ({
               ...candidates.find((candidate) => candidate.id === choice.model_id)!,
