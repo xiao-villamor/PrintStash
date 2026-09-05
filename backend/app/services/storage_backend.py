@@ -76,7 +76,7 @@ class StorageCapabilities:
             warnings.append("PrintStash cannot verify that a file is the one it wrote.")
         if not self.verified_delete:
             warnings.append(
-                "Interrupted uploads can leave files for the orphan sweep to reclaim."
+                "Interrupted uploads can leave retained bytes requiring storage-specific cleanup."
             )
         if not self.conditional_replace:
             warnings.append(

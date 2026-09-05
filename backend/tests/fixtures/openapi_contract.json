@@ -7419,6 +7419,29 @@
         "title": "OAuthAuthorizeRead",
         "type": "object"
       },
+      "OperationResult": {
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "confirmation_required": {
+            "default": false,
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allowed",
+          "reason"
+        ],
+        "title": "OperationResult",
+        "type": "object"
+      },
       "OperatorDecision": {
         "additionalProperties": false,
         "properties": {
@@ -11957,6 +11980,20 @@
             },
             "title": "Secret Fields Set",
             "type": "array"
+          },
+          "source_operations": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OperationResult"
+            },
+            "title": "Source Operations",
+            "type": "object"
+          },
+          "uses": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UseAvailability"
+            },
+            "title": "Uses",
+            "type": "object"
           }
         },
         "required": [
@@ -12157,6 +12194,13 @@
             ],
             "title": "Support Level",
             "type": "string"
+          },
+          "uses": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UseAvailability"
+            },
+            "title": "Uses",
+            "type": "object"
           }
         },
         "required": [
@@ -12590,6 +12634,44 @@
           "url"
         ],
         "title": "UrlIngestRequest",
+        "type": "object"
+      },
+      "UseAvailability": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "dependency_installed": {
+            "title": "Dependency Installed",
+            "type": "boolean"
+          },
+          "endpoint_proven": {
+            "default": false,
+            "title": "Endpoint Proven",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "service_compiled": {
+            "title": "Service Compiled",
+            "type": "boolean"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dependency_installed",
+          "service_compiled",
+          "supported",
+          "available",
+          "reason"
+        ],
+        "title": "UseAvailability",
         "type": "object"
       },
       "UserCreate": {
@@ -13221,6 +13303,11 @@
           "storage_capabilities": {
             "additionalProperties": true,
             "title": "Storage Capabilities",
+            "type": "object"
+          },
+          "storage_operations": {
+            "additionalProperties": true,
+            "title": "Storage Operations",
             "type": "object"
           },
           "storage_probe_diagnostics": {

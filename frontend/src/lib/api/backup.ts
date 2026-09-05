@@ -7,8 +7,10 @@ import {
   sendForm,
   sendJson,
 } from "@/lib/api/request";
+import type { StorageOperations } from "@/types";
 
 export interface BackupMeta {
+  operations?: StorageOperations;
   backup_id: string;
   created_at: string;
   size_bytes: number;

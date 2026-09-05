@@ -291,7 +291,11 @@ class TestStorageConnections:
             f"/api/v1/storage-connections/{created['id']}/probe",
             headers=_headers(admin),
         )
-        assert success.json() == {"ok": True, "sample_count": 2}
+        assert success.json() == {
+            "ok": True,
+            "sample_count": 2,
+            "endpoint_proven": {"listing": True, "read": False},
+        }
 
         def failed_source(*_args, **_kwargs):
             raise LibrarySourceError("library_source_list_failed")

@@ -10,6 +10,8 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from app.services.storage_operations import UseAvailability, use_availability
+
 
 class ProviderCategory(str, Enum):
     THIS_MACHINE = "this_machine"
@@ -54,6 +56,7 @@ class StorageProvider(BaseModel):
     support_level: Literal["stable", "beta"] = "stable"
     disabled_reason: str | None = None
     fields: list[StorageFieldDescriptor]
+    uses: dict[str, UseAvailability] = Field(default_factory=dict)
 
 
 class _ProviderConfig(BaseModel):
@@ -485,12 +488,12 @@ def provider_catalogue() -> list[StorageProvider]:
                 description="Remote storage over WebDAV.",
                 expected_tier="guarded",
                 expected_tier_note=(
-                    "Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual "
-                    "and confirmed only."
+                    "Confirmed catalog removal retains stored bytes; exact physical "
+                    "deletion is unavailable."
                 ),
                 consequences=[
-                    "Manual permanent deletion requires one-shot confirmation.",
-                    "Scheduled storage purge is skipped.",
+                    "Confirmed catalog removal retains stored bytes.",
+                    "Automatic physical deletion is unavailable.",
                 ],
                 documentation_url=f"/docs/storage-providers.md#{provider_id}",
                 available=remote_available,
@@ -520,8 +523,8 @@ def provider_catalogue() -> list[StorageProvider]:
                 "and purge is manual and confirmed only."
             ),
             consequences=[
-                "Manual permanent deletion requires one-shot confirmation.",
-                "Scheduled storage purge is skipped.",
+                "Confirmed catalog removal retains stored bytes.",
+                "Automatic physical deletion is unavailable.",
             ],
             documentation_url="/docs/storage-providers.md#sftp",
             available=sftp_available,
@@ -618,6 +621,23 @@ def provider_catalogue() -> list[StorageProvider]:
             ],
         )
     )
+    for entry in entries:
+        transport = (
+            "s3"
+            if entry.category == ProviderCategory.S3_COMPATIBLE
+            else "webdav"
+            if entry.category == ProviderCategory.WEBDAV
+            else entry.id
+        )
+        entry.uses = {
+            use: use_availability(transport, use)
+            for use in ("vault", "library", "backup")
+        }
+        vault = entry.uses["vault"]
+        entry.available = vault.dependency_installed and vault.service_compiled
+        entry.selectable = vault.available
+        if not vault.available:
+            entry.disabled_reason = vault.reason
     return entries
 
 

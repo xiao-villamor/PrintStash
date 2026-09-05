@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useOptionalI18n } from "@/lib/i18n";
+import { storageOperationMessage } from "@/lib/storage-operations";
 import type { ProviderCategory, StorageProvider, StorageProviderConfigValues } from "@/types";
 
 const CATEGORIES: Array<{
@@ -38,16 +39,18 @@ function supportLabel(level: string | undefined): string {
   return (level ?? "stable").charAt(0).toUpperCase() + (level ?? "stable").slice(1);
 }
 
-function providerConsequences(provider: StorageProvider): string[] {
+function providerConsequences(
+  provider: StorageProvider,
+  catalog: string,
+  retention: string,
+): string[] {
   if (provider.expected_tier !== "guarded") return provider.consequences;
 
   // Keep the deletion contract visible even if an older backend catalogue has
   // not populated its free-form consequences list yet.
-  return [
-    "Manual permanent deletion requires one-shot confirmation.",
-    "Scheduled storage purge is skipped.",
-    ...provider.consequences,
-  ].filter((consequence, index, all) => all.indexOf(consequence) === index);
+  return [catalog, retention, ...provider.consequences].filter(
+    (consequence, index, all) => all.indexOf(consequence) === index,
+  );
 }
 
 export function StorageProviderPicker(props: {
@@ -66,7 +69,13 @@ export function StorageProviderPicker(props: {
   const secretFieldsSet = new Set(
     Array.isArray(props.values.secret_fields_set) ? props.values.secret_fields_set : [],
   );
-  const consequences = selected ? providerConsequences(selected) : [];
+  const consequences = selected
+    ? providerConsequences(
+        selected,
+        i18n?.t("storage.guardedCatalog") ?? "Confirmed catalog removal retains stored bytes.",
+        i18n?.t("storage.guardedRetention") ?? "Automatic physical deletion is unavailable.",
+      )
+    : [];
 
   return (
     <div className="space-y-5">
@@ -116,7 +125,11 @@ export function StorageProviderPicker(props: {
                 variant="outline"
                 disabled={props.disabled || !provider.selectable}
                 aria-pressed={provider.id === props.providerId}
-                title={provider.disabled_reason ?? undefined}
+                title={
+                  provider.uses?.vault && !provider.uses.vault.available
+                    ? storageOperationMessage(provider.uses.vault.reason, i18n?.t)
+                    : (provider.disabled_reason ?? undefined)
+                }
                 onClick={() => {
                   setCategoryOverride(null);
                   props.onProviderChange(provider);
@@ -130,7 +143,9 @@ export function StorageProviderPicker(props: {
                 <span>
                   <span className="block text-sm font-medium">{provider.label}</span>
                   <span className="block text-xs font-normal opacity-70">
-                    {provider.disabled_reason ?? provider.description}
+                    {provider.uses?.vault && !provider.uses.vault.available
+                      ? storageOperationMessage(provider.uses.vault.reason, i18n?.t)
+                      : (provider.disabled_reason ?? provider.description)}
                   </span>
                 </span>
               </Button>

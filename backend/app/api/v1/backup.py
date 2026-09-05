@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from app.core.logging import get_logger
 from app.core.security import require_superuser
 from app.services import backup
+from app.services.backup_capabilities import backup_operations
 from app.services.storage import UploadTooLarge
 
 logger = get_logger(__name__)
@@ -135,6 +136,7 @@ def list_backups() -> list[dict]:
             "prefix": backup._s3_prefix_for_key(m.path),  # noqa: SLF001
             "canonical": m.canonical,
             "precedence": m.precedence,
+            "operations": backup_operations(m),
         }
         for m in metas
     ]
@@ -165,6 +167,7 @@ def list_backup_sources() -> list[dict]:
             "prefix": backup._s3_prefix_for_key(m.path),  # noqa: SLF001
             "canonical": m.canonical,
             "precedence": m.precedence,
+            "operations": backup_operations(m),
         }
         for m in metas
     ]
@@ -199,6 +202,7 @@ def adopt_local_backup(filename: str) -> dict:
         "source_ref": meta.source_ref,
         "provider_ref": meta.provider_ref,
         "namespace": meta.namespace,
+        "operations": backup_operations(meta),
     }
 
 
@@ -335,6 +339,7 @@ def get_backup(backup_id: str, source_ref: str | None = None) -> dict:
         "source_ref": meta.source_ref,
         "provider_ref": meta.provider_ref,
         "namespace": meta.namespace,
+        "operations": backup_operations(meta),
     }
 
 

@@ -3,6 +3,32 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const messages = {
   en: {
+    "storage.fullImageRequired": "This connection requires the full API image.",
+    "storage.serviceMissing": "This API image does not include the required storage service.",
+    "storage.useUnsupported": "This provider does not support this use.",
+    "storage.probeRequired":
+      "Test this connection to check access. Safe deletion requires separate ownership evidence.",
+    "storage.deleteUnsupported":
+      "This storage cannot safely delete the exact backup copy. Its bytes and ownership record are retained.",
+    "storage.retentionUnsupported":
+      "Automatic retention is unavailable for this copy. The archive stays in storage.",
+    "storage.catalogOnly":
+      "This removes the Model from the catalog. Stored bytes are retained because this storage cannot safely delete the exact owned objects.",
+    "storage.sourceOriginalsRetained": "Catalog removal keeps the original source files.",
+    "storage.sourceReadOnly": "Library source originals are read-only.",
+    "storage.independentBackupRequired":
+      "GC requires current evidence of an independent backup destination.",
+    "storage.gcVerificationRequired":
+      "GC must verify this archive and its independence before approval.",
+    "storage.gcWitnessUnsupported": "This backup destination cannot currently provide GC evidence.",
+    "storage.backupOwnershipRequired": "The ownership record is retained with the backup bytes.",
+    "storage.ownedObjectsVerified":
+      "Deletion checks the exact owned objects before removing bytes.",
+    "storage.operationUnavailable": "This operation is unavailable. Review the storage connection.",
+    "storage.catalogConfirmation": "Remove from catalog?",
+    "storage.catalogConfirmAction": "Remove from catalog",
+    "storage.guardedCatalog": "Confirmed catalog removal retains stored bytes.",
+    "storage.guardedRetention": "Automatic physical deletion is unavailable.",
     "locale.label": "Language",
     "locale.en": "English",
     "locale.es": "Spanish",
@@ -522,6 +548,38 @@ const messages = {
     "multipart.notFoundError": "This multipart model or collection no longer exists.",
   },
   es: {
+    "storage.fullImageRequired": "Esta conexión requiere la imagen completa de la API.",
+    "storage.serviceMissing":
+      "Esta imagen de la API no incluye el servicio de almacenamiento necesario.",
+    "storage.useUnsupported": "Este proveedor no admite este uso.",
+    "storage.probeRequired":
+      "Prueba la conexión para comprobar el acceso. La eliminación segura requiere pruebas de propiedad adicionales.",
+    "storage.deleteUnsupported":
+      "Este almacenamiento no puede eliminar con seguridad la copia exacta. Se conservan sus bytes y su registro de propiedad.",
+    "storage.retentionUnsupported":
+      "La retención automática no está disponible para esta copia. El archivo permanece en el almacenamiento.",
+    "storage.catalogOnly":
+      "Esto elimina el Modelo del catálogo. Los bytes se conservan porque este almacenamiento no puede eliminar con seguridad los objetos exactos que le pertenecen.",
+    "storage.sourceOriginalsRetained":
+      "La eliminación del catálogo conserva los archivos originales de la fuente.",
+    "storage.sourceReadOnly": "Los originales de las fuentes de biblioteca son de solo lectura.",
+    "storage.independentBackupRequired":
+      "GC requiere pruebas actuales de un destino de copia independiente.",
+    "storage.gcVerificationRequired":
+      "GC debe verificar este archivo y su independencia antes de aprobarlo.",
+    "storage.gcWitnessUnsupported":
+      "Este destino de copia todavía no puede aportar pruebas para GC.",
+    "storage.backupOwnershipRequired":
+      "El registro de propiedad se conserva junto a los bytes de la copia.",
+    "storage.ownedObjectsVerified":
+      "La eliminación comprueba los objetos exactos que pertenecen a PrintStash antes de borrar los bytes.",
+    "storage.operationUnavailable":
+      "Esta operación no está disponible. Revisa la conexión de almacenamiento.",
+    "storage.catalogConfirmation": "¿Eliminar del catálogo?",
+    "storage.catalogConfirmAction": "Eliminar del catálogo",
+    "storage.guardedCatalog":
+      "La eliminación confirmada del catálogo conserva los bytes almacenados.",
+    "storage.guardedRetention": "La eliminación física automática no está disponible.",
     "locale.label": "Idioma",
     "locale.en": "Inglés",
     "locale.es": "Español",
