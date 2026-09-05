@@ -178,11 +178,18 @@ test.describe("shared provider connection forms", () => {
     const { mkdir, rm } = await import("node:fs/promises");
     const { dirname, resolve } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
-    const status = await (await page.request.get("/api/v1/setup/status")).json();
+    const statusResponse = await page.request.get("/api/v1/setup/status");
+    const status = await statusResponse.json();
     if (!status.configured) {
+      const origin = new URL(statusResponse.url()).origin;
+      const preparation = await page.request.post("/api/v1/setup/session", {
+        headers: { Origin: origin },
+      });
+      expect(preparation.status(), await preparation.text()).toBe(200);
+      const { csrf } = await preparation.json();
       const setup = await page.request.post("/api/v1/setup", {
+        headers: { Origin: origin, "X-PrintStash-Setup-CSRF": csrf },
         data: {
-          setup_token: "playwright-critical-backup-token",
           username: "backup-admin",
           password: "playwright-password",
           storage_backend: "local",
