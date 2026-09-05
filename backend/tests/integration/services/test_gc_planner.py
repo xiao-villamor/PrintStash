@@ -244,6 +244,33 @@ class TestCreateGcPlan:
 
 
 class TestApproveGcPlan:
+    def test_rechecks_a_candidate_restored_during_backup_verification(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin = build_user(db_session, "gc-concurrent-restore-admin", superuser=True)
+        candidate = _expired_model(db_session, "gc-concurrent-restore")
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+
+        def verify_witness():
+            with Session(db_session.bind) as other:
+                restored = other.get(Model, candidate.id)
+                assert restored is not None
+                restored.deleted_at = None
+                other.add(restored)
+                other.commit()
+            return _witness()
+
+        monkeypatch.setattr(gc_planner, "find_backup_witness", verify_witness)
+
+        with pytest.raises(gc_planner.GcSafetyError, match="gc_candidate_changed"):
+            gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+
+        db_session.expire_all()
+        assert db_session.get(Model, candidate.id).deleted_at is None
+        assert db_session.get(GcRun, run.id).state is GcRunState.PREVIEW
+
     @pytest.mark.parametrize("backup_bucket", ["shared", "different-bucket"])
     def test_same_server_cannot_authorize_gc_through_a_different_role(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch, backup_bucket: str
@@ -599,6 +626,32 @@ class TestApproveGcPlan:
 
 
 class TestFinalizeGcPlan:
+    def test_rechecks_a_candidate_restored_during_backup_reverification(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate, run = _approved_run(
+            db_session, monkeypatch, slug="gc-restore-during-finalize"
+        )
+        run.quarantine_until = utcnow() - timedelta(seconds=1)
+        db_session.add(run)
+        db_session.commit()
+
+        def reverify(_run):
+            with Session(db_session.bind) as other:
+                restored = other.get(Model, candidate.id)
+                assert restored is not None
+                restored.deleted_at = None
+                other.add(restored)
+                other.commit()
+
+        monkeypatch.setattr(gc_planner, "_reverify_backup", reverify)
+
+        with pytest.raises(gc_planner.GcSafetyError, match="gc_candidate_changed"):
+            gc_planner.finalize_plan(db_session, run.id)
+
+        db_session.expire_all()
+        assert db_session.get(Model, candidate.id).deleted_at is None
+
     @pytest.mark.parametrize(
         "mutation",
         [

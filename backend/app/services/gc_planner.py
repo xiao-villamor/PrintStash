@@ -434,6 +434,9 @@ def approve_plan(session: Session, run_id: int, digest: str, actor_id: int) -> G
         or witness.backup_identity_evidence is None
     ):
         raise GcSafetyError("gc_backup_required")
+    # Verification may take long enough for another request to restore a
+    # candidate. Re-read committed rows instead of the session identity map.
+    session.expire_all()
     _revalidate_plan(session, run)
     if get_backend().capabilities.tier is not StorageTier.VERIFIED:
         raise GcSafetyError("gc_verified_storage_required")
@@ -524,6 +527,7 @@ def finalize_plan(session: Session, run_id: int) -> GcRun:
         if get_backend().capabilities.tier is not StorageTier.VERIFIED:
             raise GcSafetyError("gc_verified_storage_required")
         _reverify_backup(run)
+        session.expire_all()
         items = _revalidate_plan(session, run)
         if get_backend().capabilities.tier is not StorageTier.VERIFIED:
             raise GcSafetyError("gc_verified_storage_required")

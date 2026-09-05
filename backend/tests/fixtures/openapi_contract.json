@@ -2239,6 +2239,23 @@
         "title": "FacetValueRead",
         "type": "object"
       },
+      "FailureDomainDeclarationInput": {
+        "additionalProperties": false,
+        "properties": {
+          "failure_domain": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "title": "Failure Domain",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failure_domain"
+        ],
+        "title": "FailureDomainDeclarationInput",
+        "type": "object"
+      },
       "FilamentProfileCreate": {
         "additionalProperties": false,
         "properties": {
@@ -28055,6 +28072,144 @@
           }
         },
         "summary": "List storage providers",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/targets": {
+      "get": {
+        "description": "Administrator view of credential-free identity and independence evidence.",
+        "operationId": "list_storage_targets_api_v1_storage_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Storage Targets Api V1 Storage Targets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Storage Targets",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/targets/{target_ref}/failure-domain": {
+      "delete": {
+        "operationId": "remove_failure_domain_api_v1_storage_targets__target_ref__failure_domain_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_ref",
+            "required": true,
+            "schema": {
+              "title": "Target Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove Failure Domain Api V1 Storage Targets  Target Ref  Failure Domain Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove Failure Domain",
+        "tags": [
+          "storage"
+        ]
+      },
+      "put": {
+        "operationId": "declare_failure_domain_api_v1_storage_targets__target_ref__failure_domain_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_ref",
+            "required": true,
+            "schema": {
+              "title": "Target Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FailureDomainDeclarationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Declare Failure Domain Api V1 Storage Targets  Target Ref  Failure Domain Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Declare Failure Domain",
         "tags": [
           "storage"
         ]
