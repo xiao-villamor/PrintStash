@@ -99,6 +99,7 @@ from tests.factories.ops import (
     build_background_job,
     build_document,
     build_external_library,
+    build_failure_domain_declaration,
     build_filament_profile,
     build_notification_channel,
     build_restore_marker,
@@ -136,6 +137,7 @@ from tests.factories.storage import (
 )
 
 __all__ = [
+    "build_failure_domain_declaration",
     "PASSWORD",
     "a_member_who_can_see_one_collection",
     "a_gcode_artifact",

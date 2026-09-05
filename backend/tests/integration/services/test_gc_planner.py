@@ -7,12 +7,15 @@ verified backup and finalization waits through the quarantine window.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 from sqlmodel import Session
 
+from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import (
     Document,
@@ -24,9 +27,11 @@ from app.db.models import (
     RestoreMarker,
 )
 from app.services import backup, gc_planner
-from app.services.storage_backend import StorageTier
+from app.services.storage_backend import S3StorageBackend, StorageTier
+from app.services.storage_identity import independent_evidence, s3_target
 from tests.factories import (
     build_collection,
+    build_failure_domain_declaration,
     build_file,
     build_model,
     build_user,
@@ -61,6 +66,15 @@ class _Factory:
         return _Context()
 
 
+def _evidence() -> tuple[dict, dict]:
+    evidence = independent_evidence(
+        gc_planner.get_backend().storage_target,
+        s3_target(endpoint="", bucket="backups"),
+    )
+    assert evidence is not None
+    return evidence
+
+
 def _witness(name: str = "backup") -> gc_planner.BackupWitness:
     return gc_planner.BackupWitness(
         backup_id=name,
@@ -68,6 +82,8 @@ def _witness(name: str = "backup") -> gc_planner.BackupWitness:
         provider_ref="e" * 64,
         archive_sha256="b" * 64,
         verified_at=utcnow(),
+        active_identity_evidence=_evidence()[0],
+        backup_identity_evidence=_evidence()[1],
     )
 
 
@@ -178,9 +194,7 @@ class TestCreateGcPlan:
         db_session.add_all([model, owned, external, document])
         db_session.commit()
         db_session.refresh(document)
-        document.body = (
-            f"/api/v1/documents/{document.id}/images/{'a' * 64}.png"
-        )
+        document.body = f"/api/v1/documents/{document.id}/images/{'a' * 64}.png"
         db_session.refresh(collection)
         collection.readme = (
             f"/api/v1/collections/{collection.id}/images/{'c' * 64}.webp"
@@ -204,21 +218,136 @@ class TestCreateGcPlan:
         deleted_at = utcnow() - timedelta(days=31)
         safe = gc_planner._Candidate("model", 1, deleted_at, 1, 1)  # noqa: SLF001
         too_many_keys = gc_planner._Candidate(  # noqa: SLF001
-            "model", 2, deleted_at, gc_planner._MAX_KEYS, 1  # noqa: SLF001
+            "model",
+            2,
+            deleted_at,
+            gc_planner._MAX_KEYS,
+            1,  # noqa: SLF001
         )
         too_many_bytes = gc_planner._Candidate(  # noqa: SLF001
-            "model", 3, deleted_at, 1, gc_planner._MAX_BYTES + 1  # noqa: SLF001
+            "model",
+            3,
+            deleted_at,
+            1,
+            gc_planner._MAX_BYTES + 1,  # noqa: SLF001
         )
 
         assert gc_planner._select_bounded(  # noqa: SLF001
             db_session, [safe, too_many_keys]
         ) == [safe]
-        assert gc_planner._select_bounded(  # noqa: SLF001
-            db_session, [too_many_bytes]
-        ) == []
+        assert (
+            gc_planner._select_bounded(  # noqa: SLF001
+                db_session, [too_many_bytes]
+            )
+            == []
+        )
 
 
 class TestApproveGcPlan:
+    @pytest.mark.parametrize("backup_bucket", ["shared", "different-bucket"])
+    def test_same_server_cannot_authorize_gc_through_a_different_role(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, backup_bucket: str
+    ) -> None:
+        for key, value in {
+            "s3_bucket": "shared",
+            "s3_endpoint_url": "https://shared.example.test",
+            "s3_region": "us-east-1",
+            "s3_access_key": "active-key",
+            "s3_secret_key": "active-secret",
+            "s3_root": "vault-prefix",
+        }.items():
+            monkeypatch.setitem(_overlay, key, value)
+        active = S3StorageBackend(check_bucket=False)
+        monkeypatch.setattr(
+            active, "_capabilities", replace(active.capabilities, verified_delete=True)
+        )
+        assert active.capabilities.tier is StorageTier.VERIFIED
+        monkeypatch.setattr(gc_planner, "get_backend", lambda: active)
+        target = backup._BackupS3Target(
+            None,
+            backup_bucket,
+            "signature",
+            "e" * 64,
+            "https://shared.example.test:443",
+        )
+        assert target.storage_target is not None
+        build_failure_domain_declaration(
+            db_session, active.storage_target, failure_domain="active-site"
+        )
+        if target.storage_target.target_ref != active.storage_target.target_ref:
+            build_failure_domain_declaration(
+                db_session, target.storage_target, failure_domain="claimed-offsite"
+            )
+        meta = backup.BackupMeta(
+            id="shared",
+            created_at=utcnow().isoformat(),
+            size_bytes=10,
+            storage_backend="s3",
+            file_count=1,
+            app_version="0.13.0",
+            path="backup-prefix/shared.tar.gz",
+            location="s3",
+            archive_sha256="b" * 64,
+            provider_ref=target.provider_ref,
+            source_ref="backup-profile-source",
+            namespace="backup-prefix",
+        )
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: target)
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: [meta])
+        monkeypatch.setattr(
+            backup,
+            "verify_backup",
+            lambda *_args, **_kwargs: pytest.fail(
+                "shared storage must be rejected before archive verification"
+            ),
+        )
+        admin = build_user(db_session, "shared-gc-admin", superuser=True)
+        candidate = _expired_model(db_session, "shared-candidate")
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        assert run.active_provider_ref != target.provider_ref
+
+        with pytest.raises(gc_planner.GcSafetyError, match="gc_backup_required"):
+            gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+
+        assert db_session.get(Model, candidate.id) is not None
+        assert run.state is GcRunState.PREVIEW
+
+    def test_unknown_target_identity_cannot_authorize_gc(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate = backup.BackupMeta(
+            id="unknown-target",
+            created_at=utcnow().isoformat(),
+            path="unknown.tar.gz",
+            location="s3",
+            provider_ref="2" * 64,
+            size_bytes=1,
+            storage_backend="local",
+            file_count=1,
+            app_version="0.13.0",
+            archive_sha256="a" * 64,
+            source_ref="source-ref",
+            namespace="backups",
+        )
+        monkeypatch.setattr(gc_planner, "_active_provider_ref", lambda: "1" * 64)
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: [candidate])
+        monkeypatch.setattr(
+            backup,
+            "verify_backup",
+            lambda *_args, **_kwargs: backup.BackupVerification(
+                backup_id=candidate.id,
+                valid=True,
+                app_compatible=True,
+                manifest_version="3",
+                checked_members=1,
+                findings=[],
+            ),
+        )
+
+        assert gc_planner.find_backup_witness() is None
+
     def test_created_at_parser_normalizes_only_valid_time(self) -> None:
         assert gc_planner._parse_created_at("not-a-date") is None  # noqa: SLF001
         parsed = gc_planner._parse_created_at("2026-01-02T03:04:05")  # noqa: SLF001
@@ -267,6 +396,11 @@ class TestApproveGcPlan:
         ]
         monkeypatch.setattr(gc_planner, "_active_provider_ref", lambda: active_ref)
         monkeypatch.setattr(backup, "list_backup_sources", lambda: candidates)
+        monkeypatch.setattr(
+            backup,
+            "_get_backup_s3_target",
+            lambda: backup._BackupS3Target(None, "backups", "signature", valid_ref, ""),
+        )
         monkeypatch.setattr(
             backup,
             "verify_backup",
@@ -361,9 +495,7 @@ class TestApproveGcPlan:
         with pytest.raises(gc_planner.GcSafetyError, match=error):
             gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
 
-    def test_approval_requires_an_exact_preview(
-        self, db_session: Session
-    ) -> None:
+    def test_approval_requires_an_exact_preview(self, db_session: Session) -> None:
         admin = build_user(db_session, "gc-approval-guards", superuser=True)
         _expired_model(db_session, "gc-approval-guards")
         run = gc_planner.create_plan(
@@ -423,6 +555,14 @@ class TestApproveGcPlan:
         assert approved.backup_provider_ref == witness.provider_ref
         assert approved.backup_archive_sha256 == witness.archive_sha256
         assert approved.quarantine_until is not None
+        assert (
+            json.loads(approved.active_identity_evidence)
+            == witness.active_identity_evidence
+        )
+        assert (
+            json.loads(approved.backup_identity_evidence)
+            == witness.backup_identity_evidence
+        )
 
     def test_refuses_approval_without_a_recent_independent_verified_backup(
         self,
@@ -459,15 +599,97 @@ class TestApproveGcPlan:
 
 
 class TestFinalizeGcPlan:
-    def test_only_quarantined_plans_can_finalize(
-        self, db_session: Session
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            "domain",
+            "revision",
+            "withdrawal",
+            "legacy-approval",
+            "target",
+            "archive",
+            "compatibility",
+            "active-tier",
+        ],
+    )
+    def test_identity_drift_leaves_candidates_restorable(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, mutation: str
     ) -> None:
+        admin = build_user(db_session, "gc-domain-admin", superuser=True)
+        candidate = _expired_model(db_session, f"gc-domain-{mutation}")
+        target = backup._BackupS3Target(
+            None, "backups", "signature", "e" * 64, "https://offsite.example.test"
+        )
+        assert target.storage_target is not None
+        declaration = build_failure_domain_declaration(
+            db_session, target.storage_target
+        )
+        meta = backup.BackupMeta(
+            id="backup",
+            created_at=utcnow().isoformat(),
+            size_bytes=10,
+            storage_backend="local",
+            file_count=1,
+            app_version="0.13.0",
+            path="backup.tar.gz",
+            location="s3",
+            archive_sha256="b" * 64,
+            provider_ref=target.provider_ref,
+            source_ref="source-ref",
+            namespace="backups",
+        )
+        verification = backup.BackupVerification("backup", True, True, "3", 1, [])
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: target)
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: [meta])
+        monkeypatch.setattr(
+            backup, "verify_backup", lambda *_args, **_kwargs: verification
+        )
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        run.quarantine_until = utcnow() - timedelta(seconds=1)
+        if mutation == "domain":
+            declaration.failure_domain = "shared-site"
+        elif mutation == "revision":
+            declaration.revision = "c" * 32
+        elif mutation == "withdrawal":
+            db_session.delete(declaration)
+        elif mutation == "legacy-approval":
+            run.backup_identity_evidence = None
+        elif mutation == "target":
+            target = replace(target, endpoint="https://elsewhere.example.test")
+        elif mutation == "archive":
+            meta.archive_sha256 = "c" * 64
+        elif mutation == "compatibility":
+            verification.app_compatible = False
+        else:
+            backend = gc_planner.get_backend()
+            monkeypatch.setattr(
+                backend,
+                "_capabilities",
+                replace(backend.capabilities, verified_delete=False),
+            )
+        if mutation in {"domain", "revision"}:
+            db_session.add(declaration)
+        db_session.add(run)
+        db_session.commit()
+
+        with pytest.raises(
+            gc_planner.GcSafetyError,
+            match="gc_(identity_evidence_changed|backup_witness_invalid|backup_witness_missing|verified_storage_required)",
+        ):
+            gc_planner.finalize_plan(db_session, run.id)
+
+        db_session.expire_all()
+        assert db_session.get(Model, candidate.id) is not None
+        assert db_session.get(GcRun, run.id).state == GcRunState.BLOCKED
+
+    def test_only_quarantined_plans_can_finalize(self, db_session: Session) -> None:
         with pytest.raises(gc_planner.GcSafetyError, match="gc_plan_not_found"):
             gc_planner.finalize_plan(db_session, 999999)
 
-        run = gc_planner.create_plan(
-            db_session, retention_days=30, requested_by=None
-        )
+        run = gc_planner.create_plan(db_session, retention_days=30, requested_by=None)
         with pytest.raises(gc_planner.GcSafetyError, match="gc_plan_not_quarantined"):
             gc_planner.finalize_plan(db_session, run.id)
 
@@ -487,6 +709,8 @@ class TestFinalizeGcPlan:
             provider_ref="f" * 64,
             archive_sha256="a" * 64,
             verified_at=utcnow(),
+            active_identity_evidence=_evidence()[0],
+            backup_identity_evidence=_evidence()[1],
         )
         monkeypatch.setattr(gc_planner, "find_backup_witness", lambda: witness)
         gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
@@ -512,6 +736,8 @@ class TestFinalizeGcPlan:
             provider_ref="e" * 64,
             archive_sha256="b" * 64,
             verified_at=utcnow(),
+            active_identity_evidence=_evidence()[0],
+            backup_identity_evidence=_evidence()[1],
         )
         monkeypatch.setattr(gc_planner, "find_backup_witness", lambda: witness)
         gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
@@ -670,6 +896,12 @@ class TestBackupReverification:
             backup_source_ref="source",
             backup_provider_ref="e" * 64,
             backup_archive_sha256="f" * 64,
+            active_identity_evidence=json.dumps(
+                _evidence()[0], sort_keys=True, separators=(",", ":")
+            ),
+            backup_identity_evidence=json.dumps(
+                _evidence()[1], sort_keys=True, separators=(",", ":")
+            ),
         )
 
     def test_missing_or_same_provider_witness_is_invalid(
@@ -713,6 +945,11 @@ class TestBackupReverification:
         monkeypatch.setattr(backup, "list_backup_sources", lambda: [meta])
         monkeypatch.setattr(
             backup,
+            "_get_backup_s3_target",
+            lambda: backup._BackupS3Target(None, "backups", "signature", "e" * 64, ""),
+        )
+        monkeypatch.setattr(
+            backup,
             "verify_backup",
             lambda *_args, **_kwargs: backup.BackupVerification(
                 backup_id="backup",
@@ -734,9 +971,7 @@ class TestAbortGcPlan:
         with pytest.raises(gc_planner.GcSafetyError, match="gc_plan_not_found"):
             gc_planner.abort_plan(db_session, 999999)
 
-        run = gc_planner.create_plan(
-            db_session, retention_days=30, requested_by=None
-        )
+        run = gc_planner.create_plan(db_session, retention_days=30, requested_by=None)
         run.state = GcRunState.COMPLETED
         run.active_slot = None
         db_session.add(run)
@@ -831,9 +1066,7 @@ class TestScheduledGc:
         state: GcRunState,
         error: str,
     ) -> None:
-        run = gc_planner.create_plan(
-            db_session, retention_days=30, requested_by=None
-        )
+        run = gc_planner.create_plan(db_session, retention_days=30, requested_by=None)
         run.state = GcRunState.FINALIZING
         db_session.add(run)
         db_session.commit()
@@ -893,9 +1126,7 @@ class TestScheduledGc:
         monkeypatch: pytest.MonkeyPatch,
         finalize_fails: bool,
     ) -> None:
-        run = gc_planner.create_plan(
-            db_session, retention_days=30, requested_by=None
-        )
+        run = gc_planner.create_plan(db_session, retention_days=30, requested_by=None)
         run.state = GcRunState.QUARANTINED
         run.quarantine_until = utcnow() - timedelta(seconds=1)
         db_session.add(run)
@@ -905,12 +1136,15 @@ class TestScheduledGc:
         )
 
         if finalize_fails:
+
             def finalize(*_args, **_kwargs):
                 raise gc_planner.GcSafetyError("blocked")
         else:
+
             def finalize(*_args, **_kwargs):
                 run.state = GcRunState.COMPLETED
                 return run
+
         monkeypatch.setattr(gc_planner, "finalize_plan", finalize)
 
         result = gc_planner.run_scheduled_gc(retention_days=30)

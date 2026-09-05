@@ -33,6 +33,7 @@ from app.db.models import (
     ShareLink,
     StorageConnection,
     StorageConnectionPurpose,
+    StorageFailureDomainDeclaration,
     SystemConfig,
     User,
     VaultAuditFinding,
@@ -42,7 +43,27 @@ from app.db.models import (
     VaultAuditRunState,
     VaultAuditSeverity,
 )
+from app.services.storage_identity import StorageTargetIdentity
 from tests.factories._support import nth, reject_aliases, save, unique_hash
+
+
+def build_failure_domain_declaration(
+    session: Session,
+    target: StorageTargetIdentity,
+    *,
+    failure_domain: str = "off-site",
+    **overrides: Any,
+) -> StorageFailureDomainDeclaration:
+    return save(
+        session,
+        StorageFailureDomainDeclaration(
+            target_ref=target.target_ref,
+            target_identity=target.model_dump_json(),
+            failure_domain=failure_domain,
+            revision=unique_hash("failure-domain-revision")[:32],
+            **overrides,
+        ),
+    )
 
 
 def build_system_config(

@@ -20,6 +20,7 @@ from typing import BinaryIO, Iterator
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.filesystem import FsKind, detect_fs_kind
+from app.services.storage_identity import StorageTargetIdentity
 
 logger = get_logger(__name__)
 
@@ -213,6 +214,11 @@ class StorageBackend(ABC):
     # (``s3``); legacy fakes fall back to ``backend_name``.
     provider_id: str
     transport: str
+
+    @property
+    def storage_target(self) -> StorageTargetIdentity | None:
+        """Versioned target identity, independent of locator/ownership hashes."""
+        return None
 
     @property
     def capabilities(self) -> StorageCapabilities:
@@ -629,6 +635,12 @@ class LocalStorageBackend(StorageBackend):
     transport = "local"
     _BINDING_FILENAME = ".printstash-storage-root.json"
     _BINDING_FORMAT = 1
+
+    @property
+    def storage_target(self) -> StorageTargetIdentity:
+        return StorageTargetIdentity(
+            transport="local", endpoint=self._installation_identity()
+        )
 
     def __init__(
         self,
@@ -1926,6 +1938,12 @@ def _raise_s3_missing_object(exc: Exception, key: str) -> None:
 class S3StorageBackend(StorageBackend):
     backend_name = "s3"
     transport = "s3"
+
+    @property
+    def storage_target(self) -> StorageTargetIdentity:
+        from app.services.storage_identity import s3_target
+
+        return s3_target(endpoint=self._endpoint_url, bucket=self._bucket)
 
     def __init__(self, *, check_bucket: bool = True) -> None:
         import boto3

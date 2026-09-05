@@ -13,6 +13,10 @@
   recovery on both supported architectures.
 - SFTP streaming releases its connection, reader, and event loop when opening
   fails, a read is cancelled, or cleanup itself encounters an error.
+- Garbage collection requires current evidence of independent storage failure
+  domains. Different profiles, credentials, or prefixes cannot authorize
+  deletion using a backup on the same storage. Custom targets require an
+  administrator declaration; changes invalidate an approved plan.
 
 ## 0.13.0
 
