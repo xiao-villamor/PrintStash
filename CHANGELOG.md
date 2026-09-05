@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- The full container image includes the S3 transport used by remote Library
+  sources and backup connections. Image checks now exercise remote-only S3
+  recovery on both supported architectures.
+
 ## 0.13.0
 
 **Back up before upgrading. This release includes additive database migrations

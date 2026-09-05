@@ -625,8 +625,10 @@ jobs:
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-latest
-            load: false
+            load: true
             step-smoke: false
+            storage-smoke: true
+            variant: full
           - image: printstash-api
             context: ./backend
             dockerfile: ./backend/Dockerfile
@@ -636,6 +638,8 @@ jobs:
             runner: ubuntu-24.04-arm
             load: true
             step-smoke: true
+            storage-smoke: true
+            variant: full
           - image: printstash-api-lite
             context: ./backend
             dockerfile: ./backend/Dockerfile
@@ -643,8 +647,10 @@ jobs:
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-latest
-            load: false
+            load: true
             step-smoke: false
+            storage-smoke: true
+            variant: lite
           - image: printstash-api-lite
             context: ./backend
             dockerfile: ./backend/Dockerfile
@@ -652,8 +658,10 @@ jobs:
             arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
-            load: false
+            load: true
             step-smoke: false
+            storage-smoke: true
+            variant: lite
           - image: printstash-frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
@@ -702,3 +710,17 @@ jobs:
           printstash-api:arm64-ci
           /app/.venv/bin/python -c
           "from pathlib import Path; from app.services.mesh_processing import _load_mesh; mesh = _load_mesh(Path('/fixtures/cascadio_material.stp')); assert mesh is not None and len(mesh.faces) > 0"
+
+      - name: Install uv for image contracts
+        if: matrix.storage-smoke
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install image contract runner
+        if: matrix.storage-smoke
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Check final-image storage lifecycle
+        if: matrix.storage-smoke
+        working-directory: backend
+        run: ./scripts/test.sh image --image ${{ matrix.image }}:${{ matrix.arch }}-ci --variant ${{ matrix.variant }}
