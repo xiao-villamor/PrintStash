@@ -6,6 +6,7 @@ import io
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -326,6 +327,98 @@ class TestS3LibrarySourceAdapter:
 
 
 class TestOpenDalLibrarySourceAdapter:
+    @pytest.mark.parametrize(
+        "after",
+        [
+            None,
+            StorageObjectInfo(size=4, etag="before"),
+            StorageObjectInfo(size=3, etag="changed"),
+            StorageObjectInfo(size=3, etag="before", version_id="replacement"),
+        ],
+        ids=["disappeared", "size-changed", "etag-changed", "version-changed"],
+    )
+    def test_rejects_changed_metadata_before_exposing_downloaded_content(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        after: StorageObjectInfo | None,
+    ) -> None:
+        backend = _StableDirectoryBackend()
+        observations = iter([StorageObjectInfo(size=3, etag="before"), after])
+        monkeypatch.setattr(backend, "object_info", lambda _key: next(observations))
+        monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
+        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+
+        with pytest.raises(LibrarySourceError, match="library_source_changed"):
+            with source.materialize("models/a.stl"):
+                pytest.fail("changed source content was exposed to indexing")
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_cleans_the_temporary_download_after_a_read_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        backend = _StableDirectoryBackend()
+
+        def broken_stream(_key: str):
+            yield b"a"
+            raise OSError("remote read failed")
+
+        monkeypatch.setattr(backend, "stream_chunks", broken_stream)
+        monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
+        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+
+        with pytest.raises(OSError, match="remote read failed"):
+            with source.materialize("models/a.stl"):
+                pytest.fail("failed remote content was exposed to indexing")
+
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize(
+        "payload",
+        [b"", b"ab", b"abcd"],
+        ids=["empty", "short", "oversized"],
+    )
+    def test_rejects_a_stream_with_the_wrong_length(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        payload: bytes,
+    ) -> None:
+        backend = _StableDirectoryBackend()
+        monkeypatch.setattr(backend, "stream_chunks", lambda _key: iter([payload]))
+        monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
+        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+
+        with pytest.raises(LibrarySourceError, match="library_source_size_mismatch"):
+            with source.materialize("models/a.stl"):
+                pytest.fail("an incomplete source was exposed to indexing")
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_stops_reading_when_the_advertised_length_is_exceeded(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        backend = _StableDirectoryBackend()
+
+        def oversized_stream(_key: str):
+            yield b"abcd"
+            pytest.fail("continued reading an oversized source")
+
+        monkeypatch.setattr(backend, "stream_chunks", oversized_stream)
+        monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
+        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+
+        with pytest.raises(LibrarySourceError, match="library_source_size_mismatch"):
+            with source.materialize("models/a.stl"):
+                pytest.fail("an oversized source was exposed to indexing")
+
+        assert list(tmp_path.iterdir()) == []
+
     def test_depth_first_cursor_pages_without_a_recursive_full_listing(self) -> None:
         source = OpenDalLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
 

@@ -322,13 +322,17 @@ class OpenDalLibrarySource:
         try:
             with open(fd, "wb", closefd=True) as output:
                 for chunk in self.backend.stream_chunks(provider_key):
-                    output.write(chunk)
                     written += len(chunk)
+                    if written > before.size:
+                        raise LibrarySourceError("library_source_size_mismatch")
+                    output.write(chunk)
                     if self.max_bytes_per_second:
                         target_elapsed = written / self.max_bytes_per_second
                         remaining = target_elapsed - (time.monotonic() - started)
                         if remaining > 0:
                             time.sleep(remaining)
+            if written != before.size:
+                raise LibrarySourceError("library_source_size_mismatch")
             after = self.backend.object_info(provider_key)
             if (
                 after is None

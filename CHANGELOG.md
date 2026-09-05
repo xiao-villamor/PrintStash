@@ -17,6 +17,8 @@
   domains. Different profiles, credentials, or prefixes cannot authorize
   deletion using a backup on the same storage. Custom targets require an
   administrator declaration; changes invalidate an approved plan.
+- Remote Library sources reject incomplete or oversized downloads before
+  indexing, so a truncated first read cannot create an Artifact from partial bytes.
 
 ## 0.13.0
 
