@@ -215,6 +215,14 @@ def _start_seaweedfs() -> str:
         )
     )
     _started.append(container)
+    # GC tests need the container's distinct network endpoint: a loopback
+    # backup is correctly considered shared with a local Vault. The test
+    # administrator still has to declare this simulated failure domain.
+    networks = container.get_wrapped_container().attrs["NetworkSettings"]["Networks"]
+    private_ip = next(
+        info["IPAddress"] for info in networks.values() if info["IPAddress"]
+    )
+    _resolved["s3_private"] = f"http://{private_ip}:{SEAWEEDFS_S3_PORT}"
     host = container.get_container_host_ip()
     port = container.get_exposed_port(SEAWEEDFS_S3_PORT)
     return f"http://{host}:{port}"
@@ -228,6 +236,14 @@ def postgres_url() -> str:
 def s3_endpoint() -> str:
     """A real S3-compatible endpoint URL. Raises when Docker is not running."""
     return _resolve("s3", S3_RESOURCE, _start_seaweedfs)
+
+
+def s3_private_endpoint() -> str:
+    """Direct Linux Docker bridge endpoint for declared-domain GC scenarios."""
+    s3_endpoint()
+    endpoint = _resolved["s3_private"]
+    assert endpoint is not None
+    return endpoint
 
 
 def _start_nextcloud() -> str:

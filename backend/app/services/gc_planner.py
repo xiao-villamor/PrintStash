@@ -31,7 +31,9 @@ from app.db.models import (
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
+    OwnedStorageObject,
     RestoreMarker,
+    StorageObjectState,
 )
 from app.db.scopes import trashed
 from app.db.session import get_session_factory
@@ -336,7 +338,7 @@ def find_backup_witness() -> BackupWitness | None:
         if (
             created_at is None
             or now - created_at > _BACKUP_MAX_AGE
-            or meta.location != "s3"
+            or meta.location not in {"s3", "opendal:s3"}
             or not meta.source_ref
             or not meta.provider_ref
             or meta.provider_ref == active
@@ -366,14 +368,47 @@ def find_backup_witness() -> BackupWitness | None:
 def _source_identity_evidence(meta) -> tuple[dict, dict] | None:
     from app.services import backup
 
-    target = backup._get_backup_s3_target()
-    if (
-        target is None
-        or meta.location != "s3"
-        or target.provider_ref != meta.provider_ref
-    ):
+    if meta.location == "s3":
+        target = backup._get_backup_s3_target()
+        if target is None or target.provider_ref != meta.provider_ref:
+            return None
+        storage_target = target.storage_target
+    elif meta.location == "opendal:s3":
+        from app.services.backup_destination import destination_for_ownership
+
+        if meta.source_ref != backup._source_ref(
+            location=meta.location,
+            namespace=meta.namespace,
+            path=meta.path,
+            provider_ref=meta.provider_ref,
+        ):
+            return None
+        with get_session_factory().scoped_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.provider_ref == meta.provider_ref,
+                    OwnedStorageObject.namespace == meta.namespace,
+                    OwnedStorageObject.key == meta.path,
+                    OwnedStorageObject.object_kind.in_(("backup", "backup-legacy")),
+                    OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                )
+            ).first()
+            if (
+                row is None
+                or not row.token
+                or not row.sha256
+                or row.sha256 != meta.archive_sha256
+            ):
+                return None
+            destination = destination_for_ownership(row)
+            if destination is None:
+                return None
+            storage_target = destination.backend.storage_target
+        if storage_target is None or storage_target.transport != "s3":
+            return None
+    else:
         return None
-    return independent_evidence(get_backend().storage_target, target.storage_target)
+    return independent_evidence(get_backend().storage_target, storage_target)
 
 
 def _serialize_evidence(evidence: dict) -> str:
@@ -481,7 +516,7 @@ def _reverify_backup(run: GcRun) -> None:
             and item.source_ref == run.backup_source_ref
             and item.provider_ref == run.backup_provider_ref
             and item.archive_sha256 == run.backup_archive_sha256
-            and item.location == "s3"
+            and item.location in {"s3", "opendal:s3"}
         ),
         None,
     )

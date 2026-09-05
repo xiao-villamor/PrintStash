@@ -1211,3 +1211,203 @@ class TestScheduledGc:
 
         assert result["gc_plan_id"] == run.id
         assert result["rows"] == (0 if finalize_fails else run.resource_count)
+
+
+class TestOpenDalS3Witness:
+    def _source(self, session, monkeypatch):
+        from app.services import backup_destination
+        from tests.factories import build_owned_storage_object
+
+        target = s3_target(endpoint="https://offsite.example.test", bucket="backups")
+        declaration = build_failure_domain_declaration(session, target)
+        row = build_owned_storage_object(
+            session,
+            backend="s3_self_hosted",
+            namespace="backups",
+            key="backups/archive.tar.gz",
+            object_kind="backup",
+            provider_ref="e" * 64,
+            sha256="b" * 64,
+            token="publication-token",
+        )
+        meta = backup.BackupMeta(
+            id="archive",
+            created_at=utcnow().isoformat(),
+            size_bytes=3,
+            storage_backend="local",
+            file_count=1,
+            app_version="0.13.0",
+            path=row.key,
+            location="opendal:s3",
+            archive_sha256=row.sha256,
+            provider_ref=row.provider_ref,
+            source_ref=backup._source_ref(
+                location="opendal:s3",
+                namespace=row.namespace,
+                path=row.key,
+                provider_ref=row.provider_ref,
+            ),
+            namespace=row.namespace,
+        )
+        destination = SimpleNamespace(backend=SimpleNamespace(storage_target=target))
+        monkeypatch.setattr(
+            backup_destination, "destination_for_ownership", lambda _: destination
+        )
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: [meta])
+        verification = backup.BackupVerification("archive", True, True, "3", 1, [])
+        calls = []
+
+        def verify(backup_id, *, source_ref):
+            calls.append((backup_id, source_ref))
+            return verification
+
+        monkeypatch.setattr(backup, "verify_backup", verify)
+        return row, meta, declaration, destination, verification, calls
+
+    def test_independent_opendal_s3_archive_can_witness_gc(
+        self, db_session, monkeypatch
+    ):
+        _, meta, _, _, _, calls = self._source(db_session, monkeypatch)
+
+        witness = gc_planner.find_backup_witness()
+
+        assert witness is not None
+        assert witness.source_ref == meta.source_ref
+        assert witness.archive_sha256 == meta.archive_sha256
+        assert witness.backup_identity_evidence["target"]["container"] == "backups"
+        assert calls == [(meta.id, meta.source_ref)]
+
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            "domain",
+            "target",
+            "digest",
+            "token",
+            "destination",
+            "uncommitted",
+            "missing-row",
+            "missing-digest",
+            "missing-target",
+            "wrong-transport",
+            "source",
+            "transport",
+        ],
+    )
+    def test_unprovable_opendal_source_never_authorizes_gc(
+        self, db_session, monkeypatch, mutation
+    ):
+        from app.db.models import StorageObjectState
+        from app.services import backup_destination
+
+        row, meta, declaration, destination, _, calls = self._source(
+            db_session, monkeypatch
+        )
+        if mutation == "domain":
+            db_session.delete(declaration)
+        elif mutation == "target":
+            destination.backend.storage_target = s3_target(
+                endpoint="http://localhost:9000", bucket="backups"
+            )
+        elif mutation == "digest":
+            row.sha256 = "c" * 64
+        elif mutation == "token":
+            row.token = None
+        elif mutation == "missing-row":
+            meta.path = "missing.tar.gz"
+            meta.source_ref = backup._source_ref(
+                location=meta.location,
+                namespace=meta.namespace,
+                path=meta.path,
+                provider_ref=meta.provider_ref,
+            )
+        elif mutation == "missing-digest":
+            row.sha256 = None
+        elif mutation == "missing-target":
+            destination.backend.storage_target = None
+        elif mutation == "wrong-transport":
+            destination.backend.storage_target = (
+                destination.backend.storage_target.model_copy(
+                    update={"transport": "webdav"}
+                )
+            )
+        elif mutation == "destination":
+            monkeypatch.setattr(
+                backup_destination, "destination_for_ownership", lambda _: None
+            )
+        elif mutation == "uncommitted":
+            row.state = StorageObjectState.PENDING
+        elif mutation == "source":
+            meta.source_ref = "different-source"
+        else:
+            meta.location = "opendal:webdav"
+        db_session.add(row)
+        db_session.commit()
+
+        assert gc_planner.find_backup_witness() is None
+        assert calls == []
+
+    @pytest.mark.parametrize(
+        "mutation", ["domain", "target", "archive", "invalid", "compatibility"]
+    )
+    def test_changed_opendal_witness_preserves_quarantined_candidates(
+        self, db_session, monkeypatch, mutation
+    ):
+        _, meta, declaration, destination, verification, _ = self._source(
+            db_session, monkeypatch
+        )
+        admin = build_user(db_session, "opendal-gc-admin", superuser=True)
+        candidate = _expired_model(db_session, "opendal-gc-candidate")
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        run.quarantine_until = utcnow() - timedelta(seconds=1)
+        if mutation == "domain":
+            declaration.failure_domain = "changed-domain"
+            db_session.add(declaration)
+        elif mutation == "target":
+            destination.backend.storage_target = s3_target(
+                endpoint="https://changed.example.test", bucket="backups"
+            )
+        elif mutation == "archive":
+            meta.archive_sha256 = "c" * 64
+        elif mutation == "invalid":
+            verification.valid = False
+        else:
+            verification.app_compatible = False
+        db_session.add(run)
+        db_session.commit()
+
+        with pytest.raises(gc_planner.GcSafetyError):
+            gc_planner.finalize_plan(db_session, run.id)
+
+        db_session.expire_all()
+        assert db_session.get(Model, candidate.id) is not None
+        assert db_session.get(GcRun, run.id).state == GcRunState.BLOCKED
+
+    @pytest.mark.parametrize("invalid", ["content", "compatibility"])
+    def test_failed_opendal_verification_cannot_witness_gc(
+        self, db_session, monkeypatch, invalid
+    ):
+        _, _, _, _, verification, calls = self._source(db_session, monkeypatch)
+        if invalid == "content":
+            verification.valid = False
+        else:
+            verification.app_compatible = False
+        assert gc_planner.find_backup_witness() is None
+        assert len(calls) == 1
+
+    def test_evidence_changed_during_opendal_verification_is_rejected(
+        self, db_session, monkeypatch
+    ):
+        _, _, declaration, _, verification, _ = self._source(db_session, monkeypatch)
+
+        def verify(*_args, **_kwargs):
+            declaration.revision = "c" * 32
+            db_session.add(declaration)
+            db_session.commit()
+            return verification
+
+        monkeypatch.setattr(backup, "verify_backup", verify)
+        assert gc_planner.find_backup_witness() is None

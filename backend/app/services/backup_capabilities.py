@@ -47,7 +47,7 @@ def backup_operations(meta: BackupMeta) -> dict[str, dict]:
                     )
                 )
     gc_reason = "storage_gc_witness_unsupported"
-    if meta.location == "s3":
+    if meta.location in {"s3", "opendal:s3"}:
         from app.services.gc_planner import _source_identity_evidence
 
         gc_reason = (

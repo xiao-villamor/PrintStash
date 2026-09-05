@@ -173,3 +173,12 @@ The implementation is covered at integration and end-to-end boundaries for:
 Provider deletion semantics remain separate contract tests. See
 [Provider Support](./provider-support.md#storage-and-library-source-compatibility)
 and [Release Validation](./release-validation.md).
+
+
+### OpenDAL S3 backup witnesses
+
+A verified backup in an OpenDAL S3 connection can satisfy GC's independent-backup requirement. PrintStash resolves the exact source reference, committed ownership, archive digest and current target before verification. The active Vault must still have Verified storage capabilities.
+
+Custom S3 targets require an administrator-declared failure domain bound to the current target identity. Different profiles, prefixes or credentials do not establish independence, and a declaration cannot override known shared storage. Approval records the evidence; finalization verifies the same archive and rechecks the evidence after quarantine. A removed profile, edited target, changed declaration, changed archive or incompatible backup blocks finalization and preserves the candidates.
+
+This eligibility does not grant backup deletion, promote the destination's maturity, or enable witnesses from other remote transports.
