@@ -140,7 +140,7 @@ class TestRuntimeImageBackup(unittest.TestCase):
             .with_env("VAULT_SETUP_TOKEN", SETUP_TOKEN)
             .with_exposed_ports(8000)
             .waiting_for(
-                HttpWaitStrategy(8000, "/api/v1/setup").with_startup_timeout(120)
+                HttpWaitStrategy(8000, "/api/v1/setup/status").with_startup_timeout(120)
             )
         )
         try:
