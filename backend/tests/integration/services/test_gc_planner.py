@@ -341,8 +341,9 @@ class TestApproveGcPlan:
         assert db_session.get(Model, candidate.id) is not None
         assert run.state is GcRunState.PREVIEW
 
+    @pytest.mark.parametrize("configured", [False, True])
     def test_unknown_target_identity_cannot_authorize_gc(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, configured: bool
     ) -> None:
         candidate = backup.BackupMeta(
             id="unknown-target",
@@ -360,6 +361,12 @@ class TestApproveGcPlan:
         )
         monkeypatch.setattr(gc_planner, "_active_provider_ref", lambda: "1" * 64)
         monkeypatch.setattr(backup, "list_backup_sources", lambda: [candidate])
+        target = (
+            backup._BackupS3Target(None, "backups", "signature", "2" * 64)
+            if configured
+            else None
+        )
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: target)
         monkeypatch.setattr(
             backup,
             "verify_backup",
