@@ -12024,6 +12024,18 @@
             ],
             "title": "Automatic Backup Enabled"
           },
+          "configuration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configuration"
+          },
           "enabled": {
             "anyOf": [
               {
@@ -12046,6 +12058,19 @@
             ],
             "title": "Manual Backup Enabled"
           },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "purpose": {
             "anyOf": [
               {
@@ -12055,6 +12080,20 @@
                 "type": "null"
               }
             ]
+          },
+          "secrets": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secrets"
           }
         },
         "title": "StorageConnectionUpdate",
@@ -12099,6 +12138,13 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
           },
           "required": {
             "default": true,
@@ -12174,6 +12220,16 @@
             "title": "Fields",
             "type": "array"
           },
+          "fields_by_use": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/StorageFieldDescriptor"
+              },
+              "type": "array"
+            },
+            "title": "Fields By Use",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -12181,6 +12237,14 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Requirements",
+            "type": "array"
           },
           "selectable": {
             "title": "Selectable",
@@ -12193,6 +12257,11 @@
               "beta"
             ],
             "title": "Support Level",
+            "type": "string"
+          },
+          "transport": {
+            "default": "",
+            "title": "Transport",
             "type": "string"
           },
           "uses": {

@@ -398,6 +398,8 @@ describe("StorageConfigCard", () => {
       await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
       await user.click(screen.getByRole("button", { name: /Amazon S3/ }));
 
+      await user.type(screen.getByLabelText("Bucket"), "chosen-bucket");
+
       await user.click(screen.getByRole("button", { name: /Save configuration/ }));
 
       await waitFor(() =>
@@ -406,6 +408,17 @@ describe("StorageConfigCard", () => {
           storage_provider_config: { provider: "s3" },
         }),
       );
+    });
+
+    it("refuses a provider whose required configuration is missing", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderCard();
+      await screen.findByDisplayValue("/data/files");
+      await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+      await user.click(screen.getByRole("button", { name: /Amazon S3/ }));
+      await user.click(screen.getByRole("button", { name: /Save configuration/ }));
+      expect(await screen.findByText("Bucket is required.")).toBeVisible();
+      expect(requestsWithMethod("PUT")).toHaveLength(0);
     });
 
     it("sends the paths the operator typed", async () => {

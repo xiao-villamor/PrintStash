@@ -2,8 +2,7 @@
 
 import pytest
 
-from tests.e2e.test_backup import _setup_and_login
-from tests.e2e.test_e2e_webdav_storage import webdav_endpoint as webdav_endpoint
+from tests.e2e._backup_helpers import setup_and_login
 
 
 class TestConnectionEditing:
@@ -11,7 +10,7 @@ class TestConnectionEditing:
     async def test_edits_credentials_without_redirecting_a_linked_source(
         self, api, tmp_path, webdav_endpoint
     ):
-        headers = await _setup_and_login(api, tmp_path)
+        headers = await setup_and_login(api, tmp_path)
         enabled = await api.put(
             "/api/v1/config", headers=headers, json={"external_libraries_enabled": True}
         )

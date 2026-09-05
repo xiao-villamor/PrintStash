@@ -1,5 +1,6 @@
 "use client";
 
+import { providerFormError } from "@/lib/storage-provider-form";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Save } from "lucide-react";
 import {
@@ -64,6 +65,17 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
     setSaveState("saving");
     setErrorMsg("");
     try {
+      const selected = providers.find((provider) => provider.id === providerId);
+      if (selected) {
+        const stored = Array.isArray(providerValues.secret_fields_set)
+          ? providerValues.secret_fields_set
+          : [];
+        const submitted = Object.fromEntries(
+          Object.entries(providerValues).filter(([, value]) => value !== ""),
+        );
+        const invalid = providerFormError(selected, submitted, "vault", stored);
+        if (invalid) throw new Error(invalid);
+      }
       const body: VaultConfigUpdate = {
         storage_provider: providerId,
         storage_provider_config: {
@@ -85,7 +97,7 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       setSaveState("error");
       setErrorMsg(e?.message || "Save failed");
     }
-  }, [providerId, providerValues, load]);
+  }, [providerId, providerValues, load, providers]);
 
   if (loading) {
     return (
