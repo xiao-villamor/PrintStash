@@ -12,6 +12,11 @@
   Equal-size changes trigger the next scan; sources without change markers are
   hashed on every scan. Reads use supported version or conditional constraints
   and reject metadata drift before indexing.
+- Storage settings and backup lists distinguish catalog removal, exact physical
+  deletion, automatic retention and GC evidence. Unavailable image services and
+  retained bytes have explicit explanations; a connection probe does not imply
+  safe deletion. Guarded catalog removal keeps its confirmation and now states
+  that stored bytes remain.
 - The full container image includes the S3 transport used by remote Library
   sources and backup connections. Image checks now exercise remote-only S3
   recovery on both supported architectures.

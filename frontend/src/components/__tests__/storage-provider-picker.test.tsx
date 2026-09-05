@@ -203,10 +203,8 @@ describe("StorageProviderPicker", () => {
 
     expect(screen.getByText(/Expected:\s*Guarded/)).toBeVisible();
     expect(screen.getByText("Guarded storage consequences")).toBeVisible();
-    expect(
-      screen.getByText(/manual permanent deletion requires one-shot confirmation/i),
-    ).toBeVisible();
-    expect(screen.getByText(/scheduled storage purge is skipped/i)).toBeVisible();
+    expect(screen.getByText(/confirmed catalog removal retains stored bytes/i)).toBeVisible();
+    expect(screen.getByText(/automatic physical deletion is unavailable/i)).toBeVisible();
   });
 
   it("reports the required SFTP host key field", async () => {

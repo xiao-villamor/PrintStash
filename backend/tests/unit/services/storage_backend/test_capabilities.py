@@ -71,7 +71,7 @@ class TestStorageCapabilities:
             "direct_path": False,
             "tier": "guarded",
             "warnings": [
-                "Interrupted uploads can leave files for the orphan sweep to reclaim.",
+                "Interrupted uploads can leave retained bytes requiring storage-specific cleanup.",
                 "PrintStash cannot confirm that a file is inside its owned storage root.",
             ],
         }

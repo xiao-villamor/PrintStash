@@ -82,6 +82,11 @@ class RemoteBackupDestination:
         return {
             "ok": True,
             "provider": self.provider,
+            "endpoint_proven": {
+                "access": True,
+                "publication": False,
+                "physical_delete": False,
+            },
             "read": bool(getattr(capabilities, "read", False)),
             "write": bool(getattr(capabilities, "write", False)),
             "conditional_create": bool(

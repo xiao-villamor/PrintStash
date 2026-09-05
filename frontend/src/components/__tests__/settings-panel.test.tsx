@@ -157,6 +157,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/backups/unowned-local": json([]),
       "GET /api/v1/backups/unowned-remote": json([]),
       "GET /api/v1/storage-connections": json([]),
+      "GET /api/v1/storage/providers": json([]),
       "GET /api/v1/models/stats": json(VAULT_STATS),
       ...routes,
     },
@@ -919,6 +920,31 @@ describe("SettingsPanel", () => {
       expect(requests().some((call) => call.url.endsWith("/api/v1/backups/sources"))).toBe(true);
     });
 
+    it("disables unsafe backup deletion while explaining retained bytes", async () => {
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([
+            {
+              ...BACKUP,
+              location: "opendal:sftp",
+              operations: {
+                catalog_purge: { allowed: false, reason: "storage_backup_ownership_required" },
+                physical_delete: { allowed: false, reason: "storage_exact_delete_unavailable" },
+                automatic_retention: { allowed: false, reason: "storage_retention_unsupported" },
+                gc_witness: { allowed: false, reason: "storage_gc_witness_unsupported" },
+              },
+            },
+          ]),
+        },
+      });
+      expect(await screen.findByRole("button", { name: "Delete backup" })).toBeDisabled();
+      expect(screen.getByText(/Its bytes and ownership record are retained/)).toBeVisible();
+      expect(screen.getByText(/Automatic retention is unavailable for this copy/)).toBeVisible();
+      expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+
     it("deletes the exact backup source after confirmation", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
@@ -1471,7 +1497,7 @@ describe("SettingsPanel", () => {
       });
       await user.click(await screen.findByRole("button", { name: /Delete/ }));
 
-      await user.click(await screen.findByRole("button", { name: "Delete forever" }));
+      await user.click(await screen.findByRole("button", { name: "Remove from catalog" }));
 
       await waitFor(() =>
         expect(requestsWithMethod("DELETE").some((call) => call.url.includes("/models/7"))).toBe(
@@ -1498,7 +1524,10 @@ describe("SettingsPanel", () => {
       });
 
       await user.click(await screen.findByRole("button", { name: /Delete/ }));
-      await user.click(await screen.findByRole("button", { name: "Delete forever" }));
+      expect(await screen.findByRole("dialog", { name: "Remove from catalog?" })).toHaveTextContent(
+        "Stored bytes are retained",
+      );
+      await user.click(await screen.findByRole("button", { name: "Remove from catalog" }));
 
       expect(await screen.findByRole("status")).toHaveTextContent("retained");
     });

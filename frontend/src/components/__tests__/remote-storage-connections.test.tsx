@@ -14,9 +14,45 @@ import { aStorageConnection } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
 describe("RemoteStorageConnections", () => {
+  it("explains disabled transport selection", async () => {
+    const view = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/storage/providers": json([
+          {
+            id: "s3",
+            uses: {
+              vault: { available: true },
+              library: { available: false, reason: "storage_service_not_compiled" },
+              backup: { available: false, reason: "storage_service_not_compiled" },
+            },
+          },
+        ]),
+      },
+    });
+    expect(
+      await screen.findByText("This API image does not include the required storage service."),
+    ).toBeVisible();
+    expect(screen.getByRole("option", { name: "S3 / compatible" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save connection" })).toBeDisabled();
+    expect(view.requestsWithMethod("POST")).toHaveLength(0);
+  });
+
+  it("keeps existing profiles visible when the provider catalogue fails", async () => {
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Workshop storage")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save connection" })).toBeDisabled();
+  });
+
   it("lists each remote profile with its current uses", async () => {
     renderApp(<RemoteStorageConnections />, {
       routes: {
+        "GET /api/v1/storage/providers": json([]),
         "GET /api/v1/storage-connections": json([
           aStorageConnection(),
           aStorageConnection({ id: 2, name: "Archive only", purpose: "backup" }),
@@ -40,6 +76,7 @@ describe("RemoteStorageConnections", () => {
     });
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
+        "GET /api/v1/storage/providers": json([]),
         "GET /api/v1/storage-connections": json([]),
         "POST /api/v1/storage-connections": json(created, 201),
       },
@@ -69,6 +106,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
+        "GET /api/v1/storage/providers": json([]),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
         "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ purpose: "library" })),
       },
@@ -88,6 +126,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
+        "GET /api/v1/storage/providers": json([]),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
         "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ enabled: false })),
       },
@@ -105,6 +144,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     renderApp(<RemoteStorageConnections />, {
       routes: {
+        "GET /api/v1/storage/providers": json([]),
         "GET /api/v1/storage-connections": json([
           aStorageConnection({ kind: "gdrive", name: "Recovery Drive" }),
         ]),
@@ -127,7 +167,10 @@ describe("RemoteStorageConnections", () => {
 
   it("keeps save unavailable until the profile has a name", async () => {
     renderApp(<RemoteStorageConnections />, {
-      routes: { "GET /api/v1/storage-connections": json([]) },
+      routes: {
+        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage-connections": json([]),
+      },
     });
 
     expect(await screen.findByRole("button", { name: "Save connection" })).toBeDisabled();
@@ -136,7 +179,10 @@ describe("RemoteStorageConnections", () => {
   it("keeps save unavailable until required provider credentials are complete", async () => {
     const user = userEvent.setup();
     renderApp(<RemoteStorageConnections />, {
-      routes: { "GET /api/v1/storage-connections": json([]) },
+      routes: {
+        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage-connections": json([]),
+      },
     });
     const save = await screen.findByRole("button", { name: "Save connection" });
 

@@ -220,6 +220,25 @@ matches as `printer_history` jobs, and skips already-imported remote filenames.
 
 ## Storage And Library-source Compatibility
 
+Storage actions report separate guarantees for `catalog_purge`,
+`physical_delete`, `automatic_retention` and `gc_witness`. Guarded Vault catalog
+removal requires confirmation and retains bytes that cannot be safely deleted.
+Library source originals remain read-only. A backup with no supported exact
+deletion operation keeps both its archive and ownership record; its row explains
+why automatic retention is unavailable.
+
+The provider catalogue reports each use separately. Installing the optional
+dependency, compiling its transport service and supporting a use are prerequisites
+for configuring it; they do not prove endpoint behavior. A connection probe
+reports which access or listing operation it exercised. GC still verifies the
+archive and current independence evidence during approval and finalization.
+
+Administrator-facing reason codes include `storage_dependency_missing`,
+`storage_service_not_compiled`, `storage_use_unsupported`,
+`storage_exact_delete_unavailable`, `storage_retention_unsupported` and
+`storage_independent_backup_required`. The UI translates these into the action
+available and the bytes that remain.
+
 There are two storage roles:
 
 - **Managed Vault storage** contains bytes PrintStash owns and may eventually

@@ -206,7 +206,7 @@ class TestStorageProviders:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            "app.services.storage_providers.find_spec", lambda _name: None
+            "app.services.storage_operations.find_spec", lambda _name: None
         )
 
         providers = {
@@ -219,9 +219,14 @@ class TestStorageProviders:
         assert all(not provider.available for provider in providers.values())
         assert all(not provider.selectable for provider in providers.values())
         assert all(
-            provider.disabled_reason == "Requires the full image"
+            provider.disabled_reason == "storage_dependency_missing"
             for provider in providers.values()
         )
+        s3 = next(provider for provider in provider_catalogue() if provider.id == "s3")
+        assert s3.selectable and s3.uses["vault"].available
+        assert not s3.uses["library"].available
+        assert not s3.uses["backup"].available
+        assert not s3.uses["vault"].endpoint_proven
 
     def test_provider_secrets_are_encrypted(
         self,

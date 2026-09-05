@@ -19,13 +19,21 @@ import {
   createStorageConnection,
   deleteStorageConnection,
   listStorageConnections,
+  getStorageProviders,
   probeStorageConnection,
   updateStorageConnection,
 } from "@/lib/api";
 import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
 import { toast } from "@/lib/toast";
+import { useOptionalI18n } from "@/lib/i18n";
+import { storageOperationMessage } from "@/lib/storage-operations";
 import { cn } from "@/lib/utils";
-import type { LibrarySourceKind, StorageConnection, StorageConnectionPurpose } from "@/types";
+import type {
+  LibrarySourceKind,
+  StorageConnection,
+  StorageConnectionPurpose,
+  StorageProvider,
+} from "@/types";
 
 type RemoteKind = Exclude<LibrarySourceKind, "mounted">;
 
@@ -52,7 +60,10 @@ function purposeLabel(purpose: StorageConnectionPurpose): string {
 }
 
 export function RemoteStorageConnections({ disabled = false }: { disabled?: boolean }) {
+  const i18n = useOptionalI18n();
   const [connections, setConnections] = useState<StorageConnection[]>([]);
+  const [providers, setProviders] = useState<StorageProvider[]>([]);
+  const [catalogueFailed, setCatalogueFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | "create" | null>(null);
   const [name, setName] = useState("");
@@ -77,9 +88,14 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
 
   useEffect(() => {
     let active = true;
-    void listStorageConnections()
-      .then((rows) => {
-        if (active) setConnections(rows);
+    void Promise.allSettled([listStorageConnections(), getStorageProviders()])
+      .then(([rows, catalogue]) => {
+        if (active) {
+          if (rows.status === "fulfilled") setConnections(rows.value);
+          else toast.error(rows.reason);
+          if (catalogue.status === "fulfilled") setProviders(catalogue.value);
+          else setCatalogueFailed(true);
+        }
       })
       .catch((error) => {
         if (active) toast.error(error);
@@ -91,6 +107,15 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       active = false;
     };
   }, []);
+
+  function availability(remoteKind: RemoteKind) {
+    const uses = providers.find((provider) => provider.id === remoteKind)?.uses;
+    if (!uses) return undefined;
+    if (purpose === "both") return !uses.library.available ? uses.library : uses.backup;
+    return uses[purpose];
+  }
+
+  const selectedAvailability = availability(kind);
 
   function requestBody(): StorageConnectionCreate {
     const common = { name: name.trim(), kind, purpose };
@@ -297,6 +322,24 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                       {connection.secret_fields_set.length} protected credential
                       {connection.secret_fields_set.length === 1 ? "" : "s"}
                     </p>
+                    {connection.uses?.[connection.purpose === "library" ? "library" : "backup"]
+                      ?.available === false && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {storageOperationMessage(
+                          connection.uses[connection.purpose === "library" ? "library" : "backup"]
+                            .reason,
+                          i18n?.t,
+                        )}
+                      </p>
+                    )}
+                    {connection.purpose !== "backup" && connection.source_operations && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {storageOperationMessage(
+                          connection.source_operations.catalog_purge.reason,
+                          i18n?.t,
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[minmax(12rem,15rem)_auto] sm:items-end">
                     <label className={FIELD_LABEL}>
@@ -389,10 +432,18 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   if (isRemoteKind(event.target.value)) setKind(event.target.value);
                 }}
               >
-                <option value="s3">S3 / compatible</option>
-                <option value="webdav">WebDAV / Nextcloud</option>
-                <option value="sftp">SFTP</option>
-                <option value="gdrive">Google Drive (beta)</option>
+                <option value="s3" disabled={availability("s3")?.available === false}>
+                  S3 / compatible
+                </option>
+                <option value="webdav" disabled={availability("webdav")?.available === false}>
+                  WebDAV / Nextcloud
+                </option>
+                <option value="sftp" disabled={availability("sftp")?.available === false}>
+                  SFTP
+                </option>
+                <option value="gdrive" disabled={availability("gdrive")?.available === false}>
+                  Google Drive (beta)
+                </option>
               </select>
             </label>
             <label className={FIELD_LABEL}>
@@ -612,9 +663,27 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             </p>
           )}
           <div className="flex justify-end">
+            {catalogueFailed && (
+              <p className="mr-auto text-xs text-muted-foreground">
+                {i18n?.t("storage.operationUnavailable") ??
+                  "Storage information is unavailable. Reload to try again."}
+              </p>
+            )}
+            {selectedAvailability?.available === false && (
+              <p className="mr-auto max-w-xl text-xs text-muted-foreground">
+                {storageOperationMessage(selectedAvailability.reason, i18n?.t)}
+              </p>
+            )}
             <Button
               type="button"
-              disabled={disabled || busy !== null || !canCreateConnection()}
+              disabled={
+                disabled ||
+                loading ||
+                catalogueFailed ||
+                busy !== null ||
+                selectedAvailability?.available === false ||
+                !canCreateConnection()
+              }
               onClick={() => void addConnection()}
             >
               {busy === "create" ? (

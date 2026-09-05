@@ -27,6 +27,12 @@ from app.services.storage_connections import (
     StorageConnectionConfigError,
     serialize_connection_config,
 )
+from app.services.storage_operations import (
+    OperationResult,
+    UseAvailability,
+    source_operations,
+    use_availability,
+)
 
 router = APIRouter(
     prefix="/storage-connections",
@@ -55,6 +61,8 @@ class StorageConnectionRead(BaseModel):
     enabled: bool
     manual_backup_enabled: bool
     automatic_backup_enabled: bool
+    uses: dict[str, UseAvailability] = Field(default_factory=dict)
+    source_operations: dict[str, OperationResult] = Field(default_factory=dict)
 
 
 class StorageConnectionUpdate(BaseModel):
@@ -104,6 +112,10 @@ def _read(row: StorageConnection) -> StorageConnectionRead:
         enabled=row.enabled,
         manual_backup_enabled=row.manual_backup_enabled,
         automatic_backup_enabled=row.automatic_backup_enabled,
+        uses={
+            use: use_availability(row.kind.value, use) for use in ("library", "backup")
+        },
+        source_operations=source_operations(),
     )
 
 
@@ -163,7 +175,11 @@ def probe_connection(
         StorageConfigurationError,
     ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"ok": True, "sample_count": len(page.entries)}
+    return {
+        "ok": True,
+        "sample_count": len(page.entries),
+        "endpoint_proven": {"listing": True, "read": False},
+    }
 
 
 @router.patch("/{connection_id}", response_model=StorageConnectionRead)

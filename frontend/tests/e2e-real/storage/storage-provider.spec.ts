@@ -147,6 +147,15 @@ test.describe("storage provider setup", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
     await previewExpiredTrashWithoutApproval(page, modelName);
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    const purge = page.getByRole("dialog", { name: "Remove from catalog?" });
+    await expect(purge).toContainText("Stored bytes are retained");
+    const purged = page.waitForResponse(
+      (response) => response.url().includes("/purge") && response.request().method() === "DELETE",
+    );
+    await purge.getByRole("button", { name: "Remove from catalog", exact: true }).click();
+    expect((await purged).status()).toBe(200);
+    await expect(page.getByText(modelName, { exact: true })).toHaveCount(0);
     const retainedBytes = await page.request.fetch(remoteObjectUrl);
     expect(retainedBytes.status()).toBe(200);
     expect(Number(retainedBytes.headers()["content-length"] ?? 0)).toBe(expectedBytes.length);

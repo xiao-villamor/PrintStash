@@ -135,6 +135,7 @@ import {
 } from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
 import { useI18n, type MessageKey } from "@/lib/i18n";
+import { storageOperationMessage } from "@/lib/storage-operations";
 import {
   usePrinterCardImagePreference,
   writePrinterCardImagePreference,
@@ -159,6 +160,7 @@ import type {
   PrinterRole,
   StorageCleanupStatus,
   StorageHealthRead,
+  StorageOperations,
   HealthResponse,
   TrashPurgeRead,
   TrashedModelRead,
@@ -489,6 +491,7 @@ export function SettingsPanel() {
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
   const [trashStorageTier, setTrashStorageTier] = useState("verified");
+  const [trashOperations, setTrashOperations] = useState<StorageOperations>();
   const [backingUp, setBackingUp] = useState(false);
   const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
@@ -639,6 +642,7 @@ export function SettingsPanel() {
       setTrashItems(items);
       setTrashRetentionDays(cfg.trash_retention_days ?? 30);
       setTrashStorageTier(cfg.storage_tier ?? "unguarded");
+      setTrashOperations(cfg.storage_operations);
       setGcPlan(activePlan);
     } catch (e) {
       toast.error(e);
@@ -1366,7 +1370,10 @@ export function SettingsPanel() {
     setPurgeTarget(null);
     setTrashBusy(id);
     try {
-      const result = await purgeModel(id, trashStorageTier !== "verified");
+      const result = await purgeModel(
+        id,
+        trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
+      );
       setTrashItems((current) => current.filter((item) => item.id !== id));
       setTrashPurgeResult(result);
       if (result.storage_cleanup_status === "completed") {
@@ -1558,13 +1565,21 @@ export function SettingsPanel() {
           onClose={() => setPurgeTarget(null)}
           onConfirm={confirmPurge}
           busy={isModelPurge(trashBusy)}
-          title="Permanently delete?"
-          description={
-            trashStorageTier === "verified"
-              ? "This will delete the model and all its files immediately. This cannot be undone."
-              : `This ${trashStorageTier} storage cannot verify every destructive mutation. Confirm this one-time storage risk acknowledgement to delete the model and its files.`
+          title={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? "Permanently delete?"
+              : t("storage.catalogConfirmation")
           }
-          confirmLabel="Delete forever"
+          description={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? "This will delete the model and all its files immediately. This cannot be undone."
+              : t("storage.catalogOnly")
+          }
+          confirmLabel={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? "Delete forever"
+              : t("storage.catalogConfirmAction")
+          }
         />
         <ConfirmModal
           open={purgeExpiredOpen}
@@ -3073,6 +3088,28 @@ export function SettingsPanel() {
                                 {backup.file_count} files · {formatBytes(backup.size_bytes)} ·{" "}
                                 {backup.location}
                               </p>
+                              {backup.operations &&
+                                !backup.operations.automatic_retention.allowed && (
+                                  <p className="mt-2 text-xs text-muted-foreground">
+                                    {storageOperationMessage(
+                                      backup.operations.automatic_retention.reason,
+                                      t,
+                                    )}
+                                  </p>
+                                )}
+                              {backup.operations && !backup.operations.physical_delete.allowed && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {storageOperationMessage(
+                                    backup.operations.physical_delete.reason,
+                                    t,
+                                  )}
+                                </p>
+                              )}
+                              {backup.operations && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {storageOperationMessage(backup.operations.gc_witness.reason, t)}
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-wrap gap-2 lg:justify-end">
                               <button
@@ -3127,6 +3164,7 @@ export function SettingsPanel() {
                                   restoringBackup ||
                                   backingUp ||
                                   deletingBackup !== null ||
+                                  backup.operations?.physical_delete.allowed === false ||
                                   !backup.source_ref
                                 }
                                 title={

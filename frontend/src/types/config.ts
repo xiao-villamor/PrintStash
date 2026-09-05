@@ -59,6 +59,7 @@ export interface VaultConfigRead {
   storage_provider: string;
   storage_provider_config: StorageProviderConfigValues;
   storage_tier: StorageTier;
+  storage_operations?: StorageOperations;
   storage_warnings: string[];
   storage_unverified_acknowledged: boolean;
   data_dir: string;
@@ -215,6 +216,27 @@ export interface StorageProvider {
   support_level?: "stable" | "beta" | string;
   disabled_reason?: string | null;
   fields: StorageProviderField[];
+  uses?: Record<string, StorageUseAvailability>;
+}
+
+export interface StorageOperationResult {
+  allowed: boolean;
+  reason: string;
+  confirmation_required: boolean;
+}
+
+export type StorageOperations = Record<
+  "catalog_purge" | "physical_delete" | "automatic_retention" | "gc_witness",
+  StorageOperationResult
+>;
+
+export interface StorageUseAvailability {
+  dependency_installed: boolean;
+  service_compiled: boolean;
+  supported: boolean;
+  available: boolean;
+  endpoint_proven: boolean;
+  reason: string;
 }
 
 export type ExternalLibraryCollectionMode = "mirror" | "single";
@@ -236,6 +258,8 @@ export interface StorageConnection {
   enabled: boolean;
   manual_backup_enabled: boolean;
   automatic_backup_enabled: boolean;
+  uses?: Record<string, StorageUseAvailability>;
+  source_operations?: StorageOperations;
 }
 
 // Detected filesystem class backing the root path.

@@ -80,13 +80,13 @@ Expected tier: **Guarded**. Verified when bucket versioning is enabled; otherwis
 
 Remote storage over WebDAV.
 
-Expected tier: **Guarded**. Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual and confirmed only.
+Expected tier: **Guarded**. Confirmed catalog removal retains stored bytes; exact physical deletion is unavailable.
 
 ## webdav
 
 Remote storage over WebDAV.
 
-Expected tier: **Guarded**. Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual and confirmed only.
+Expected tier: **Guarded**. Confirmed catalog removal retains stored bytes; exact physical deletion is unavailable.
 
 ## sftp
 

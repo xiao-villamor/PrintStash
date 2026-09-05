@@ -208,6 +208,11 @@ class TestProbe:
             "write": False,
             "conditional_create": False,
             "versioned_delete": False,
+            "endpoint_proven": {
+                "access": True,
+                "publication": False,
+                "physical_delete": False,
+            },
         }
 
     @pytest.mark.parametrize(
