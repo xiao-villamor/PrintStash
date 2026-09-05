@@ -21,8 +21,8 @@ manufacturing platform.
   grouping until they are restored or replaced.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
   status, streamed plain-text G-code and validated `.bgcode` upload/start, file
-  inventory/deletion, and pause/resume/cancel are implemented. BGCODE preview,
-  Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
+  inventory/deletion, and pause/resume/cancel are implemented. BGCODE v1 toolpaths can be previewed within the
+  [conversion limits](bgcode-preview.md). Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
   consumption are not.
 - Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
   Carbon 2 have beta local status/control support and beta chunked HTTP

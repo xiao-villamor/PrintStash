@@ -289,3 +289,68 @@ class TestResume:
                 assert job.state == PrintJobState.COMPLETED
         finally:
             running.stop()
+
+
+class TestOriginalBinaryAfterPreview:
+    @pytest.mark.bgcode
+    def test_preview_then_upload_preserves_bgcode_bytes(self, bgcode_binary, tmp_path):
+        import hashlib
+
+        from fastapi import Request
+
+        from app.core.config import _overlay
+        from app.services import toolpath
+        from app.services.artifact_content import resolve
+        from tests.factories import detached_file
+        from tests.paths import FIXTURES_DIR
+
+        content = (FIXTURES_DIR / "bgcode/prusaslicer.bgcode").read_bytes()
+        source = tmp_path / "original.bgcode"
+        source.write_bytes(content)
+        artifact = detached_file(
+            model_id=1,
+            path=str(source),
+            original_filename=source.name,
+            file_type=FileType.GCODE,
+            is_external=True,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+        _overlay["bgcode_executable"] = str(bgcode_binary)
+        app, _ = create_app(auth_mode="api_key", api_key=API_KEY)
+        received = []
+
+        @app.middleware("http")
+        async def record_uploaded_body(request: Request, call_next):
+            if request.method == "PUT" and request.url.path.startswith(
+                "/api/v1/files/local/"
+            ):
+                received.append(await request.body())
+            return await call_next(request)
+
+        running = start_server(app)
+        try:
+            provider = get_provider_client(
+                printer_config(
+                    "Prusa preview",
+                    provider=PrinterProvider.PRUSALINK,
+                    prusalink_url=running.base_url,
+                    prusalink_auth_mode="api_key",
+                    prusalink_api_key=API_KEY,
+                ),
+                registry=REGISTRY,
+            )
+
+            async def preview_then_send():
+                preview = await toolpath.render(artifact)
+                assert (
+                    preview == (FIXTURES_DIR / "bgcode/prusaslicer.gcode").read_bytes()
+                )
+                with resolve(artifact).materialize() as original:
+                    await provider.upload(original, "original.bgcode")
+
+            asyncio.run(preview_then_send())
+            assert received == [content]
+            assert source.read_bytes() == content
+        finally:
+            running.stop()

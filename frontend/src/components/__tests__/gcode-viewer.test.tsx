@@ -18,6 +18,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseGcode } from "@/lib/gcode";
+
 import { GcodeViewer } from "@/components/gcode-viewer";
 import { I18nProvider } from "@/lib/i18n";
 
@@ -51,6 +53,7 @@ describe("GcodeViewer", () => {
           url="/api/v1/files/7/toolpath-preview"
           printerBedMm={{ x: 220, y: 220 }}
           canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
         />
       </I18nProvider>,
     );
@@ -94,6 +97,7 @@ describe("GcodeViewer", () => {
           url="/api/v1/files/7/toolpath-preview"
           printerBedMm={{ x: 220, y: 220 }}
           canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
         />
       </I18nProvider>,
     );
@@ -108,5 +112,42 @@ describe("GcodeViewer", () => {
     );
     expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("must-not-leak");
     window.removeEventListener("printstash:unauthorized", unauthorized);
+  });
+  it("retries a busy converter through the same preview", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(textResponse('{"detail":"toolpath_busy"}', 429))
+      .mockResolvedValueOnce(textResponse(TOOLPATH));
+    render(
+      <I18nProvider>
+        <GcodeViewer
+          url="/api/v1/files/7/toolpath"
+          canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
+        />
+      </I18nProvider>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("Other previews are being prepared");
+    await user.click(screen.getByRole("button", { name: "Try preview again" }));
+    expect(await screen.findByRole("slider", { name: "Current layer" })).toBeVisible();
+  });
+  it.each([413, 504])("explains a server resource limit (%s)", async (status) => {
+    fetchMock.mockResolvedValue(textResponse('{"detail":"toolpath_limit"}', status));
+    render(
+      <I18nProvider>
+        <GcodeViewer url="/api/v1/files/7/toolpath" canvasRenderer={TestCanvas} />
+      </I18nProvider>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("size or time limit");
+  });
+  it("refuses invalid converted bytes without suggesting a successful preview", async () => {
+    fetchMock.mockResolvedValue(textResponse('{"detail":"toolpath_invalid_bgcode"}', 422));
+    render(
+      <I18nProvider>
+        <GcodeViewer url="/api/v1/files/7/toolpath" canvasRenderer={TestCanvas} />
+      </I18nProvider>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be validated");
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 });

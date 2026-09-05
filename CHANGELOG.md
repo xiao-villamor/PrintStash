@@ -9,6 +9,11 @@
   preserves omitted credentials, supports explicit replacement and prevents
   changing a target while linked sources or owned backups depend on it.
 
+- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
+  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
+  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Originals
+  remain unchanged for downloads and PrusaLink.
+
 - Backup run history records every selected destination, including invalid
   connections and partial failures. Administrators can retry an exact failed
   replica from a verified surviving archive; successful copies remain available.

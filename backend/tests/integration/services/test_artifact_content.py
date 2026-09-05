@@ -35,6 +35,7 @@ class TestRemoteArtifactContent:
             @contextmanager
             def materialize(self, key: str, *, expected=None):
                 assert key == "models/source.stl"
+                assert expected == SourceEntry(key, len(payload))
                 yield SourceContent(
                     source_path,
                     SourceEntry(source_path.name, source_path.stat().st_size),
@@ -237,3 +238,55 @@ class TestManagedArtifactContent:
             artifact_content.presigned_download_url(managed, "managed.stl")
             == "https://download.example.test/signed"
         )
+
+
+class TestBoundedExternalContent:
+    def test_changed_size_is_refused_before_opening_source(self, tmp_path, monkeypatch):
+        source = tmp_path / "grown.gcode"
+        source.write_bytes(b"unexpectedly larger content")
+        row = detached_file(
+            model_id=1,
+            path=str(source),
+            original_filename=source.name,
+            size_bytes=1,
+            sha256="a" * 64,
+            is_external=True,
+        )
+        original_open = artifact_content.os.open
+
+        def refuse_source_open(path, *args, **kwargs):
+            if Path(path) == source:
+                raise AssertionError(
+                    "changed source opened before its size was checked"
+                )
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(artifact_content.os, "open", refuse_source_open)
+        with pytest.raises(artifact_content.ArtifactContentChangedError):
+            with artifact_content.resolve(row).materialize():
+                pytest.fail("changed source was materialized")
+
+
+class TestManagedStreamCleanup:
+    def test_early_close_releases_the_backend_reader(
+        self, make_model, make_file, monkeypatch
+    ):
+        from app.services.storage_backend import get_backend
+
+        backend = get_backend()
+        backend.write_bytes(b"content", "cleanup.gcode")
+        artifact = make_file(make_model(), path="cleanup.gcode")
+        closed = []
+
+        def chunks(_key, _size):
+            try:
+                yield b"first"
+                yield b"second"
+            finally:
+                closed.append(True)
+
+        monkeypatch.setattr(backend, "stream_chunks", chunks)
+        reader = artifact_content.resolve(artifact, backend=backend).stream()
+        assert next(reader) == b"first"
+        reader.close()
+        assert closed == [True]

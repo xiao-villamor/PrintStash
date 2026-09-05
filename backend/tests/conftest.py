@@ -70,6 +70,7 @@ _RESOURCE_DIRS = {"postgres": "postgres"}
 # Each resource marker names the service it needs. Containers are the only path
 # and their absence is an error rather than a skip — see `tests/containers.py`.
 _RESOURCES = {
+    "bgcode": "official libbgcode build",
     "postgres": containers.POSTGRES_RESOURCE,
     "remote_storage": "Nextcloud WebDAV and OpenSSH/SFTP",
     "s3": containers.S3_RESOURCE,
@@ -527,3 +528,11 @@ def auth_headers(db_session: Session) -> dict[str, str]:
     db_session.refresh(user)
     token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="session")
+def bgcode_binary(tmp_path_factory):
+    """The exact CLI distributed by Dockerfile, built once for this test session."""
+    from tests.bgcode_support import build_converter
+
+    return build_converter(tmp_path_factory.mktemp("official-bgcode"))

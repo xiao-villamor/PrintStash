@@ -84,6 +84,6 @@ describe("public URL builders", () => {
   });
 
   it("puts the token in the G-code path", () => {
-    expect(sharedGcodeUrl("abc", 2)).toBe("/api/v1/share/abc/files/2/gcode");
+    expect(sharedGcodeUrl("abc", 2)).toBe("/api/v1/share/abc/files/2/toolpath");
   });
 });

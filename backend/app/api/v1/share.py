@@ -198,3 +198,28 @@ def revoke_model_share(
         raise HTTPException(status_code=404, detail="share_not_found")
     _require_model(session, current_user, link.model_id, CollectionRole.EDIT)
     return share.to_read(share.revoke_share(session, link))
+
+
+@router.get(
+    "/{token}/files/{file_id}/toolpath",
+    summary="Toolpath only for download-authorized shares",
+)
+async def get_shared_toolpath(
+    token: str,
+    file_id: int,
+    session: Session = Depends(get_session),
+):
+    from fastapi.responses import Response
+
+    from app.services import toolpath
+
+    link = share.resolve_share(session, token)
+    if not link.allow_download:
+        raise HTTPException(status_code=403, detail="download_disabled")
+    file = share.share_file_or_404(session, link, file_id)
+    content = await toolpath.render(file)
+    return Response(
+        content=content,
+        media_type="text/plain",
+        headers={"Cache-Control": "private, no-store"},
+    )

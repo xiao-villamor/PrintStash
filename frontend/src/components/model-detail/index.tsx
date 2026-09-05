@@ -680,7 +680,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             {viewerMode === "gcode" && hasGcode ? (
               <Suspense fallback={ViewerFallback}>
                 <GcodeViewer
-                  url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/download`}
+                  url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/toolpath`}
                   printerBedMm={getBedSize(meta?.printer_model)}
                   screenshotName={model.slug || model.name}
                 />

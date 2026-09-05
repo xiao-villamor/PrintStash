@@ -35,7 +35,7 @@ export default defineConfig({
       command: "bash tests/e2e-real/scripts/start-backend.sh",
       url: `${apiBase}/api/v1/health`,
       reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
+      timeout: 240_000,
       env: {
         PLAYWRIGHT_REAL_API_PORT: String(apiPort),
         VAULT_SETUP_TOKEN: "playwright-setup-token-123",

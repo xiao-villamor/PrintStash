@@ -238,6 +238,14 @@ class Settings(BaseSettings):
     # count is unknowable before Cascadio loads it. The child is killed on this
     # deadline; its RSS budget is derived from mesh_memory_budget_fraction and
     # the detected cgroup/host limit, just like other mesh work.
+    # Toolpath conversion runs in a bounded disposable official libbgcode process.
+    bgcode_executable: str = "bgcode"
+    toolpath_input_max_mb: int = Field(default=128, ge=1)
+    toolpath_output_max_mb: int = Field(default=32, ge=1)
+    toolpath_timeout_seconds: int = Field(default=30, ge=1)
+    toolpath_memory_max_mb: int = Field(default=512, ge=64)
+    toolpath_max_jobs: int = Field(default=2, ge=1, le=32)
+
     mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
     # Oversized STL previews run in a disposable, streaming worker. The worker

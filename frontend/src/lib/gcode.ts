@@ -1,3 +1,5 @@
+import { arcPoints, type Plane, type Point } from "./gcode-arcs";
+
 // G-code toolpath parsing. Lives outside the viewer component so the module
 // stays component-only and Fast Refresh keeps working for the viewer.
 
@@ -35,21 +37,21 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
-export function parseGcode(text: string): ToolpathData {
-  let cx = 0,
-    cy = 0,
-    cz = 0,
-    ce = 0;
+export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData {
+  let position: Point = [0, 0, 0];
+  const offset: Point = [0, 0, 0];
+  let ce = 0,
+    scale = 1;
   let relXYZ = false,
-    relE = false;
-
+    relE = false,
+    absoluteCenter = false;
+  let plane: Plane = "xy";
+  let segments = 0;
   const extrudeSegs: number[] = [];
   const travelSegs: number[] = [];
-
   const layerRanges: LayerRange[] = [];
-  let currentZ = -1;
-  let layerVertStart = 0; // in vertex units (floats/3)
-
+  let currentZ = -1,
+    layerVertStart = 0;
   let minX = Infinity,
     maxX = -Infinity;
   let minY = Infinity,
@@ -57,24 +59,55 @@ export function parseGcode(text: string): ToolpathData {
   let minZ = Infinity,
     maxZ = -Infinity;
 
-  const lines = text.split("\n");
+  const append = (next: Point, extruding: boolean) => {
+    const [x, y, z] = position;
+    const [nx, ny, nz] = next;
+    if (x !== nx || y !== ny || z !== nz) {
+      if (++segments > segmentLimit) throw new Error("toolpath_segment_limit");
+      (extruding ? extrudeSegs : travelSegs).push(x, z, -y, nx, nz, -ny);
+      if (extruding) {
+        minX = Math.min(minX, x, nx);
+        maxX = Math.max(maxX, x, nx);
+        minY = Math.min(minY, y, ny);
+        maxY = Math.max(maxY, y, ny);
+        minZ = Math.min(minZ, z, nz);
+        maxZ = Math.max(maxZ, z, nz);
+      }
+    }
+    position = next;
+  };
 
-  for (const rawLine of lines) {
-    let line = rawLine;
-    const semi = line.indexOf(";");
-    if (semi >= 0) line = line.slice(0, semi);
-    line = line.trim();
-    if (!line) continue;
-
-    const tokens = line.split(/\s+/);
-    const op = tokens[0].toUpperCase();
-
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine
+      .split(/[;*]/, 1)[0]
+      .replace(/\([^)]*\)/g, "")
+      .toUpperCase();
+    const tokens = [...line.matchAll(/([A-Z])([+-]?(?:\d+\.?\d*|\.\d+))/g)];
+    const command = tokens.find((token) => token[1] === "G" || token[1] === "M");
+    if (!command) continue;
+    const op = command[1] + Number(command[2]);
+    const values: Record<string, number> = {};
+    for (const token of tokens) {
+      if (!["G", "M", "N"].includes(token[1])) {
+        const value = Number(token[2]);
+        if (!Number.isFinite(value)) throw new Error("toolpath_invalid_coordinate");
+        values[token[1]] = value;
+      }
+    }
     if (op === "G90") {
       relXYZ = false;
       continue;
     }
     if (op === "G91") {
       relXYZ = true;
+      continue;
+    }
+    if (op === "G90.1") {
+      absoluteCenter = true;
+      continue;
+    }
+    if (op === "G91.1") {
+      absoluteCenter = false;
       continue;
     }
     if (op === "M82") {
@@ -85,69 +118,71 @@ export function parseGcode(text: string): ToolpathData {
       relE = true;
       continue;
     }
-    if (op !== "G0" && op !== "G1" && op !== "G00" && op !== "G01") continue;
-
-    let nx = cx,
-      ny = cy,
-      nz = cz,
-      ne = ce;
-    let hasE = false;
-
-    for (let i = 1; i < tokens.length; i++) {
-      const t = tokens[i].toUpperCase();
-      if (t.length < 2) continue;
-      const k = t[0];
-      const v = parseFloat(t.slice(1));
-      if (isNaN(v)) continue;
-      if (k === "X") nx = relXYZ ? cx + v : v;
-      else if (k === "Y") ny = relXYZ ? cy + v : v;
-      else if (k === "Z") nz = relXYZ ? cz + v : v;
-      else if (k === "E") {
-        ne = relE ? ce + v : v;
-        hasE = true;
-      }
+    if (op === "G20") {
+      scale = 25.4;
+      continue;
     }
-
-    // Layer change: Z increases
-    if (nz > cz && nz > 0.01) {
-      if (currentZ >= 0) {
-        const vCount = extrudeSegs.length / 3 - layerVertStart;
-        layerRanges.push({ z: currentZ, vertexStart: layerVertStart, vertexCount: vCount });
-      }
+    if (op === "G21") {
+      scale = 1;
+      continue;
+    }
+    if (op === "G17") {
+      plane = "xy";
+      continue;
+    }
+    if (op === "G18") {
+      plane = "xz";
+      continue;
+    }
+    if (op === "G19") {
+      plane = "yz";
+      continue;
+    }
+    if (op === "G92") {
+      const all = !["X", "Y", "Z", "E"].some((axis) => values[axis] !== undefined);
+      (["X", "Y", "Z"] as const).forEach((axis, index) => {
+        if (all || values[axis] !== undefined)
+          offset[index] = position[index] - (values[axis] ?? 0) * scale;
+      });
+      if (all || values.E !== undefined) ce = (values.E ?? 0) * scale;
+      continue;
+    }
+    if (!["G0", "G1", "G2", "G3"].includes(op)) continue;
+    const next: Point = [position[0], position[1], position[2]];
+    (["X", "Y", "Z"] as const).forEach((axis, index) => {
+      if (values[axis] !== undefined)
+        next[index] = values[axis] * scale + (relXYZ ? position[index] : offset[index]);
+    });
+    const ne = values.E === undefined ? ce : values.E * scale + (relE ? ce : 0);
+    const extruding = values.E !== undefined && ne > ce + 0.0001;
+    ce = ne;
+    const nz = next[2];
+    if (nz > position[2] && nz > 0.01) {
+      if (currentZ >= 0)
+        layerRanges.push({
+          z: currentZ,
+          vertexStart: layerVertStart,
+          vertexCount: extrudeSegs.length / 3 - layerVertStart,
+        });
       currentZ = nz;
       layerVertStart = extrudeSegs.length / 3;
-    } else if (currentZ < 0 && nz >= 0) {
-      currentZ = nz;
-    }
-
-    const isExtrusion = hasE && (relE ? ne > 0 : ne > ce + 0.0001);
-    if (hasE) ce = ne;
-
-    // Track bounds only from extrusion moves so start-gcode travel to X0 Y0 doesn't skew center
-    if (isExtrusion) {
-      if (nx < minX) minX = nx;
-      if (nx > maxX) maxX = nx;
-      if (ny < minY) minY = ny;
-      if (ny > maxY) maxY = ny;
-      if (nz < minZ) minZ = nz;
-      if (nz > maxZ) maxZ = nz;
-    }
-
-    const dx = nx - cx,
-      dy = ny - cy,
-      dz = nz - cz;
-    if (dx !== 0 || dy !== 0 || dz !== 0) {
-      // Map: three.x = gcodeX, three.y = gcodeZ (height), three.z = -gcodeY
-      if (isExtrusion) {
-        extrudeSegs.push(cx, cz, -cy, nx, nz, -ny);
-      } else {
-        travelSegs.push(cx, cz, -cy, nx, nz, -ny);
-      }
-    }
-
-    cx = nx;
-    cy = ny;
-    cz = nz;
+    } else if (currentZ < 0 && nz >= 0) currentZ = nz;
+    if (op === "G2" || op === "G3") {
+      const center: Point = [position[0], position[1], position[2]];
+      (["I", "J", "K"] as const).forEach((axis, index) => {
+        center[index] = absoluteCenter
+          ? (values[axis] ?? (position[index] - offset[index]) / scale) * scale + offset[index]
+          : position[index] + (values[axis] ?? 0) * scale;
+      });
+      for (const point of arcPoints(position, next, {
+        clockwise: op === "G2",
+        plane,
+        center,
+        radius: values.R === undefined ? undefined : values.R * scale,
+        segmentLimit: segmentLimit - segments,
+      }))
+        append(point, extruding);
+    } else append(next, extruding);
   }
 
   // Push final layer

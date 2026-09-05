@@ -702,6 +702,10 @@ jobs:
           # while exporting) should not fail an otherwise-successful build.
           cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }},mode=max,ignore-error=true
 
+      - name: Convert official BGCODE in the final native image
+        if: matrix.storage-smoke
+        run: backend/scripts/test-bgcode-image.sh ${{ matrix.image }}:${{ matrix.arch }}-ci
+
       - name: Tessellate a valid STEP fixture in ARM64 userspace
         if: matrix.step-smoke
         run: >-

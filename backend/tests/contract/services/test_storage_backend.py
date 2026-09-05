@@ -909,3 +909,21 @@ class TestDestructiveLifecycleFindings:
         # retention can prevent. A fresh bucket has none, and the check must say so
         # rather than raising on a store with no lifecycle API at all.
         assert s3_backend.destructive_lifecycle_findings() == []
+
+
+class TestToolpathStorage:
+    @pytest.mark.asyncio
+    async def test_s3_toolpath_retains_original(
+        self, s3_backend, db_session, monkeypatch
+    ):
+        from app.services import artifact_content, toolpath
+
+        content = b"G90\nG1 X10 Y10 E1\n"
+        key = "vault-data/models/toolpath-reference.gcode"
+        s3_backend.write_bytes(content, key)
+        artifact = build_file(
+            db_session, build_model(db_session), path=key, size_bytes=len(content)
+        )
+        monkeypatch.setattr(artifact_content, "get_backend", lambda: s3_backend)
+        assert await toolpath.render(artifact) == content
+        assert s3_backend.read_bytes(key) == content

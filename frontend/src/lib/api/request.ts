@@ -48,11 +48,10 @@ export async function getAuthenticatedBlob(path: string): Promise<Blob> {
 }
 
 /** Read a protected text resource while preserving the shared 401 handling. */
-export async function getAuthenticatedText(path: string): Promise<string> {
-  const res = await fetch(getUrl(path), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
+export async function getAuthenticatedText(path: string, signal?: AbortSignal): Promise<string> {
+  const options: RequestInit = { headers: authHeaders(), cache: "no-store" };
+  if (signal) options.signal = signal;
+  const res = await fetch(getUrl(path), options);
   if (!res.ok) throw await parseError(res);
   return res.text();
 }

@@ -18382,6 +18382,51 @@
         ]
       }
     },
+    "/api/v1/files/{file_id}/toolpath": {
+      "get": {
+        "operationId": "get_toolpath_api_v1_files__file_id__toolpath_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Bounded ASCII toolpath from the original Artifact",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/api/v1/fleet/batches": {
       "post": {
         "operationId": "create_batch_api_v1_fleet_batches_post",
@@ -27856,6 +27901,55 @@
           }
         },
         "summary": "Serve a shared mesh file as STL for the public viewer",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/files/{file_id}/toolpath": {
+      "get": {
+        "operationId": "get_shared_toolpath_api_v1_share__token__files__file_id__toolpath_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Toolpath only for download-authorized shares",
         "tags": [
           "share"
         ]

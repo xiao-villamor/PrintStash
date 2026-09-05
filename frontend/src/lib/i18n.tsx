@@ -211,6 +211,14 @@ const messages = {
     "repro.toolpathPreview": "Toolpath preview",
     "viewer.loadingToolpath": "Loading toolpath…",
     "viewer.renderFailed": "G-code render failed",
+    "viewer.resourceLimit":
+      "This preview exceeds the server's size or time limit. Download the original to inspect it in your slicer.",
+    "viewer.converterBusy": "Other previews are being prepared. Try again shortly.",
+    "viewer.invalidToolpath":
+      "This file could not be validated as a supported toolpath. The original remains available.",
+    "viewer.retry": "Try preview again",
+    "viewer.segmentLimit":
+      "This preview exceeds the one-million-segment limit. Download the original to inspect it in your slicer.",
     "viewer.binaryUnsupported":
       "Binary G-code (.bgcode) can't be previewed in the browser — download the file to open it in a slicer.",
     "viewer.loadFailed": "Unable to load the toolpath preview.",
@@ -795,6 +803,15 @@ const messages = {
     "repro.toolpathPreview": "Vista previa de la trayectoria",
     "viewer.loadingToolpath": "Cargando trayectoria…",
     "viewer.renderFailed": "No se pudo renderizar el G-code",
+    "viewer.resourceLimit":
+      "Este recorrido supera el límite de tamaño o tiempo del servidor. Descarga el original para inspeccionarlo en tu laminador.",
+    "viewer.converterBusy":
+      "Se están preparando otros recorridos. Vuelve a intentarlo en un momento.",
+    "viewer.invalidToolpath":
+      "No se pudo validar este archivo como un recorrido compatible. El original sigue disponible.",
+    "viewer.retry": "Volver a intentar la vista previa",
+    "viewer.segmentLimit":
+      "Este recorrido supera el límite de un millón de segmentos. Descarga el original para inspeccionarlo en tu laminador.",
     "viewer.binaryUnsupported":
       "El G-code binario (.bgcode) no se puede previsualizar en el navegador; descárgalo para abrirlo en un laminador.",
     "viewer.loadFailed": "No se pudo cargar la vista previa de la trayectoria.",
