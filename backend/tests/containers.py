@@ -67,9 +67,10 @@ NEXTCLOUD_IMAGE = (
     "nextcloud:29.0.4-apache"
     "@sha256:37d77a1857563d26f7c9a6dc8cdc306ef1118b66f0485bbf457d2f9c1d86e6ed"
 )
+# Pin the multi-architecture index: the former index contained amd64 only.
 OPENSSH_IMAGE = (
     "lscr.io/linuxserver/openssh-server"
-    "@sha256:f5d2155439a0ea4c1b8e173bc36a8bd0be76c3524e4eac3c3b44f67b45fd32ea"
+    "@sha256:2a48f9ce01f61c1d7b376b7be99bd12801a3ecd9f339a4c7e7698d529e8d0b47"
 )
 
 POSTGRES_IMAGE = "postgres:16-alpine"
