@@ -94,6 +94,62 @@ def _row(payload: bytes = b"archive") -> OwnedStorageObject:
 
 
 class TestDownloadOwned:
+    def test_normalizes_remote_metadata_failures(self, tmp_path: Path) -> None:
+        class FailingBackend(_Backend):
+            def object_info(self, _key: str):
+                raise OSError("example-secret")
+
+        with pytest.raises(
+            BackupDestinationError, match="^backup_remote_metadata_failed$"
+        ):
+            _destination(FailingBackend()).download_owned(
+                _row(), tmp_path / "backup.tar.gz"
+            )
+
+        assert not list(tmp_path.iterdir())
+
+    def test_normalizes_failed_downloads_without_retaining_partial_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        class FailingBackend(_Backend):
+            def stream_chunks(self, _key: str):
+                yield b"arc"
+                raise OSError("endpoint included example-secret")
+
+        path = tmp_path / "backup.tar.gz"
+        with pytest.raises(
+            BackupDestinationError, match="^backup_remote_read_failed$"
+        ) as failure:
+            _destination(FailingBackend()).download_owned(_row(), path)
+
+        assert "example-secret" not in str(failure.value)
+        assert not path.exists()
+
+    def test_never_removes_a_preexisting_download_destination(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "backup.tar.gz"
+        path.write_bytes(b"existing")
+
+        with pytest.raises(BackupDestinationError, match="backup_remote_read_failed"):
+            _destination(_Backend()).download_owned(_row(), path)
+
+        assert path.read_bytes() == b"existing"
+
+    def test_stops_an_oversized_archive_download(self, tmp_path: Path) -> None:
+        class OversizedBackend(_Backend):
+            def stream_chunks(self, _key: str):
+                yield b"too many bytes"
+                pytest.fail("oversized stream must not be drained")
+
+        path = tmp_path / "backup.tar.gz"
+        with pytest.raises(
+            BackupDestinationError, match="backup_download_digest_mismatch"
+        ):
+            _destination(OversizedBackend()).download_owned(_row(), path)
+
+        assert not path.exists()
+
     def test_requires_verified_ownership(self, tmp_path: Path) -> None:
         destination = _destination(_Backend())
         output = tmp_path / "backup.tar.gz"
@@ -154,8 +210,16 @@ class TestProbe:
             "versioned_delete": False,
         }
 
-    def test_reports_a_remote_connection_failure(self) -> None:
-        destination = _destination(_Backend(check_error=RuntimeError("oauth rejected")))
+    @pytest.mark.parametrize(
+        "error",
+        [
+            RuntimeError("oauth rejected"),
+            TimeoutError("example-secret"),
+            ConnectionError("example-secret"),
+        ],
+    )
+    def test_reports_a_remote_connection_failure(self, error: Exception) -> None:
+        destination = _destination(_Backend(check_error=error))
 
         with pytest.raises(
             BackupDestinationError, match="storage_connection_probe_failed"

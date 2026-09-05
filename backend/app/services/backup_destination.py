@@ -102,7 +102,10 @@ class RemoteBackupDestination:
             or row.sha256 is None
         ):
             raise BackupDestinationError("backup_storage_ownership_unverified")
-        info = self.backend.object_info(row.key)
+        try:
+            info = self.backend.object_info(row.key)
+        except Exception as exc:
+            raise BackupDestinationError("backup_remote_metadata_failed") from exc
         if info is None or info.size != row.size_bytes:
             raise BackupDestinationError("backup_remote_identity_mismatch")
         if row.etag and info.etag != row.etag:
@@ -119,19 +122,30 @@ class RemoteBackupDestination:
 
     def download_owned(self, row: OwnedStorageObject, destination: Path) -> None:
         self.require_owned(row)
+        assert row.size_bytes is not None
         digest = hashlib.sha256()
         written = 0
-        with destination.open("xb") as output:
-            for chunk in self.backend.stream_chunks(row.key):
-                output.write(chunk)
-                digest.update(chunk)
-                written += len(chunk)
-        self.require_owned(row)
-        if written != row.size_bytes or (
-            row.sha256 and digest.hexdigest() != row.sha256
-        ):
-            destination.unlink(missing_ok=True)
-            raise BackupDestinationError("backup_download_digest_mismatch")
+        created = False
+        try:
+            with destination.open("xb") as output:
+                created = True
+                for chunk in self.backend.stream_chunks(row.key):
+                    written += len(chunk)
+                    if written > row.size_bytes:
+                        raise BackupDestinationError("backup_download_digest_mismatch")
+                    output.write(chunk)
+                    digest.update(chunk)
+            self.require_owned(row)
+            if written != row.size_bytes or digest.hexdigest() != row.sha256:
+                raise BackupDestinationError("backup_download_digest_mismatch")
+        except BaseException as exc:
+            if created:
+                destination.unlink(missing_ok=True)
+            if isinstance(exc, BackupDestinationError) or not isinstance(
+                exc, Exception
+            ):
+                raise
+            raise BackupDestinationError("backup_remote_read_failed") from exc
 
     def delete_owned(
         self, row: OwnedStorageObject, *, allow_unversioned: bool = False

@@ -1,6 +1,6 @@
 """A remote-only backup remains recoverable through the public HTTP API.
 
-The archive lives in a real S3-compatible service and no local copy is retained;
+The archive lives in a real S3-compatible or SFTP service and no local copy is retained;
 the test then destroys the catalog row and Artifact bytes before restoring them
 through the same operator-facing endpoints.
 """
@@ -18,7 +18,9 @@ from botocore.config import Config as BotoConfig
 from app.core.config import settings
 from app.services.setup_token import current_setup_token
 from app.services.storage_backend import init_backend
-from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
+from app.services.storage_opendal import OpenDALStorageBackend
+from app.services.storage_providers import SFTPProviderConfig, resolve_transport
+from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, openssh_endpoint, s3_endpoint
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "sample.gcode"
@@ -46,14 +48,55 @@ def remote_backup_bucket():
         client.delete_bucket(Bucket=bucket)
 
 
+@pytest.fixture(
+    params=[
+        pytest.param("s3", marks=pytest.mark.s3),
+        pytest.param("sftp", marks=pytest.mark.remote_storage),
+    ]
+)
+def remote_backup_profile(request):
+    if request.param == "s3":
+        endpoint, bucket = request.getfixturevalue("remote_backup_bucket")
+        return {
+            "kind": "s3",
+            "configuration": {
+                "provider": "s3_self_hosted",
+                "bucket": bucket,
+                "endpoint_url": endpoint,
+                "region": "us-east-1",
+                "root": "off-site",
+                "addressing_style": "path",
+            },
+            "secrets": {"access_key": S3_ACCESS_KEY, "secret_key": S3_SECRET_KEY},
+        }
+    host, port, host_key = openssh_endpoint()
+    configuration = {
+        "provider": "sftp",
+        "host": host,
+        "port": port,
+        "username": "contract",
+        "host_key": host_key,
+        "root": f"api-backup-{uuid4().hex}",
+    }
+    # Provision only this disposable test directory before enrolling the
+    # profile. Runtime probes and reads must never create an absent root.
+    backend = OpenDALStorageBackend(
+        resolve_transport(SFTPProviderConfig(**configuration, password="contract-only"))
+    )
+    backend.provision_root()
+    return {
+        "kind": "sftp",
+        "configuration": configuration,
+        "secrets": {"password": "contract-only"},
+    }
+
+
 class TestRemoteBackup:
     @pytest.mark.critical
-    @pytest.mark.s3
     @pytest.mark.asyncio
     async def test_remote_only_backup_restores_through_the_public_api(
-        self, api, tmp_path, remote_backup_bucket
+        self, api, tmp_path, remote_backup_profile
     ) -> None:
-        endpoint, bucket = remote_backup_bucket
         setup = await api.post(
             "/api/v1/setup",
             json={
@@ -79,23 +122,17 @@ class TestRemoteBackup:
             headers=headers,
             json={
                 "name": f"critical backup {uuid4().hex}",
-                "kind": "s3",
                 "purpose": "backup",
-                "configuration": {
-                    "provider": "s3_self_hosted",
-                    "bucket": bucket,
-                    "endpoint_url": endpoint,
-                    "region": "us-east-1",
-                    "root": "off-site",
-                    "addressing_style": "path",
-                },
-                "secrets": {
-                    "access_key": S3_ACCESS_KEY,
-                    "secret_key": S3_SECRET_KEY,
-                },
+                **remote_backup_profile,
             },
         )
         assert connection.status_code == 201, connection.text
+        probe = await api.post(
+            f"/api/v1/storage-connections/{connection.json()['id']}/probe",
+            headers=headers,
+        )
+        assert probe.status_code == 200, probe.text
+        assert probe.json()["read"] is True
 
         uploaded = await api.post(
             "/api/v1/ingest/orca",
@@ -126,8 +163,20 @@ class TestRemoteBackup:
 
         assert created.status_code == 202, created.text
         metadata = created.json()
-        assert metadata["location"] == "opendal:s3"
+        assert metadata["location"] == f"opendal:{remote_backup_profile['kind']}"
         assert not list(Path(settings.backup_dir).glob("*.tar.gz"))
+        listed = await api.get("/api/v1/backups/sources", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert any(
+            item["source_ref"] == metadata["source_ref"] for item in listed.json()
+        )
+        verified = await api.post(
+            f"/api/v1/backups/{metadata['backup_id']}/verify",
+            headers=headers,
+            params={"source_ref": metadata["source_ref"]},
+        )
+        assert verified.status_code == 200, verified.text
+        assert verified.json()["valid"] is True
         trashed = await api.delete(f"/api/v1/models/{model['id']}", headers=headers)
         assert trashed.status_code == 204, trashed.text
         purged = await api.delete(

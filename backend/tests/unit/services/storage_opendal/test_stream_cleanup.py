@@ -102,6 +102,74 @@ def stream_resources(monkeypatch: pytest.MonkeyPatch):
 
 
 class TestStreamChunks:
+    def test_reader_reaches_eof_without_losing_chunk_boundaries(
+        self, stream_resources
+    ) -> None:
+        operator, resources, loop = stream_resources
+
+        with operator.open("archive.tar.gz", "rb") as reader:
+            assert reader.read(7) == b"firstla"
+            assert reader.read() == b"st"
+            assert reader.read(1) == b""
+
+        assert resources.closed == resources.acquired
+        assert loop.is_closed()
+
+    def test_reader_rejects_a_write_mode_without_connecting(
+        self, stream_resources
+    ) -> None:
+        from app.services.storage_backend import StorageConfigurationError
+
+        operator, resources, _ = stream_resources
+        with pytest.raises(
+            StorageConfigurationError, match="sftp_stream_mode_unsupported"
+        ):
+            operator.open("archive.tar.gz", "wb")
+
+        assert not resources.acquired
+
+    def test_reader_normalizes_cleanup_failures(self, stream_resources) -> None:
+        from app.services.storage_backend import StorageConfigurationError
+
+        operator, resources, loop = stream_resources
+        with pytest.raises(
+            StorageConfigurationError, match="remote_storage_read_failed"
+        ):
+            with operator.open("archive.tar.gz", "rb") as reader:
+                reader.read(1)
+                resources.fail_at = "reader_close"
+
+        assert resources.closed == resources.acquired
+        assert loop.is_closed()
+
+    def test_reader_leaves_unconsumed_archive_bytes_remote(
+        self, stream_resources
+    ) -> None:
+        operator, resources, loop = stream_resources
+        resources.chunks = [b"x" * 65536, b"unconsumed", b""]
+
+        with operator.open("archive.tar.gz", "rb") as reader:
+            assert reader.read(10) == b"x" * 10
+            assert resources.chunks == [b"unconsumed", b""]
+
+        assert resources.closed == resources.acquired
+        assert loop.is_closed()
+
+    def test_reader_normalizes_transport_failures(self, stream_resources) -> None:
+        from app.services.storage_backend import StorageConfigurationError
+
+        operator, resources, loop = stream_resources
+        resources.fail_at = "read"
+
+        with pytest.raises(
+            StorageConfigurationError, match="remote_storage_read_failed"
+        ):
+            with operator.open("archive.tar.gz", "rb") as reader:
+                reader.read(10)
+
+        assert resources.closed == resources.acquired
+        assert loop.is_closed()
+
     def test_closes_resources_after_early_consumer_exit(self, stream_resources) -> None:
         operator, resources, loop = stream_resources
         stream = operator.stream_chunks("file", 1024)
