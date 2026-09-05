@@ -13,9 +13,10 @@ RUN apt-get update \
     python3-venv \
  && rm -rf /var/lib/apt/lists/*
 
-# OpenDAL v0.58.2 publishes Python distribution 0.47.6. Its upstream Linux
-# wheel omits the Unix-only SFTP service, so the full image builds the exact
-# release source with only PrintStash's remote-storage contract surface enabled.
+# SFTP uses AsyncSSH; native amd64/arm64 image recovery proves this path.
+# OpenDAL v0.58.2 publishes Python distribution 0.47.6. Build that exact
+# release with the advertised S3, WebDAV and Google Drive service features
+# enabled, independently of the features selected in upstream wheels.
 RUN curl -fsSL \
       "https://github.com/apache/opendal/archive/refs/tags/v${OPENDAL_SOURCE_VERSION}.tar.gz" \
       -o /tmp/opendal.tar.gz \
@@ -26,7 +27,7 @@ RUN curl -fsSL \
  && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6' \
  && cd /src/bindings/python \
  && /tmp/maturin/bin/maturin build --release --no-default-features \
-      --features pyo3/extension-module,abi3,services-memory,services-s3,services-webdav,services-sftp,services-gdrive \
+      --features pyo3/extension-module,abi3,services-memory,services-s3,services-webdav,services-gdrive \
       --out /wheels
 
 FROM scratch AS opendal-wheel
