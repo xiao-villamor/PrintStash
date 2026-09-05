@@ -26,7 +26,7 @@ RUN curl -fsSL \
  && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6' \
  && cd /src/bindings/python \
  && /tmp/maturin/bin/maturin build --release --no-default-features \
-      --features pyo3/extension-module,abi3,services-memory,services-webdav,services-sftp,services-gdrive \
+      --features pyo3/extension-module,abi3,services-memory,services-s3,services-webdav,services-sftp,services-gdrive \
       --out /wheels
 
 FROM scratch AS opendal-wheel
@@ -65,7 +65,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && uv sync --frozen --no-dev --no-editable --extra full \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
- && .venv/bin/python -c 'import opendal; opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check")' \
+ && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh' \
  && rm -rf /tmp/opendal-wheels \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"

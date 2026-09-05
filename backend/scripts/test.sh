@@ -17,6 +17,8 @@ Lanes
              over a real loopback socket. Needs no external services; the
              container-backed provider contracts run in `full`.
   e2e        tests/e2e — the whole app over ASGITransport plus the fakes.
+  image      final-image transport and HTTP backup/restore contracts.
+             --image TAG --variant full|lite; requires an already built image.
   critical   release-blocking workflows across integration, contract and E2E.
              Includes real remote providers and therefore needs Docker.
   full       everything, including `slow`, minus the coverage gate.
@@ -94,6 +96,9 @@ add_paths() {
 }
 
 case "$lane" in
+  image)
+    exec uv run python -m tests.e2e.runtime_image "${pytest_args[@]}"
+    ;;
   fast)
     add_paths tests/unit tests/integration
     exec uv run pytest "${parallel[@]}" -m "not slow and not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
