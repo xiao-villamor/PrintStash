@@ -83,17 +83,41 @@ HTTP boundary completion retains these additional contracts:
 | 65 | `repo/test_architecture.py::TestImports.test_rejects_an_operations_unexported_dependency` | Error | HTTP reaches an operation's imported dependency directly, through an alias or through a deferred import | Architectural violation identifies the dependency and its consumer | Repo | ✅ four variants in the 23-test architecture/OpenAPI run |
 | 66 | `repo/test_architecture.py::TestImports.test_allows_an_explicit_public_error_contract` | Happy | Operation explicitly exports its error contract in `__all__` | Public error contract remains accessible to HTTP | Repo | ✅ |
 | 67 | `repo/test_architecture.py::TestImports.test_allows_an_operation_defined_by_its_owner` | Happy | HTTP calls the owner's own operation | Operation is accepted as public | Repo | ✅ |
+| 68 | `integration/modules/ingestion/test_import_resolvers.py::TestConnectedManifest.test_rejects_noncanonical_provider_identity` | Error | Provider identity URL includes query, fragment, credentials or an insecure scheme | No capture manifest; stable contract-change error | Integration | ✅ four URL variants pass |
+| 69 | `integration/modules/administration/test_setup_bootstrap.py::TestLockInstallation.test_excludes_a_competing_postgres_setup_transaction` | Edge | One installation transaction holds the PostgreSQL advisory lock | A peer receives PostgreSQL's lock-not-available error instead of entering setup | Integration / PostgreSQL | ✅ |
+| 70 | `integration/modules/administration/test_setup_bootstrap.py::TestLockInstallation.test_rejects_postgres_setup_after_configuration_commits` | Edge | A peer cached unconfigured state before the first transaction committed configuration | New lock acquisition refreshes state and rejects setup as already configured | Integration / PostgreSQL | ✅ |
 
 ## Gate evidence
 
-- Shared core: 1,431 tests passed; all five branch-coverage floor checks passed.
-- Repository organization, migration fixture and WebDAV regression pass: 2,178 tests.
-- OSS targeted extraction runs: 277 Revision adapter and Model HTTP tests; 220 command/dispatch
-  and HTTP tests; 86 import-handler/progress tests; 111 runtime/bootstrap tests.
-- Shared core Ruff and strict Pyright pass. Cloud adoption is deferred.
-- Ruff and the configured backend Pyright scope pass. Formatting of core, database,
-  HTTP schemas and shared-core source passes.
-- Added backup boundaries: 18 download tests, 37 archive/adoption/catalogue/identity tests,
-  and nine OpenDAL/recovery tests pass.
-- The full OSS coverage gate is still being closed. Cloud execution is deferred.
-  Intermediate failures are recorded as pending above, not treated as a green gate.
+- The complete backend regression suite on `c94be69` passed in CI on Python 3.11
+  and 3.13: 8,663 general tests plus 144 PostgreSQL/storage tests in each runtime.
+  The initial Python 3.11 coverage gate identified the provider-identity and
+  directly measured PostgreSQL setup cases added in rows 68–70. Production code
+  did not change while closing those gaps.
+- Shared core: 1,431 tests and all five branch-coverage floor checks passed;
+  its Ruff and strict Pyright checks passed. CI also validated Python 3.11/3.13
+  with lowest/highest dependency resolution.
+- Final HTTP/import regression: 1,250 tests passed after the last route import
+  changes. Additional resolver, source, API and repository checks: 2,328 passed;
+  the WebDAV E2E case passed when launched through `uv` so its executable was on
+  PATH. Four mounted-folder discovery/permission tests passed.
+- The two new PostgreSQL setup tests passed on their final assertions. The
+  unchanged SQLite two-process test hit its existing worker-result timeout during
+  a heavily loaded mixed-resource run, then passed alone in 96.88 seconds with
+  the original timeout and assertions. It also passed in both complete CI runs.
+- A long-running local general pass finished with 8,654 passing tests and three
+  failures from workers that had loaded the previous fake HTTP-error adapters.
+  The corrected five concurrency cases passed, followed by both complete CI
+  regression passes above. No test was skipped or weakened to hide these results.
+- Final combined local branch coverage: **93.97%**. All ten coverage
+  floor checks pass, retaining the 90% aggregate/module floors and the existing
+  capped debt list. Measurements from before the ten route changes were removed
+  and replaced with fresh execution data from their final regression tests.
+- Backend Ruff, configured Pyright, dependency declarations and ratcheted
+  formatting pass. Architecture checks report no recorded cycles, private
+  dependencies, legacy service imports or HTTP transport imports in operations.
+  OpenAPI, metadata/migration parity and query-budget assertions pass.
+- CI also passed the critical capabilities, frontend, browser extension,
+  real-backend browser workflows and Docker images for amd64/arm64.
+- Cloud implementation and execution remain deferred to
+  `architecture/cloud-adoption.md`.

@@ -317,6 +317,48 @@ class TestProviderMetadataCache:
 class TestConnectedManifest:
     """Turning an authenticated provider's response into a bounded capture manifest."""
 
+    @pytest.mark.parametrize(
+        "identity_url",
+        [
+            "https://www.myminifactory.com/object/123?token=fixture-token",
+            "https://www.myminifactory.com/object/123#download",
+            "https://fixture-user:fixture-password@www.myminifactory.com/object/123",
+            "http://www.myminifactory.com/object/123",
+        ],
+        ids=["query", "fragment", "credentials", "insecure-scheme"],
+    )
+    def test_rejects_noncanonical_provider_identity(
+        self, identity_url, db_session, make_user, monkeypatch
+    ) -> None:
+        provider_metadata_cache._provider_metadata_cache.clear()
+        actor = make_user()
+        context = import_resolvers.ProviderResolutionContext(
+            actor.id, SQLiteSessionFactory(db_session.get_bind())
+        )
+
+        async def fetch(_session, _user_id, _item):
+            return ProviderModelMetadata(
+                model_id="123",
+                title="Fixture model",
+                description=None,
+                creator=None,
+                license_name=None,
+                identity=ProviderIdentity(
+                    provider_id="123", canonical_url=identity_url
+                ),
+            )
+
+        monkeypatch.setattr(provider_connections, "fetch_mmf_model_metadata", fetch)
+
+        with pytest.raises(
+            import_resolvers.ImportError_, match="^provider_contract_changed$"
+        ):
+            asyncio.run(
+                import_resolvers.resolve_connected_provider_capture(
+                    "https://www.myminifactory.com/object/123", context
+                )
+            )
+
     def test_mmf_manifest_carries_only_allowlisted_metadata(
         self,
         monkeypatch: pytest.MonkeyPatch,
