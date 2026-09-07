@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import httpx
 import pytest
 
@@ -71,8 +73,53 @@ class TestBrowserDelivery:
             result = plan_artifact(
                 artifact,
                 DeliveryRequest(
-                    filename="part.stl", range_header="bytes=2-7", proxy_only=True
+                    filename="part.stl", range_header="bytes=2-7"
                 ),
             )
 
             assert (result.status, b"".join(result.chunks)) == (206, PAYLOAD[2:8])
+
+    def test_compares_if_range_to_the_original_digest(self, tmp_path, db_session):
+        with browser_s3(tmp_path) as (backend, _tls):
+            key = backend.blob_key("delivery", 1, "part.stl")
+            backend.write_bytes(PAYLOAD, key)
+            digest = hashlib.sha256(PAYLOAD).hexdigest()
+            artifact = build_file(
+                db_session,
+                build_model(db_session),
+                path=key,
+                size_bytes=len(PAYLOAD),
+                sha256=digest,
+            )
+            bind_backend(backend)
+
+            result = plan_artifact(
+                artifact,
+                DeliveryRequest(
+                    filename="part.stl",
+                    range_header="bytes=2-7",
+                    if_range=f'"{digest}"',
+                ),
+            )
+
+            assert (result.status, b"".join(result.chunks)) == (206, PAYLOAD[2:8])
+
+    def test_serves_full_original_for_stale_if_range(self, tmp_path, db_session):
+        with browser_s3(tmp_path) as (backend, _tls):
+            key = backend.blob_key("delivery", 1, "part.stl")
+            backend.write_bytes(PAYLOAD, key)
+            artifact = build_file(
+                db_session, build_model(db_session), path=key, size_bytes=len(PAYLOAD)
+            )
+            bind_backend(backend)
+
+            result = plan_artifact(
+                artifact,
+                DeliveryRequest(
+                    filename="part.stl",
+                    range_header="bytes=2-7",
+                    if_range='"stale"',
+                ),
+            )
+
+            assert (result.status, b"".join(result.chunks)) == (200, PAYLOAD)

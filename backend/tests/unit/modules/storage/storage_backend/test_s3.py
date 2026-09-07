@@ -448,6 +448,85 @@ class TestS3ClientConfiguration:
         assert captured["config"].s3["addressing_style"] == "virtual"
 
 
+class TestBrowserDownload:
+    def test_falls_back_when_cors_policy_is_unreadable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, client = _memory_s3_backend(monkeypatch)
+
+        def unavailable(**_kwargs: object):
+            raise PermissionError("get-bucket-cors denied")
+
+        monkeypatch.setattr(client, "get_bucket_cors", unavailable, raising=False)
+
+        result = backend.browser_download(
+            "vault-data/part.stl", "part.stl", "application/sla", origin="https://app.test"
+        )
+
+        assert result is None
+
+    def test_refuses_a_later_permissive_cors_rule(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, client = _memory_s3_backend(monkeypatch)
+        blocked = {
+            "AllowedMethods": ["GET"],
+            "AllowedOrigins": ["https://app.test"],
+            "AllowedHeaders": ["*"],
+        }
+        policy = {
+            "CORSRules": [blocked, {**blocked, "ExposeHeaders": ["Content-Disposition"]}]
+        }
+        monkeypatch.setattr(
+            client, "get_bucket_cors", lambda **_kwargs: policy, raising=False
+        )
+
+        result = backend.browser_download(
+            "vault-data/part.stl", "part.stl", "application/sla", origin="https://app.test"
+        )
+
+        assert result is None
+
+    def test_falls_back_when_the_signer_fails(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        backend, client = _memory_s3_backend(monkeypatch)
+        backend.write_bytes(b"payload", "vault-data/part.stl")
+
+        def unavailable(*_args: object, **_kwargs: object):
+            raise RuntimeError("sensitive-signed-query")
+
+        monkeypatch.setattr(client, "generate_presigned_url", unavailable)
+
+        result = backend.browser_download(
+            "vault-data/part.stl", "part.stl", "application/sla"
+        )
+
+        assert result is None
+        assert "sensitive-signed-query" not in caplog.text
+
+
+class TestStreamRange:
+    def test_closes_an_unstarted_body(self):
+        body = BytesIO(b"payload")
+        result = storage_s3._RangeBody(body, 7)
+
+        result.close()
+
+        assert body.closed is True
+
+    def test_rejects_a_truncated_body(self):
+        from app.core.errors import OperationError
+
+        body = BytesIO(b"short")
+        result = storage_s3._RangeBody(body, 10)
+
+        with pytest.raises(OperationError, match="storage_range_truncated"):
+            b"".join(result)
+
+        assert body.closed is True
+
+
 class TestS3CompatibilityCoverage:
     def test_derives_all_object_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend, _client = _memory_s3_backend(monkeypatch)

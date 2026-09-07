@@ -20,7 +20,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.api.artifact_responses import delivery_request, render_delivery
 from app.core.config import settings
@@ -446,8 +446,8 @@ def _run_thumbnail_rebuild(
             after_id = 0
             while True:
                 page_stmt = (
-                    stmt.where(Model.id > after_id).order_by(Model.id).limit(100)
-                )  # type: ignore[operator,union-attr]
+                    stmt.where(col(Model.id) > after_id).order_by(col(Model.id)).limit(100)
+                )
                 models = session.exec(page_stmt).all()
                 if not models:
                     break

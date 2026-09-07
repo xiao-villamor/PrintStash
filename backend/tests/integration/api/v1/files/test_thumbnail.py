@@ -88,6 +88,9 @@ class TestFileThumbnail:
         row = make_file(make_model("remote-thumb"))
 
         class RemoteThumbnailBackend:
+            def browser_download(self, *args, **kwargs):
+                return None
+
             streamed = 0
 
             def thumbnail_key(self, file_id: int) -> str:
@@ -259,7 +262,7 @@ class TestThumbnailRebuildJob:
         db_session.add(model)
         db_session.commit()
         monkeypatch.setattr(
-            'app.modules.media.mesh_operations.render_thumbnail', lambda _path: b"webp"
+            "app.modules.media.mesh_operations.render_thumbnail", lambda _path: b"webp"
         )
         job_id = registry.create(owner_user_id=None)
 
@@ -316,7 +319,7 @@ class TestThumbnailRebuildJob:
         get_backend().write_bytes(b"solid x endsolid", key)
         make_file(model, filename="render-fails.stl", path=key)
         monkeypatch.setattr(
-            'app.modules.media.mesh_operations.render_thumbnail', lambda _path: None
+            "app.modules.media.mesh_operations.render_thumbnail", lambda _path: None
         )
         job_id = registry.create(owner_user_id=None)
 
@@ -344,7 +347,9 @@ class TestThumbnailRebuildJob:
         def exploding(_path):
             raise RuntimeError("renderer exploded")
 
-        monkeypatch.setattr('app.modules.media.mesh_operations.render_thumbnail', exploding)
+        monkeypatch.setattr(
+            "app.modules.media.mesh_operations.render_thumbnail", exploding
+        )
         job_id = registry.create(owner_user_id=None)
 
         _run_thumbnail_rebuild(job_id, True, get_session_factory())

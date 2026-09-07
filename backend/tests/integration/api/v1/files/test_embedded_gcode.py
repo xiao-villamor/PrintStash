@@ -117,7 +117,7 @@ class TestEmbeddedGcode:
 
         assert response.headers["content-type"].startswith("text/plain")
         assert response.headers["content-disposition"] == (
-            'inline; filename="plate_2.gcode"'
+            'inline; filename="plate_2.gcode"; filename*=UTF-8\'\'plate_2.gcode'
         )
 
     async def test_falls_back_to_the_only_plate_when_none_is_named(

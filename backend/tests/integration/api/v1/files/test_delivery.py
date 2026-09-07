@@ -125,3 +125,84 @@ class TestAuthorizedDelivery:
         )
 
         assert response.status_code == 404
+
+    def test_denies_revoked_conditional_access(
+        self, client, auth_headers, stored_artifact
+    ):
+        created = client.post(
+            f"/api/v1/models/{stored_artifact.model_id}/shares",
+            headers=auth_headers,
+            json={"allow_download": True},
+        ).json()
+        client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers)
+
+        response = client.get(
+            f"/api/v1/share/{created['token']}/files/{stored_artifact.id}/download",
+            headers={"If-None-Match": f'"{stored_artifact.sha256}"'},
+        )
+
+        assert response.status_code == 404
+
+    def test_keeps_shared_original_noncacheable(
+        self, client, auth_headers, stored_artifact
+    ):
+        created = client.post(
+            f"/api/v1/models/{stored_artifact.model_id}/shares",
+            headers=auth_headers,
+            json={"allow_download": True},
+        ).json()
+
+        response = client.get(
+            f"/api/v1/share/{created['token']}/files/{stored_artifact.id}/download"
+        )
+
+        assert response.headers["cache-control"] == "private, no-store"
+
+    def test_keeps_slicer_original_noncacheable(
+        self, client, auth_headers, stored_artifact
+    ):
+        url = client.get(
+            f"/api/v1/files/{stored_artifact.id}/slicer-url", headers=auth_headers
+        ).json()["url"]
+
+        response = client.get(url)
+
+        assert response.headers["cache-control"] == "private, no-store"
+
+    def test_revalidates_authenticated_thumbnail_privately(
+        self, client, auth_headers, stored_artifact
+    ):
+        backend = get_backend()
+        backend.write_bytes(b"thumbnail", backend.thumbnail_key(stored_artifact.id))
+
+        response = client.get(
+            f"/api/v1/files/{stored_artifact.id}/thumbnail", headers=auth_headers
+        )
+
+        assert (
+            response.headers["cache-control"] == "private, max-age=0, must-revalidate"
+        )
+
+    def test_uses_a_separate_converted_validator(
+        self, client, auth_headers, db_session
+    ):
+        payload = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+        backend = get_backend()
+        key = backend.blob_key("conversion", 1, "part.obj")
+        backend.write_bytes(payload, key)
+        artifact = build_file(
+            db_session,
+            build_model(db_session),
+            filename="part.obj",
+            path=key,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+        )
+
+        response = client.get(
+            f"/api/v1/files/{artifact.id}/stl",
+            headers={**auth_headers, "If-None-Match": f'"{artifact.sha256}"'},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["etag"] != f'"{artifact.sha256}"'

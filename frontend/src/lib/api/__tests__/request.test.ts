@@ -286,7 +286,7 @@ describe("sendJson", () => {
 describe("getAuthenticatedBlob", () => {
   it("retries a failed browser delivery through the API", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    fetchMock.mockResolvedValueOnce(blobResponse());
+    fetchMock.mockResolvedValueOnce(new Response("payload"));
 
     const blob = await getAuthenticatedBlob("/api/v1/files/7/download");
 

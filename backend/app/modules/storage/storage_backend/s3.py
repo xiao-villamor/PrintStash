@@ -844,26 +844,33 @@ class S3StorageBackend(StorageBackend):
             except Exception:
                 # Lack of read-only CORS permission is not a delivery outage.
                 return None
-            permitted = any(
-                "GET" in rule.get("AllowedMethods", [])
-                and any(
+            # S3 uses the first matching rule; a later permissive rule does
+            # not establish that this browser can read the response headers.
+            permitted = False
+            for rule in rules:
+                if "GET" not in rule.get("AllowedMethods", []):
+                    continue
+                if not any(
                     re.fullmatch(re.escape(allowed).replace(r"\*", ".*"), origin)
-                    is not None
                     for allowed in rule.get("AllowedOrigins", [])
-                )
-                and any(
-                    header.lower() in {"*", "content-disposition"}
-                    for header in rule.get("ExposeHeaders", [])
-                )
-                and (
-                    "*" in rule.get("AllowedHeaders", [])
+                ):
+                    continue
+                exposed = {header.lower() for header in rule.get("ExposeHeaders", [])}
+                allowed_headers = {
+                    header.lower() for header in rule.get("AllowedHeaders", [])
+                }
+                permitted = bool(exposed & {"*", "content-disposition"}) and (
+                    "*" in allowed_headers
                     or {
-                        "cache-control", "pragma", "if-none-match",
-                        "if-modified-since", "range", "if-range",
-                    }.issubset({header.lower() for header in rule.get("AllowedHeaders", [])})
+                        "cache-control",
+                        "pragma",
+                        "if-none-match",
+                        "if-modified-since",
+                        "range",
+                        "if-range",
+                    }.issubset(allowed_headers)
                 )
-                for rule in rules
-            )
+                break
             if not permitted:
                 return None
         info = self.object_info(key)

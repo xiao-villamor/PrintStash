@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Artifact downloads use the canonical `/files/{id}/download` endpoint. The
+  separate `download-url` and `download-direct` endpoints have been removed.
+
 - Backend code is organized by capability, with separate startup, storage,
   backup recovery and library query modules. G-code Revision deletion uses a
   shared business operation with product-specific authorization and persistence.
@@ -14,6 +17,11 @@
   listing. Its connection settings and extension identity are unchanged.
 
 ### Added
+
+- Authorized Artifact downloads can offload managed S3 bodies through short-lived
+  HTTPS redirects when browser CORS is supported. Local files retain range
+  delivery; originals, previews and thumbnails now revalidate privately, and
+  shares/slicer downloads remain noncacheable.
 
 - Successful browser-extension CI jobs provide the validated Chrome Web Store
   ZIP as a direct download, retained for 30 days.

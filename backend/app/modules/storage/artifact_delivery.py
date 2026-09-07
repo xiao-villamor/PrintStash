@@ -196,7 +196,15 @@ def plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
         DeliveryPurpose.BROWSER_FETCH,
         DeliveryPurpose.THUMBNAIL,
     }
-    if backend is not None and path is None and can_redirect and not request.proxy_only:
+    # A provider's object ETag need not equal our original SHA-256 validator.
+    # Keep range admission here so If-Range always names this representation.
+    if (
+        backend is not None
+        and path is None
+        and can_redirect
+        and not request.proxy_only
+        and not request.range_header
+    ):
         target = backend.browser_download(
             artifact.path, request.filename, request.media_type, origin=request.origin
         )
@@ -268,6 +276,24 @@ def plan_stored_representation(
     ):
         return DeliveryPlan(304, headers, request.media_type)
     path = backend.direct_path(key)
+    if (
+        path is None
+        and request.purpose == DeliveryPurpose.THUMBNAIL
+        and not request.proxy_only
+        and not request.range_header
+    ):
+        target = backend.browser_download(
+            key, request.filename, request.media_type, origin=request.origin
+        )
+        if target is not None and safe_browser_download(
+            target, key=key, origin=request.origin, now=utcnow()
+        ):
+            return DeliveryPlan(
+                307,
+                {"Cache-Control": PRIVATE_NO_STORE, "Referrer-Policy": "no-referrer"},
+                request.media_type,
+                redirect=target.url,
+            )
     if path is not None:
         if not path.is_file():
             raise ArtifactContentMissingError("file_blob_missing")

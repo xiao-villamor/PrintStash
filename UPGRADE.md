@@ -1,5 +1,13 @@
 # PrintStash Upgrade Guide
 
+## Unreleased: canonical Artifact downloads
+
+Clients using `/api/v1/files/{id}/download-url` or `download-direct` must use
+`/api/v1/files/{id}/download` and follow temporary redirects. Authentication is
+still required. Browser provider delivery needs readable CORS configuration;
+without it, downloads continue through the API. See [Artifact downloads](docs/artifact-delivery.md).
+
+
 This guide covers supported self-hosted upgrades. SQLite plus local filesystem
 storage remains the default. Always upgrade from a fresh backup and retain the
 previous application image until validation is complete.
