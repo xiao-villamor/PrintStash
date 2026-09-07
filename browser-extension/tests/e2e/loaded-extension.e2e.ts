@@ -54,7 +54,7 @@ declare const chrome: {
   scripting?: { executeScript?: unknown };
 };
 
-const EXTENSION_NAME = "PrintStash Model Importer";
+const EXTENSION_NAME = "PrintStash";
 const FIREFOX_ADDON_ID = "printstash-model-importer@printstash.local";
 
 describe("loaded extension", () => {
@@ -105,7 +105,7 @@ describe("loaded extension", () => {
     await browser.switchToWindow(handle);
 
     assert.match(await browser.getUrl(), /^(?:chrome|moz)-extension:\/\/[^/]+\/help\.html$/);
-    assert.equal(await browser.$("h1").getText(), "PrintStash Model Importer");
+    assert.equal(await browser.$("h1").getText(), "PrintStash");
     assert.equal(await browser.$("#privacy").getText(), "Privacy policy");
     assert.match(
       await browser.$("body").getText(),

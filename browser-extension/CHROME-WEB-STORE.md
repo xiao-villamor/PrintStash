@@ -1,4 +1,4 @@
-# Publicar PrintStash Model Importer en Chrome Web Store
+# Publicar PrintStash en Chrome Web Store
 
 Este documento prepara una primera publicación. La extensión requiere una
 instancia de PrintStash; no incluye un servidor ni crea una cuenta de alojamiento.
@@ -43,7 +43,7 @@ ni inicia un navegador y no sustituye esta prueba.
 
 ## Textos de la ficha
 
-**Name:** PrintStash Model Importer
+**Name:** PrintStash
 
 **Summary:** Send models from MakerWorld, Printables, Thingiverse, or direct file links to PrintStash.
 
@@ -54,8 +54,8 @@ ni inicia un navegador y no sustituye esta prueba.
 ```text
 Bring the models you find online into your own PrintStash library.
 
-PrintStash Model Importer connects your browser to a self-hosted PrintStash
-server. Send a supported model page or direct file link to Pending Imports,
+The PrintStash browser extension connects your browser to your self-hosted
+PrintStash server. Send a supported model page or direct file link to Pending Imports,
 then review the files before adding them to your library.
 
 • Pair your browser with a one-time code from PrintStash Settings → Imports.

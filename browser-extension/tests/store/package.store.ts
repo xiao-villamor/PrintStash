@@ -15,7 +15,7 @@ describe("Chrome Web Store ZIP", () => {
   it("packages a production MV3 manifest at the ZIP root", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.version).toBe(metadata.version);
-    expect(manifest.name).toBe("PrintStash Model Importer");
+    expect(manifest.name).toBe("PrintStash");
     expect(manifest.description.length).toBeGreaterThan(0);
     expect(manifest.description.length).toBeLessThanOrEqual(132);
     expect(manifest.action.default_popup).toBe("popup.html");

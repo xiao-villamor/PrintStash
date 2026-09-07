@@ -16,7 +16,7 @@ export default defineConfig({
     },
   },
   manifest: ({ browser }) => ({
-    name: "PrintStash Model Importer",
+    name: "PrintStash",
     description:
       "Send models from MakerWorld, Printables, Thingiverse, or direct file links to PrintStash.",
     permissions: ["activeTab", "scripting", "storage"],
@@ -35,7 +35,7 @@ export default defineConfig({
           }
         : undefined,
     action: {
-      default_title: "Import model to PrintStash",
+      default_title: "PrintStash",
       default_icon: {
         16: "icon-16.png",
         32: "icon-32.png",

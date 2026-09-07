@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- The browser extension is now named PrintStash in the browser, help and store
+  listing. Its connection settings and extension identity are unchanged.
+
 ### Added
 
 - Successful browser-extension CI jobs provide the validated Chrome Web Store

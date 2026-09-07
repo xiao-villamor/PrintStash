@@ -1,4 +1,4 @@
-# PrintStash Model Importer
+# PrintStash
 
 This Manifest V3 Chrome and Firefox extension recognizes MakerWorld, Printables, and
 Thingiverse model pages, Printables collections, and direct model/archive file
