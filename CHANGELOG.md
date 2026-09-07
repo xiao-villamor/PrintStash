@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The simple Docker Compose deployment now uses the light API image.
+
 - The browser extension is now named PrintStash in the browser, help and store
   listing. Its connection settings and extension identity are unchanged.
 

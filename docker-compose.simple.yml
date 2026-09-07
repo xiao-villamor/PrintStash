@@ -11,7 +11,7 @@ services:
         condition: service_healthy
 
   api:
-    image: ghcr.io/xiao-villamor/printstash-api:${PRINTSTASH_VERSION:-latest}
+    image: ghcr.io/xiao-villamor/printstash-api-lite:${PRINTSTASH_VERSION:-latest}
     restart: unless-stopped
     environment:
       VAULT_SETUP_MODE: trusted_network

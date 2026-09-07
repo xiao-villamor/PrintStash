@@ -1,8 +1,9 @@
 # Deployment and optional settings
 
 For a new local installation, use [docker-compose.simple.yml](../docker-compose.simple.yml).
-It starts the full API and web UI with SQLite and local storage. The short file
-uses the images' built-in defaults; you only add settings you need.
+It starts the light API and web UI with SQLite and local storage. The short file
+uses the images' built-in defaults; you only add settings you need. The light API
+omits browser automation and STEP tessellation.
 
 ## Install
 
@@ -262,7 +263,7 @@ at `http://localhost:3000/api/v1/health` (use your chosen host/port).
 
 | File | Purpose |
 | --- | --- |
-| **`docker-compose.simple.yml`** | **Recommended for a new local install.** Full images, two services, minimal configuration. |
+| **`docker-compose.simple.yml`** | **Recommended for a new local install.** Light API image, two services, minimal configuration. |
 | `docker-compose.yml` | Existing configurable deployment with opt-in PostgreSQL and S3 profiles. |
 | `docker-compose.light.yml` | Smaller API image without browser automation or STEP tessellation; exposes advanced variables. |
 | `docker-compose.prod.yml` | Standalone configuration for a TLS reverse proxy, with localhost binding and log rotation. |

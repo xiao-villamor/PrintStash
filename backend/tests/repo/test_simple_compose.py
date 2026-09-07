@@ -51,13 +51,19 @@ class TestSimpleCompose:
         assert set(simple_config["services"]) == {"frontend", "api"}
         assert not simple_config["services"]["api"].get("env_file")
 
-    @pytest.mark.parametrize("service", ["api", "frontend"], ids=str)
-    def test_uses_prebuilt_full_images(
-        self, simple_config: dict[str, Any], service: str
+    @pytest.mark.parametrize(
+        ("service", "image"),
+        [
+            pytest.param("api", "printstash-api-lite", id="api-lite"),
+            pytest.param("frontend", "printstash-frontend", id="frontend"),
+        ],
+    )
+    def test_uses_prebuilt_images(
+        self, simple_config: dict[str, Any], service: str, image: str
     ) -> None:
         config = simple_config["services"][service]
 
-        assert config["image"] == f"ghcr.io/xiao-villamor/printstash-{service}:latest"
+        assert config["image"] == f"ghcr.io/xiao-villamor/{image}:latest"
         assert "build" not in config
 
     @pytest.mark.parametrize(
