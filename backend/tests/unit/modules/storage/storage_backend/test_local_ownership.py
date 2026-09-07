@@ -345,6 +345,7 @@ class TestLocalRootSafetyBranches:
 
         missing = tmp_path / "unmounted"
         _overlay["data_dir"] = missing
+        backend = storage_local.LocalStorageBackend()
         with pytest.raises(StorageConfigurationError, match="root_unavailable"):
             backend._assert_no_managed_escape(missing / "object.bin")
         assert not missing.exists()
@@ -411,7 +412,9 @@ class TestLocalRootSafetyBranches:
             # A root replacement is represented by a changed identity at the
             # pathname; no write is attempted by this probe.
             monkeypatch = pytest.MonkeyPatch()
-            monkeypatch.setattr('app.modules.storage.storage_backend.local.os.stat', changed_stat)
+            monkeypatch.setattr(
+                "app.modules.storage.storage_backend.local.os.stat", changed_stat
+            )
             try:
                 with pytest.raises(StorageConfigurationError, match="root_changed"):
                     backend._assert_pinned_root_current(fd, root)
@@ -465,7 +468,9 @@ class TestLocalRootSafetyBranches:
         def fail_rename(*_args: object, **_kwargs: object) -> None:
             raise rename_error("rename failed")
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.rename', fail_rename)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.rename", fail_rename
+        )
 
         result = backend.reclaim_unverified(
             str(key), expected_size=len(b"payload"), expected_etag=None
@@ -509,7 +514,9 @@ class TestLocalRootSafetyBranches:
                 return os.stat_result(values)
             return result
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.fstat', changing_fstat)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.fstat", changing_fstat
+        )
         assert (
             backend.reclaim_unverified(
                 str(key), expected_size=len(b"payload"), expected_etag=None
@@ -538,7 +545,9 @@ class TestLocalRootSafetyBranches:
         def fail_restore_link(*_args: object, **_kwargs: object) -> None:
             raise OSError("link unavailable")
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.link', fail_restore_link)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.link", fail_restore_link
+        )
         with pytest.raises(OSError, match="link unavailable"):
             backend._quarantine_owned(receipt)
         assert not key.exists()
@@ -557,7 +566,9 @@ class TestLocalRootSafetyBranches:
         def no_hardlinks(*_args: object, **_kwargs: object) -> None:
             raise OSError(errno.EXDEV, "cross-device")
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.link', no_hardlinks)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.link", no_hardlinks
+        )
         receipt = backend.create_bytes(b"guarded", str(key))
 
         assert receipt.device is None
@@ -577,9 +588,11 @@ class TestLocalRootSafetyBranches:
         def no_hardlinks(*_args: object, **_kwargs: object) -> None:
             raise OSError(errno.EXDEV, "cross-device")
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.link', no_hardlinks)
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local._fsync_directory',
+            "app.modules.storage.storage_backend.local.os.link", no_hardlinks
+        )
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local._fsync_directory",
             lambda _path: None,
         )
         receipt = backend.create_bytes(b"backup", str(key))
@@ -600,7 +613,9 @@ class TestLocalRootSafetyBranches:
         def unsupported_link(*_args: object, **_kwargs: object) -> None:
             raise OSError(errno.EIO, "link failed")
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.link', unsupported_link)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.link", unsupported_link
+        )
         with pytest.raises(OSError, match="link failed"):
             backend.create_bytes(b"backup", str(key))
         assert not key.exists()
@@ -616,7 +631,7 @@ class TestLocalRootSafetyBranches:
         key = Path(settings.backup_dir) / "backup.tar"
         key.write_bytes(b"existing")
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EXDEV, "cross-device")
             ),
@@ -635,7 +650,7 @@ class TestLocalRootSafetyBranches:
 
         key = Path(settings.backup_dir) / "backup.tar"
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EXDEV, "cross-device")
             ),
@@ -661,13 +676,13 @@ class TestLocalRootSafetyBranches:
 
         key = Path(settings.backup_dir) / "backup.tar"
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EXDEV, "cross-device")
             ),
         )
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local._fsync_directory',
+            "app.modules.storage.storage_backend.local._fsync_directory",
             lambda _path: (_ for _ in ()).throw(OSError("fsync failed")),
         )
         receipt = backend.create_bytes(b"backup", str(key))
@@ -832,7 +847,8 @@ class TestLocalRootSafetyBranches:
             raise FileExistsError(str(key))
 
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link', claim_destination_then_collide
+            "app.modules.storage.storage_backend.local.os.link",
+            claim_destination_then_collide,
         )
         with pytest.raises(StorageCollisionError):
             backend.replace_bytes(b"new", receipt)
@@ -882,7 +898,9 @@ class TestLocalRootSafetyBranches:
                 return os.stat_result(values)
             return result
 
-        monkeypatch.setattr('app.modules.storage.storage_backend.local.os.fstat', changing_fstat)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.local.os.fstat", changing_fstat
+        )
         with pytest.raises(StorageCollisionError, match="object_changed"):
             backend.adopt_existing(
                 str(key),
@@ -931,7 +949,7 @@ class TestLocalRootSafetyBranches:
 
         key = Path(settings.data_dir) / "unsupported.bin"
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EIO, "link failed")
             ),
@@ -951,7 +969,7 @@ class TestLocalRootSafetyBranches:
         key = Path(settings.data_dir) / "collision.bin"
         key.write_bytes(b"existing")
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EXDEV, "cross-device")
             ),
@@ -970,7 +988,7 @@ class TestLocalRootSafetyBranches:
 
         key = Path(settings.data_dir) / "uncertain.bin"
         monkeypatch.setattr(
-            'app.modules.storage.storage_backend.local.os.link',
+            "app.modules.storage.storage_backend.local.os.link",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError(errno.EXDEV, "cross-device")
             ),

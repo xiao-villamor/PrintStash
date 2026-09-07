@@ -19,6 +19,13 @@ _backend: StorageBackend | None = None
 
 
 def get_backend() -> StorageBackend:
+    from .generations import current_backend
+
+    pinned = current_backend()
+    return pinned if pinned is not None else get_bound_backend()
+
+
+def get_bound_backend() -> StorageBackend:
     """Return the backend selected by the application's composition root.
 
     Storage access is intentionally not constructed on demand here: doing so
