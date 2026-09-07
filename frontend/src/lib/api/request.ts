@@ -33,25 +33,35 @@ export function getAssetUrl(path: string): string {
   return getUrl(path);
 }
 
+/** Revalidate protected bytes; a failed cross-origin delivery retries via the API. */
+async function fetchArtifact(path: string, signal?: AbortSignal): Promise<Response> {
+  const options: RequestInit = { headers: authHeaders(), cache: "no-cache", signal };
+  const proxy = () =>
+    fetch(getUrl(path), {
+      ...options,
+      headers: { ...authHeaders(), "X-PrintStash-Delivery": "proxy" },
+    });
+  let response: Response;
+  try {
+    response = await fetch(getUrl(path), options);
+  } catch (error) {
+    if (!(error instanceof TypeError) || signal?.aborted) throw error;
+    return proxy();
+  }
+  // An expired provider capability can return an HTTP failure rather than a
+  // browser CORS/network error. Reauthorize against the original URL once.
+  return response.redirected && !response.ok ? proxy() : response;
+}
+
 export async function getAuthenticatedBlob(path: string): Promise<Blob> {
-  // `no-cache` (revalidate, don't blindly reuse) instead of `force-cache`:
-  // thumbnail URLs are stable (e.g. /files/1/thumbnail) but their content
-  // changes when a file id is reused (re-upload / DB reset). force-cache served
-  // the stale image forever; the backend sends an ETag, so revalidation here is
-  // a cheap 304 when unchanged and a fresh fetch when it actually changed.
-  const res = await fetch(getUrl(path), {
-    headers: authHeaders(),
-    cache: "no-cache",
-  });
+  const res = await fetchArtifact(path);
   if (!res.ok) throw await parseError(res);
   return res.blob();
 }
 
 /** Read a protected text resource while preserving the shared 401 handling. */
 export async function getAuthenticatedText(path: string, signal?: AbortSignal): Promise<string> {
-  const options: RequestInit = { headers: authHeaders(), cache: "no-store" };
-  if (signal) options.signal = signal;
-  const res = await fetch(getUrl(path), options);
+  const res = await fetchArtifact(path, signal);
   if (!res.ok) throw await parseError(res);
   return res.text();
 }
@@ -110,10 +120,7 @@ export function parseContentDispositionFilename(header: string | null): string |
  * token, then trigger a save via a temporary object URL.
  */
 export async function downloadAuthenticatedFile(path: string, filename?: string): Promise<void> {
-  const res = await fetch(getUrl(path), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
+  const res = await fetchArtifact(path);
   if (!res.ok) throw await parseError(res);
   const blob = await res.blob();
   const resolvedFilename =

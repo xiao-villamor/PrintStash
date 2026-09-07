@@ -12,16 +12,15 @@ Two routers with very different trust levels:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
-from app.api.v1.files import stl_response, thumbnail_response
+from app.api.v1.files import serve_artifact, stl_response, thumbnail_response
 from app.core.ratelimit import rate_limit
 from app.core.security import require_user
 from app.db.models import CollectionRole, FileType, Model, ShareLink, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
-from app.modules.storage.artifact_content import ArtifactContentMissingError, resolve
+from app.modules.storage.artifact_delivery import DeliveryPurpose
 from app.schemas.share import ShareLinkCreate, ShareLinkCreated, ShareLinkRead
 
 _MESH_TYPES = {FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP}
@@ -37,20 +36,6 @@ router = APIRouter(
     tags=["share"],
     dependencies=[Depends(rate_limit(120, 60.0))],
 )
-
-
-def _stream_shared_artifact(f, *, media_type: str = "application/octet-stream"):
-    try:
-        chunks = resolve(f).stream()
-    except ArtifactContentMissingError as exc:
-        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
-    return StreamingResponse(
-        chunks,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{f.original_filename}"'
-        },
-    )
 
 
 @router.get("/{token}", summary="Public read-only view of a shared model")
@@ -71,7 +56,10 @@ def get_shared_thumbnail(
     if model is None or model.thumbnail_file_id is None:
         raise HTTPException(status_code=404, detail="not_found")
     return thumbnail_response(
-        model.thumbnail_file_id, request, thumbnail_path=model.thumbnail_path
+        model.thumbnail_file_id,
+        request,
+        thumbnail_path=model.thumbnail_path,
+        purpose=DeliveryPurpose.PUBLIC_SHARE,
     )
 
 
@@ -89,7 +77,7 @@ def get_shared_stl(
     f = share.share_file_or_404(session, link, file_id)
     if f.file_type not in _MESH_TYPES:
         raise HTTPException(status_code=404, detail="not_found")
-    return stl_response(f, request)
+    return stl_response(f, request, DeliveryPurpose.PUBLIC_SHARE)
 
 
 @router.get(
@@ -98,6 +86,7 @@ def get_shared_stl(
 )
 def download_shared_file(
     token: str,
+    request: Request,
     file_id: int,
     session: Session = Depends(get_session),
 ):
@@ -105,7 +94,9 @@ def download_shared_file(
     if not link.allow_download:
         raise HTTPException(status_code=403, detail="download_disabled")
     f = share.share_file_or_404(session, link, file_id)
-    return _stream_shared_artifact(f)
+    return serve_artifact(
+        f, request, f.original_filename, purpose=DeliveryPurpose.PUBLIC_SHARE
+    )
 
 
 @router.get(
@@ -114,6 +105,7 @@ def download_shared_file(
 )
 def get_shared_gcode(
     token: str,
+    request: Request,
     file_id: int,
     session: Session = Depends(get_session),
 ):
@@ -123,7 +115,9 @@ def get_shared_gcode(
         raise HTTPException(status_code=404, detail="not_found")
     if not link.allow_download:
         raise HTTPException(status_code=403, detail="download_disabled")
-    return _stream_shared_artifact(f, media_type="text/plain")
+    return serve_artifact(
+        f, request, f.original_filename, "text/plain", DeliveryPurpose.PUBLIC_SHARE
+    )
 
 
 # ---------------------------------------------------------------------------

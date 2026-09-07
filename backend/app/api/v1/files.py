@@ -17,12 +17,12 @@ from fastapi import (
 from fastapi.responses import (
     FileResponse,
     PlainTextResponse,
-    RedirectResponse,
     StreamingResponse,
 )
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from app.api.artifact_responses import delivery_request, render_delivery
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.logging import get_logger
@@ -38,9 +38,15 @@ from app.modules.media.three_mf_preview import (
 from app.modules.storage.artifact_content import (
     ArtifactContentError,
     ArtifactContentMissingError,
-    presigned_download_url,
     resolve,
 )
+from app.modules.storage.artifact_delivery import (
+    DeliveryPurpose,
+    bytes_response_headers,
+    plan_artifact,
+    plan_stored_representation,
+)
+from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import publish_bytes
@@ -107,37 +113,22 @@ def _serve_file(
     )
 
 
-def _serve_artifact(
+def serve_artifact(
     artifact: File,
+    request: Request | None,
     filename: str,
     media_type: str = "application/octet-stream",
-    *,
-    headers: dict[str, str] | None = None,
+    purpose: DeliveryPurpose = DeliveryPurpose.DOWNLOAD,
 ):
-    handle = resolve(artifact)
-    if handle.backend is not None:
-        direct = handle.backend.direct_path(artifact.path)
-        if direct is not None:
-            if not direct.exists():
-                raise HTTPException(status_code=410, detail="file_blob_missing")
-            return FileResponse(
-                path=str(direct),
-                filename=filename,
-                media_type=media_type,
-                headers=headers,
-            )
+    """Render an original after the caller has authorized its exact Artifact."""
     try:
-        chunks = handle.stream()
-    except ArtifactContentMissingError as exc:
+        return render_delivery(
+            plan_artifact(
+                artifact, delivery_request(request, filename, media_type, purpose)
+            )
+        )
+    except (ArtifactContentMissingError, FileNotFoundError) as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
-    return StreamingResponse(
-        chunks,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            **(headers or {}),
-        },
-    )
 
 
 def _serve_download(
@@ -145,6 +136,7 @@ def _serve_download(
     file_id: int,
     slicer_token: str | None,
     current_user: User | None,
+    request: Request,
 ):
     # A logged-in user goes through the normal RBAC check. Otherwise the request
     # must carry a valid slicer download token — a short-lived bearer capability
@@ -156,7 +148,10 @@ def _serve_download(
         f = _live_file(session, file_id)
     else:
         raise HTTPException(status_code=401, detail="not_authenticated")
-    return _serve_artifact(f, f.original_filename)
+    purpose = (
+        DeliveryPurpose.DOWNLOAD if current_user is not None else DeliveryPurpose.SLICER
+    )
+    return serve_artifact(f, request, f.original_filename, purpose=purpose)
 
 
 @router.get(
@@ -166,11 +161,12 @@ def _serve_download(
 )
 def download_file(
     file_id: int,
+    request: Request,
     slicer_token: str | None = None,
     current_user: User | None = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    return _serve_download(session, file_id, slicer_token, current_user)
+    return _serve_download(session, file_id, slicer_token, current_user, request)
 
 
 @router.get(
@@ -194,6 +190,7 @@ def download_file(
 )
 def embedded_gcode(
     file_id: int,
+    request: Request,
     plate_index: int | None = Query(default=None, ge=0),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
@@ -227,11 +224,18 @@ def embedded_gcode(
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     except ArtifactContentError as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    payload = embedded.content
+    status_code, headers = bytes_response_headers(
+        payload,
+        delivery_request(
+            request, embedded.filename, "text/plain", DeliveryPurpose.TRANSFORMED
+        ),
+    )
+    headers["Content-Disposition"] = content_disposition(embedded.filename, inline=True)
     return PlainTextResponse(
-        content=embedded.content,
-        headers={
-            "Content-Disposition": f'inline; filename="{embedded.filename}"',
-        },
+        content=embedded.content if status_code == 200 else "",
+        status_code=status_code,
+        headers=headers,
     )
 
 
@@ -249,11 +253,14 @@ def embedded_gcode(
 )
 def slicer_download(
     file_id: int,
+    request: Request,
     slicer_token: str,
     filename: str,
     session: Session = Depends(get_session),
 ):
-    return _serve_download(session, file_id, slicer_token, current_user=None)
+    return _serve_download(
+        session, file_id, slicer_token, current_user=None, request=request
+    )
 
 
 @router.get(
@@ -278,46 +285,6 @@ def slicer_download_url(
 
 
 @router.get(
-    "/{file_id}/download-url",
-    summary="Get a pre-signed direct download URL (S3 only)",
-    description=(
-        "Returns a short-lived pre-signed URL when storage backend is S3. "
-        "Falls back to API streaming URL for local storage."
-    ),
-)
-def download_url(
-    file_id: int,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
-) -> dict:
-    f = _accessible_file(session, file_id, current_user)
-    url = presigned_download_url(f, f.original_filename)
-    if url:
-        return {
-            "url": url,
-            "backend": "s3",
-            "expires_in": settings.s3_presigned_url_expire_seconds,
-        }
-    return {"url": f"/api/v1/files/{file_id}/download", "backend": "local"}
-
-
-@router.get(
-    "/{file_id}/download-direct",
-    summary="Redirect to pre-signed URL when available",
-)
-def download_direct(
-    file_id: int,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
-):
-    f = _accessible_file(session, file_id, current_user)
-    url = presigned_download_url(f, f.original_filename)
-    if url:
-        return RedirectResponse(url=url, status_code=307)
-    return download_file(file_id=file_id, current_user=current_user, session=session)
-
-
-@router.get(
     "/{file_id}/thumbnail",
     summary="Get the thumbnail extracted from the file (if any)",
 )
@@ -331,20 +298,12 @@ def file_thumbnail(
     return thumbnail_response(file_id, request, thumbnail_path=file_row.thumbnail_path)
 
 
-def _etag_matches(request: Request | None, etag: str) -> bool:
-    if request is None:
-        return False
-    candidates = request.headers.get("if-none-match", "").split(",")
-    return any(
-        candidate.strip().removeprefix("W/") in ("*", etag) for candidate in candidates
-    )
-
-
 def thumbnail_response(
     file_id: int,
     request: Request | None = None,
     *,
     thumbnail_path: str | None = None,
+    purpose: DeliveryPurpose = DeliveryPurpose.THUMBNAIL,
 ):
     """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
@@ -361,20 +320,13 @@ def thumbnail_response(
         info = backend.object_info(thumb_key)
         if info is None:
             raise HTTPException(status_code=404, detail="thumbnail_not_found")
-    # Thumbnails only change on explicit rebuilds; let the browser cache them
-    # so the library grid doesn't re-request every image on each visit.
-    # Revalidate cheaply so a newly-published immutable generation is visible
-    # immediately instead of leaving cards stale for the previous one-hour TTL.
-    headers = {"Cache-Control": "public, max-age=0, must-revalidate"}
-    if info.etag:
-        headers["ETag"] = info.etag
-        if _etag_matches(request, info.etag):
-            return Response(status_code=304, headers=headers)
-    return _serve_file(
-        thumb_key,
-        filename,
-        media_type,
-        headers=headers,
+    return render_delivery(
+        plan_stored_representation(
+            backend,
+            thumb_key,
+            delivery_request(request, filename, media_type, purpose),
+            info=info,
+        )
     )
 
 
@@ -396,44 +348,28 @@ def file_as_stl(
     return stl_response(f, request)
 
 
-def stl_response(f: File, request: Request):
+def stl_response(
+    f: File, request: Request, purpose: DeliveryPurpose = DeliveryPurpose.TRANSFORMED
+):
     """Serve a mesh File as binary STL (cached). No access checks — callers
     are responsible for authorising access to *f* first."""
     stem = Path(f.original_filename).stem
-    # File blobs are immutable (content-addressed by sha256), so the rendered
-    # STL never changes (content-addressed), but keep the browser TTL modest;
-    # the ETag still lets it revalidate cheaply after expiry.
-    etag = f'"{f.sha256}"'
-    # Content-Disposition is added per-response below: _serve_file derives it
-    # from the filename, the in-memory Response sets it explicitly.
-    cache_headers = {
-        "Cache-Control": "public, max-age=3600",
-        "ETag": etag,
-    }
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=cache_headers)
-
-    # Already STL: stream the blob straight through, no conversion — never read
-    # a (potentially multi-GB) STL fully into memory just to serve it.
+    delivery = delivery_request(request, f"{stem}.stl", "application/sla", purpose)
     if Path(f.original_filename).suffix.lower() == ".stl":
-        return _serve_artifact(
+        return serve_artifact(
             f,
+            request,
             f"{stem}.stl",
-            media_type="application/sla",
-            headers=cache_headers,
+            "application/sla",
+            DeliveryPurpose.BROWSER_FETCH
+            if purpose == DeliveryPurpose.TRANSFORMED
+            else purpose,
         )
 
-    # 3MF/OBJ: trimesh conversion is expensive, so cache the result keyed by the
-    # source sha256 and serve the cached STL on every subsequent request.
     backend = get_backend()
     cache_key = backend.stl_cache_key(f.sha256)
     if backend.exists(cache_key):
-        return _serve_file(
-            cache_key,
-            f"{stem}.stl",
-            media_type="application/sla",
-            headers=cache_headers,
-        )
+        return render_delivery(plan_stored_representation(backend, cache_key, delivery))
 
     # Lazy import: trimesh is heavy; pull it in only when we must convert.
     from app.modules.media import mesh_processing
@@ -446,6 +382,7 @@ def stl_response(f: File, request: Request):
     if data is None:
         raise HTTPException(status_code=500, detail="stl_conversion_failed")
 
+    cached = False
     try:
         with get_session_factory().scoped_session() as ownership_session:
             publish_bytes(
@@ -456,6 +393,7 @@ def stl_response(f: File, request: Request):
                 object_kind="derived_stl_cache",
             )
             ownership_session.commit()
+            cached = True
     except StorageCollisionError:
         # Another request won the create-only race. Serve our in-memory result;
         # subsequent requests will use the already-published cache object.
@@ -463,15 +401,14 @@ def stl_response(f: File, request: Request):
     except Exception:
         logger.warning("stl cache write failed for file %s", f.id, exc_info=True)
 
-    # Freshly converted bytes are already in memory (and bounded by the render
-    # cap), so serve them directly; subsequent requests hit the streamed cache.
+    if cached:
+        return render_delivery(plan_stored_representation(backend, cache_key, delivery))
+    status_code, headers = bytes_response_headers(data, delivery)
     return Response(
-        content=data,
+        content=data if status_code == 200 else b"",
+        status_code=status_code,
         media_type="application/sla",
-        headers={
-            "Content-Disposition": f'attachment; filename="{stem}.stl"',
-            **cache_headers,
-        },
+        headers=headers,
     )
 
 

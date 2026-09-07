@@ -21,8 +21,6 @@ from app.core.time import utcnow
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 
-PRESIGNED = "https://s3.example.test/pre-signed"
-
 
 class TestDownloadFile:
     def test_serves_the_stored_bytes(
@@ -140,6 +138,11 @@ class TestDownloadFile:
         row = make_file(model, path="remote.stl")
 
         class RemoteBackend:
+            supports_ranges = False
+
+            def browser_download(self, *args, **kwargs):
+                return None
+
             def exists(self, key: str) -> bool:
                 return True
 
@@ -199,118 +202,3 @@ class TestDownloadFile:
         row = make_file(make_model("anon-download"))
 
         assert client.get(f"/api/v1/files/{row.id}/download").status_code == 401
-
-
-class TestDownloadUrl:
-    def test_points_at_the_api_on_local_storage(
-        self, client: TestClient, auth_headers, make_model, make_file
-    ) -> None:
-        row = make_file(make_model("local-url"))
-
-        body = client.get(
-            f"/api/v1/files/{row.id}/download-url", headers=auth_headers
-        ).json()
-
-        assert body["backend"] == "local"
-        assert body["url"] == f"/api/v1/files/{row.id}/download"
-
-    def test_hands_back_a_presigned_url_on_object_storage(
-        self,
-        client: TestClient,
-        auth_headers,
-        monkeypatch: pytest.MonkeyPatch,
-        make_model,
-        make_file,
-    ) -> None:
-        row = make_file(make_model("s3-url"))
-        monkeypatch.setattr(
-            get_backend(),
-            "presigned_download_url",
-            lambda key, filename: PRESIGNED,
-        )
-
-        body = client.get(
-            f"/api/v1/files/{row.id}/download-url", headers=auth_headers
-        ).json()
-
-        # The bytes never transit the app when the store can serve them itself.
-        assert body["backend"] == "s3"
-        assert body["url"] == PRESIGNED
-        assert "expires_in" in body
-
-    def test_external_file_uses_the_api_instead_of_the_vault_presigner(
-        self,
-        client: TestClient,
-        auth_headers,
-        monkeypatch: pytest.MonkeyPatch,
-        make_model,
-        make_file,
-        tmp_path: Path,
-    ) -> None:
-        from app.api.v1 import files as files_api
-
-        source = tmp_path / "nas" / "external-url.stl"
-        source.parent.mkdir()
-        source.write_bytes(b"external")
-        row = make_file(
-            make_model("external-url"),
-            path=str(source),
-            is_external=True,
-        )
-
-        def active_vault_must_not_be_used():
-            raise AssertionError("external path reached the active vault backend")
-
-        monkeypatch.setattr(files_api, "get_backend", active_vault_must_not_be_used)
-
-        body = client.get(
-            f"/api/v1/files/{row.id}/download-url", headers=auth_headers
-        ).json()
-
-        assert body == {
-            "url": f"/api/v1/files/{row.id}/download",
-            "backend": "local",
-        }
-
-
-class TestDownloadDirect:
-    def test_streams_the_file_on_local_storage(
-        self, client: TestClient, auth_headers, make_model, make_file
-    ) -> None:
-        model = make_model("direct-local")
-        key = "direct-local.stl"
-        get_backend().write_bytes(b"stl-bytes", key)
-        row = make_file(model, path=key)
-
-        response = client.get(
-            f"/api/v1/files/{row.id}/download-direct",
-            headers=auth_headers,
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.content == b"stl-bytes"
-
-    def test_redirects_to_the_presigned_url_on_object_storage(
-        self,
-        client: TestClient,
-        auth_headers,
-        monkeypatch: pytest.MonkeyPatch,
-        make_model,
-        make_file,
-    ) -> None:
-        row = make_file(make_model("direct-s3"))
-        monkeypatch.setattr(
-            get_backend(),
-            "presigned_download_url",
-            lambda key, filename: PRESIGNED,
-        )
-
-        response = client.get(
-            f"/api/v1/files/{row.id}/download-direct",
-            headers=auth_headers,
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 307, response.text
-        assert response.headers["location"] == PRESIGNED

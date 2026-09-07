@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from app.core.logging import get_logger
+from app.modules.storage.delivery_contracts import BrowserDownload
 from app.modules.storage.filesystem import FsKind
 from app.modules.storage.storage_identity import StorageTargetIdentity
 
@@ -398,6 +399,19 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def presigned_download_url(self, key: str, filename: str) -> str | None: ...
+
+    def browser_download(
+        self, key: str, filename: str, media_type: str, *, origin: str | None = None
+    ) -> BrowserDownload | None:
+        """Return a short-lived, header-free object capability when supported."""
+        return None
+
+    @property
+    def supports_ranges(self) -> bool:
+        return False
+
+    def stream_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
+        raise NotImplementedError("storage_range_unavailable")
 
     @abstractmethod
     def health_probe(self) -> dict: ...

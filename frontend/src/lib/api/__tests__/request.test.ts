@@ -29,6 +29,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   downloadAuthenticatedFile,
   getJson,
+  getAuthenticatedBlob,
+  getAuthenticatedText,
   getUrl,
   getWsUrl,
   invalidateApiCache,
@@ -278,5 +280,47 @@ describe("sendJson", () => {
     respondWith([{ id: 2 }]);
     expect(await getJson("/api/v1/models")).toEqual([{ id: 1 }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("getAuthenticatedBlob", () => {
+  it("retries a failed browser delivery through the API", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    fetchMock.mockResolvedValueOnce(blobResponse());
+
+    const blob = await getAuthenticatedBlob("/api/v1/files/7/download");
+
+    expect(blob.size).toBe(7);
+    expect(new Headers(initOf(1).headers).get("x-printstash-delivery")).toBe("proxy");
+  });
+
+  it("does not retry a cancelled read", async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException("Aborted", "AbortError"));
+
+    await expect(getAuthenticatedBlob("/api/v1/files/7/download")).rejects.toThrow("Aborted");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an authorization denial", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: "forbidden" }, 403));
+
+    await expect(getAuthenticatedBlob("/api/v1/files/7/download")).rejects.toMatchObject({
+      status: 403,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getAuthenticatedText", () => {
+  it("preserves cancellation while revalidating protected text", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("G1 X10"));
+    const controller = new AbortController();
+
+    const content = await getAuthenticatedText("/api/v1/files/7/download", controller.signal);
+
+    expect(content).toBe("G1 X10");
+    expect(initOf(0)).toMatchObject({ cache: "no-cache", signal: controller.signal });
   });
 });

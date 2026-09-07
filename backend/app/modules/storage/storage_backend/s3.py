@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import tempfile
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Iterator
 
 from app.core.config import settings
+from app.core.errors import ErrorKind, OperationError
 from app.core.logging import get_logger
+from app.core.time import utcnow
+from app.modules.storage.delivery_contracts import BrowserDownload, content_disposition
 from app.modules.storage.storage_identity import StorageTargetIdentity
 
 if TYPE_CHECKING:
@@ -36,6 +41,31 @@ logger = get_logger(__name__)
 
 
 _S3_MISSING_OBJECT_CODES = {"404", "NoSuchKey", "NotFound"}
+
+
+class _RangeBody(Iterator[bytes]):
+    """A bounded response body that can be closed before iteration starts."""
+
+    def __init__(self, body, length: int):
+        self.body = body
+        self.remaining = length
+
+    def __next__(self) -> bytes:
+        if not self.remaining:
+            self.close()
+            raise StopIteration
+        try:
+            chunk = self.body.read(min(self.remaining, 1024 * 1024))
+            if not chunk:
+                raise OperationError("storage_range_truncated", kind=ErrorKind.UPSTREAM)
+            self.remaining -= len(chunk)
+            return chunk
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        self.body.close()
 
 
 def _raise_s3_missing_object(exc: Exception, key: str) -> None:
@@ -798,6 +828,95 @@ class S3StorageBackend(StorageBackend):
             },
             ExpiresIn=int(settings.s3_presigned_url_expire_seconds),
         )
+
+    def browser_download(
+        self, key: str, filename: str, media_type: str, *, origin: str | None = None
+    ) -> BrowserDownload | None:
+        """Sign one managed GET; a browser fetch also needs measured CORS policy."""
+        from urllib.parse import urlsplit
+
+        self._validate_managed_key(key)
+        if self._endpoint_url and urlsplit(self._endpoint_url).scheme != "https":
+            return None
+        if origin is not None:
+            try:
+                rules = self._client.get_bucket_cors(Bucket=self._bucket)["CORSRules"]
+            except Exception:
+                # Lack of read-only CORS permission is not a delivery outage.
+                return None
+            permitted = any(
+                "GET" in rule.get("AllowedMethods", [])
+                and any(
+                    re.fullmatch(re.escape(allowed).replace(r"\*", ".*"), origin)
+                    is not None
+                    for allowed in rule.get("AllowedOrigins", [])
+                )
+                and any(
+                    header.lower() in {"*", "content-disposition"}
+                    for header in rule.get("ExposeHeaders", [])
+                )
+                and (
+                    "*" in rule.get("AllowedHeaders", [])
+                    or {
+                        "cache-control", "pragma", "if-none-match",
+                        "if-modified-since", "range", "if-range",
+                    }.issubset({header.lower() for header in rule.get("AllowedHeaders", [])})
+                )
+                for rule in rules
+            )
+            if not permitted:
+                return None
+        info = self.object_info(key)
+        if info is None:
+            raise FileNotFoundError("file_blob_missing")
+        params = {
+            "Bucket": self._bucket,
+            "Key": key,
+            "ResponseContentDisposition": content_disposition(filename),
+            "ResponseContentType": media_type,
+            "ResponseCacheControl": "private, no-store",
+        }
+        if info.version_id and info.version_id != "null":
+            params["VersionId"] = info.version_id
+        ttl = min(60, int(settings.s3_presigned_url_expire_seconds))
+        try:
+            url = self._client.generate_presigned_url(
+                "get_object", Params=params, ExpiresIn=ttl, HttpMethod="GET"
+            )
+        except Exception:
+            # Never include SDK diagnostics: they can contain signed query data.
+            logger.warning("S3 browser delivery signing unavailable")
+            return None
+        return BrowserDownload(
+            url=url,
+            key=key,
+            expires_at=utcnow() + timedelta(seconds=ttl),
+            cors_origin=origin,
+            version_id=info.version_id,
+        )
+
+    @property
+    def supports_ranges(self) -> bool:
+        return True
+
+    def stream_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
+        from botocore.exceptions import ClientError
+
+        self._validate_managed_key(key)
+        try:
+            response = self._client.get_object(
+                Bucket=self._bucket, Key=key, Range=f"bytes={start}-{end}"
+            )
+        except ClientError as exc:
+            _raise_s3_missing_object(exc, key)
+        body = response["Body"]
+        if (
+            not response.get("ContentRange", "").startswith(f"bytes {start}-{end}/")
+            or response.get("ContentLength") != end - start + 1
+        ):
+            body.close()
+            raise OperationError("storage_range_mismatch", kind=ErrorKind.UPSTREAM)
+        return _RangeBody(body, end - start + 1)
 
     def health_probe(self) -> dict:
         try:
