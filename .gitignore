@@ -81,6 +81,7 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/tests/e2e-real/.data/
 frontend/tests/e2e-real/.storage-data/
+frontend/tests/e2e-real/.delivery-data/
 .playwright-mcp/
 screenshots/gif-frames/
 

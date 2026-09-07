@@ -2,7 +2,9 @@
 
 The acceptance scenarios below cover issue #101. Focused results: 61 API/unit
 cases, 55 provider/unit/E2E cases, 17 frontend request cases and the reviewed
-OpenAPI contract passed. Full-suite, coverage and final browser checks remain
+OpenAPI contract passed. The real Chromium native-download proof passed one
+test (19.7 seconds overall), including exact saved bytes, Unicode filename,
+provider CORS and zero API body bytes. Full-suite and coverage checks remain
 in the integration queue; focused results do not imply those gates passed.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
@@ -53,4 +55,10 @@ in the integration queue; focused results do not imply those gates passed.
 | 44 | does not retry a cancelled read | Edge | Aborted signal | Cancellation propagated | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::does not retry a cancelled read` |
 | 45 | does not retry an authorization denial | Error | 403 API response | Denial propagated once | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::does not retry an authorization denial` |
 | 46 | preserves cancellation while revalidating protected text | Edge | Text read with signal | Signal and no-cache mode retained | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::preserves cancellation while revalidating protected text` |
-| 47 | downloads through native browser fetch | Happy | Actual browser, API, TLS provider | Exact bytes and readable filename without forwarding app credentials | Playwright | ❌ missing — focused browser validation in progress |
+| 47 | downloads native S3 bytes through the authenticated frontend helper | Happy | Actual browser, authenticated API, HTTPS S3 with CORS, Unicode name | Exact bytes and Unicode filename; no provider app credentials or referrer; sole API response is private/no-store 307 with zero emitted body bytes | Playwright | ✅ `frontend/tests/e2e-real/delivery/native-download.spec.ts::downloads native S3 bytes through the authenticated frontend helper` |
+
+The browser run used the actual API/TLS provider fixture started once before a
+coordinated stable-network window, then reused it through the same delivery
+config. An isolated offline dependency installation resolved a changing shared
+Playwright installation before the passing run. Backend fixture lint, launcher
+syntax validation, frontend test lint and TypeScript all passed.
