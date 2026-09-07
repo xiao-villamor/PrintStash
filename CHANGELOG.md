@@ -4,6 +4,9 @@
 
 ### Added
 
+- Successful browser-extension CI jobs provide the validated Chrome Web Store
+  ZIP as a direct download, retained for 30 days.
+
 - The browser importer includes offline help and privacy information, with a
   validated Chrome Web Store ZIP command and a publishing guide.
 

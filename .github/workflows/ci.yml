@@ -546,6 +546,17 @@ jobs:
           name: browser-extension-chromedriver-log
           path: ${{ runner.temp }}/printstash-chromedriver.log
 
+      - name: Upload Chrome Web Store ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: browser-extension/.output/printstash-browser-extension-*-chrome.zip
+          # Upload the tested ZIP itself so it can go straight to the store.
+          archive: false
+          # WXT builds into .output; only the ZIP above is included.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   e2e-real:
     name: Real-backend E2E
     runs-on: ubuntu-latest

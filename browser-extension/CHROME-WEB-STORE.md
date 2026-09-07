@@ -6,6 +6,16 @@ La interfaz y los textos de la ficha están en inglés.
 
 ## Generar el archivo que se sube
 
+En GitHub, abre **Actions → CI**, elige una ejecución y descarga
+`printstash-browser-extension-<version>-chrome.zip` desde **Artifacts**.
+El job **Browser extension** lo publica cuando pasan sus comprobaciones y lo
+conserva durante 30 días. El archivo descargado es el ZIP de la extensión, listo
+para subir a Chrome Web Store. Para generarlo a demanda, usa **Run workflow**
+sobre `main`. También se genera en PRs, cambios en `main` y ejecuciones de CI
+nocturnas o de release.
+
+Para generarlo en tu equipo:
+
 ```bash
 cd browser-extension
 pnpm install --frozen-lockfile

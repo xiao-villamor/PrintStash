@@ -12,6 +12,13 @@ extension and generate `.output/printstash-browser-extension-0.13.0-chrome.zip`
 (the filename follows `package.json`). The ZIP contains the production extension
 with its manifest at the root. Chrome and Edge exclude Firefox-specific metadata.
 
+GitHub Actions also generates the ZIP on pull requests, pushes to `main`, release
+CI, nightly runs and manual runs. Open **Actions → CI**, select the run, then
+download `printstash-browser-extension-<version>-chrome.zip` from **Artifacts**.
+The **Browser extension** job publishes it only after its checks pass. This is
+the extension ZIP itself, ready to upload to Chrome Web Store, and is retained
+for 30 days. Use **Run workflow** on `main` to generate a fresh package on demand.
+
 The [publishing guide](CHROME-WEB-STORE.md) includes listing copy, permission
 justifications, privacy disclosures and reviewer instructions. **Help & privacy**
 in the popup opens the packaged help and privacy policy without a server.
