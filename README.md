@@ -7,14 +7,12 @@
 
 # PrintStash
 
-### A self-hosted workspace for 3D print files, revisions, printers, and the work around them.
+### Organize your 3D models, keep the G-code that works, and manage your printers.
 
-PrintStash is a local-first web app for STL, 3MF, OBJ, STEP, and G-code
-libraries. It connects Models and G-code revisions to printer fleets, material
-state, print history, Documents, share links, notifications, access control,
-Pending Imports, and Vault audits. Upload from the browser, capture a model URL,
-index a mounted or remote library source, or let OrcaSlicer push new G-code
-after every slice.
+PrintStash is an open-source, self-hosted web app for your 3D printing library.
+Bring together files from your computer, model marketplaces, and NAS; preview
+them, open them in your slicer, and keep print settings and results with each
+Model. Run it on your own server with SQLite and local disk to get started.
 
 ![PrintStash demo](screenshots/00-demo-v010.gif)
 
@@ -27,202 +25,19 @@ after every slice.
 ![Vite](https://img.shields.io/badge/vite-8-646CFF?logo=vite&style=flat-square)
 ![Status: beta](https://img.shields.io/badge/status-beta%20%C2%B7%20self--hosted-f59e0b?style=flat-square)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Comparison**](#printstash-vs-a-simple-model-vault) · [**Wiki / Docs**](https://www.printstash.org/docs/) · [**Limitations**](#known-limitations--beta-notes) · [**Security**](#security)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Printers**](#printer-compatibility) · [**Screenshots**](#screenshots) · [**Docs**](#documentation) · [**Limitations**](#known-limitations--beta-notes)
 
 </div>
 
 ---
 
-## Project Status
-
-PrintStash is an early open-source, self-hosted project. The current release is
-usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
-as the primary install path. SQLite plus local disk is the default; Postgres and
-S3/R2-compatible storage are optional.
-
-PrintStash [0.13.0 is published](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0),
-with full and lite API images and a frontend image for amd64 and arm64. It adds runtime-probed storage safety tiers, reusable
-remote storage connections, paired-browser marketplace capture with Model
-Source provenance, richer Bambu LAN history evidence, Multipart Models, and
-safer 3MF/STL preview handling. Read the
-[0.13.0 changelog](./CHANGELOG.md#0130) and
-[upgrade notes](./UPGRADE.md#0130-notes) before upgrading. Changes on `main`
-after that release are listed under [Unreleased](./CHANGELOG.md#unreleased).
-
-Hardware reports, parser fixtures, install notes, docs fixes, and UX feedback
-are welcome in
-[Discussions](https://github.com/xiao-villamor/PrintStash/discussions) or issues.
-
-## Features
-
-**Ingest and organize**
-- STL, 3MF, OBJ, STEP/STP, and G-code upload from the browser.
-- URL imports and `.zip` archives, with per-file selection on extraction.
-- An OrcaSlicer post-processing hook pushes exported G-code automatically: it
-  logs in with username + API key, then uploads under a JWT Bearer token.
-- Content-hash dedup groups files into logical models and keeps version history
-  in one place rather than scattered across folders.
-- Multipart Models group existing Models into named parts and alternatives
-  (for example, a short or long handle) without moving, hiding, or deleting
-  their files. Each Model remains independently visible, downloadable, and
-  sliceable, and can be reused in more than one Multipart Model. Open the
-  separate **Multipart models** tab in the Vault to create a grouping, add a
-  part, then choose existing Models as its alternatives.
-- Nested collections; direct Model, Collection, and Artifact tags; unified search
-  across names, files, collection paths, effective tags, and provenance; filters,
-  thumbnails, grid/list views,
-  sorting, breadcrumbs, and drag-and-drop between collections.
-
-**Library sources (mounted folders, NAS, and remote protocols)**
-- Point PrintStash at a mounted folder, S3 prefix, WebDAV collection, SFTP
-  directory, or Google Drive folder and it indexes files **in place**. Only
-  thumbnails and metadata are stored in the Vault.
-- Discovery picks up added, removed, and edited files without a recursive
-  full-download loop. Remote sources are read-only. Mounted folders may accept
-  create-only web uploads and revisions without overwriting existing bytes.
-- Keep it current with a per-volume schedule (presets or custom cron), manual
-  "Scan now", and optional real-time watching of local folders.
-- Network folders (NFS/SMB) can't deliver filesystem events, so watching
-  auto-detects the filesystem and falls back to the schedule — with a per-volume
-  override. An unmounted share can never trigger a mass delete.
-- Remote scans use durable cursors, one global scan slot, 1,000-key pages, a
-  2 GiB and 15-minute slice budget, 8 MiB/s content pacing, 4 metadata calls/s
-  for WebDAV/SFTP, and a 24-hour provider-error backoff. A weekly rotating hash
-  check catches same-size, same-mtime replacements.
-
-**Preview and inspect**
-- A browser 3D viewer for source meshes — solid, X-ray, and wireframe modes,
-  plus build-plate grid, fit-to-view, zoom, reset, and screenshot.
-- G-code toolpath preview with layer navigation, travel visibility, and bed
-  overlays derived from printer profiles.
-- One model detail page covers the source files, recommended G-code, slicer
-  settings, mesh metadata, and print history.
-- Slicer metadata is parsed out of common OrcaSlicer, PrusaSlicer, Bambu Studio,
-  Cura, and Klipper-style output: slicer/version, printer profile, nozzle, layer
-  height, infill, material, filament brand/type, temperatures, estimated time,
-  and filament length/weight/cost.
-- Mesh metadata where the file carries it — bounding box, volume, triangle count.
-
-**G-code revisions**
-- Multiple G-code revisions per model, each with a label, notes, and outcome
-  status.
-- Statuses are `known_good`, `needs_test`, `failed`, or `archived`; exactly one
-  revision is recommended at a time.
-- A side-by-side compare view diffs two revisions on slicer, material, and print
-  metadata.
-- The first successful print auto-marks a revision known-good.
-
-**Printer workflows**
-- Moonraker/Klipper printers with live WebSocket status and send-to-print.
-- Remote file inventory sync, matched back to vault files where the filenames
-  line up.
-- Vault-initiated jobs track through upload/start/status states, and the UI shows
-  which printer already holds a model's G-code or can start a supported remote
-  file.
-- Print history import pulls measured filament use, actual duration, and
-  per-print cost from Moonraker.
-- Provider diagnostics cover capabilities, configuration, and connectivity.
-- Bambu LAN status and pause/resume/cancel, plus evidence-labelled history and
-  best-effort artifact capture for externally-started prints, in beta.
-- Optional [Spoolman](https://github.com/Donkie/Spoolman) integration (OFF by
-  default): show spool inventory, pick a spool per print, and decrement it by the
-  real grams used on a Moonraker-measured completion — with double-count
-  detection for Moonraker's native Spoolman hook.
-
-**Fleet and material-aware dispatch**
-- Queue one print or an atomic multi-copy batch across configured printers.
-- Route manually, to the default printer, or to the least-busy eligible printer,
-  with exact group constraints and low, normal, or rush priority lanes.
-- Track operator-set tools and material feeds on every provider. Bambu AMS trays
-  and Moonraker's active Spoolman spool can synchronize automatically.
-- Compare G-code material and nozzle metadata before dispatch. Known mismatches
-  require an audited confirmation; unknown state remains usable.
-- Keep printers out of rotation with maintenance windows, soft drain, or an
-  optional operator release gate after a completed print.
-
-**Capture, Documents, sharing, and notifications**
-- Pending Imports keep URL and browser captures reviewable across restarts, with
-  retry, archive/file selection, tags, and Collection assignment before ingest.
-- Pair named, revocable browsers for authenticated Printables file selection
-  and MakerWorld package transfer without sending marketplace cookies to
-  PrintStash. MyMiniFactory OAuth and Cults metadata connections are per-user.
-- Captured Models retain bounded source snapshots, confirmed/inferred fields,
-  and explicit user overrides; portable archives can carry the provenance as
-  an optional backward-compatible sidecar.
-- Attach Markdown notes, PDFs, images, and other files to any Collection.
-  Markdown includes a built-in editor, preview, and pasted or dropped images.
-- Create expiring, read-only public links for a Model. Original-file downloads
-  stay off unless the owner enables them for that link.
-- Send print-completed, failed, cancelled, and printer-offline events to generic
-  webhooks, Discord, Telegram, or ntfy, with per-event and per-printer controls.
-
-**Statistics and cost insights**
-- A Statistics dashboard (admin-only) turns completed prints into trends: total
-  cost, prints, filament used, average filament per print, and total print time.
-- A cost / filament / prints time series with selectable area, line, or bar
-  charts, plus top collections and most-used filaments breakdowns.
-- Period filter (7/30/90 days, 1 year, all time) and a configurable display
-  currency (Settings → Design) applied across cost figures.
-
-**Users, access, and administration**
-- A first-run setup wizard creates the first admin account. There is no default
-  password.
-- JWT login with refresh/logout, admin user management, and named API keys for
-  scripts and slicer hooks.
-- Optional OIDC / SSO works with Authentik, Authelia, and similar providers,
-  including PKCE, just-in-time users, admin-group mapping, encrypted settings,
-  and local-login fallback.
-- Collection-level RBAC shares parts of a library at view/edit/admin levels.
-- Per-printer roles grant view, print, control, or admin independently and apply
-  to UI sessions, API keys, REST endpoints, and live WebSocket state.
-- Audit logs record who changed what, including authenticated browser actions.
-- A recycle bin keeps soft-deleted models restorable until retention expires.
-  Scheduled cleanup only creates a bounded preview. Physical deletion requires
-  an exact administrator approval, Verified active storage, a fresh verified
-  backup on independent S3, and a configurable quarantine (seven days by
-  default), with every proof checked again before finalization.
-
-**Vault integrity, backups, and portability**
-- Quick and Full Vault audits persist findings, support cancellation, group
-  problems by severity, and repair eligible thumbnail, Metadata, and recommended
-  Revision findings through narrow audited actions.
-- Full backup/restore of the database plus stored files and thumbnails.
-- Backup verification checks archive structure and manifest membership, while
-  creation fails closed if a vault-owned blob cannot be read consistently.
-- Backups can replicate to S3-compatible storage, WebDAV, SFTP, or Google Drive,
-  independent of where Vault files live. Restore rechecks the provider identity
-  and archive hash before replacing data.
-- Export or import a versioned, hash-verified portable library archive with
-  Models, Artifacts, metadata, taxonomy, history, favorites, and saved views.
-- Metadata export to JSON or CSV for analysis, migration planning, or audits.
-- Model-card metrics and the metadata fields shown on detail pages are
-  configurable.
-- Local disk is the default Vault storage, with optional S3/R2, B2, Wasabi,
-  self-hosted S3, Nextcloud/WebDAV, or SFTP and optional Postgres. Reusable
-  remote connections also support Google Drive for Library sources and backup
-  replicas. Storage support maturity is distinct from the
-  Verified/Guarded/Unguarded tier measured at runtime; remote presets remain
-  beta except the generic/native S3 path.
-- Health checks report database, measured storage capabilities, backup, and
-  printer-provider readiness.
-
-Storage and migration guides:
-
-- [0.13.0 release and migration guide](./docs/0.13.0-release-guide.md)
-- [Library sources and NAS recipes](./docs/library-sources.md)
-- [Storage provider and protocol matrix](./docs/provider-support.md#storage-and-library-source-compatibility)
-- [Garbage collection safety and recovery](./docs/storage-data-safety.md)
-- [Upgrade and migration to 0.13.0](./UPGRADE.md#0130-notes)
-
 ## Quick Start
 
 > [!WARNING]
-> **Run PrintStash only on a trusted self-hosted network.** Do not expose it
-> directly to the public internet. If you need remote access, put it behind a
-> reverse proxy with TLS and your own authentication, and use
-> `docker-compose.prod.yml`, which keeps the API off the host and requires you to
-> set your own `VAULT_JWT_SECRET`.
-> See [Security](#security).
+> **Run PrintStash on a trusted self-hosted network.** For remote access, use
+> a reverse proxy with TLS and your own access controls. The
+> [production Compose file](./docker-compose.prod.yml) keeps the API internal
+> and requires your own signing secret. See [Security](#security).
 
 Install Docker with the Compose plugin, then download the
 [**simple Compose file**](./docker-compose.simple.yml) and start PrintStash:
@@ -234,12 +49,18 @@ docker compose up -d
 ```
 
 Open **[http://localhost:3000](http://localhost:3000)** (or
-`http://<server-ip>:3000` from another machine) on a trusted network. Create your
-local administrator account, check where uploads will be stored, then upload
-models or connect an existing folder. There is no default username or password
-and no credential to retrieve from a console in the Unreleased source build.
-Version 0.13.0 images retain the previous setup wizard until the next minor release. The first person to complete setup
-becomes the administrator; restrict access to the installation until then.
+`http://<server-ip>:3000` from another machine) and complete setup:
+
+1. **Create your administrator account.** There is no default username or
+   password. In v0.13.0, the wizard asks for the setup token from
+   `docker compose logs api`; look for the line containing `setup token`.
+   Source builds from `main` use the new [browser registration flow](./docs/first-run.md)
+   without a console token. Keep access restricted until setup is complete.
+2. **Add your first files.** Upload a Model, or connect an existing folder under
+   **Settings → Library sources** and run its first scan. Folder paths must be
+   accessible inside the API container; see the [mounting guide](./docs/deployment.md#data-and-host-folders).
+3. **Explore the Model.** Inspect its preview, open a file in your slicer, and
+   add G-code as a Revision. Connect a printer when you want to send a print.
 
 The simple deployment uses the full prebuilt images, SQLite, and persistent
 Docker volumes. No `.env`, build step, PostgreSQL, or S3 service is needed.
@@ -252,6 +73,192 @@ and include `-f docker-compose.simple.yml` in subsequent Compose commands.
 For ports, version pinning, host folders, upload limits, SSO, HTTPS, updates,
 and the purpose of the other Compose files, see
 [**Deployment and optional settings**](./docs/deployment.md).
+
+## Features
+
+A **Model** keeps a printable design's files, G-code Revisions, and print history
+in one place. **Collections** organize the library; a **Multipart Model** groups
+Models that make up one object, such as a box with a base and a choice of lids.
+You can use the library without connecting a printer.
+
+[Import](#bring-your-files-together) · [Organize](#find-and-organize-your-models) ·
+[Multipart Models](#keep-multipart-projects-together) · [Preview](#inspect-files-and-open-your-slicer) ·
+[Revisions](#keep-track-of-g-code-that-works) · [Print](#send-prints-and-manage-your-fleet) ·
+[Materials and costs](#track-filament-costs-and-results) · [Share](#add-notes-share-and-stay-informed) ·
+[Backups](#protect-and-move-your-library) · [Access](#manage-access-and-personalize-your-workspace)
+
+### Bring your files together
+
+- **Upload from your browser:** STL, 3MF, OBJ, STEP/STP, G-code, and PrusaSlicer
+  binary G-code (`.bgcode`). Import ZIP archives with file selection and keep
+  their folder structure as nested Collections.
+- **Capture from model sites:** send supported URLs or use the
+  [browser extension](./browser-extension/README.md) for Printables, MakerWorld,
+  and Thingiverse. MakerWorld packages require browser transfer; Thingiverse
+  files require the extension or manual upload. Per-user MyMiniFactory OAuth
+  and Cults metadata connections are also available.
+- **Review before importing:** **Pending Imports** is an inbox for captures.
+  Choose files, a Collection, and tags, see partial results, and retry failed
+  captures. Imported Models retain available source information, with fields
+  you can review and correct. Paired browsers keep marketplace cookies in the browser.
+- **Use the library you already have:** index mounted folders or NAS shares,
+  S3-compatible storage, WebDAV/Nextcloud, SFTP, or Google Drive **in place**.
+  Remote sources are read-only; mounted folders can optionally accept new files
+  without overwriting existing ones. Scan manually, on a schedule, or watch
+  supported local folders. See [Library sources and NAS setup](./docs/library-sources.md).
+- **Send slices automatically:** the [OrcaSlicer post-processing hook](./scripts/printstash_orca_push.py)
+  uploads exported G-code using your account and API key. Content-hash
+  deduplication recognizes identical files.
+
+### Find and organize your Models
+
+- Browse thumbnails in grid or list views, navigate nested Collections, and
+  move Models with drag-and-drop.
+- Search names, filenames, Collection paths, tags, and source information.
+  Narrow results by file type, material, slicer, printer model, Revision status,
+  print outcome, storage location, or upload date.
+- Star favorites and save filtered views so your usual searches are one click away.
+- Select multiple Models to update tags, move them between Collections, change
+  Revision labels, or send them to the trash in one action.
+- Choose the metrics shown on Model cards and the metadata visible on detail pages.
+
+### Keep multipart projects together
+
+- Group existing Models into ordered, named pieces such as a base, handle, and
+  lid. Offer alternatives for a piece, such as a short or long handle.
+- Give the Multipart Model its own cover, description, tags, Collection, and
+  Markdown, PDF, or image guides.
+- Browse Multipart Models alongside ordinary Models in the main library.
+  Use **Organized**, **Everything**, **Multipart sets only**, or **Parts only**
+  to choose how groupings and their members appear.
+- Reuse a Model in several projects. Each keeps its own files, Revisions, and
+  print history; removing a grouping leaves those Models and files intact.
+
+### Inspect files and open your slicer
+
+- Rotate and zoom source meshes in the browser, with solid, X-ray, and wireframe
+  modes, a build-plate grid, fit-to-view, and screenshots.
+- Preview plain-text G-code layer by layer, toggle travel moves, and view the
+  printer profile's bed outline.
+- Inspect extracted dimensions, volume, triangle count, and slicer settings
+  where available. Common OrcaSlicer, PrusaSlicer, Bambu Studio, Cura, and
+  Klipper-style output can supply nozzle, layer height, infill, temperatures,
+  material, and estimated time, filament use, and cost.
+- Open a file directly in **OrcaSlicer, Bambu Studio, or PrusaSlicer** using
+  slicer deep links. STEP/STP mesh previews require the full API image.
+
+### Keep track of G-code that works
+
+- Keep several G-code Revisions with each Model, with labels, notes, and
+  **known good**, **needs test**, **failed**, or **archived** status.
+- Mark one Revision as recommended so the next print starts from your preferred
+  file. A Model with G-code always has one recommended Revision.
+- Compare two files side by side for slicer and material settings, estimates,
+  and recorded print outcomes.
+- Review each Model's print history, import matching Moonraker jobs, or log a
+  print manually. A Revision's first successful print marks it known good.
+
+### Send prints and manage your fleet
+
+- See printer status, progress, and temperatures; send G-code, choose whether to
+  start it, and pause, resume, or cancel on [supported printers](#printer-compatibility).
+- See which printers already hold a Model's G-code and start an existing remote
+  file where the provider supports it.
+- Queue a print or a batch of copies. Route work manually, to a default printer,
+  or to the least-busy eligible printer, with printer groups and low, normal,
+  or rush priorities. Fleet scheduling uses plain-text G-code.
+- Check loaded material and nozzle size against G-code before dispatch.
+  Known mismatches require confirmation for manual sends and block automatic
+  routing; unknown material state remains usable.
+- Plan maintenance windows, stop new work reaching a printer while its current
+  print finishes, or require an operator to release it after each print.
+- With Bambu LAN, keep history of externally started jobs and, when available,
+  recover their G-code or project 3MF. The history distinguishes archived files
+  from printer-reported metadata; recovery depends on the printer's cache.
+
+### Track filament, costs, and results
+
+- Manage printer and filament presets from **Profiles**. Record loaded tools
+  and material feeds manually for any provider; Bambu AMS and Moonraker's active
+  Spoolman spool can synchronize when that information is available.
+- Optionally connect **[Spoolman](https://github.com/Donkie/Spoolman)** to see
+  inventory and remaining filament, import filament presets, and select a spool
+  for a print. Measured Moonraker completions can deduct the grams used, with
+  checks to avoid double-counting Moonraker's native Spoolman integration.
+- Keep actual duration, measured filament use, and per-print cost from Moonraker
+  alongside slicer estimates and recorded outcomes.
+- Use the admin **Statistics** dashboard to explore print counts, filament,
+  cost, and print time over a selected period, with charts and Collection and
+  filament breakdowns. Choose a display currency in Settings.
+
+### Add notes, share, and stay informed
+
+- Keep Markdown notes, PDFs, images, and other Documents with a Collection.
+  The Markdown editor includes preview, tables, and pasted or dropped images.
+- Share a Model through an expiring, read-only public link. Original-file
+  downloads are disabled unless you enable them for that link.
+- Receive print-completed, failed, cancelled, and printer-offline notifications
+  through **Discord, Telegram, ntfy, or generic webhooks**. Notifications are
+  opt-in, with per-event and per-printer controls.
+
+### Protect and move your library
+
+- Restore trashed Models before permanent cleanup. Physical cleanup is guarded
+  by storage capabilities, administrator approval, a verified independent
+  backup, and quarantine; see [storage safety and recovery](./docs/storage-data-safety.md).
+- Run **Quick or Full Vault audits** to find missing files, integrity problems,
+  and metadata issues. Review findings and use supported repairs for thumbnails,
+  parsed metadata, and recommended Revisions.
+- Create, verify, and restore backups of the SQLite database, managed files, and
+  thumbnails. Schedule a daily backup and send copies to local storage,
+  S3-compatible storage, WebDAV, SFTP, or Google Drive. PostgreSQL needs
+  operator-managed database backups; Library source originals need separate backups.
+- Export or import a portable library archive with files, metadata, tags,
+  Collections, history, favorites, saved views, and captured source information.
+  Export metadata alone as JSON or CSV when you need it for analysis.
+- Start with local disk and optionally use PostgreSQL or remote managed storage
+  such as S3, R2, B2, Wasabi, Nextcloud/WebDAV, or SFTP. Support maturity and
+  available safety guarantees vary by provider; see the [storage guide](./docs/storage-providers.md).
+
+### Manage access and personalize your workspace
+
+- Create local accounts and named API keys for scripts and slicer hooks, or
+  connect **OIDC / SSO** through Authentik, Authelia, or a similar identity provider.
+- Grant view, edit, or admin access to Collections and separate view, print,
+  control, or admin access to individual printers. Audit logs record changes.
+- Use responsive desktop and mobile layouts, light/dark themes, and an
+  installable web app. English and Spanish localization is in progress; some
+  screens fall back to English. Library data and printer actions need a live
+  connection to your server.
+- Check storage usage, backup status, and printer connectivity in administration;
+  health endpoints and Prometheus metrics support external monitoring.
+
+### Available on main, awaiting a release
+
+The features above describe v0.13.0. Source builds from `main` also include
+[multipart build tracking](./docs/multipart-builds.md) with quantities and
+confirmed usable output, [BGCODE toolpath previews](./docs/bgcode-preview.md),
+[guided browser registration](./docs/first-run.md), and backup destination
+history with retries for failed copies. These are **not included in v0.13.0
+images**. See [Unreleased](./CHANGELOG.md#unreleased) for the complete list.
+
+## Printer Compatibility
+
+Moonraker/Klipper is the primary integration. **Beta** providers have implemented
+workflows, but still need broader validation on physical printers and firmware.
+The app shows each printer's capabilities and disables unsupported actions.
+
+| Printer / service | Support level | What you can do |
+| --- | --- | --- |
+| **Moonraker / Klipper** | Stable | Live status, upload/start, pause/resume/cancel, remote files, matching print-history import, measured filament use |
+| **Elegoo Neptune 4 / Pro / Plus / Max** | Via Moonraker | Uses the Moonraker integration through a dedicated setup preset |
+| **Bambu LAN** | Beta | Local status, plain-text G-code upload with explicit start, pause/resume/cancel, external-job history and best-effort file capture; no remote file inventory |
+| **PrusaLink** | Beta | Local status, plain-text G-code and validated `.bgcode` upload/start, remote files, pause/resume/cancel; no Prusa Connect cloud |
+| **OctoPrint / OctoPi** | Beta | Local status, G-code upload/start, remote files, pause/resume/cancel |
+| **Elegoo Centauri Carbon / Carbon 2** | Beta | Local status, G-code upload/start, pause/resume/cancel; no remote file inventory or history import |
+
+See [Provider support](./docs/provider-support.md) for authentication, unsupported
+actions, diagnostics, and the hardware validation record.
 
 ## Screenshots
 
@@ -275,38 +282,54 @@ and the purpose of the other Compose files, see
 
 ## Known Limitations & Beta Notes
 
-PrintStash is a **beta** self-hosted release. It is useful today, but it is
-deliberately not a full manufacturing platform. Set expectations accordingly:
+- **You still need a slicer.** PrintStash organizes files and dispatches prepared
+  G-code. Its toolpath viewer does not simulate firmware behavior or validate
+  whether a file is safe for your printer.
+- **Printer support depends on the provider and firmware.** The
+  [compatibility table](#printer-compatibility) summarizes available actions;
+  physical hardware validation is still limited, especially for beta providers.
+- **Metadata and marketplace captures can be incomplete.** Slicer output and
+  source-site access vary. Missing fields, expired browser sessions, or
+  unavailable downloads may require manual review or another capture.
+- **Full and lite images differ.** Both generate STL/OBJ/3MF thumbnails. The
+  full image also includes browser-assisted imports, STEP/STP mesh previews,
+  and optional remote storage transports. Lite stores STEP files without mesh
+  previews and retains native local and S3 managed storage.
+- **Backups have a defined scope.** Built-in database backup/restore supports
+  SQLite; PostgreSQL and files indexed from external Library sources need
+  separate backup procedures.
+- **One server process per library.** The supported deployment runs one API
+  process per Vault. Printer actions, uploads, and library data require that
+  server to be online, including when using the installed web app.
 
-- **Bambu LAN is beta** with local status, plain-text G-code upload, explicit
-  start, and pause/resume/cancel. Remote inventory/deletion is not implemented.
-- **PrusaLink is beta** for local FDM printers, with Digest or legacy API-key
-  authentication, status, streamed plain-text G-code and validated `.bgcode`
-  upload/start, files, and print controls. Prusa Connect cloud is not used.
-- **Elegoo support covers Neptune 4, Pro, Plus, and Max** through Moonraker;
-  Centauri Carbon and Carbon 2 additionally have beta local status/control
-  support through native SDCP/MQTT, plus beta G-code upload since 0.11.3.
-  Centauri file inventory and deletion remain unavailable.
-- **Hardware coverage is still thin.** Provider behavior needs more real-world
-  validation across printers, firmware versions, and network/auth setups.
-  Reports are very welcome.
-- **Slicer metadata parsing varies.** Extraction is best for common OrcaSlicer,
-  PrusaSlicer, Bambu Studio, Cura, and Klipper output; missing fields are
-  expected — please report them with safe sample files.
-- **The G-code viewer is a visualization aid**, not a slicer-grade simulator. It
-  does not validate firmware macros, acceleration, pressure advance, or safety.
-- **Not for direct public exposure.** It is designed for trusted self-hosted
-  networks (see [Security](#security)).
-- **Full and lite images have different optional capabilities.** Both run on
-  `linux/amd64` and `linux/arm64` and generate STL/OBJ/3MF thumbnails. The full
-  image additionally includes browser-assisted imports and STEP/STP
-  tessellation; the lite image stores STEP files without generating their mesh
-  preview.
+See [Known limitations](./docs/known-limitations.md) for the full boundaries and
+[Security](#security) for deployment guidance.
 
-Full detail — including non-goals — lives in
-[docs/known-limitations.md](./docs/known-limitations.md). Storage provider setup,
-runtime safety tiers, and required credentials are documented in
-[docs/storage-providers.md](./docs/storage-providers.md).
+## Documentation
+
+| I want to… | Start here |
+| --- | --- |
+| Learn the app's workflows | [User documentation](https://www.printstash.org/docs/) |
+| Configure Docker, ports, folders, or SSO | [Deployment guide](./docs/deployment.md) |
+| Upgrade an existing installation | [Upgrade notes](./UPGRADE.md) · [v0.13.0 release guide](./docs/0.13.0-release-guide.md) |
+| Connect a NAS or an existing library | [Library sources](./docs/library-sources.md) |
+| Choose remote storage | [Storage providers](./docs/storage-providers.md) · [Compatibility details](./docs/provider-support.md#storage-and-library-source-compatibility) |
+| Set up browser capture | [Browser extension](./browser-extension/README.md) · [Pending Imports guide](./docs/vault-maintenance-and-capture.md) |
+| Check backups or recover data | [Disaster recovery](./docs/disaster-recovery.md) · [Storage safety](./docs/storage-data-safety.md) |
+| Follow releases and future work | [Changelog](./CHANGELOG.md) · [Roadmap](./docs/roadmap.md) |
+
+## Project Status
+
+PrintStash is in **beta**, with a published release for self-hosted use.
+Library management and Moonraker/Klipper are the best-established workflows;
+other printer integrations have explicit [support levels](#printer-compatibility).
+
+| At a glance | Current status |
+| --- | --- |
+| **Latest release** | [v0.13.0](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0) · [Changelog](./CHANGELOG.md#0130) |
+| **Recommended installation** | Docker Compose with SQLite and local disk; full and lite images for amd64 and arm64 |
+| **Upgrading** | Back up first, then follow the [upgrade notes](./UPGRADE.md#0130-notes) |
+| **Development** | Changes after v0.13.0 are listed under [Unreleased](./CHANGELOG.md#unreleased); future plans are in the [roadmap](./docs/roadmap.md) |
 
 ## Contributing
 
@@ -315,8 +338,9 @@ Bug reports, hardware notes, docs fixes, and small PRs are welcome. Start with
 reports, parser fixtures, install notes, and small UI workflow improvements.
 
 Not sure where to start? See
-[community starter issues](./docs/community-starter-issues.md) or open a
-discussion.
+[community starter issues](./docs/community-starter-issues.md), ask in
+[Discussions](https://github.com/xiao-villamor/PrintStash/discussions), or
+[report an issue](https://github.com/xiao-villamor/PrintStash/issues).
 
 ## Security
 
