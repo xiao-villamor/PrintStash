@@ -5,6 +5,19 @@ Thingiverse model pages, Printables collections, and direct model/archive file
 URLs, then sends them to the Pending Imports inbox of a self-hosted PrintStash
 instance.
 
+## Chrome Web Store package
+
+Run `pnpm install --frozen-lockfile && pnpm package:chrome` to validate the
+extension and generate `.output/printstash-browser-extension-0.13.0-chrome.zip`
+(the filename follows `package.json`). The ZIP contains the production extension
+with its manifest at the root. Chrome and Edge exclude Firefox-specific metadata.
+
+The [publishing guide](CHROME-WEB-STORE.md) includes listing copy, permission
+justifications, privacy disclosures and reviewer instructions. **Help & privacy**
+in the popup opens the packaged help and privacy policy without a server.
+Use the [public extension privacy policy](https://www.printstash.org/en/extension-privacy/)
+for the store's privacy-policy URL; the site also provides a Spanish version.
+
 ## Install
 
 1. In PrintStash, create a browser pairing code in **Settings → Imports**.
@@ -49,7 +62,7 @@ The one-time code is exchanged for an opaque browser-only credential; the code
 is never retained, and PrintStash stores only its hash. Local extension storage
 contains only the vault URL and that device credential—not a username, API key,
 or access token. Revoking the browser in PrintStash stops future imports.
-**Manage → Disconnect** removes the device credential and vault host permission
+**Edit → Disconnect** removes the device credential and vault host permission
 from the browser. Existing username/API-key setups continue to work as a legacy
 migration path, but new setups should use pairing.
 

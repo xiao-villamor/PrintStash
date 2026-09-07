@@ -27,6 +27,8 @@ const chromeProfile = process.env.PRINTSTASH_EXTENSION_USER_DATA_DIR;
 const headless = process.env.PRINTSTASH_EXTENSION_HEADLESS !== "0";
 const chromeOptions = {
   binary: browserBinary,
+  // ChromeDriver 136+ otherwise omits extension tabs from window handles.
+  enableExtensionTargets: true,
   args: [
     ...(headless ? ["--headless=new"] : []),
     ...(chromeProfile ? [`--user-data-dir=${chromeProfile}`] : []),

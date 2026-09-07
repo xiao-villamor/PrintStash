@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Help &amp; privacy — PrintStash Model Importer</title>
+  </head>
+  <body class="help-page">
+    <main>
+      <header class="header">
+        <img class="brand-mark" src="/icon.svg" alt="" width="36" height="36" />
+        <div>
+          <h1>PrintStash Model Importer</h1>
+          <p class="section-description">Help &amp; privacy</p>
+        </div>
+      </header>
+
+      <section aria-labelledby="setup">
+        <h2 id="setup">From a model page to your library</h2>
+        <p>You need a running PrintStash server and an account on it to use this extension.</p>
+        <ol>
+          <li>
+            In PrintStash, open <strong>Settings → Imports</strong> and create a browser pairing
+            code.
+          </li>
+          <li>
+            Open the extension. Enter your Vault URL and the code, then choose
+            <strong>Pair browser</strong>. Codes expire after five minutes.
+          </li>
+          <li>
+            Open a supported model page and choose <strong>Send to Pending Imports</strong>. Select
+            files when prompted.
+          </li>
+          <li>
+            Keep the popup open during the transfer. Open <strong>Pending Imports</strong> in
+            PrintStash to review the files and finish importing.
+          </li>
+        </ol>
+        <p>
+          Local addresses such as <code>localhost:8000</code> and
+          <code>192.168.1.20:8000</code> work without a scheme. Use HTTPS for a remote server.
+        </p>
+      </section>
+
+      <section aria-labelledby="sources">
+        <h2 id="sources">Supported sources</h2>
+        <ul>
+          <li>
+            <strong>MakerWorld:</strong> individual model pages. Sign in to MakerWorld in the same
+            browser. Collections are not supported.
+          </li>
+          <li>
+            <strong>Printables:</strong> model pages and collections. Available files depend on the
+            page and your source-site access.
+          </li>
+          <li>
+            <strong>Thingiverse:</strong> individual model pages, with file selection and manual
+            attachment when automatic download is unavailable.
+          </li>
+          <li>
+            <strong>Direct links:</strong> ZIP, 3MF, STL, OBJ, STEP/STP and G-code files, where your
+            server can safely download them.
+          </li>
+        </ul>
+        <p>
+          Source sites can require sign-in or browser checks. The extension does not bypass access
+          restrictions. If a transfer stops, check Pending Imports before retrying.
+        </p>
+      </section>
+
+      <section aria-labelledby="privacy">
+        <h2 id="privacy">Privacy policy</h2>
+        <p>
+          This policy covers PrintStash Model Importer. The extension sends the models you choose to
+          the PrintStash server you configure. It has no advertising, analytics or telemetry
+          service.
+        </p>
+        <h3>Data used by the extension</h3>
+        <p>
+          When you open the popup, it reads the active page URL and title to identify a supported
+          source and checks your configured server. During a capture you initiate, it reads
+          supported page metadata and downloads selected files. This can include the model title,
+          description, creator, license and source URL.
+        </p>
+        <p>
+          The extension stores the Vault URL and a browser device credential locally in your
+          browser. A pairing code is exchanged once and is not saved. If you choose the legacy
+          setup, your username and named API key are stored locally instead. Temporary access tokens
+          remain in memory.
+        </p>
+        <h3>Where data goes</h3>
+        <p>
+          Selected files and allowlisted source metadata go to your configured PrintStash server for
+          review and import. Credentials are sent to that server for authentication. Requests to
+          model providers and their file hosts obtain the content you select; those services receive
+          ordinary network information such as your IP address.
+        </p>
+        <p>
+          Provider requests may use the sign-in session already present on the source page.
+          Source-site cookies and session credentials are never copied into the import or sent to
+          PrintStash. Raw page HTML and signed download URLs are not retained as source metadata.
+        </p>
+        <p>
+          The extension does not sell data, use it for advertising, or transfer it to an analytics
+          service. Data is used only to connect your browser and import the content you request.
+          Your PrintStash administrator controls the server's storage, access and backups; source
+          sites have their own privacy policies.
+        </p>
+        <h3>Permissions</h3>
+        <p>
+          <strong>Active tab and scripting</strong> let the extension identify the page you open it
+          on and run bundled extraction code when you capture. It does not monitor your browsing in
+          the background.
+        </p>
+        <p>
+          <strong>Storage</strong> remembers the connection locally.
+          <strong>Host access</strong> connects to a local PrintStash server or, with your approval,
+          your chosen server and the provider hosts needed for a transfer. Optional HTTP/HTTPS
+          access allows self-hosted servers at different addresses; it does not grant all websites
+          at installation.
+        </p>
+        <h3>Your controls</h3>
+        <p>
+          Use <strong>Edit → Disconnect</strong> in the popup to remove the saved connection
+          credentials. Revoke the paired browser in
+          <strong>PrintStash Settings → Imports</strong> to invalidate its credential on the server.
+          Remove additional site permissions through your browser's extension settings, or uninstall
+          the extension.
+        </p>
+        <p>
+          Disconnecting does not delete existing imports. Dismiss a pending item or delete imported
+          content in PrintStash to manage server data; retention and backups are controlled by that
+          server's administrator.
+        </p>
+        <h3>Contact</h3>
+        <p>
+          For extension questions, use the
+          <a
+            href="https://github.com/xiao-villamor/PrintStash/issues"
+            target="_blank"
+            rel="noopener noreferrer"
+            >PrintStash issue tracker</a
+          >. Do not post pairing codes, credentials or private model files. For server-held data,
+          contact your PrintStash administrator.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

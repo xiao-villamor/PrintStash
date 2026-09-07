@@ -57,6 +57,7 @@
 body {
   margin: 0;
   min-width: 380px;
+  width: 380px;
   background: var(--background);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
@@ -66,6 +67,41 @@ main {
   display: grid;
   gap: 14px;
   padding: 16px;
+}
+
+a {
+  color: var(--primary);
+  text-underline-offset: 3px;
+}
+
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: var(--radius);
+}
+
+@media (prefers-color-scheme: dark) {
+  a,
+  button.text-button:not(.destructive) {
+    color: var(--ring);
+  }
+}
+
+.popup-footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.popup-footer a {
+  flex: none;
 }
 
 p,
@@ -223,6 +259,10 @@ h1 {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.page-context[hidden] {
+  display: none;
 }
 
 .source {

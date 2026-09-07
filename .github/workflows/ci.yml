@@ -438,6 +438,9 @@ jobs:
       - name: Test extension and build Chrome, Firefox, and Edge
         run: pnpm test
 
+      - name: Verify Chrome Web Store upload package
+        run: pnpm zip:chrome && pnpm test:store
+
       - name: Install backend runtime for capture boundary
         uses: astral-sh/setup-uv@v8.1.0
         with:

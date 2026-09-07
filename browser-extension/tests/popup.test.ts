@@ -1,3 +1,4 @@
+/** Defends the popup's user-visible states through real DOM events and browser boundary fakes. */
 import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "@webext-core/fake-browser";
@@ -75,6 +76,123 @@ describe("popup browser adapters", () => {
     expect(element("#runtime-marker").hidden).toBe(false);
     expect(document.querySelector("header")?.textContent).not.toContain("protocol");
     expect(document.querySelector("header")?.textContent).not.toContain("diagnostics");
+  });
+
+  it.each([
+    { input: "localhost:8000", expected: "http://localhost:8000" },
+    { input: "127.0.0.1:3000", expected: "http://127.0.0.1:3000" },
+    { input: "192.168.1.20:8000", expected: "http://192.168.1.20:8000" },
+    { input: "https://prints.example.com", expected: "https://prints.example.com" },
+  ])(
+    "submits supported Vault addresses through native form validation: $input",
+    async ({ input, expected }) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () =>
+          response({
+            status: "ok",
+            name: "PrintStash",
+            credential: "test-device-credential",
+          }),
+        ),
+      );
+      await import("../popup.ts");
+      await settle();
+      requiredElement("#vault", HTMLInputElement).value = input;
+      requiredElement("#pairing-code", HTMLInputElement).value = "test-pairing-code";
+
+      button("#connect").click();
+      await settle();
+
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(element("#page-context").hidden).toBe(false);
+      expect(await fakeBrowser.storage.local.get(["vault", "deviceCredential"])).toEqual({
+        vault: expected,
+        deviceCredential: "test-device-credential",
+      });
+    },
+  );
+
+  it("keeps an empty Vault address required", () => {
+    const input = requiredElement("#vault", HTMLInputElement);
+
+    input.value = "";
+
+    expect(input.checkValidity()).toBe(false);
+    expect(input.validity.valueMissing).toBe(true);
+  });
+
+  it("keeps first-run setup focused on pairing", async () => {
+    await import("../popup.ts");
+    await settle();
+
+    expect(element("#connection-panel").hidden).toBe(false);
+    expect(element("#page-context").hidden).toBe(true);
+    expect(element("#import-panel").hidden).toBe(true);
+  });
+
+  it("asks users to keep the popup open during a transfer", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      deviceCredential: "test-device-credential",
+    });
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 42, title: "Part.stl", url: "https://models.example.com/part.stl" },
+      ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => response({ status: "ok", name: "PrintStash", id: 1 })),
+    );
+    await import("../popup.ts");
+    await settle();
+
+    button("#capture").click();
+
+    expect(element("#import-hint").textContent).toContain(
+      "Keep this popup open until it finishes.",
+    );
+    expect(button("#capture").disabled).toBe(true);
+    await settle();
+  });
+
+  it.each([
+    { vault: "http://[", code: "test-code", message: "Vault URL is invalid." },
+    {
+      vault: "ftp://prints.example.com",
+      code: "test-code",
+      message: "Vault URL must use HTTP or HTTPS.",
+    },
+    {
+      vault: "https://prints.example.com",
+      code: "",
+      message: "Enter a pairing code, or a username and named API key.",
+    },
+  ])("explains invalid connection input: $message", async ({ vault, code, message }) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchImpl);
+    await import("../popup.ts");
+    await settle();
+    requiredElement("#vault", HTMLInputElement).value = vault;
+    requiredElement("#pairing-code", HTMLInputElement).value = code;
+
+    button("#connect").click();
+    await settle();
+
+    expect(element("#connection-title").textContent).toBe("Connection failed");
+    expect(element("#connection-detail").textContent).toBe(message);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await fakeBrowser.storage.local.get()).toEqual({});
+  });
+
+  it("exposes local help from the popup", () => {
+    const link = requiredElement("#help-link", HTMLAnchorElement);
+
+    expect(link.getAttribute("href")).toBe("help.html");
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toContain("noopener");
+    expect(link.textContent).toBe("Help & privacy");
   });
 
   it("places recovery guidance before the fallback controls", () => {

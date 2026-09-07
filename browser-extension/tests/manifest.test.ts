@@ -1,3 +1,4 @@
+/** The generated manifests preserve each browser's permissions and install metadata. */
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
@@ -21,6 +22,12 @@ describe("MV3 manifest contract", () => {
       required: ["authenticationInfo", "browsingActivity", "websiteContent"],
       optional: [],
     });
+  });
+
+  it.each(["chrome-mv3", "edge-mv3"])("omits Firefox-only settings from %s", async (target) => {
+    const manifest = JSON.parse(await readFile(`.output/${target}/manifest.json`, "utf8"));
+
+    expect(manifest.browser_specific_settings).toBeUndefined();
   });
 
   it("ships the popup, icons, and only the intended permission surface", async () => {

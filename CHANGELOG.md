@@ -4,6 +4,9 @@
 
 ### Added
 
+- The browser importer includes offline help and privacy information, with a
+  validated Chrome Web Store ZIP command and a publishing guide.
+
 - Vault, Library and backup connection forms use one typed provider catalogue.
   S3 and Nextcloud presets resolve consistently across uses. Connection editing
   preserves omitted credentials, supports explicit replacement and prevents
@@ -42,6 +45,11 @@
   and customization examples in a separate deployment guide.
 
 ### Fixed
+
+- Browser pairing accepts local addresses without a scheme and explains invalid
+  setup input. First-run setup keeps pairing controls visible in the popup;
+  transfers remind users to keep it open until completion. Chrome and Edge
+  packages omit Firefox-only manifest settings.
 
 - Documented pinned Nextcloud and WsgiDAV cleanup evidence, including ETag
   collisions, conditional quarantine and lock expiry. WebDAV physical deletion

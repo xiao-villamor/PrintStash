@@ -30,7 +30,7 @@
         <button id="edit-connection" class="text-button" type="button" hidden>Edit</button>
       </section>
 
-      <section class="page-context" aria-labelledby="current-page-label">
+      <section id="page-context" class="page-context" aria-labelledby="current-page-label" hidden>
         <p id="current-page-label" class="section-label">Current page</p>
         <p id="page" class="page-title">Reading current page…</p>
         <p id="source" class="source">Detecting a supported model source…</p>
@@ -72,13 +72,17 @@
             ><span>Vault URL</span
             ><input
               id="vault"
-              type="url"
+              type="text"
               inputmode="url"
               autocomplete="url"
               spellcheck="false"
               placeholder="https://prints.example.com"
+              aria-describedby="vault-help"
               required
           /></label>
+          <p id="vault-help" class="credential-help">
+            Your PrintStash address, for example localhost:8000 or a server on your network.
+          </p>
           <label
             ><span>Pairing code</span
             ><input
@@ -89,8 +93,8 @@
               placeholder="Code from PrintStash Settings"
           /></label>
           <p class="credential-help">
-            Create a browser pairing code in PrintStash Settings, then paste it here. The code is
-            exchanged once for a browser-only credential.
+            In PrintStash, open Settings → Imports and create a pairing code. It expires after five
+            minutes.
           </p>
           <details class="credential-help">
             <summary>Use legacy API-key setup</summary>
@@ -141,6 +145,10 @@
         <button id="capture" class="wide" type="button" disabled>Send to Pending Imports</button>
       </section>
       <button id="open-inbox" class="secondary wide" hidden>Open Pending Imports</button>
+      <footer class="popup-footer">
+        <span>Imports go to your PrintStash server.</span>
+        <a id="help-link" href="help.html" target="_blank" rel="noopener">Help &amp; privacy</a>
+      </footer>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

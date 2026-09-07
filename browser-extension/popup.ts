@@ -104,6 +104,7 @@ const usernameInput = requiredElement("#username", HTMLInputElement);
 const keyInput = requiredElement("#key", HTMLInputElement);
 const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
+const pageContext = requiredElement("#page-context", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
 const statusTitle = requiredElement("#status-title", HTMLElement);
@@ -489,7 +490,8 @@ function renderImportAvailability() {
   importPanel.hidden = !readyConnection;
   captureButton.disabled = importBusy || !readyConnection || !activeSource;
   if (importBusy) {
-    importHint.textContent = "Sending the model to your review inbox…";
+    importHint.textContent =
+      "Sending to your review inbox… Keep this popup open until it finishes.";
   } else if (!connected) {
     importHint.textContent = "Connect PrintStash to enable importing.";
   } else if (!activeSource) {
@@ -524,6 +526,7 @@ function renderConnection(
   }
 
   const showConnectedActions = state === "connected";
+  pageContext.hidden = !showConnectedActions;
   editButton.hidden = !showConnectedActions || editingConnection;
   disconnectButton.hidden = !showConnectedActions || !editingConnection;
   renderImportAvailability();
@@ -1173,6 +1176,7 @@ connectionForm.addEventListener("submit", async (event) => {
       showStatus(`Connection was not updated. ${messageFrom(error)}`, "error");
     } else {
       showStatus();
+      renderConnection("error", { detail: messageFrom(error) });
     }
   }
 });

@@ -28,6 +28,7 @@ import { installChromeExtension } from "./_chrome_extension";
 interface LoadedExtensionElement {
   getText(): Promise<string>;
   waitForExist(): Promise<void>;
+  click(): Promise<void>;
 }
 
 interface LoadedExtensionBrowser {
@@ -41,6 +42,10 @@ interface LoadedExtensionBrowser {
   isFirefox: boolean;
   installAddOn(path: string | undefined, temporary: boolean): Promise<string>;
   url(destination: string | undefined): Promise<void>;
+  getWindowHandles(): Promise<string[]>;
+  switchToWindow(handle: string): Promise<void>;
+  getUrl(): Promise<string>;
+  waitUntil(condition: () => Promise<boolean>): Promise<void>;
 }
 
 declare const browser: LoadedExtensionBrowser;
@@ -84,5 +89,27 @@ describe("loaded extension", () => {
     }));
 
     assert.deepEqual(apis, { permissions: "function", scripting: "function" });
+  });
+
+  it("opens packaged help from the installed popup", async () => {
+    const previousHandles = await browser.getWindowHandles();
+
+    await browser.$("#help-link").click();
+    await browser.waitUntil(
+      async () => (await browser.getWindowHandles()).length > previousHandles.length,
+    );
+    const handle = (await browser.getWindowHandles()).find(
+      (value) => !previousHandles.includes(value),
+    );
+    assert.ok(handle, "Help must open in its own tab so the popup's form is preserved");
+    await browser.switchToWindow(handle);
+
+    assert.match(await browser.getUrl(), /^(?:chrome|moz)-extension:\/\/[^/]+\/help\.html$/);
+    assert.equal(await browser.$("h1").getText(), "PrintStash Model Importer");
+    assert.equal(await browser.$("#privacy").getText(), "Privacy policy");
+    assert.match(
+      await browser.$("body").getText(),
+      /Source-site cookies and session credentials are never copied/,
+    );
   });
 });
