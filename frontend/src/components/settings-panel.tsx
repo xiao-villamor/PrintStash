@@ -1,5 +1,7 @@
 "use client";
 
+import { GettingStartedReminder } from "@/components/getting-started-reminder";
+
 import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
@@ -1615,11 +1617,7 @@ export function SettingsPanel() {
   return (
     <Localized>
       <div className="w-full space-y-6">
-        {user?.is_superuser && (
-          <Button variant="outline" onClick={() => router.push("/getting-started")}>
-            {t("setup.resume")}
-          </Button>
-        )}
+        <GettingStartedReminder />
         <ConfirmModal
           open={restartConfirmOpen}
           onClose={() => {

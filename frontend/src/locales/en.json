@@ -2939,5 +2939,6 @@
   "uploads.mode.zip": "From ZIP",
   "setup.chooseFileAction": "Choose a file",
   "setup.scanPartial": "Some files could not be indexed. Review the scan in the task center or retry this folder. Models already added remain in your library.",
-  "setup.folderPathExample": "/libraries/models"
+  "setup.folderPathExample": "/libraries/models",
+  "setup.dismissReminder": "Don't show again"
 }

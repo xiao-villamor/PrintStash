@@ -204,6 +204,19 @@ test.describe("Browser onboarding", () => {
       await expect(page).toHaveURL(/\/$/);
       await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
       await expect(page).toHaveURL(/\/getting-started$/);
+      await page.goto("/settings");
+      await page.getByRole("button", { name: "Don't show again", exact: true }).click();
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Resume the getting-started guide" }),
+      ).toHaveCount(0);
+      await page.goto("/");
+      await expect(page.getByRole("button", { name: "Upload files", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Resume the getting-started guide" }),
+      ).toHaveCount(0);
+      await page.goto("/getting-started");
       await page.getByRole("button", { name: "Upload my first files" }).press("Enter");
       await page.getByLabel("Model or G-code file").setInputFiles({
         name: "first-model.gcode",
@@ -225,7 +238,10 @@ test.describe("Browser onboarding", () => {
         page.getByRole("heading", { name: "My first model", exact: true }),
       ).toBeVisible();
       await page.goto("/settings");
-      await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
+      await expect(
+        page.getByRole("button", { name: "Resume the getting-started guide" }),
+      ).toHaveCount(0);
+      await page.goto("/getting-started");
       await expect(page).toHaveURL(/\/getting-started$/);
       await page.getByRole("button", { name: "Connect an existing folder" }).press("Enter");
       await page.getByLabel("Folder name").fill("My existing folder");

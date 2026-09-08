@@ -73,7 +73,8 @@ server folders, keyboard step navigation, and the account → first Model flow.
 The activation route also exercises the language/theme menus, the simplified
 upload dialog, mounted-folder help, postponing/resuming, and connecting a folder
 with automatic scanning. Screenshots include the Spanish chooser and dialogs at
-mobile and desktop sizes.
+mobile and desktop sizes. Dismissing the guide reminder is checked across reloads
+and navigation between Settings and the empty library.
 
 auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections

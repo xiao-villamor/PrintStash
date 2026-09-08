@@ -2939,5 +2939,6 @@
   "uploads.mode.zip": "Desde ZIP",
   "setup.chooseFileAction": "Elegir un archivo",
   "setup.scanPartial": "No se pudieron añadir algunos archivos. Revisa la búsqueda en el centro de tareas o vuelve a buscar en esta carpeta. Los modelos ya añadidos siguen en tu biblioteca.",
-  "setup.folderPathExample": "/libraries/models"
+  "setup.folderPathExample": "/libraries/models",
+  "setup.dismissReminder": "No volver a mostrar"
 }

@@ -18,6 +18,9 @@
 
 ### Changed
 
+- The getting-started reminder can be dismissed with Don't show again. The choice
+  is remembered per user in the current browser across Settings and the empty library.
+
 - First-run setup uses a centered, responsive form with inline password visibility
   controls. Storage choices and server folders are visible immediately, with a
   clear access-check step before account creation and guidance in English and Spanish.

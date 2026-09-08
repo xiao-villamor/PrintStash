@@ -1,5 +1,7 @@
 "use client";
 
+import { GettingStartedReminder } from "@/components/getting-started-reminder";
+
 import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
@@ -2435,11 +2437,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       </Button>
                     ) : (
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        {user?.is_superuser && (
-                          <Button variant="outline" onClick={() => router.push("/getting-started")}>
-                            {t("setup.resume")}
-                          </Button>
-                        )}
+                        <GettingStartedReminder />
                         <Button
                           type="button"
                           size="sm"
