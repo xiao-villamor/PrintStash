@@ -21,6 +21,10 @@ unsupported multi-range syntax falls back to the full representation.
 
 ## Browser configuration
 
+Native delivery for browser `fetch` requests requires the bucket owner to add a
+CORS rule. PrintStash validates that rule but does not create or modify bucket
+CORS configuration; without it, downloads safely fall back to API proxying.
+
 The app downloads with authenticated `fetch`. A provider redirect therefore needs
 CORS, even for the ordinary Download action. PrintStash reads the bucket's CORS
 configuration; absence of this capability or permission keeps delivery through

@@ -4,8 +4,11 @@ The acceptance scenarios below cover issue #101. Focused results: 61 API/unit
 cases, 55 provider/unit/E2E cases, 17 frontend request cases and the reviewed
 OpenAPI contract passed. The real Chromium native-download proof passed one
 test (19.7 seconds overall), including exact saved bytes, Unicode filename,
-provider CORS and zero API body bytes. Full-suite and coverage checks remain
-in the integration queue; focused results do not imply those gates passed.
+provider CORS and zero API body bytes. The complete measured backend run passed
+8,768 non-resource tests and 153 real-resource tests. One deterministic staging
+cleanup case was then appended to that report to remove an order-sensitive
+dependency pin: aggregate coverage is 93.96%, `artifact_delivery.py` is 90.39%,
+and all 10 coverage-floor checks pass.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
@@ -65,10 +68,11 @@ syntax validation, frontend test lint and TypeScript all passed.
 
 ## Attached-plan observability and contract follow-up
 
-80 focused delivery/thumbnail/telemetry tests passed and290 adapter regressions
-passed. The earlier CI run passed its functional suites; its delivery module
-coverage was88.57%, below90%. Coverage and full gates remain pending on this
-follow-up, including the additional inline-provider contract.
+80 focused delivery/thumbnail/telemetry tests and 290 adapter regressions
+passed. The completed backend measurement also passed all 8,768 non-resource
+tests and all 153 real-resource tests, including the additional inline-provider
+contract. The follow-up raised delivery-module coverage from the earlier 88.57%
+to 90.39% and the final 10-test floor audit passed.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
@@ -89,3 +93,4 @@ follow-up, including the additional inline-provider contract.
 |62|preserves inline thumbnail disposition|Happy|Authenticated thumbnail|Inline filename response|Integration|✅ `test_delivery.py::TestAuthorizedDelivery::test_preserves_inline_thumbnail_disposition`|
 |63|preserves inline provider disposition|Happy|Real S3 thumbnail target|Exact inline filename/media type|Contract|✅ `test_artifact_delivery.py::TestBrowserDelivery::test_preserves_inline_provider_disposition`|
 |64|refuses unparseable browser URL|Error|Malformed IPv6 authority from provider|Capability rejected without escaping validation|Unit|✅ `backend/tests/unit/modules/storage/test_artifact_delivery.py::TestSafeBrowserDownload::test_refuses_unparseable_url`|
+|65|quarantines owned staging file without xattrs|Edge|Owned file; filesystem reports `ENOTSUP` for marker reads|Inode proof permits exact-file cleanup and coverage is order-independent|Integration|✅ `backend/tests/integration/modules/ingestion/test_staging_leases.py::TestEntryHelpers::test_quarantines_owned_file_without_xattrs`|

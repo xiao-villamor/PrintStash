@@ -81,6 +81,28 @@ class TestEntryHelpers:
     def test_absent_quarantine_destination_is_not_present(self) -> None:
         assert staging_leases._entry_present(None) is False
 
+    def test_quarantines_owned_file_without_xattrs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "capture-slot"
+        path.write_bytes(b"owned partial")
+        info = path.lstat()
+
+        def unsupported(_path: object, _name: object) -> bytes:
+            raise OSError(getattr(errno, "ENOTSUP", 95), "not supported")
+
+        monkeypatch.setattr(staging_leases.os, "getxattr", unsupported, raising=False)
+
+        assert staging_leases._quarantine_owned_file(
+            path,
+            receipt_id="slot-1",
+            device=info.st_dev,
+            inode=info.st_ino,
+            marker=b"slot-1",
+        )
+        assert not path.exists()
+        assert not (tmp_path / ".printstash-staging-quarantine").exists()
+
 
 class TestTransfer:
     def test_a_transfer_leaves_exactly_one_owner(
