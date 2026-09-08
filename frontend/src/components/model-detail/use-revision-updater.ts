@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { deleteFileRevision, updateFileRevision } from "@/lib/api";
+import { uiText } from "@/lib/locale";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { FileRead, FileRevisionUpdate, ModelRead } from "@/types";
@@ -23,7 +24,7 @@ export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) 
     setSaving(file.id);
     try {
       onModel(await updateFileRevision(modelId, file.id, patch));
-      toast.success("Revision updated");
+      toast.success(uiText("revision.updateSuccess"));
       return true;
     } catch (e) {
       toast.error(e);
@@ -41,7 +42,7 @@ export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) 
     setSaving(file.id);
     try {
       onModel(await deleteFileRevision(modelId, file.id));
-      toast.success("Revision deleted");
+      toast.success(uiText("revision.deleteSuccess"));
       return true;
     } catch (e) {
       toast.error(e);

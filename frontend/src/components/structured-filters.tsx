@@ -1,3 +1,6 @@
+import { filterValueText } from "@/lib/filter-labels";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { ChevronDown, X } from "lucide-react";
 import { useState } from "react";
 
@@ -16,14 +19,54 @@ type FilterKey =
   | "printed";
 
 const GROUPS: Array<{ key: FilterKey; label: string }> = [
-  { key: "file_type", label: "Artifact" },
-  { key: "material_type", label: "Material" },
-  { key: "slicer_name", label: "Slicer" },
-  { key: "printer_model", label: "Printer model" },
-  { key: "revision_status", label: "Revision" },
-  { key: "printed", label: "Printed" },
-  { key: "print_outcome", label: "Print outcome" },
-  { key: "storage", label: "Storage" },
+  {
+    key: "file_type",
+    get label() {
+      return uiText("Artifact");
+    },
+  },
+  {
+    key: "material_type",
+    get label() {
+      return uiText("Material");
+    },
+  },
+  {
+    key: "slicer_name",
+    get label() {
+      return uiText("Slicer");
+    },
+  },
+  {
+    key: "printer_model",
+    get label() {
+      return uiText("Printer model");
+    },
+  },
+  {
+    key: "revision_status",
+    get label() {
+      return uiText("Revision");
+    },
+  },
+  {
+    key: "printed",
+    get label() {
+      return uiText("Printed");
+    },
+  },
+  {
+    key: "print_outcome",
+    get label() {
+      return uiText("Print outcome");
+    },
+  },
+  {
+    key: "storage",
+    get label() {
+      return uiText("Storage");
+    },
+  },
 ];
 
 export function StructuredFilters({
@@ -47,6 +90,7 @@ export function StructuredFilters({
   loading?: boolean;
   error?: boolean;
 }) {
+  useUiLocale();
   const [open, setOpen] = useState<Set<FilterKey>>(
     new Set(["file_type", "material_type", "revision_status"]),
   );
@@ -86,7 +130,7 @@ export function StructuredFilters({
       <section>
         <div className="mb-2 flex items-center justify-between pl-2 pr-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Model filters
+            {uiText("Model filters")}
           </h3>
           {count > 0 && (
             <button
@@ -94,16 +138,20 @@ export function StructuredFilters({
               onClick={clearAll}
               className="flex items-center gap-1 text-3xs text-muted-foreground hover:text-foreground"
             >
-              <X className="h-3 w-3" /> Clear {count}
+              <X className="h-3 w-3" />
+              {uiText(" Clear ")}
+              {count}
             </button>
           )}
         </div>
         {loading && (
-          <p className="px-2 py-2 text-xs text-muted-foreground">Loading filter values…</p>
+          <p className="px-2 py-2 text-xs text-muted-foreground">
+            {uiText("Loading filter values…")}
+          </p>
         )}
         {error && (
           <p className="mx-2 mb-2 rounded-md border border-destructive/30 px-2 py-2 text-xs text-destructive">
-            Filter values could not be loaded.
+            {uiText("Filter values could not be loaded.")}
           </p>
         )}
         <div className="space-y-0.5">
@@ -148,7 +196,7 @@ export function StructuredFilters({
                           onChange={() => toggleValue(key, item.value)}
                         />
                         <span className="min-w-0 flex-1 truncate capitalize">
-                          {item.value.replaceAll("_", " ")}
+                          {filterValueText(key, item.value)}
                         </span>
                         <span className="min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
                           {item.count}
@@ -161,10 +209,10 @@ export function StructuredFilters({
             );
           })}
           <div className="pt-1">
-            <p className="px-2 py-1.5 text-sm font-medium text-foreground">Uploaded</p>
+            <p className="px-2 py-1.5 text-sm font-medium text-foreground">{uiText("Uploaded")}</p>
             <div className="grid grid-cols-2 gap-2 px-2 pb-1">
               <label className="text-3xs text-muted-foreground">
-                After
+                {uiText("After")}
                 <input
                   type="date"
                   value={uploadedAfter ?? ""}
@@ -173,7 +221,7 @@ export function StructuredFilters({
                 />
               </label>
               <label className="text-3xs text-muted-foreground">
-                Before
+                {uiText("Before")}
                 <input
                   type="date"
                   value={uploadedBefore ?? ""}

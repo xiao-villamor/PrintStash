@@ -15,6 +15,7 @@
 
 import { toast as sonner } from "sonner";
 import { userMessage, parseApiError } from "@/lib/errors";
+import { uiText } from "./locale";
 
 // ---------------------------------------------------------------------------
 // Typed helpers — prefer these over the raw `toast()` function.
@@ -60,7 +61,7 @@ export const toast = {
     sonner.success(message, {
       duration: 6000,
       action: {
-        label: "Undo",
+        label: uiText("Undo"),
         onClick: () => {
           void onUndo();
         },

@@ -1,5 +1,9 @@
 "use client";
 
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useCallback, useEffect, useState } from "react";
 import { Bell, Loader2, Plus, Send, Trash2, Pencil } from "lucide-react";
 import {
@@ -35,10 +39,30 @@ const BTN_SECONDARY = cn(
 const LABEL = "block text-2xs text-muted-foreground mb-1";
 
 const TARGETS: { value: NotificationTarget; label: string }[] = [
-  { value: "webhook", label: "Webhook" },
-  { value: "discord", label: "Discord" },
-  { value: "telegram", label: "Telegram" },
-  { value: "ntfy", label: "ntfy" },
+  {
+    value: "webhook",
+    get label() {
+      return uiText("Webhook");
+    },
+  },
+  {
+    value: "discord",
+    get label() {
+      return uiText("Discord");
+    },
+  },
+  {
+    value: "telegram",
+    get label() {
+      return uiText("Telegram");
+    },
+  },
+  {
+    value: "ntfy",
+    get label() {
+      return uiText("ntfy");
+    },
+  },
 ];
 
 /** Decode a `<select>` value back into a target, ignoring anything not offered. */
@@ -47,10 +71,30 @@ function parseNotificationTarget(value: string): NotificationTarget | null {
 }
 
 const EVENTS: { value: NotificationEvent; label: string }[] = [
-  { value: "print_completed", label: "Print completed" },
-  { value: "print_failed", label: "Print failed" },
-  { value: "print_cancelled", label: "Print cancelled" },
-  { value: "printer_offline", label: "Printer offline" },
+  {
+    value: "print_completed",
+    get label() {
+      return uiText("Print completed");
+    },
+  },
+  {
+    value: "print_failed",
+    get label() {
+      return uiText("Print failed");
+    },
+  },
+  {
+    value: "print_cancelled",
+    get label() {
+      return uiText("Print cancelled");
+    },
+  },
+  {
+    value: "printer_offline",
+    get label() {
+      return uiText("Printer offline");
+    },
+  },
 ];
 
 /** One editable entry of a channel's `config` map. */
@@ -67,11 +111,22 @@ interface TargetField {
 // that every target has a form while leaving each entry's own shape intact.
 const TARGET_FIELDS = {
   webhook: [
-    { key: "url", label: "Webhook URL", placeholder: "https://example.com/hook", secret: true },
+    {
+      key: "url",
+      get label() {
+        return uiText("Webhook URL");
+      },
+      placeholder: "https://example.com/hook",
+      secret: true,
+    },
     {
       key: "secret",
-      label: "Signing secret (optional)",
-      placeholder: "used to HMAC-sign the payload",
+      get label() {
+        return uiText("Signing secret (optional)");
+      },
+      get placeholder() {
+        return uiText("notifications.signingSecretPlaceholder");
+      },
       secret: true,
       optional: true,
     },
@@ -79,21 +134,50 @@ const TARGET_FIELDS = {
   discord: [
     {
       key: "url",
-      label: "Discord webhook URL",
+      get label() {
+        return uiText("Discord webhook URL");
+      },
       placeholder: "https://discord.com/api/webhooks/…",
       secret: true,
     },
   ],
   telegram: [
-    { key: "bot_token", label: "Bot token", placeholder: "123456:ABC-DEF…", secret: true },
-    { key: "chat_id", label: "Chat ID", placeholder: "-1001234567890" },
+    {
+      key: "bot_token",
+      get label() {
+        return uiText("Bot token");
+      },
+      placeholder: "123456:ABC-DEF…",
+      secret: true,
+    },
+    {
+      key: "chat_id",
+      get label() {
+        return uiText("Chat ID");
+      },
+      placeholder: "-1001234567890",
+    },
   ],
   ntfy: [
-    { key: "server_url", label: "Server URL", placeholder: "https://ntfy.sh" },
-    { key: "topic", label: "Topic", placeholder: "my-printer-alerts" },
+    {
+      key: "server_url",
+      get label() {
+        return uiText("Server URL");
+      },
+      placeholder: "https://ntfy.sh",
+    },
+    {
+      key: "topic",
+      get label() {
+        return uiText("Topic");
+      },
+      placeholder: "my-printer-alerts",
+    },
     {
       key: "token",
-      label: "Access token (optional)",
+      get label() {
+        return uiText("Access token (optional)");
+      },
       placeholder: "tk_…",
       secret: true,
       optional: true,
@@ -133,7 +217,7 @@ function statusBadge(status: string | null): StatusBadge {
   if (status === "sent")
     return { text: "Delivered", cls: "text-green-600 dark:text-green-400 border-green-600/40" };
   if (status === "failed")
-    return { text: "Failed", cls: "text-red-600 dark:text-red-400 border-red-600/40" };
+    return { text: uiText("Failed"), cls: "text-red-600 dark:text-red-400 border-red-600/40" };
   if (status === "pending")
     return { text: "Pending", cls: "text-amber-600 dark:text-amber-400 border-amber-600/40" };
   return { text: "—", cls: "text-muted-foreground border-border" };
@@ -175,6 +259,7 @@ export function NotificationsPanel({
   canEdit: boolean;
   deps?: NotificationsPanelDeps;
 }) {
+  useUiLocale();
   const [enabled, setEnabled] = useState(false);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
@@ -239,11 +324,11 @@ export function NotificationsPanel({
   const saveDraft = useCallback(async () => {
     if (!draft) return;
     if (!draft.name.trim()) {
-      deps.toast.error("Channel name is required.");
+      deps.toast.error(uiText("Channel name is required."));
       return;
     }
     if (draft.events.length === 0) {
-      deps.toast.error("Select at least one event.");
+      deps.toast.error(uiText("Select at least one event."));
       return;
     }
     setBusy("save");
@@ -257,10 +342,10 @@ export function NotificationsPanel({
       };
       if (draft.id === null) {
         await deps.createNotificationChannel({ ...body, target: draft.target });
-        deps.toast.success("Channel created.");
+        deps.toast.success(uiText("Channel created."));
       } else {
         await deps.updateNotificationChannel(draft.id, body);
-        deps.toast.success("Channel updated.");
+        deps.toast.success(uiText("Channel updated."));
       }
       setDraft(null);
       await load();
@@ -291,8 +376,8 @@ export function NotificationsPanel({
       setBusy(id);
       try {
         const res = await deps.testNotificationChannel(id);
-        if (res.ok) deps.toast.success("Test notification sent.");
-        else deps.toast.warning("Test failed", res.error ?? undefined);
+        if (res.ok) deps.toast.success(uiText("Test notification sent."));
+        else deps.toast.warning(uiText("Test failed"), res.error ?? undefined);
         await load();
       } catch (e) {
         deps.toast.error(e);
@@ -304,7 +389,7 @@ export function NotificationsPanel({
   );
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return <p className="text-sm text-muted-foreground">{uiText("Loading…")}</p>;
   }
 
   return (
@@ -315,9 +400,11 @@ export function NotificationsPanel({
           <div className="min-w-0 flex items-start gap-2">
             <Bell className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
+              <h3 className="text-sm font-semibold text-foreground">{uiText("Notifications")}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.
+                {uiText(
+                  "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
+                )}
               </p>
             </div>
           </div>
@@ -330,14 +417,14 @@ export function NotificationsPanel({
               className="h-4 w-4 accent-primary"
             />
             <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              {enabled ? "On" : "Off"}
+              {enabled ? uiText("On") : uiText("Off")}
             </span>
           </label>
         </div>
 
         {!canEdit && (
           <p className="text-xs text-muted-foreground italic">
-            Only an administrator can manage notification channels.
+            {uiText("Only an administrator can manage notification channels.")}
           </p>
         )}
 
@@ -347,9 +434,11 @@ export function NotificationsPanel({
             {channels.length === 0 && !draft && (
               <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                 <Bell className="h-7 w-7 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-foreground">No notification channels yet</p>
+                <p className="text-sm font-medium text-foreground">
+                  {uiText("No notification channels yet")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Add a channel to start receiving print and printer alerts.
+                  {uiText("Add a channel to start receiving print and printer alerts.")}
                 </p>
               </div>
             )}
@@ -372,11 +461,11 @@ export function NotificationsPanel({
                               className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
                               title={ch.last_error ?? undefined}
                             >
-                              Auto-disabled
+                              {uiText("Auto-disabled")}
                             </span>
                           ) : (
                             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                              disabled
+                              {uiText("disabled")}
                             </span>
                           ))}
                       </div>
@@ -385,8 +474,10 @@ export function NotificationsPanel({
                           .map((e) => EVENTS.find((x) => x.value === e)?.label ?? e)
                           .join(", ")}
                         {ch.printer_ids
-                          ? ` · ${ch.printer_ids.length} printer(s)`
-                          : " · all printers"}
+                          ? uiText(" · {value1} printer(s)", {
+                              value1: String(ch.printer_ids.length),
+                            })
+                          : uiText(" · all printers")}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -401,7 +492,7 @@ export function NotificationsPanel({
                         onClick={() => sendTest(ch.id)}
                         disabled={busy === ch.id}
                         className={BTN_SECONDARY}
-                        title="Send a test notification"
+                        title={uiText("Send a test notification")}
                       >
                         {busy === ch.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -413,7 +504,7 @@ export function NotificationsPanel({
                         type="button"
                         onClick={() => startEdit(ch)}
                         className={BTN_SECONDARY}
-                        title="Edit channel"
+                        title={uiText("Edit channel")}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -422,7 +513,7 @@ export function NotificationsPanel({
                         onClick={() => removeChannel(ch.id)}
                         disabled={busy === ch.id}
                         className={BTN_SECONDARY}
-                        title="Delete channel"
+                        title={uiText("Delete channel")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -445,7 +536,7 @@ export function NotificationsPanel({
             ) : (
               <button type="button" onClick={() => setDraft(emptyDraft())} className={BTN_PRIMARY}>
                 <Plus className="h-3.5 w-3.5" />
-                Add channel
+                {uiText("Add channel")}
               </button>
             )}
           </div>
@@ -456,7 +547,7 @@ export function NotificationsPanel({
           <div className={CARD}>
             <div className="px-4 py-3 border-b border-border">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Recent deliveries
+                {uiText("Recent deliveries")}
               </h4>
             </div>
             <div className="divide-y divide-border">
@@ -475,7 +566,7 @@ export function NotificationsPanel({
                         <span className="text-muted-foreground">×{d.attempts}</span>
                       )}
                       <span className="text-muted-foreground">
-                        {d.created_at ? new Date(d.created_at).toLocaleString() : ""}
+                        {d.created_at ? new Date(d.created_at).toLocaleString(currentLocale()) : ""}
                       </span>
                       <span
                         className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
@@ -510,6 +601,7 @@ function ChannelForm({
   onCancel: () => void;
   saving: boolean;
 }) {
+  useUiLocale();
   const fields: TargetField[] = TARGET_FIELDS[draft.target];
   const scoped = draft.printerIds !== null;
 
@@ -524,16 +616,16 @@ function ChannelForm({
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className={LABEL}>Name</label>
+            <label className={LABEL}>{uiText("Name")}</label>
             <input
               value={draft.name}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="Living-room printer alerts"
+              placeholder={uiText("Living-room printer alerts")}
               className={INPUT}
             />
           </div>
           <div>
-            <label className={LABEL}>Type</label>
+            <label className={LABEL}>{uiText("Type")}</label>
             <select
               value={draft.target}
               disabled={draft.id !== null}
@@ -561,7 +653,9 @@ function ChannelForm({
               onChange={(e) =>
                 setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
               }
-              placeholder={draft.id !== null && f.secret ? "•••••••• (unchanged)" : f.placeholder}
+              placeholder={
+                draft.id !== null && f.secret ? uiText("•••••••• (unchanged)") : f.placeholder
+              }
               className={INPUT}
               autoComplete="off"
             />
@@ -569,7 +663,7 @@ function ChannelForm({
         ))}
 
         <div>
-          <label className={LABEL}>Events</label>
+          <label className={LABEL}>{uiText("Events")}</label>
           <div className="flex flex-wrap gap-3">
             {EVENTS.map((ev) => (
               <label
@@ -596,7 +690,7 @@ function ChannelForm({
         </div>
 
         <div>
-          <label className={LABEL}>Printers</label>
+          <label className={LABEL}>{uiText("Printers")}</label>
           <label className="inline-flex items-center gap-1.5 text-xs text-foreground mb-2">
             <input
               type="checkbox"
@@ -604,13 +698,13 @@ function ChannelForm({
               onChange={(e) => setDraft({ ...draft, printerIds: e.target.checked ? null : [] })}
               className="h-3.5 w-3.5 accent-primary"
             />
-            All printers
+            {uiText("All printers")}
           </label>
           {scoped && (
             <div className="flex flex-wrap gap-3">
               {printers.length === 0 && (
                 <span className="text-2xs text-muted-foreground italic">
-                  No printers configured.
+                  {uiText("No printers configured.")}
                 </span>
               )}
               {printers.map((p) => (
@@ -645,16 +739,16 @@ function ChannelForm({
             onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
             className="h-3.5 w-3.5 accent-primary"
           />
-          Enabled
+          {uiText("Enabled")}
         </label>
 
         <div className="flex items-center gap-2 pt-1">
           <button type="submit" disabled={saving} className={BTN_PRIMARY}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {draft.id === null ? "Create channel" : "Save changes"}
+            {draft.id === null ? uiText("Create channel") : uiText("Save changes")}
           </button>
           <button type="button" onClick={onCancel} disabled={saving} className={BTN_SECONDARY}>
-            Cancel
+            {uiText("Cancel")}
           </button>
         </div>
       </form>

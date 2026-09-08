@@ -1,5 +1,11 @@
 "use client";
 
+import { translate } from "@/lib/locale";
+import { revisionStatusLabel } from "@/components/model-detail/presentation";
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { AlertTriangle, Box, Download, Layers, Loader2 } from "lucide-react";
@@ -28,10 +34,14 @@ function value(value: string | number | null | undefined, suffix = "") {
 }
 
 function revisionTitle(file: PublicFileRead) {
-  return `Rev ${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}`;
+  return uiText("Rev {number}{label}", {
+    number: file.gcode_revision_number ?? file.version,
+    label: file.revision_label ? ` · ${file.revision_label}` : "",
+  });
 }
 
 export default function SharePage() {
+  const locale = useUiLocale();
   const { token = "" } = useParams();
   const [model, setModel] = useState<PublicModelRead | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +68,7 @@ export default function SharePage() {
         if (!cancelled) setModel(m);
       })
       .catch(() => {
-        if (!cancelled) setError("This share link is invalid, expired, or revoked.");
+        if (!cancelled) setError(uiText("This share link is invalid, expired, or revoked."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -69,8 +79,10 @@ export default function SharePage() {
   }, [token]);
 
   useEffect(() => {
-    document.title = model ? `${model.name} · Shared · PrintStash` : "Shared model · PrintStash";
-  }, [model]);
+    document.title = model
+      ? translate(locale, "{value1} · Shared · PrintStash", { value1: String(model.name) })
+      : translate(locale, "Shared model · PrintStash");
+  }, [model, locale]);
 
   const meshFile = useMemo(
     () => model?.files.find((f) => MESH_TYPES.has(f.file_type)) ?? null,
@@ -107,7 +119,7 @@ export default function SharePage() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
         <AlertTriangle className="h-8 w-8 text-amber-500" />
-        <p className="font-mono text-sm text-on-surface-variant">{error ?? "Not found."}</p>
+        <p className="font-mono text-sm text-on-surface-variant">{error ?? uiText("Not found.")}</p>
       </div>
     );
   }
@@ -116,14 +128,16 @@ export default function SharePage() {
     <div className="min-h-screen bg-surface text-on-surface">
       <header className="border-b border-outline-variant bg-surface-container-lowest px-6 py-4">
         <p className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
-          Shared model · PrintStash
+          {uiText("Shared model · PrintStash")}
         </p>
         <div className="mt-0.5 flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold leading-tight truncate">{model.name}</h1>
             <p className="mt-1 font-mono text-2xs text-on-surface-variant">
-              {meshFile ? `${meshFile.file_type.toUpperCase()} source · ` : ""}
-              {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"}
+              {meshFile
+                ? uiText("{value1} source · ", { value1: String(meshFile.file_type.toUpperCase()) })
+                : ""}
+              {uiText("counts.revisions", { count: gcodeFiles.length })}
               {selectedGcode ? ` · ${revisionTitle(selectedGcode)}` : ""}
             </p>
           </div>
@@ -137,7 +151,7 @@ export default function SharePage() {
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
-              title={canShowModel ? "3D model view" : "No mesh in this share"}
+              title={canShowModel ? uiText("3D model view") : uiText("No mesh in this share")}
             >
               <Box className="h-3.5 w-3.5" /> 3D
             </button>
@@ -150,7 +164,9 @@ export default function SharePage() {
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
-              title={canShowGcode ? "G-code toolpath preview" : "No G-code in this share"}
+              title={
+                canShowGcode ? uiText("G-code toolpath preview") : uiText("No G-code in this share")
+              }
             >
               <Layers className="h-3.5 w-3.5" /> G-code
             </button>
@@ -197,7 +213,9 @@ export default function SharePage() {
           ) : (
             <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-2 text-on-surface-variant">
               <Box className="h-8 w-8" />
-              <p className="font-mono text-xs">No previewable mesh or G-code in this share.</p>
+              <p className="font-mono text-xs">
+                {uiText("No previewable mesh or G-code in this share.")}
+              </p>
             </div>
           )}
 
@@ -215,7 +233,11 @@ export default function SharePage() {
                         : "text-on-surface-variant hover:bg-surface-container-high"
                     }`}
                   >
-                    {mode === "wireframe" ? "Wire" : mode === "xray" ? "X-Ray" : "Solid"}
+                    {mode === "wireframe"
+                      ? uiText("Wire")
+                      : mode === "xray"
+                        ? uiText("X-Ray")
+                        : uiText("Solid")}
                   </button>
                 ))}
               </div>
@@ -226,14 +248,14 @@ export default function SharePage() {
                   showGrid ? "text-primary" : "text-on-surface-variant"
                 }`}
               >
-                Grid
+                {uiText("Grid")}
               </button>
               <button
                 type="button"
                 onClick={() => viewerControls.current?.fit()}
                 className="h-9 px-2.5 rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur font-mono text-2xs uppercase tracking-wider text-on-surface-variant shadow-sm hover:bg-surface-container-high"
               >
-                Fit
+                {uiText("Fit")}
               </button>
             </div>
           )}
@@ -247,7 +269,9 @@ export default function SharePage() {
                     : meshFile?.original_filename}
                 </p>
                 <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                  {activeViewerMode === "gcode" ? "G-code toolpath" : "Source model"}
+                  {activeViewerMode === "gcode"
+                    ? uiText("G-code toolpath")
+                    : uiText("Source model")}
                 </p>
               </div>
             </div>
@@ -259,9 +283,11 @@ export default function SharePage() {
             <div className="rounded border border-outline-variant bg-surface-container-lowest p-3">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
-                  Shared revision
+                  {uiText("Shared revision")}
                 </h2>
-                <span className="font-mono text-3xs uppercase text-primary">G-code preview</span>
+                <span className="font-mono text-3xs uppercase text-primary">
+                  {uiText("G-code preview")}
+                </span>
               </div>
               <p className="mt-2 text-sm font-medium text-on-surface">
                 {revisionTitle(selectedGcode)}
@@ -274,43 +300,43 @@ export default function SharePage() {
               <div className="mt-3 grid grid-cols-2 gap-2 text-2xs">
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Status
+                    {uiText("Status")}
                   </span>
-                  <span>{selectedGcode.revision_status?.replace("_", " ") ?? "—"}</span>
+                  <span>{revisionStatusLabel(selectedGcode.revision_status)}</span>
                 </div>
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Print time
+                    {uiText("Print time")}
                   </span>
                   <span>{formatDuration(selectedGcode.estimated_time_s)}</span>
                 </div>
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Layer
+                    {uiText("Layer")}
                   </span>
                   <span>{value(selectedGcode.layer_height_mm, " mm")}</span>
                 </div>
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Nozzle
+                    {uiText("Nozzle")}
                   </span>
                   <span>{value(selectedGcode.nozzle_diameter_mm, " mm")}</span>
                 </div>
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Material
+                    {uiText("Material")}
                   </span>
                   <span>{selectedGcode.material_type ?? "—"}</span>
                 </div>
                 <div>
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Filament
+                    {uiText("Filament")}
                   </span>
                   <span>{value(selectedGcode.filament_weight_g, " g")}</span>
                 </div>
                 <div className="col-span-2">
                   <span className="block font-mono text-3xs uppercase text-on-surface-variant">
-                    Printer
+                    {uiText("Printer")}
                   </span>
                   <span>{selectedGcode.printer_model ?? "—"}</span>
                 </div>
@@ -319,7 +345,7 @@ export default function SharePage() {
           )}
 
           <h2 className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
-            Files ({model.files.length})
+            {uiText("Files ({value1})", { value1: String(model.files.length ?? "") })}
           </h2>
           {model.files.map((f) => (
             <div
@@ -336,20 +362,25 @@ export default function SharePage() {
                 <div className="mt-1 flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                   <Layers className="h-3 w-3" />
                   {revisionTitle(f)}
-                  {f.is_recommended ? " · Recommended" : ""}
+                  {f.is_recommended ? uiText(" · Recommended") : ""}
                 </div>
               )}
               <div className="mt-1 flex items-center justify-between gap-2">
                 <span className="font-mono text-3xs text-on-surface-variant">
                   {formatBytes(f.size_bytes)}
-                  {f.triangle_count ? ` · ${f.triangle_count.toLocaleString()} tris` : ""}
+                  {f.triangle_count
+                    ? uiText(" · {value1} tris", {
+                        value1: String(f.triangle_count.toLocaleString(currentLocale())),
+                      })
+                    : ""}
                 </span>
                 {model.allow_download && (
                   <a
                     href={getAssetUrl(sharedDownloadUrl(token, f.id))}
                     className="inline-flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-primary hover:underline"
                   >
-                    <Download className="h-3 w-3" /> Download
+                    <Download className="h-3 w-3" />
+                    {uiText(" Download")}
                   </a>
                 )}
               </div>
@@ -357,7 +388,7 @@ export default function SharePage() {
           ))}
           {!model.allow_download && (
             <p className="font-mono text-3xs text-on-surface-variant/70">
-              Downloads are disabled for this link — view only.
+              {uiText("Downloads are disabled for this link — view only.")}
             </p>
           )}
         </aside>

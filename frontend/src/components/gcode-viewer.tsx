@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/locale";
+import { formatNumber } from "@/lib/format";
 import { ApiError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 
@@ -168,14 +170,9 @@ class GcodeErrorBoundary extends React.Component<
 function viewerCopy(
   i18n: ReturnType<typeof useOptionalI18n>,
   key: MessageKey,
-  fallback: string,
   values?: Record<string, string>,
 ): string {
-  const template = i18n?.t(key) ?? fallback;
-  return Object.entries(values ?? {}).reduce(
-    (text, [name, value]) => text.replaceAll(`{${name}}`, value),
-    template,
-  );
+  return i18n?.t(key, values) ?? uiText(key, values);
 }
 
 // ---- Public Component ----
@@ -272,28 +269,18 @@ export function GcodeViewer({
     };
   }, [url, toolpathParser, retry]);
 
-  const loadingCopy = viewerCopy(i18n, "viewer.loadingToolpath", "Loading toolpath…");
-  const renderFailedCopy = viewerCopy(i18n, "viewer.renderFailed", "G-code render failed");
+  const loadingCopy = viewerCopy(i18n, "viewer.loadingToolpath");
+  const renderFailedCopy = viewerCopy(i18n, "viewer.renderFailed");
   const errors = {
-    limit: [
-      "viewer.segmentLimit",
-      "This preview exceeds the one-million-segment limit. Download the original to inspect it in your slicer.",
-    ],
-    resource: [
-      "viewer.resourceLimit",
-      "This preview exceeds the server's size or time limit. Download the original to inspect it in your slicer.",
-    ],
-    busy: ["viewer.converterBusy", "Other previews are being prepared. Try again shortly."],
-    invalid: [
-      "viewer.invalidToolpath",
-      "This file could not be validated as a supported toolpath. The original remains available.",
-    ],
-    load: ["viewer.loadFailed", "Unable to load the toolpath preview."],
-  } as const;
-  const [errorKey, errorFallback] = errors[errorKind ?? "load"];
-  const errorCopy = viewerCopy(i18n, errorKey, errorFallback);
-  const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData", "No toolpath data");
-  const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound", "No toolpath found in file");
+    limit: "viewer.segmentLimit",
+    resource: "viewer.resourceLimit",
+    busy: "viewer.converterBusy",
+    invalid: "viewer.invalidToolpath",
+    load: "viewer.loadFailed",
+  } satisfies Record<NonNullable<LoadedToolpath["errorKind"]>, MessageKey>;
+  const errorCopy = viewerCopy(i18n, errors[errorKind ?? "load"]);
+  const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData");
+  const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound");
 
   if (loading) {
     return (
@@ -319,7 +306,7 @@ export function GcodeViewer({
             setRetry((value) => value + 1);
           }}
         >
-          {viewerCopy(i18n, "viewer.retry", "Try preview again")}
+          {viewerCopy(i18n, "viewer.retry")}
         </Button>
       </div>
     );
@@ -357,15 +344,18 @@ export function GcodeViewer({
         <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-3 py-2 flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {viewerCopy(i18n, "viewer.layer", "Layer {current} / {total}", {
+              {viewerCopy(i18n, "viewer.layer", {
                 current: String(currentLayer + 1),
                 total: String(data.totalLayers),
               })}
               {data.layerRanges[currentLayer] && (
                 <>
                   {" · "}
-                  {viewerCopy(i18n, "viewer.z", "Z {value} mm", {
-                    value: data.layerRanges[currentLayer].z.toFixed(2),
+                  {viewerCopy(i18n, "viewer.z", {
+                    value: formatNumber(data.layerRanges[currentLayer].z, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }),
                   })}
                 </>
               )}
@@ -378,7 +368,6 @@ export function GcodeViewer({
                 aria-label={viewerCopy(
                   i18n,
                   showTravel ? "viewer.hideTravel" : "viewer.showTravel",
-                  showTravel ? "Hide travel moves" : "Show travel moves",
                 )}
                 className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                   showTravel
@@ -386,25 +375,21 @@ export function GcodeViewer({
                     : "border-outline-variant text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {viewerCopy(i18n, "viewer.travel", "Travel")}
+                {viewerCopy(i18n, "viewer.travel")}
               </button>
               {printerBedMm && (
                 <button
                   type="button"
                   onClick={() => setShowBed((v) => !v)}
                   aria-pressed={showBed}
-                  aria-label={viewerCopy(
-                    i18n,
-                    showBed ? "viewer.hideBed" : "viewer.showBed",
-                    showBed ? "Hide build plate" : "Show build plate",
-                  )}
+                  aria-label={viewerCopy(i18n, showBed ? "viewer.hideBed" : "viewer.showBed")}
                   className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                     showBed
                       ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30"
                       : "border-outline-variant text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {viewerCopy(i18n, "viewer.bed", "Bed {x}×{y}", {
+                  {viewerCopy(i18n, "viewer.bed", {
                     x: String(printerBedMm.x),
                     y: String(printerBedMm.y),
                   })}
@@ -413,7 +398,7 @@ export function GcodeViewer({
             </div>
           </div>
           <input
-            aria-label={viewerCopy(i18n, "viewer.currentLayer", "Current layer")}
+            aria-label={viewerCopy(i18n, "viewer.currentLayer")}
             type="range"
             min={0}
             max={data.totalLayers - 1}

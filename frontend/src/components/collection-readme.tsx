@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Pencil } from "lucide-react";
 
@@ -15,6 +18,7 @@ export function CollectionReadme({
   collectionId: number;
   canEdit: boolean;
 }) {
+  useUiLocale();
   const [readme, setReadme] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -128,7 +132,9 @@ export function CollectionReadme({
             }
           }}
           rows={8}
-          placeholder="A short description of this collection. Markdown — paste or drop images."
+          placeholder={uiText(
+            "A short description of this collection. Markdown — paste or drop images.",
+          )}
           className="w-full bg-surface text-on-surface font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <div className="flex items-center gap-2 mt-2">
@@ -138,22 +144,23 @@ export function CollectionReadme({
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
           >
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Save
+            {uiText("Save")}
           </button>
           <button
             onClick={() => setEditing(false)}
             disabled={saving}
             className="px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
           >
-            Cancel
+            {uiText("Cancel")}
           </button>
           {uploading && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading image…
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              {uiText(" Uploading image…")}
             </span>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
-            Markdown · paste or drop images
+            {uiText("Markdown · paste or drop images")}
           </span>
         </div>
       </div>
@@ -179,7 +186,7 @@ export function CollectionReadme({
                 onClick={() => setExpanded((v) => !v)}
                 className="mt-1 text-xs font-medium text-primary hover:underline"
               >
-                {expanded ? "Show less" : "Show more"}
+                {expanded ? uiText("Show less") : uiText("Show more")}
               </button>
             </>
           )}
@@ -188,7 +195,8 @@ export function CollectionReadme({
               onClick={startEdit}
               className="absolute top-0 right-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted opacity-0 group-hover/readme:opacity-100 transition-opacity"
             >
-              <Pencil className="w-3.5 h-3.5" /> Edit
+              <Pencil className="w-3.5 h-3.5" />
+              {uiText(" Edit")}
             </button>
           )}
         </div>
@@ -197,7 +205,8 @@ export function CollectionReadme({
           onClick={startEdit}
           className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         >
-          <FileText className="w-4 h-4" /> Add a description for this collection
+          <FileText className="w-4 h-4" />
+          {uiText(" Add a description for this collection")}
         </button>
       )}
     </div>

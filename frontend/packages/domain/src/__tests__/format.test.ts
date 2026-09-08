@@ -115,9 +115,9 @@ describe("timeAgo", () => {
     vi.setSystemTime(new Date(iso));
   }
 
-  it("collapses sub-minute differences to 'just now'", () => {
+  it("uses the locale's word for the current moment", () => {
     freezeAt("2026-06-14T12:00:30Z");
-    expect(timeAgo("2026-06-14T12:00:00Z")).toBe("just now");
+    expect(timeAgo("2026-06-14T12:00:00Z")).toBe("now");
   });
 
   it("renders minutes, hours, and days", () => {
@@ -134,8 +134,8 @@ describe("timeAgo", () => {
 
   it("timeAgoShort uses words for today/yesterday", () => {
     freezeAt("2026-06-14T12:00:00Z");
-    expect(timeAgoShort("2026-06-14T06:00:00Z")).toBe("Today");
-    expect(timeAgoShort("2026-06-13T06:00:00Z")).toBe("Yesterday");
+    expect(timeAgoShort("2026-06-14T06:00:00Z")).toBe("today");
+    expect(timeAgoShort("2026-06-13T06:00:00Z")).toBe("yesterday");
     expect(timeAgoShort("2026-06-11T12:00:00Z")).toBe("3 days ago");
   });
 

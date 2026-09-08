@@ -1,5 +1,9 @@
 "use client";
 
+import { uiMessage, type MessageDescriptor } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -129,6 +133,7 @@ export function UploadModal({
   preloadItems?: BulkItem[] | null;
   initialMode?: UploadMode;
 }) {
+  useUiLocale();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -291,8 +296,12 @@ export function UploadModal({
     const skipped = items.length - items.filter((it) => isMeshFile(it.file.name)).length;
     if (skipped > 0) {
       toast.warning(
-        "Some files skipped",
-        `${skipped} file${skipped === 1 ? "" : "s"} ignored — only 3D models (${MESH_ACCEPT}) are accepted here.`,
+        uiText("Some files skipped"),
+        uiText("uploads.ignored", {
+          value1: String(skipped),
+          value3: String(MESH_ACCEPT),
+          count: Number(skipped),
+        }),
       );
     }
   }
@@ -378,7 +387,7 @@ export function UploadModal({
     try {
       if (mesh) {
         updateTask(taskId, {
-          detail: `Uploading ${mesh.name}`,
+          detail: uiMessage("Uploading {value1}", { value1: String(mesh.name) }),
           status: "running",
           progress: 15,
         });
@@ -392,7 +401,7 @@ export function UploadModal({
         linkTaskToJob(taskId, meshRes.job_id);
 
         updateTask(taskId, {
-          detail: "Processing mesh and thumbnail",
+          detail: uiMessage("Processing mesh and thumbnail"),
           status: "running",
           progress: 35,
         });
@@ -416,7 +425,7 @@ export function UploadModal({
 
         const full = await getModel(meshStatus.model_id);
         updateTask(taskId, {
-          detail: `Uploading ${gcode.name}`,
+          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
           status: "running",
           progress: 60,
         });
@@ -443,7 +452,7 @@ export function UploadModal({
 
       if (gcode) {
         updateTask(taskId, {
-          detail: `Uploading ${gcode.name}`,
+          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
           status: "running",
           progress: 25,
         });
@@ -494,8 +503,11 @@ export function UploadModal({
     const queue = files.map((item) => ({
       item,
       taskId: createTask({
-        title: `Upload ${item.relPath ? `${item.relPath}/` : ""}${item.file.name}`,
-        detail: "Queued",
+        title: uiMessage("Upload {value1}{value2}", {
+          value1: String(item.relPath ? `${item.relPath}/` : ""),
+          value2: String(item.file.name),
+        }),
+        detail: uiMessage("Queued"),
         status: "pending" as const,
         progress: 0,
         expectedJobCount: 1,
@@ -535,13 +547,13 @@ export function UploadModal({
       return false;
     }
     if (!user?.is_superuser && !collectionPath) {
-      toast.warning("Collection required", "Choose a collection you can edit.");
+      toast.warning(uiText("Collection required"), uiText("Choose a collection you can edit."));
       return false;
     }
     return true;
   }
 
-  function startImportTask(jobId: string, title: string) {
+  function startImportTask(jobId: string, title: string | MessageDescriptor) {
     const taskId = trackImportJob(jobId, title);
     void (async () => {
       try {
@@ -574,7 +586,7 @@ export function UploadModal({
           : null,
         tags: selectedTags,
       });
-      toast.success("Captured URL. Review it before importing.");
+      toast.success(uiText("Captured URL. Review it before importing."));
       close();
       router.push(`/inbox/${item.id}`);
     } catch (err) {
@@ -590,7 +602,10 @@ export function UploadModal({
       const fd = new FormData();
       fd.append("file", zipFile);
       const response = await inspectArchive(fd);
-      trackImportJob(response.job_id, `Inspect ${zipFile.name}`);
+      trackImportJob(
+        response.job_id,
+        uiMessage("Inspect {value1}", { value1: String(zipFile.name) }),
+      );
       const status = await waitForJobInline(response.job_id);
       if (status.state === "failed") throw new Error(status.error || "Archive inspection failed");
       const result: IngestJobResult = status.result ?? {};
@@ -616,7 +631,7 @@ export function UploadModal({
     if (!manifest || submitting) return;
     const names = [...selectedEntries];
     if (names.length === 0) {
-      toast.warning("Nothing selected", "Pick at least one file to import.");
+      toast.warning(uiText("Nothing selected"), uiText("Pick at least one file to import."));
       return;
     }
     setSubmitting(true);
@@ -626,7 +641,10 @@ export function UploadModal({
         collection: collectionPath || undefined,
         tags: selectedTags.length ? selectedTags.join(",") : undefined,
       });
-      startImportTask(res.job_id, `Import ${manifest.archive_name}`);
+      startImportTask(
+        res.job_id,
+        uiMessage("Import {value1}", { value1: String(manifest.archive_name) }),
+      );
       close();
     } catch (err) {
       toast.error(err);
@@ -661,7 +679,10 @@ export function UploadModal({
         libraryId: targetLibraryId,
       });
       toast.success(
-        `Queued ${bulkFiles.length} upload${bulkFiles.length === 1 ? "" : "s"} — track progress in the task center`,
+        uiText("uploads.queued", {
+          value1: String(bulkFiles.length),
+          count: Number(bulkFiles.length),
+        }),
       );
       reset();
       onClose();
@@ -670,8 +691,10 @@ export function UploadModal({
     if (!meshFile && !gcodeFile) return;
     if (!collectionGate()) return;
     const taskId = createTask({
-      title: `Upload ${modelName || meshFile?.name || gcodeFile?.name || "model"}`,
-      detail: "Preparing upload",
+      title: uiMessage("Upload {value1}", {
+        value1: String(modelName || meshFile?.name || gcodeFile?.name || "model"),
+      }),
+      detail: uiMessage("Preparing upload"),
       status: "running",
       progress: 5,
       expectedJobCount: meshFile && gcodeFile ? 2 : 1,
@@ -734,15 +757,15 @@ export function UploadModal({
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
           <div>
             <h3 id="upload-modal-title" className="text-sm font-semibold text-on-surface">
-              Upload model
+              {uiText("Upload model")}
             </h3>
             <p className="text-xs text-on-surface-variant mt-0.5">
-              Drop a 3D model, a G-code, or both together
+              {uiText("Drop a 3D model, a G-code, or both together")}
             </p>
           </div>
           <button
             onClick={close}
-            aria-label="Close"
+            aria-label={uiText("Close")}
             className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
           >
             <X className="h-4 w-4" />
@@ -751,9 +774,9 @@ export function UploadModal({
 
         {!auth.isAuthenticated && (
           <div className="mx-6 mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 font-mono">
-            Sign in before uploading.{" "}
+            {uiText("Sign in before uploading.")}{" "}
             <a href="/login" className="underline">
-              Open login
+              {uiText("Open login")}
             </a>
             .
           </div>
@@ -801,14 +824,14 @@ export function UploadModal({
           ) : mode === "files" ? (
             <div className="space-y-3">
               <FileSlot
-                label="3D Model"
+                label={uiText("3D Model")}
                 accept={MESH_ACCEPT}
                 file={meshFile}
                 setFile={(f) => {
                   setMeshFile(f);
                   if (f) autoName(f);
                 }}
-                placeholder={".stl .3mf .obj .step"}
+                placeholder={uiText(".stl .3mf .obj .step")}
                 inputRef={meshRef}
               />
               <FileSlot
@@ -819,7 +842,7 @@ export function UploadModal({
                   setGcodeFile(f);
                   if (f) autoName(f);
                 }}
-                placeholder={".gcode .g .gco .bgcode"}
+                placeholder={uiText(".gcode .g .gco .bgcode")}
                 inputRef={gcodeRef}
               />
             </div>
@@ -835,26 +858,27 @@ export function UploadModal({
           ) : mode === "url" ? (
             <div>
               <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                Source URL
+                {uiText("Source URL")}
               </label>
               <input
                 value={urlValue}
                 onChange={(e) => setUrlValue(e.target.value)}
                 className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                placeholder="Model page, collection, or direct .stl/.zip link"
+                placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
               />
               <p className="mt-1.5 font-mono text-3xs text-on-surface-variant/70">
-                Create a durable capture, then review its files and confirm or change the collection
-                and tags.
+                {uiText(
+                  "Create a durable capture, then review its files and confirm or change the collection and tags.",
+                )}
               </p>
             </div>
           ) : (
             <FileSlot
-              label="ZIP archive"
+              label={uiText("ZIP archive")}
               accept=".zip"
               file={zipFile}
               setFile={setZipFile}
-              placeholder={".zip"}
+              placeholder={uiText(".zip")}
               inputRef={zipRef}
             />
           )}
@@ -864,13 +888,13 @@ export function UploadModal({
           {!reviewing && mode === "files" && (
             <div>
               <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                Model name
+                {uiText("Model name")}
               </label>
               <input
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                placeholder="e.g. Bracket v2"
+                placeholder={uiText("e.g. Bracket v2")}
               />
             </div>
           )}
@@ -878,7 +902,7 @@ export function UploadModal({
           {/* Collection */}
           <div>
             <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-              Collection
+              {uiText("Collection")}
             </label>
             <DropdownMenu
               open={catOpen}
@@ -896,7 +920,8 @@ export function UploadModal({
                   className="w-full h-10 flex items-center justify-between bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 >
                   <span className={collectionPath ? "" : "text-on-surface-variant/60"}>
-                    {collectionPath || (user?.is_superuser ? "None" : "Choose collection")}
+                    {collectionPath ||
+                      (user?.is_superuser ? uiText("None") : uiText("Choose collection"))}
                   </span>
                   <ChevronDown className="h-4 w-4 text-on-surface-variant" />
                 </button>
@@ -913,12 +938,12 @@ export function UploadModal({
                   }}
                   className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
                 >
-                  None
+                  {uiText("None")}
                 </button>
               )}
               {writableCollections.length === 0 ? (
                 <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
-                  No editable collections.
+                  {uiText("No editable collections.")}
                 </div>
               ) : (
                 writableCollections.map((c) => (
@@ -948,7 +973,7 @@ export function UploadModal({
           {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
             <div>
               <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                Store in
+                {uiText("Store in")}
               </label>
               <select
                 value={targetLibraryId}
@@ -957,16 +982,17 @@ export function UploadModal({
                 }
                 className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               >
-                <option value="">Vault storage</option>
+                <option value="">{uiText("Vault storage")}</option>
                 {libraries.map((lib) => (
                   <option key={lib.id} value={lib.id}>
-                    {lib.name} (library source)
+                    {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
                   </option>
                 ))}
               </select>
               <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
-                Eligible mounted sources use create-only write-back. Revisions to a linked model
-                follow that source automatically.
+                {uiText(
+                  "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
+                )}
               </p>
             </div>
           )}
@@ -974,7 +1000,7 @@ export function UploadModal({
           {/* Tags */}
           <div>
             <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-              Tags
+              {uiText("Tags")}
             </label>
             <div className="relative">
               <input
@@ -991,7 +1017,7 @@ export function UploadModal({
                     setSelectedTags((p) => p.slice(0, -1));
                   }
                 }}
-                placeholder="Search or create — press Enter"
+                placeholder={uiText("Search or create — press Enter")}
                 className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               />
               {tagInput && (filteredTags.length > 0 || canCreateNewTag) && (
@@ -1029,8 +1055,10 @@ export function UploadModal({
                       }}
                       className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                     >
-                      <Plus className="h-3 w-3" /> Create &quot;
-                      {tagInput.trim()}&quot;
+                      <Plus className="h-3 w-3" />
+                      {uiText(' Create "')}
+                      {tagInput.trim()}
+                      {uiText('"')}
                     </button>
                   )}
                 </div>
@@ -1049,7 +1077,7 @@ export function UploadModal({
                       <button
                         type="button"
                         onClick={() => toggleTag(slug)}
-                        aria-label={`Remove ${t?.name || slug}`}
+                        aria-label={uiText("Remove {value1}", { value1: String(t?.name || slug) })}
                         className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
                       >
                         <X className="h-3 w-3" />
@@ -1067,7 +1095,7 @@ export function UploadModal({
               onClick={close}
               className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors"
             >
-              Cancel
+              {uiText("Cancel")}
             </button>
             <button
               type="submit"
@@ -1089,22 +1117,26 @@ export function UploadModal({
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {reviewing ? "Importing…" : mode === "zip" ? "Inspecting…" : "Working…"}
+                  {reviewing
+                    ? uiText("Importing…")
+                    : mode === "zip"
+                      ? uiText("Inspecting…")
+                      : uiText("Working…")}
                 </>
               ) : reviewing ? (
-                `Import ${selectedEntries.size} selected`
+                uiText("Import {value1} selected", { value1: String(selectedEntries.size) })
               ) : mode === "bulk" ? (
                 bulkFiles.length > 0 ? (
-                  `Upload ${bulkFiles.length} model${bulkFiles.length === 1 ? "" : "s"}`
+                  uiText("counts.uploadModels", { count: bulkFiles.length })
                 ) : (
-                  "Upload to vault"
+                  uiText("Upload to vault")
                 )
               ) : mode === "url" ? (
-                "Review URL"
+                uiText("Review URL")
               ) : mode === "zip" ? (
-                "Inspect archive"
+                uiText("Inspect archive")
               ) : (
-                "Upload to vault"
+                uiText("Upload to vault")
               )}
             </button>
           </div>
@@ -1129,6 +1161,7 @@ function FileSlot({
   placeholder: string;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
+  useUiLocale();
   const [dragActive, setDragActive] = useState(false);
   // Count drag enter/leave so crossing a child element doesn't flicker the
   // highlight off — only a real leave (depth back to 0) clears it.
@@ -1165,7 +1198,10 @@ function FileSlot({
           const dropped = e.dataTransfer.files?.[0];
           if (!dropped) return;
           if (!acceptsFile(accept, dropped.name)) {
-            toast.warning(`Wrong file type for ${label}`, `Drop a ${accept} file here.`);
+            toast.warning(
+              uiText("Wrong file type for {value1}", { value1: String(label) }),
+              uiText("Drop a {value1} file here.", { value1: String(accept) }),
+            );
             return;
           }
           setFile(dropped);
@@ -1191,7 +1227,7 @@ function FileSlot({
                 ev.stopPropagation();
                 setFile(null);
               }}
-              aria-label={`Remove ${label}`}
+              aria-label={uiText("Remove {value1}", { value1: String(label) })}
               className="h-5 w-5 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0"
             >
               <X className="h-3.5 w-3.5" />
@@ -1228,6 +1264,7 @@ export function BulkFiles({
   onRemove: (index: number) => void;
   onClear: () => void;
 }) {
+  useUiLocale();
   const [dragActive, setDragActive] = useState(false);
   // See FileSlot: count enter/leave depth so dragging over child elements
   // (icon, hint text, the "select a folder" button) doesn't flicker the
@@ -1284,9 +1321,11 @@ export function BulkFiles({
         }`}
       >
         <Layers className="h-5 w-5 text-on-surface-variant" />
-        <span className="text-xs text-on-surface">Drop 3D models or a folder here</span>
+        <span className="text-xs text-on-surface">{uiText("Drop 3D models or a folder here")}</span>
         <span className="font-mono text-3xs text-on-surface-variant/60">
-          {MESH_ACCEPT} · subfolders become nested collections
+          {uiText("{value1} · subfolders become nested collections", {
+            value1: String(MESH_ACCEPT ?? ""),
+          })}
         </span>
         <button
           type="button"
@@ -1296,7 +1335,7 @@ export function BulkFiles({
           }}
           className="mt-1 font-mono text-3xs text-primary uppercase tracking-wider hover:underline"
         >
-          Or select a folder
+          {uiText("Or select a folder")}
         </button>
         <input
           ref={fileInputRef}
@@ -1326,18 +1365,21 @@ export function BulkFiles({
         <>
           <div className="flex items-center justify-between mt-2 mb-1.5">
             <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase">
-              {items.length} file{items.length === 1 ? "" : "s"}
+              {uiText("counts.files", { count: items.length })}
               {folderCount > 0
-                ? ` · ${folderCount} folder${folderCount === 1 ? "" : "s"}`
-                : ""} ·{" "}
-              {formatBytes(totalBytes)}
+                ? uiText("folders.count", {
+                    value1: String(folderCount),
+                    count: Number(folderCount),
+                  })
+                : ""}{" "}
+              · {formatBytes(totalBytes)}
             </span>
             <button
               type="button"
               onClick={onClear}
               className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
             >
-              Clear
+              {uiText("Clear")}
             </button>
           </div>
           <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
@@ -1357,7 +1399,7 @@ export function BulkFiles({
                 <button
                   type="button"
                   onClick={() => onRemove(idx)}
-                  aria-label={`Remove ${it.file.name}`}
+                  aria-label={uiText("Remove {value1}", { value1: String(it.file.name) })}
                   className="h-5 w-5 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -1382,25 +1424,29 @@ function ManifestList({
   onToggle: (name: string) => void;
   onBack: () => void;
 }) {
+  useUiLocale();
   const importable = manifest.entries.filter((e) => e.file_type);
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase truncate">
-          {manifest.archive_name} · {importable.length} importable
+          {uiText("{value1} · {value2} importable", {
+            value1: String(manifest.archive_name ?? ""),
+            value2: String(importable.length ?? ""),
+          })}
         </span>
         <button
           type="button"
           onClick={onBack}
           className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
         >
-          Back
+          {uiText("Back")}
         </button>
       </div>
       <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
         {importable.length === 0 ? (
           <div className="px-3 py-3 font-mono text-2xs text-on-surface-variant/70">
-            No importable 3D files in this archive.
+            {uiText("No importable 3D files in this archive.")}
           </div>
         ) : (
           importable.map((e) => (

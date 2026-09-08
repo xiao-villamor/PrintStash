@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText, knownUiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState, useRef } from "react";
 import { Link } from "@/lib/link";
 import { AlertTriangle, X } from "lucide-react";
@@ -21,6 +24,7 @@ const BANNER_MESSAGES = {
 } satisfies Record<AuthPromptReason, string>;
 
 export function AuthBanner() {
+  useUiLocale();
   const [show, setShow] = useState(false);
   const [reason, setReason] = useState<AuthPromptReason>("missing");
   const firstFire = useRef(true);
@@ -38,7 +42,7 @@ export function AuthBanner() {
       setShow(true);
       // Toast only on subsequent 401s, not the automatic bootstrap probe.
       if (!firstFire.current) {
-        toast.warning(TOAST_MESSAGES[r]);
+        toast.warning(knownUiText(TOAST_MESSAGES[r]));
       }
       firstFire.current = false;
     });
@@ -53,14 +57,14 @@ export function AuthBanner() {
   return (
     <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 flex items-center gap-3 text-xs font-mono text-amber-800 dark:text-amber-200">
       <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-      <span className="flex-1">{BANNER_MESSAGES[reason]}</span>
+      <span className="flex-1">{knownUiText(BANNER_MESSAGES[reason])}</span>
       {!isLoggedIn() && (
         <Link
           href="/login"
           className="uppercase tracking-wider underline hover:no-underline"
           onClick={() => setShow(false)}
         >
-          Sign in
+          {uiText("Sign in")}
         </Link>
       )}
       <Link
@@ -68,13 +72,13 @@ export function AuthBanner() {
         className="uppercase tracking-wider underline hover:no-underline"
         onClick={() => setShow(false)}
       >
-        Settings
+        {uiText("Settings")}
       </Link>
       <button
         type="button"
         onClick={() => setShow(false)}
         className="p-1 rounded hover:bg-amber-500/20 transition-colors"
-        aria-label="Dismiss"
+        aria-label={uiText("Dismiss")}
       >
         <X className="h-3.5 w-3.5" />
       </button>

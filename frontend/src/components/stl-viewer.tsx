@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
@@ -62,6 +65,7 @@ function Mesh({
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
 }) {
+  useUiLocale();
   const geometry = useLoader(STLLoader, url, (loader) => {
     loader.setRequestHeader(authHeaders());
   });
@@ -119,6 +123,7 @@ function Scene({
   onLoadedChange?: (loaded: boolean) => void;
   screenshotScale: ScreenshotScale;
 }) {
+  useUiLocale();
   const orbitRef = useRef<any>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
   const { gl, scene, camera, invalidate, size: canvasSize } = useThree();
@@ -313,7 +318,7 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
         this.props.fallback ?? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-on-surface-variant">
             <AlertTriangle className="h-8 w-8" />
-            <span className="font-mono text-xs">Failed to load 3D preview</span>
+            <span className="font-mono text-xs">{uiText("Failed to load 3D preview")}</span>
           </div>
         )
       );
@@ -330,6 +335,7 @@ export function STLViewer({
   showGrid = true,
   screenshotName = "model",
 }: STLViewerProps) {
+  useUiLocale();
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
   // swap reset the overlay during render instead of through a reset effect.
   const { loaded: meshLoaded, setLoaded: setMeshLoaded } = useViewerReadiness(url);
@@ -343,7 +349,7 @@ export function STLViewer({
     <div className="relative h-full w-full touch-none overscroll-contain">
       <MeshErrorBoundary key={url}>
         <Canvas
-          aria-label="3D model preview"
+          aria-label={uiText("3D model preview")}
           className="h-full w-full touch-none overscroll-contain"
           dpr={previewPixelRatio(previewPreferences.previewQuality)}
           frameloop="demand"
@@ -363,7 +369,7 @@ export function STLViewer({
         {!meshLoaded && (
           <div
             role="status"
-            aria-label="Loading 3D preview"
+            aria-label={uiText("Loading 3D preview")}
             className="pointer-events-none absolute inset-0 flex items-center justify-center"
           >
             <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />

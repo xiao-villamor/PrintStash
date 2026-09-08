@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import {
   formatBytes,
   formatCost,
@@ -23,6 +26,7 @@ export function RevisionCompare({
   right: FileRead;
   outcomes?: ArtifactOutcomeRead[];
 }) {
+  useUiLocale();
   const leftOutcome = outcomes.find((row) => row.file_id === left.id);
   const rightOutcome = outcomes.find((row) => row.file_id === right.id);
   const leftSlicer =
@@ -30,40 +34,40 @@ export function RevisionCompare({
   const rightSlicer =
     [right.metadata?.slicer_name, right.metadata?.slicer_version].filter(Boolean).join(" ") || "—";
   const rows = [
-    ["Type", left.file_type.toUpperCase(), right.file_type.toUpperCase()],
-    ["Version", String(left.version), String(right.version)],
+    [uiText("Type"), left.file_type.toUpperCase(), right.file_type.toUpperCase()],
+    [uiText("Version"), String(left.version), String(right.version)],
     [
-      "Status",
+      uiText("Status"),
       revisionStatusLabel(left.revision_status),
       revisionStatusLabel(right.revision_status),
     ],
     [
-      "Layer height",
+      uiText("Layer height"),
       formatMillimeters(left.metadata?.layer_height_mm),
       formatMillimeters(right.metadata?.layer_height_mm),
     ],
     [
-      "First layer",
+      uiText("First layer"),
       formatMillimeters(left.metadata?.first_layer_height_mm),
       formatMillimeters(right.metadata?.first_layer_height_mm),
     ],
     [
-      "Nozzle",
+      uiText("Nozzle"),
       formatMillimeters(left.metadata?.nozzle_diameter_mm),
       formatMillimeters(right.metadata?.nozzle_diameter_mm),
     ],
     [
-      "Infill",
+      uiText("Infill"),
       formatPercent(left.metadata?.infill_percent),
       formatPercent(right.metadata?.infill_percent),
     ],
     [
-      "Walls",
+      uiText("Walls"),
       left.metadata?.wall_loops ? String(left.metadata.wall_loops) : "—",
       right.metadata?.wall_loops ? String(right.metadata.wall_loops) : "—",
     ],
     [
-      "Top / bottom",
+      uiText("Top / bottom"),
       left.metadata?.top_shell_layers || left.metadata?.bottom_shell_layers
         ? `${left.metadata?.top_shell_layers ?? "—"} / ${left.metadata?.bottom_shell_layers ?? "—"}`
         : "—",
@@ -72,17 +76,17 @@ export function RevisionCompare({
         : "—",
     ],
     [
-      "Supports",
+      uiText("Supports"),
       left.metadata?.support_material === null || left.metadata?.support_material === undefined
         ? "—"
         : left.metadata.support_material
-          ? "Yes"
-          : "No",
+          ? uiText("Yes")
+          : uiText("No"),
       right.metadata?.support_material === null || right.metadata?.support_material === undefined
         ? "—"
         : right.metadata.support_material
-          ? "Yes"
-          : "No",
+          ? uiText("Yes")
+          : uiText("No"),
     ],
     [
       "Nozzle temp",
@@ -94,19 +98,19 @@ export function RevisionCompare({
       formatTemperature(left.metadata?.bed_temperature_c),
       formatTemperature(right.metadata?.bed_temperature_c),
     ],
-    ["Material", left.metadata?.material_type ?? "—", right.metadata?.material_type ?? "—"],
+    [uiText("Material"), left.metadata?.material_type ?? "—", right.metadata?.material_type ?? "—"],
     [
-      "Filament profile",
+      uiText("Filament profile"),
       left.metadata?.material_brand ?? "—",
       right.metadata?.material_brand ?? "—",
     ],
     [
-      "Filament",
+      uiText("Filament"),
       formatGrams(left.metadata?.filament_weight_g),
       formatGrams(right.metadata?.filament_weight_g),
     ],
     [
-      "Filament cost",
+      uiText("Filament cost"),
       formatCost(left.metadata?.filament_cost),
       formatCost(right.metadata?.filament_cost),
     ],
@@ -115,17 +119,25 @@ export function RevisionCompare({
       formatDuration(left.metadata?.estimated_time_s ?? null),
       formatDuration(right.metadata?.estimated_time_s ?? null),
     ],
-    ["Printer", left.metadata?.printer_model ?? "—", right.metadata?.printer_model ?? "—"],
-    ["Slicer", leftSlicer, rightSlicer],
-    ["Size", formatBytes(left.size_bytes), formatBytes(right.size_bytes)],
+    [uiText("Printer"), left.metadata?.printer_model ?? "—", right.metadata?.printer_model ?? "—"],
+    [uiText("Slicer"), leftSlicer, rightSlicer],
+    [uiText("Size"), formatBytes(left.size_bytes), formatBytes(right.size_bytes)],
     ["SHA-256", left.sha256.slice(0, 12), right.sha256.slice(0, 12)],
-    ["Prints", String(leftOutcome?.print_count ?? 0), String(rightOutcome?.print_count ?? 0)],
     [
-      "Completed",
+      uiText("Prints"),
+      String(leftOutcome?.print_count ?? 0),
+      String(rightOutcome?.print_count ?? 0),
+    ],
+    [
+      uiText("Completed"),
       String(leftOutcome?.completed_count ?? 0),
       String(rightOutcome?.completed_count ?? 0),
     ],
-    ["Failed", String(leftOutcome?.failed_count ?? 0), String(rightOutcome?.failed_count ?? 0)],
+    [
+      uiText("Failed"),
+      String(leftOutcome?.failed_count ?? 0),
+      String(rightOutcome?.failed_count ?? 0),
+    ],
     [
       "Success rate",
       formatPercent(leftOutcome?.success_rate != null ? leftOutcome.success_rate * 100 : null),
@@ -137,12 +149,12 @@ export function RevisionCompare({
       formatDuration(rightOutcome?.average_duration_s ?? null),
     ],
     [
-      "Actual filament",
+      uiText("Actual filament"),
       formatGrams(leftOutcome?.total_filament_g ?? null),
       formatGrams(rightOutcome?.total_filament_g ?? null),
     ],
     [
-      "Actual cost",
+      uiText("Actual cost"),
       formatCost(leftOutcome?.total_cost ?? null),
       formatCost(rightOutcome?.total_cost ?? null),
     ],
@@ -153,13 +165,15 @@ export function RevisionCompare({
       <div className="bg-surface border border-outline-variant rounded overflow-hidden">
         <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
           <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-            Field
+            {uiText("Field")}
           </span>
           <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
-            Rev {left.gcode_revision_number ?? left.version}
+            {uiText("Rev ")}
+            {left.gcode_revision_number ?? left.version}
           </span>
           <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
-            Rev {right.gcode_revision_number ?? right.version}
+            {uiText("Rev ")}
+            {right.gcode_revision_number ?? right.version}
           </span>
         </div>
         {rows.map(([label, leftValue, rightValue], index) => (

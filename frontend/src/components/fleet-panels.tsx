@@ -1,3 +1,8 @@
+import { knownUiText } from "@/lib/locale";
+import { formatNumber } from "@/lib/format";
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
@@ -108,6 +113,7 @@ export function FleetQueuePanel({
   printers: PrinterRead[];
   deps?: Partial<FleetQueueDeps>;
 }) {
+  useUiLocale();
   const { deleteJob, updateJob, retryJob, decideOperatorGate } = {
     ...REAL_FLEET_QUEUE_DEPS,
     ...deps,
@@ -171,7 +177,7 @@ export function FleetQueuePanel({
     if (saved) {
       setEditTarget(null);
       setDraft(null);
-      toast.success("Queue job updated");
+      toast.success(uiText("Queue job updated"));
     }
   }
 
@@ -191,8 +197,10 @@ export function FleetQueuePanel({
       <Localized>
         <EmptyState
           icon={ListOrdered}
-          title="No queued print jobs"
-          description="Add G-code from a model’s Send dialog to start building the fleet queue."
+          title={uiText("No queued print jobs")}
+          description={uiText(
+            "Add G-code from a model’s Send dialog to start building the fleet queue.",
+          )}
           className="rounded-lg border border-border bg-card shadow-sm"
         />
       </Localized>
@@ -211,9 +219,11 @@ export function FleetQueuePanel({
             setDeleteTarget(null);
             void mutate(id, () => deleteJob(id));
           }}
-          title="Delete queued job?"
-          description="This permanently removes the pending job from the queue. It does not cancel an active printer."
-          confirmLabel="Delete job"
+          title={uiText("Delete queued job?")}
+          description={uiText(
+            "This permanently removes the pending job from the queue. It does not cancel an active printer.",
+          )}
+          confirmLabel={uiText("Delete job")}
         />
         <Modal
           open={editTarget !== null && draft !== null}
@@ -223,14 +233,14 @@ export function FleetQueuePanel({
               setDraft(null);
             }
           }}
-          title="Edit queue job"
+          title={uiText("Edit queue job")}
         >
           {editTarget && draft && (
             <div className="space-y-4">
               <p className="truncate text-sm text-muted-foreground">{editTarget.remote_filename}</p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Routing
+                  {uiText("Routing")}
                   <select
                     className={inputClasses}
                     value={draft.strategy}
@@ -239,20 +249,20 @@ export function FleetQueuePanel({
                       if (strategy) setDraft({ ...draft, strategy });
                     }}
                   >
-                    <option value="manual">Choose printer</option>
-                    <option value="default">Default printer</option>
-                    <option value="least_busy">Least busy</option>
+                    <option value="manual">{uiText("Choose printer")}</option>
+                    <option value="default">{uiText("Default printer")}</option>
+                    <option value="least_busy">{uiText("Least busy")}</option>
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Printer
+                  {uiText("Printer")}
                   <select
                     className={inputClasses}
                     value={draft.printerId}
                     disabled={draft.strategy !== "manual"}
                     onChange={(event) => setDraft({ ...draft, printerId: event.target.value })}
                   >
-                    <option value="">Choose printer</option>
+                    <option value="">{uiText("Choose printer")}</option>
                     {printers.map((printer) => (
                       <option key={printer.id} value={printer.id}>
                         {printer.name}
@@ -261,7 +271,7 @@ export function FleetQueuePanel({
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Priority
+                  {uiText("Priority")}
                   <select
                     className={inputClasses}
                     value={draft.priority}
@@ -270,13 +280,13 @@ export function FleetQueuePanel({
                       if (priority) setDraft({ ...draft, priority });
                     }}
                   >
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="rush">Rush</option>
+                    <option value="low">{uiText("Low")}</option>
+                    <option value="normal">{uiText("Normal")}</option>
+                    <option value="rush">{uiText("Rush")}</option>
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Queue position
+                  {uiText("Queue position")}
                   <Input
                     type="number"
                     min={1}
@@ -285,16 +295,16 @@ export function FleetQueuePanel({
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Target group
+                  {uiText("Target group")}
                   <Input
                     value={draft.targetGroup}
                     disabled={draft.strategy === "manual"}
                     onChange={(event) => setDraft({ ...draft, targetGroup: event.target.value })}
-                    placeholder="Any group"
+                    placeholder={uiText("Any group")}
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Compatibility
+                  {uiText("Compatibility")}
                   <select
                     className={inputClasses}
                     value={draft.compatibilityPolicy}
@@ -303,8 +313,8 @@ export function FleetQueuePanel({
                       if (compatibilityPolicy) setDraft({ ...draft, compatibilityPolicy });
                     }}
                   >
-                    <option value="safe">Require compatible material</option>
-                    <option value="allow_mismatch">Allow mismatch</option>
+                    <option value="safe">{uiText("Require compatible material")}</option>
+                    <option value="allow_mismatch">{uiText("Allow mismatch")}</option>
                   </select>
                 </label>
               </div>
@@ -317,14 +327,14 @@ export function FleetQueuePanel({
                   }}
                   disabled={busy === editTarget.id}
                 >
-                  Cancel
+                  {uiText("Cancel")}
                 </Button>
                 <Button
                   onClick={() => void saveEdit()}
                   loading={busy === editTarget.id}
                   disabled={draft.strategy === "manual" && !draft.printerId}
                 >
-                  Save changes
+                  {uiText("Save changes")}
                 </Button>
               </div>
             </div>
@@ -332,7 +342,10 @@ export function FleetQueuePanel({
         </Modal>
         {summaryQuery.data && (
           <>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Queue summary">
+            <div
+              className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+              aria-label={uiText("Queue summary")}
+            >
               {[
                 ["Queued", summaryQuery.data.queued_jobs],
                 ["Active", summaryQuery.data.active_jobs],
@@ -348,8 +361,8 @@ export function FleetQueuePanel({
               ))}
             </div>
             {(summaryQuery.data.printers?.length ?? 0) > 0 && (
-              <section className="space-y-2" aria-label="Fleet board">
-                <h2 className="text-sm font-semibold text-foreground">Fleet board</h2>
+              <section className="space-y-2" aria-label={uiText("Fleet board")}>
+                <h2 className="text-sm font-semibold text-foreground">{uiText("Fleet board")}</h2>
                 <div className="grid gap-3 lg:grid-cols-2">
                   {summaryQuery.data.printers?.map((printer) => (
                     <article
@@ -360,18 +373,27 @@ export function FleetQueuePanel({
                         <div>
                           <h3 className="font-semibold text-foreground">{printer.name}</h3>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {printer.group || "No group"} ·{" "}
+                            {printer.group || uiText("No group")} ·{" "}
                             {printer.nozzle_diameter_mm == null
-                              ? "Nozzle unknown"
-                              : `${printer.nozzle_diameter_mm.toFixed(2)} mm nozzle`}
+                              ? uiText("Nozzle unknown")
+                              : uiText("{value1} mm nozzle", {
+                                  value1: String(
+                                    formatNumber(printer.nozzle_diameter_mm, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    }),
+                                  ),
+                                })}
                           </p>
                         </div>
                         <div className="flex flex-wrap justify-end gap-1">
-                          <Badge variant="outline">{printer.status}</Badge>
-                          {printer.drain_mode && <Badge variant="warning">drain</Badge>}
-                          {printer.maintenance && <Badge variant="warning">maintenance</Badge>}
+                          <Badge variant="outline">{knownUiText(printer.status)}</Badge>
+                          {printer.drain_mode && <Badge variant="warning">{uiText("drain")}</Badge>}
+                          {printer.maintenance && (
+                            <Badge variant="warning">{uiText("maintenance")}</Badge>
+                          )}
                           {printer.pending_operator_release && (
-                            <Badge variant="warning">release needed</Badge>
+                            <Badge variant="warning">{uiText("release needed")}</Badge>
                           )}
                         </div>
                       </div>
@@ -387,19 +409,19 @@ export function FleetQueuePanel({
                       )}
                       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                         <p>
-                          <span className="font-medium text-foreground">Loaded:</span>{" "}
+                          <span className="font-medium text-foreground">{uiText("Loaded:")}</span>{" "}
                           {printer.loaded_slots.length
                             ? printer.loaded_slots.join(", ")
-                            : "Unknown"}
+                            : uiText("Unknown")}
                         </p>
                         <p>
-                          <span className="font-medium text-foreground">Current:</span>{" "}
-                          {printer.current_job_name || "Idle"}
+                          <span className="font-medium text-foreground">{uiText("Current:")}</span>{" "}
+                          {printer.current_job_name || uiText("Idle")}
                           {printer.current_priority ? ` · ${printer.current_priority}` : ""}
                         </p>
                         <p className="sm:col-span-2">
-                          <span className="font-medium text-foreground">Next:</span>{" "}
-                          {printer.next_job_name || "None"}
+                          <span className="font-medium text-foreground">{uiText("Next:")}</span>{" "}
+                          {printer.next_job_name || uiText("None")}
                           {printer.next_priority ? ` · ${printer.next_priority}` : ""}
                         </p>
                       </div>
@@ -411,7 +433,7 @@ export function FleetQueuePanel({
           </>
         )}
         <QueueSection
-          title="Queued"
+          title={uiText("Queued")}
           jobs={queued}
           printerNames={printerNames}
           busy={busy}
@@ -427,7 +449,9 @@ export function FleetQueuePanel({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Move ${job.remote_filename} up`}
+                      aria-label={uiText("Move {value1} up", {
+                        value1: String(job.remote_filename),
+                      })}
                       disabled={busy === job.id || laneIndex === 0}
                       onClick={() =>
                         void mutate(job.id, () => updateJob(job.id, { queue_position: laneIndex }))
@@ -438,7 +462,9 @@ export function FleetQueuePanel({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      aria-label={`Move ${job.remote_filename} down`}
+                      aria-label={uiText("Move {value1} down", {
+                        value1: String(job.remote_filename),
+                      })}
                       disabled={busy === job.id || laneIndex === lane.length - 1}
                       onClick={() =>
                         void mutate(job.id, () =>
@@ -454,7 +480,7 @@ export function FleetQueuePanel({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Edit ${job.remote_filename}`}
+                aria-label={uiText("Edit {value1}", { value1: String(job.remote_filename) })}
                 disabled={busy === job.id}
                 onClick={() => beginEdit(job)}
               >
@@ -463,7 +489,7 @@ export function FleetQueuePanel({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label={`Delete ${job.remote_filename}`}
+                aria-label={uiText("Delete {value1}", { value1: String(job.remote_filename) })}
                 disabled={busy === job.id}
                 onClick={() => setDeleteTarget(job)}
               >
@@ -472,9 +498,14 @@ export function FleetQueuePanel({
             </>
           )}
         />
-        <QueueSection title="Active" jobs={active} printerNames={printerNames} busy={busy} />
         <QueueSection
-          title="Recent"
+          title={uiText("Active")}
+          jobs={active}
+          printerNames={printerNames}
+          busy={busy}
+        />
+        <QueueSection
+          title={uiText("Recent")}
           jobs={recent}
           printerNames={printerNames}
           busy={busy}
@@ -488,7 +519,7 @@ export function FleetQueuePanel({
                     disabled={busy === job.id}
                     onClick={() => void mutate(job.id, () => decideOperatorGate(job.id, "release"))}
                   >
-                    Release
+                    {uiText("Release")}
                   </Button>
                   <Button
                     variant="outline"
@@ -496,7 +527,7 @@ export function FleetQueuePanel({
                     disabled={busy === job.id}
                     onClick={() => void mutate(job.id, () => decideOperatorGate(job.id, "hold"))}
                   >
-                    Hold
+                    {uiText("Hold")}
                   </Button>
                 </>
               )}
@@ -508,7 +539,7 @@ export function FleetQueuePanel({
                   onClick={() => void mutate(job.id, () => retryJob(job.id))}
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
-                  Retry
+                  {uiText("Retry")}
                 </Button>
               )}
             </>
@@ -521,7 +552,7 @@ export function FleetQueuePanel({
               size="sm"
               onClick={() => setHistoryLimit((value) => Math.min(value + 20, 100))}
             >
-              Load older jobs
+              {uiText("Load older jobs")}
             </Button>
           </div>
         )}
@@ -543,6 +574,7 @@ function QueueSection({
   busy: number | null;
   actions?: (job: PrintJobRead, index: number) => React.ReactNode;
 }) {
+  useUiLocale();
   if (jobs.length === 0) return null;
   const groups = Array.from(
     jobs.reduce((result, job, index) => {
@@ -564,23 +596,28 @@ function QueueSection({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">
           {job.remote_filename}
-          {job.copy_index != null ? ` · copy ${job.copy_index}` : ""}
+          {job.copy_index != null
+            ? uiText(" · copy {value1}", { value1: String(job.copy_index) })
+            : ""}
         </p>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {job.printer_id
-            ? (printerNames.get(job.printer_id) ?? `Printer ${job.printer_id}`)
-            : "Unassigned"}{" "}
-          · {job.routing_strategy.replace("_", " ")}
+            ? (printerNames.get(job.printer_id) ??
+              uiText("Printer {value1}", { value1: String(job.printer_id) }))
+            : uiText("Unassigned")}{" "}
+          · {knownUiText(job.routing_strategy)}
           {job.target_group ? ` · ${job.target_group}` : ""}
-          {job.blocked_reason ? ` · ${job.blocked_reason.replaceAll("_", " ")}` : ""}
+          {job.blocked_reason ? ` · ${knownUiText(job.blocked_reason)}` : ""}
         </p>
       </div>
       <Badge variant={job.priority === "rush" ? "warning" : "outline"}>
-        {job.priority ?? "normal"}
+        {job.priority ?? uiText("normal")}
       </Badge>
-      {job.operator_gate_state === "pending" && <Badge variant="warning">release needed</Badge>}
+      {job.operator_gate_state === "pending" && (
+        <Badge variant="warning">{uiText("release needed")}</Badge>
+      )}
       <Badge variant={job.blocked_reason || job.state === "failed" ? "warning" : "outline"}>
-        {job.state}
+        {knownUiText(job.state)}
       </Badge>
       <div className="flex items-center gap-1" aria-busy={busy === job.id}>
         {actions?.(job, index)}
@@ -589,7 +626,10 @@ function QueueSection({
   );
   return (
     <Localized>
-      <section className="space-y-2" aria-label={`${title} print jobs`}>
+      <section
+        className="space-y-2"
+        aria-label={uiText("{value1} print jobs", { value1: String(title) })}
+      >
         <h2 className="text-sm font-semibold text-foreground">{title}</h2>
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           {groups.map(([key, entries]) =>
@@ -598,7 +638,10 @@ function QueueSection({
             ) : (
               <details key={key} open className="border-b border-border last:border-b-0">
                 <summary className="cursor-pointer bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">
-                  Batch #{entries[0].job.batch_id} · {entries.length} copies
+                  {uiText("Batch #{value1} · {value2} copies", {
+                    value1: String(entries[0].job.batch_id ?? ""),
+                    value2: String(entries.length ?? ""),
+                  })}
                 </summary>
                 {entries.map(({ job, index }) => row(job, index))}
               </details>
@@ -644,6 +687,7 @@ export function FleetMaintenancePanel({
   onPrintersChanged: () => void;
   deps?: Partial<FleetMaintenanceDeps>;
 }) {
+  useUiLocale();
   const { listWindows, listLog, createWindow, createLog, deleteWindow, deleteLog, updateRouting } =
     { ...REAL_FLEET_MAINTENANCE_DEPS, ...deps };
   const [windows, setWindows] = useState<MaintenanceWindow[]>([]);
@@ -706,7 +750,7 @@ export function FleetMaintenancePanel({
       setNote("");
       setReason("");
       await load();
-      toast.success("Maintenance updated");
+      toast.success(uiText("Maintenance updated"));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -722,13 +766,13 @@ export function FleetMaintenancePanel({
           onClose={() => {
             if (!busy) setMode(null);
           }}
-          title={mode === "window" ? "Schedule maintenance" : "Log maintenance"}
+          title={mode === "window" ? uiText("Schedule maintenance") : uiText("Log maintenance")}
         >
           <div className="space-y-4">
             {mode === "window" ? (
               <>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Starts
+                  {uiText("Starts")}
                   <Input
                     type="datetime-local"
                     value={startsAt}
@@ -736,7 +780,7 @@ export function FleetMaintenancePanel({
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Ends
+                  {uiText("Ends")}
                   <Input
                     type="datetime-local"
                     value={endsAt}
@@ -744,32 +788,32 @@ export function FleetMaintenancePanel({
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Reason
+                  {uiText("Reason")}
                   <Input value={reason} onChange={(event) => setReason(event.target.value)} />
                 </label>
               </>
             ) : (
               <>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Category
+                  {uiText("Category")}
                   <Input value={category} onChange={(event) => setCategory(event.target.value)} />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Note
+                  {uiText("Note")}
                   <Input value={note} onChange={(event) => setNote(event.target.value)} />
                 </label>
               </>
             )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setMode(null)} disabled={busy}>
-                Cancel
+                {uiText("Cancel")}
               </Button>
               <Button
                 onClick={() => void submit()}
                 loading={busy}
                 disabled={mode === "window" ? !startsAt || !endsAt : !note.trim()}
               >
-                Save
+                {uiText("Save")}
               </Button>
             </div>
           </div>
@@ -777,7 +821,7 @@ export function FleetMaintenancePanel({
         {printers.length === 0 ? (
           <EmptyState
             icon={Wrench}
-            title="No printers to maintain"
+            title={uiText("No printers to maintain")}
             className="rounded-lg border border-border bg-card"
           />
         ) : (
@@ -795,13 +839,13 @@ export function FleetMaintenancePanel({
                       <h2 className="font-semibold text-foreground">{printer.name}</h2>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {printer.drain_mode
-                          ? printer.drain_reason || "Soft drain active"
-                          : "Accepting scheduled work"}
+                          ? printer.drain_reason || uiText("Soft drain active")
+                          : uiText("Accepting scheduled work")}
                       </p>
                     </div>
                     <div className="flex gap-1">
-                      {printer.is_default && <Badge>Default</Badge>}
-                      {printer.drain_mode && <Badge variant="warning">Draining</Badge>}
+                      {printer.is_default && <Badge>{uiText("Default")}</Badge>}
+                      {printer.drain_mode && <Badge variant="warning">{uiText("Draining")}</Badge>}
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -810,14 +854,14 @@ export function FleetMaintenancePanel({
                       variant="outline"
                       onClick={() => void toggleRouting(printer, "default")}
                     >
-                      {printer.is_default ? "Unset default" : "Set default"}
+                      {printer.is_default ? uiText("Unset default") : uiText("Set default")}
                     </Button>
                     <Button
                       size="xs"
                       variant="outline"
                       onClick={() => void toggleRouting(printer, "drain")}
                     >
-                      {printer.drain_mode ? "Resume routing" : "Soft drain"}
+                      {printer.drain_mode ? uiText("Resume routing") : uiText("Soft drain")}
                     </Button>
                     <Button
                       size="xs"
@@ -828,7 +872,7 @@ export function FleetMaintenancePanel({
                       }}
                     >
                       <CalendarClock className="h-3.5 w-3.5" />
-                      Schedule
+                      {uiText("Schedule")}
                     </Button>
                     <Button
                       size="xs"
@@ -839,19 +883,20 @@ export function FleetMaintenancePanel({
                       }}
                     >
                       <Wrench className="h-3.5 w-3.5" />
-                      Log
+                      {uiText("Log")}
                     </Button>
                   </div>
                   <div className="mt-4 space-y-2 border-t border-border pt-3 text-xs text-muted-foreground">
                     {printerWindows.slice(0, 2).map((row) => (
                       <div key={`w-${row.id}`} className="flex items-center justify-between gap-2">
                         <span>
-                          {new Date(row.starts_at).toLocaleString()} · {row.reason || "Maintenance"}
+                          {new Date(row.starts_at).toLocaleString(currentLocale())} ·{" "}
+                          {row.reason || uiText("Maintenance")}
                         </span>
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label="Delete maintenance window"
+                          aria-label={uiText("Delete maintenance window")}
                           onClick={() =>
                             void deleteWindow(printer.id, row.id).then(load).catch(toast.error)
                           }
@@ -868,7 +913,7 @@ export function FleetMaintenancePanel({
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label="Delete maintenance log"
+                          aria-label={uiText("Delete maintenance log")}
                           onClick={() =>
                             void deleteLog(printer.id, row.id).then(load).catch(toast.error)
                           }
@@ -878,7 +923,7 @@ export function FleetMaintenancePanel({
                       </div>
                     ))}
                     {printerWindows.length === 0 && printerLogs.length === 0 && (
-                      <p>No maintenance activity recorded.</p>
+                      <p>{uiText("No maintenance activity recorded.")}</p>
                     )}
                   </div>
                 </section>

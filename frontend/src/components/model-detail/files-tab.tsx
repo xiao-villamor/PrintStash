@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Download, FileText, FolderSync } from "lucide-react";
 
 import { downloadAuthenticatedFile, replaceFileTags } from "@/lib/api";
@@ -25,12 +28,15 @@ export function FilesTab({
   canEdit: boolean;
   onModel: (model: ModelRead) => void;
 }) {
+  useUiLocale();
   const { data: availableTags = [] } = useTags();
 
   async function saveTags(file: FileRead, tags: string[]) {
     try {
       onModel(await replaceFileTags(modelId, file.id, tags));
-      toast.success(`Tags updated for ${file.original_filename}`);
+      toast.success(
+        uiText("Tags updated for {value1}", { value1: String(file.original_filename) }),
+      );
     } catch (error) {
       toast.error(error);
       throw error;
@@ -41,11 +47,11 @@ export function FilesTab({
     <Localized>
       <section>
         <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-          Source Files
+          {uiText("Source Files")}
         </h2>
         {sourceFiles.length === 0 && (
           <p className="font-mono text-xs text-on-surface-variant">
-            No source files (STL / 3MF / OBJ) for this model.
+            {uiText("No source files (STL / 3MF / OBJ) for this model.")}
           </p>
         )}
         <div className="space-y-2">
@@ -61,16 +67,21 @@ export function FilesTab({
                     <span className="truncate">{f.original_filename}</span>
                     {f.is_external && (
                       <span
-                        title="Indexed from a library source; original bytes stay in external storage"
+                        title={uiText(
+                          "Indexed from a library source; original bytes stay in external storage",
+                        )}
                         className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-primary"
                       >
                         <FolderSync className="h-3 w-3" />
-                        Linked
+                        {uiText("Linked")}
                       </span>
                     )}
                   </p>
                   <p className="font-mono text-2xs text-on-surface-variant">
-                    {formatBytes(f.size_bytes)} · v{f.version} · Source
+                    {uiText("{value1} · v{value2} · Source", {
+                      value1: String(formatBytes(f.size_bytes) ?? ""),
+                      value2: String(f.version ?? ""),
+                    })}
                   </p>
                   <div className="mt-1.5">
                     <EntityTagsDialog
@@ -78,7 +89,9 @@ export function FilesTab({
                       tags={f.tags}
                       availableTags={availableTags}
                       canEdit={canEdit}
-                      help="Artifact tags make the owning Model discoverable without changing the Model’s direct tags."
+                      help={uiText(
+                        "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
+                      )}
                       onSave={(tags) => saveTags(f, tags)}
                     />
                   </div>
@@ -96,7 +109,7 @@ export function FilesTab({
                       f.original_filename,
                     ).catch((e) => toast.error(e))
                   }
-                  title="Download"
+                  title={uiText("Download")}
                   className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
                 >
                   <Download className="h-5 w-5" />

@@ -43,7 +43,14 @@ test.beforeEach(async ({ page }) => {
 
 test.describe("progressive web app", () => {
   test("the web app manifest is served with the expected shape", async ({ page }) => {
-    const response = await page.request.get("/manifest.webmanifest");
+    await page.goto("/");
+
+    const manifestLink = page.locator('link[rel="manifest"]');
+    await expect(manifestLink).toHaveAttribute("href", "/manifest.en.webmanifest");
+
+    const manifestHref = await manifestLink.getAttribute("href");
+    expect(manifestHref).not.toBeNull();
+    const response = await page.request.get(manifestHref!);
     expect(response.ok()).toBe(true);
     expect(response.headers()["content-type"]).toMatch(/json|manifest/);
 
@@ -54,13 +61,6 @@ test.describe("progressive web app", () => {
     expect(manifest.start_url).toBe("/");
     expect(Array.isArray(manifest.icons)).toBe(true);
     expect(manifest.icons.length).toBeGreaterThan(0);
-
-    // The document links to it, so a browser's install prompt can find it.
-    await page.goto("/");
-    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
-      "href",
-      "/manifest.webmanifest",
-    );
   });
 
   test("the service worker script registers and installs", async ({ page }) => {

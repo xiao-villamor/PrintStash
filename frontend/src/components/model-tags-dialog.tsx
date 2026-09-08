@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useState } from "react";
 import { Plus, Tag, X } from "lucide-react";
 
@@ -34,6 +37,7 @@ export function ModelTagsDialog({
   onClose: () => void;
   onSaved: (tags: string[]) => void;
 }) {
+  useUiLocale();
   const [selected, setSelected] = useState<string[]>(() => [...model.tags]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -94,7 +98,7 @@ export function ModelTagsDialog({
         throw new Error(result.failed[0]?.reason ?? "Could not update tags");
       }
       onSaved([...selected]);
-      toast.success("Tags updated");
+      toast.success(uiText("Tags updated"));
       setQuery("");
       onClose();
     } catch (error) {
@@ -106,7 +110,7 @@ export function ModelTagsDialog({
 
   return (
     <Localized>
-      <Modal open={open} onClose={close} title="Model tags" className="max-w-md">
+      <Modal open={open} onClose={close} title={uiText("Model tags")} className="max-w-md">
         <div className="space-y-5">
           <div className="rounded border border-border bg-muted/40 p-3">
             <div className="flex items-start gap-2.5">
@@ -114,7 +118,9 @@ export function ModelTagsDialog({
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-foreground">{model.name}</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                  Choose an existing tag or create a new one to group and find this Model.
+                  {uiText(
+                    "Choose an existing tag or create a new one to group and find this Model.",
+                  )}
                 </p>
               </div>
             </div>
@@ -125,14 +131,14 @@ export function ModelTagsDialog({
               htmlFor={`model-tags-${model.id}`}
               className="mb-1.5 block font-mono text-3xs uppercase tracking-wider text-muted-foreground"
             >
-              Search or create a tag
+              {uiText("Search or create a tag")}
             </label>
             <div className="relative">
               <input
                 id={`model-tags-${model.id}`}
                 value={query}
                 maxLength={255}
-                placeholder="Type a tag name…"
+                placeholder={uiText("Type a tag name…")}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   nav.setActiveIndex(-1);
@@ -169,7 +175,10 @@ export function ModelTagsDialog({
                       onClick={() => commit(query)}
                       className={`flex w-full items-center gap-2 px-3 py-2 text-left font-mono text-xs text-primary hover:bg-popover-hover ${matching.length === nav.activeIndex ? "bg-popover-hover" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" /> Create tag &quot;{query.trim()}&quot;
+                      <Plus className="h-3.5 w-3.5" />
+                      {uiText(' Create tag "')}
+                      {query.trim()}
+                      {uiText('"')}
                     </button>
                   )}
                 </div>
@@ -179,7 +188,7 @@ export function ModelTagsDialog({
 
           <div>
             <p className="mb-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              Assigned tags
+              {uiText("Assigned tags")}
             </p>
             {selected.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -196,7 +205,7 @@ export function ModelTagsDialog({
                           current.filter((tag) => normalized(tag) !== normalized(name)),
                         )
                       }
-                      aria-label={`Remove ${name}`}
+                      aria-label={uiText("Remove {value1}", { value1: String(name) })}
                       className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -206,7 +215,7 @@ export function ModelTagsDialog({
               </div>
             ) : (
               <p className="rounded border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
-                No tags assigned yet.
+                {uiText("No tags assigned yet.")}
               </p>
             )}
           </div>
@@ -214,10 +223,10 @@ export function ModelTagsDialog({
 
         <div className="mt-6 flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
-            Cancel
+            {uiText("Cancel")}
           </Button>
           <Button type="button" size="sm" loading={busy} disabled={!hasChanges} onClick={save}>
-            Save tags
+            {uiText("Save tags")}
           </Button>
         </div>
       </Modal>

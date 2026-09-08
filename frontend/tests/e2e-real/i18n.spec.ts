@@ -21,13 +21,18 @@ test.describe("localization", () => {
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     await page.getByRole("button", { name: /^Language:/ }).click();
+    await page.getByRole("menuitemradio", { name: "Español" }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "es");
     await expect(page.getByRole("heading", { name: "Ajustes" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Papelera" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Resumen" })).toBeVisible();
 
     // The profile menu's navigation links translate too.
-    await page.locator('header button[data-menu-trigger][aria-haspopup="menu"]').click();
+    await page
+      .locator(
+        'header button[data-menu-trigger][aria-haspopup="menu"]:not([aria-label^="Idioma:"]):not([aria-label^="Language:"])',
+      )
+      .click();
     await expect(page.getByRole("menuitem", { name: "Impresoras" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Ajustes" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -39,6 +44,7 @@ test.describe("localization", () => {
     // Restore English so specs that assert on English copy later in this worker
     // aren't affected.
     await page.getByRole("button", { name: /^Idioma:/ }).click();
+    await page.getByRole("menuitemradio", { name: "English" }).click();
     await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
   });
 });

@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Camera, Code2, Grid3x3, Layers, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
@@ -33,6 +36,7 @@ export function ViewerToolbar({
   viewerReady: boolean;
   notifyScreenshotError?: (message: string) => void;
 }) {
+  useUiLocale();
   const cluster =
     "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
   const iconBtn =
@@ -51,7 +55,7 @@ export function ViewerToolbar({
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
-              title="3D model view"
+              title={uiText("3D model view")}
             >
               <Code2 className="h-3.5 w-3.5" /> 3D
             </button>
@@ -62,7 +66,7 @@ export function ViewerToolbar({
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
-              title="G-code toolpath preview"
+              title={uiText("G-code toolpath preview")}
             >
               <Layers className="h-3.5 w-3.5" /> GCode
             </button>
@@ -83,7 +87,11 @@ export function ViewerToolbar({
                       : "text-on-surface-variant hover:bg-surface-container-high"
                   }`}
                 >
-                  {m === "wireframe" ? "Wire" : m === "xray" ? "X-Ray" : "Solid"}
+                  {m === "wireframe"
+                    ? uiText("Wire")
+                    : m === "xray"
+                      ? uiText("X-Ray")
+                      : uiText("Solid")}
                 </button>
               ))}
             </div>
@@ -92,8 +100,8 @@ export function ViewerToolbar({
               <button
                 onClick={() => controls.current?.fit()}
                 className={`${iconBtn} border-r border-outline-variant`}
-                title="Fit to view"
-                aria-label="Fit to view"
+                title={uiText("Fit to view")}
+                aria-label={uiText("Fit to view")}
               >
                 <Maximize2 className="h-4 w-4" />
               </button>
@@ -108,16 +116,16 @@ export function ViewerToolbar({
                 }}
                 disabled={!viewerReady}
                 className={`${iconBtn} border-r border-outline-variant disabled:cursor-not-allowed disabled:opacity-50`}
-                title="Screenshot"
-                aria-label="Screenshot"
+                title={uiText("Screenshot")}
+                aria-label={uiText("Screenshot")}
               >
                 <Camera className="h-4 w-4" />
               </button>
               <button
                 onClick={() => setShowGrid(!showGrid)}
                 className={`${iconBtn} ${showGrid ? "text-primary bg-secondary-container" : ""}`}
-                title="Build plate grid"
-                aria-label="Build plate grid"
+                title={uiText("Build plate grid")}
+                aria-label={uiText("Build plate grid")}
               >
                 <Grid3x3 className="h-4 w-4" />
               </button>

@@ -6,9 +6,7 @@
  * only thing telling them what the button is and what state it is in. Losing that
  * leaves an unlabelled button in the header.
  *
- * It is also a toggle rather than a picker, so the *next* locale has to be
- * derived from the current one. A toggle that always sets Spanish is a one-way
- * door, and the user cannot get back to English without clearing storage.
+ * Every registered language is a directly selectable, named menu item.
  */
 
 import { render, screen } from "@testing-library/react";
@@ -16,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { LocaleToggle } from "@/components/locale-toggle";
+import { localeDefinitions, SUPPORTED_LOCALES } from "@/lib/locale";
 import { I18nProvider } from "@/lib/i18n";
 
 function renderToggle() {
@@ -42,6 +41,7 @@ describe("LocaleToggle", () => {
     renderToggle();
 
     await user.click(screen.getByRole("button", { name: /Language/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Español" }));
 
     expect(screen.getByRole("button", { name: /Idioma: Español/ })).toBeInTheDocument();
   });
@@ -52,6 +52,7 @@ describe("LocaleToggle", () => {
     renderToggle();
 
     await user.click(screen.getByRole("button", { name: /Idioma/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: "English" }));
 
     expect(screen.getByRole("button", { name: /Language: English/ })).toBeInTheDocument();
   });
@@ -62,5 +63,17 @@ describe("LocaleToggle", () => {
     renderToggle();
 
     expect(screen.getByRole("button", { name: /Idioma/ })).toBeInTheDocument();
+  });
+});
+
+describe("LocaleToggle registry", () => {
+  it("renders all registered languages as choices", async () => {
+    renderToggle();
+    await userEvent.click(screen.getByRole("button", { name: /Language/ }));
+    for (const locale of SUPPORTED_LOCALES) {
+      expect(
+        screen.getByRole("menuitemradio", { name: localeDefinitions[locale].name }),
+      ).toHaveAttribute("lang", locale);
+    }
   });
 });

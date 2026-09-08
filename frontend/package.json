@@ -28,6 +28,8 @@
     "test:perf": "playwright test --config=playwright.performance.config.ts",
     "test:perf:react-compiler": "PERF_BUILD_MODE=react-compiler playwright test --config=playwright.performance.config.ts",
     "test:frontend": "node scripts/frontend-smoke.mjs",
+    "i18n:add": "node scripts/scaffold-locale.mjs",
+    "i18n:check": "vitest run tests/repo/i18n-coverage.test.ts tests/repo/locale-authoring.test.ts tests/repo/localization-assets.test.ts src/lib/__tests__/locale.test.ts",
     "media:readme": "node scripts/generate-readme-media.mjs",
     "lint:fix": "oxlint --fix --deny-warnings",
     "format": "oxfmt .",

@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -90,10 +93,12 @@ function multipartError(
 }
 
 function Count({ count, one, many }: { count: number; one: string; many: string }) {
+  useUiLocale();
   return <span>{(count === 1 ? one : many).replace("{count}", String(count))}</span>;
 }
 
 function Cover({ src, alt }: { src: string | null; alt: string }) {
+  useUiLocale();
   const external = src?.startsWith("https://") || src?.startsWith("http://") ? src : null;
   const authenticated = useAuthenticatedAssetUrl(external ? null : src);
   const url = external ?? authenticated;
@@ -123,6 +128,7 @@ export function MultipartModelCard({
   availableTags?: TagRead[];
   onDataChange?: () => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const [starOverride, setStarOverride] = useState<{
     base: boolean;
@@ -167,7 +173,9 @@ export function MultipartModelCard({
         onClick={() => void toggleStar()}
         disabled={starBusy}
         aria-label={
-          starred ? `Remove ${item.name} from favorites` : `Add ${item.name} to favorites`
+          starred
+            ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
+            : uiText("Add {value1} to favorites", { value1: String(item.name) })
         }
         className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
       >
@@ -266,6 +274,7 @@ export function NewMultipartModelModal({
   collections?: CollectionRead[];
   returnTo?: string;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const router = useRouter();
   const [name, setName] = useState("");
@@ -401,6 +410,7 @@ export function MultipartModelBrowser({
   onStructuresChange?: (value: MultipartStructureFilter[]) => void;
   onGuidesOnlyChange?: (value: boolean) => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
@@ -588,6 +598,7 @@ function ModelPicker({
   usedIds: Set<number>;
   onSelect: (model: MultipartModelCandidate) => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const { data: candidates = [], isLoading } = useMultipartModelCandidates(aggregateId, query, {
@@ -670,6 +681,7 @@ function ModelPicker({
 }
 
 function MemberRow({ model }: { model: MultipartModelCandidate }) {
+  useUiLocale();
   const { t } = useI18n();
   const label = modelLabel(model, t("multipart.unavailable"));
   const legacyLabel = model.available ? model.legacy_label : null;
@@ -719,6 +731,7 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
 }
 
 function MultipartMemberCard({ model }: { model: MultipartModelCandidate }) {
+  useUiLocale();
   const { t } = useI18n();
   const label = modelLabel(model, t("multipart.unavailable"));
   const content = (
@@ -781,6 +794,7 @@ function MultipartOverview({
   model: MultipartModelRead;
   onAddFirst?: () => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const members = model.parts.flatMap((part) => part.models);
   const coverMember =
@@ -967,6 +981,7 @@ function PartEditorRow({
   onMoveDown: () => void;
   canMoveDown: boolean;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   return (
     <fieldset
@@ -1082,6 +1097,7 @@ function PartEditorRow({
 }
 
 export function MultipartModelDetailPage() {
+  useUiLocale();
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
   const { t } = useI18n();

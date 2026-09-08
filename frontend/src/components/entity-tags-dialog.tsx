@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useState } from "react";
 import { Tags, X } from "lucide-react";
 
@@ -31,6 +34,7 @@ export function EntityTagsDialog({
   triggerMode?: "inline" | "icon";
   triggerClassName?: string;
 }) {
+  useUiLocale();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>(tags);
   const [input, setInput] = useState("");
@@ -79,8 +83,12 @@ export function EntityTagsDialog({
             variant="ghost"
             size="icon-sm"
             onClick={openDialog}
-            aria-label={tags.length ? `Edit tags for ${entityLabel}` : `Add tags to ${entityLabel}`}
-            title={tags.length ? "Edit tags" : "Add tags"}
+            aria-label={
+              tags.length
+                ? uiText("Edit tags for {value1}", { value1: String(entityLabel) })
+                : uiText("Add tags to {value1}", { value1: String(entityLabel) })
+            }
+            title={tags.length ? uiText("Edit tags") : uiText("Add tags")}
             className={triggerClassName}
           >
             <Tags className="h-4 w-4" aria-hidden />
@@ -100,18 +108,24 @@ export function EntityTagsDialog({
           {canEdit && (
             <Button type="button" variant="ghost" size="xs" onClick={openDialog}>
               <Tags className="h-3.5 w-3.5" aria-hidden />
-              {tags.length ? "Edit tags" : "Add tags"}
+              {tags.length ? uiText("Edit tags") : uiText("Add tags")}
             </Button>
           )}
         </div>
       )}
 
-      <Modal open={open} onClose={() => !saving && setOpen(false)} title={`Tags · ${entityLabel}`}>
+      <Modal
+        open={open}
+        onClose={() => !saving && setOpen(false)}
+        title={uiText("Tags · {value1}", { value1: String(entityLabel) })}
+      >
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-on-surface-variant">{help}</p>
-          <div className="flex flex-wrap gap-2" aria-label="Tags">
+          <div className="flex flex-wrap gap-2" aria-label={uiText("Tags")}>
             {selected.length === 0 ? (
-              <span className="text-sm text-on-surface-variant">No tags assigned yet.</span>
+              <span className="text-sm text-on-surface-variant">
+                {uiText("No tags assigned yet.")}
+              </span>
             ) : (
               selected.map((tag) => (
                 <button
@@ -123,7 +137,7 @@ export function EntityTagsDialog({
                     )
                   }
                   className="inline-flex max-w-full items-center gap-1 rounded-full border border-outline-variant bg-surface-container-low px-2.5 py-1 text-xs text-on-surface hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  title={`Remove ${tag}`}
+                  title={uiText("Remove {value1}", { value1: String(tag) })}
                 >
                   <span className="truncate">{tag}</span>
                   <X className="h-3 w-3 shrink-0" aria-hidden />
@@ -133,7 +147,7 @@ export function EntityTagsDialog({
           </div>
           <div className="space-y-2">
             <label htmlFor="entity-tag-input" className="text-sm font-medium text-on-surface">
-              Tags to add
+              {uiText("Tags to add")}
             </label>
             <Input
               id="entity-tag-input"
@@ -146,12 +160,12 @@ export function EntityTagsDialog({
                 }
               }}
               maxLength={64}
-              placeholder="Search or create a tag"
+              placeholder={uiText("Search or create a tag")}
             />
             {suggestions.length > 0 && (
               <div
                 className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto"
-                aria-label="Tags to add"
+                aria-label={uiText("Tags to add")}
               >
                 {suggestions.slice(0, 30).map((tag) => (
                   <Button
@@ -169,7 +183,7 @@ export function EntityTagsDialog({
             {input.trim() &&
               !availableTags.some((tag) => normalized(tag.name) === normalized(input)) && (
                 <Button type="button" variant="outline" size="sm" onClick={() => add(input)}>
-                  Create tag
+                  {uiText("Create tag")}
                 </Button>
               )}
           </div>
@@ -180,10 +194,10 @@ export function EntityTagsDialog({
               onClick={() => setOpen(false)}
               disabled={saving}
             >
-              Cancel
+              {uiText("Cancel")}
             </Button>
             <Button type="button" onClick={() => void submit()} disabled={saving}>
-              {saving ? "Saving…" : "Save tags"}
+              {saving ? uiText("Saving…") : uiText("Save tags")}
             </Button>
           </div>
         </div>

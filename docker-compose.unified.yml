@@ -1,0 +1,25 @@
+# One container: web UI + full API, SQLite and local storage.
+# Set PRINTSTASH_IMAGE for a fork's GHCR namespace or a locally built image.
+services:
+  printstash:
+    image: ${PRINTSTASH_IMAGE:-ghcr.io/xiao-villamor/printstash}:${PRINTSTASH_VERSION:-latest}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "${PRINTSTASH_HTTP_PORT:-3000}:3000"
+    environment:
+      VAULT_SETUP_MODE: trusted_network
+      VAULT_RESTART_ENABLED: "true"
+    volumes:
+      - printstash_data:/data/files
+      - printstash_thumbs:/data/thumbs
+      - printstash_db:/data/db
+      - printstash_staging:/data/staging
+      - printstash_backups:/data/backups
+
+volumes:
+  printstash_data:
+  printstash_thumbs:
+  printstash_db:
+  printstash_staging:
+  printstash_backups:

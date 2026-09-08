@@ -1,6 +1,13 @@
 /* global self, caches */
-const CACHE = "printstash-shell-v3";
-const SHELL = ["/", "/offline.html", "/manifest.webmanifest", "/icon-light.svg", "/icon-dark.svg"];
+const CACHE = "printstash-shell-v4";
+const SHELL = [
+  "/",
+  "/offline.html",
+  "/locale-shell.js",
+  "/manifest.webmanifest",
+  "/icon-light.svg",
+  "/icon-dark.svg",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

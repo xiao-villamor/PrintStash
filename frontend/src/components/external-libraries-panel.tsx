@@ -1,3 +1,7 @@
+import { uiMessage } from "@/lib/locale";
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -44,19 +48,59 @@ const INPUT =
 // Cron presets surfaced as a dropdown; "" = manual only. Anything not in this
 // list shows the "Custom" option with a raw cron input.
 const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
-  { label: "Manual only", cron: "" },
-  { label: "Hourly", cron: "0 * * * *" },
-  { label: "Every 6 hours", cron: "0 */6 * * *" },
-  { label: "Daily (midnight)", cron: "0 0 * * *" },
-  { label: "Weekly (Sunday)", cron: "0 0 * * 0" },
+  {
+    get label() {
+      return uiText("Manual only");
+    },
+    cron: "",
+  },
+  {
+    get label() {
+      return uiText("Hourly");
+    },
+    cron: "0 * * * *",
+  },
+  {
+    get label() {
+      return uiText("Every 6 hours");
+    },
+    cron: "0 */6 * * *",
+  },
+  {
+    get label() {
+      return uiText("Daily (midnight)");
+    },
+    cron: "0 0 * * *",
+  },
+  {
+    get label() {
+      return uiText("Weekly (Sunday)");
+    },
+    cron: "0 0 * * 0",
+  },
 ];
 const PRESET_CRONS = SCHEDULE_PRESETS.map((p) => p.cron);
 const CUSTOM_SENTINEL = "__custom__";
 
 const WATCH_OPTIONS: { value: ExternalLibraryWatchMode; label: string }[] = [
-  { value: "auto", label: "Auto (watch local folders)" },
-  { value: "events", label: "On (force watching)" },
-  { value: "off", label: "Off (schedule only)" },
+  {
+    value: "auto",
+    get label() {
+      return uiText("Auto (watch local folders)");
+    },
+  },
+  {
+    value: "events",
+    get label() {
+      return uiText("On (force watching)");
+    },
+  },
+  {
+    value: "off",
+    get label() {
+      return uiText("Off (schedule only)");
+    },
+  },
 ];
 const COLLECTION_MODES = [
   "mirror",
@@ -75,25 +119,25 @@ function parseCollectionMode(value: string): ExternalLibraryCollectionMode {
 }
 
 function describeSchedule(cron: string): string {
-  if (!cron) return "Manual only";
+  if (!cron) return uiText("Manual only");
   const preset = SCHEDULE_PRESETS.find((p) => p.cron === cron);
-  return preset ? preset.label : `Custom (${cron})`;
+  return preset ? preset.label : uiText("Custom ({value1})", { value1: String(cron) });
 }
 
 function watchStatus(lib: ExternalLibrary): string {
-  if (!lib.enabled) return "Paused";
+  if (!lib.enabled) return uiText("Paused");
   if ((lib.source_kind ?? "mounted") !== "mounted") {
-    return "Remote source — bounded scheduled scans only";
+    return uiText("Remote source — bounded scheduled scans only");
   }
   if (lib.watch_active) {
     return lib.fs_kind === "network"
-      ? "Watching (forced — polling network folder)"
-      : "Watching (real-time)";
+      ? uiText("Watching (forced — polling network folder)")
+      : uiText("Watching (real-time)");
   }
-  if (lib.watch_mode === "off") return "Watching off — scheduled scans only";
-  if (lib.fs_kind === "network") return "Network folder — scheduled scans only";
-  if (lib.fs_kind === "unknown") return "Unknown filesystem — scheduled scans only";
-  return "Scheduled scans only";
+  if (lib.watch_mode === "off") return uiText("Watching off — scheduled scans only");
+  if (lib.fs_kind === "network") return uiText("Network folder — scheduled scans only");
+  if (lib.fs_kind === "unknown") return uiText("Unknown filesystem — scheduled scans only");
+  return uiText("Scheduled scans only");
 }
 
 interface ExternalLibraryBindingStatus {
@@ -106,33 +150,50 @@ function bindingStatus(lib: ExternalLibrary): ExternalLibraryBindingStatus {
   const isMounted = (lib.source_kind ?? "mounted") === "mounted";
   if (lib.binding_state === "bound") {
     return {
-      label: "Source verified",
+      get label() {
+        return uiText("Source verified");
+      },
       description: isMounted
-        ? "This mounted root is verified for this PrintStash installation."
-        : "This remote location is verified through its encrypted connection.",
+        ? uiText("This mounted root is verified for this PrintStash installation.")
+        : uiText("This remote location is verified through its encrypted connection."),
       tone: "bound",
     };
   }
   if (lib.binding_state === "unbound") {
     return {
-      label: "Needs enrollment",
-      description:
-        "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
+      get label() {
+        return uiText("Needs enrollment");
+      },
+      get description() {
+        return uiText(
+          "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
+        );
+      },
       tone: "recovery",
     };
   }
   if (lib.binding_state === "missing") {
     return {
-      label: "Root proof unavailable",
-      description:
-        "The root or its proof is unavailable. Scans, watching, and writeback stay paused until you verify the intended mount and enroll it again.",
+      get label() {
+        return uiText("Root proof unavailable");
+      },
+      get description() {
+        return uiText(
+          "The root or its proof is unavailable. Scans, watching, and writeback stay paused until you verify the intended mount and enroll it again.",
+        );
+      },
       tone: "recovery",
     };
   }
   return {
-    label: "Root binding blocked",
-    description:
-      "This root cannot be used safely. Scans, watching, and writeback stay paused; verify the intended mount and resolve the binding problem before continuing.",
+    get label() {
+      return uiText("Root binding blocked");
+    },
+    get description() {
+      return uiText(
+        "This root cannot be used safely. Scans, watching, and writeback stay paused; verify the intended mount and resolve the binding problem before continuing.",
+      );
+    },
     tone: "recovery",
   };
 }
@@ -148,6 +209,7 @@ function ScheduleControl({
   disabled?: boolean;
   inputClass: string;
 }) {
+  useUiLocale();
   const isPreset = PRESET_CRONS.includes(value);
   return (
     <div className="flex flex-col gap-2">
@@ -166,12 +228,12 @@ function ScheduleControl({
             {p.label}
           </option>
         ))}
-        <option value={CUSTOM_SENTINEL}>Custom cron…</option>
+        <option value={CUSTOM_SENTINEL}>{uiText("Custom cron…")}</option>
       </select>
       {!isPreset && (
         <input
           className={`${inputClass} font-mono`}
-          placeholder="*/30 * * * * (min hour dom mon dow)"
+          placeholder={uiText("*/30 * * * * (min hour dom mon dow)")}
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
@@ -182,8 +244,8 @@ function ScheduleControl({
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
+  if (!value) return uiText("Never");
+  return new Intl.DateTimeFormat(currentLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -262,6 +324,7 @@ export function ExternalLibrariesPanel({
   initialRootPath?: string;
   api?: ExternalLibrariesApi;
 }) {
+  useUiLocale();
   const [enabled, setEnabled] = useState(false);
   const [enableBusy, setEnableBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -312,7 +375,9 @@ export function ExternalLibrariesPanel({
     setEnabled(next);
     try {
       await api.setFeatureEnabled(next);
-      toast.success(next ? "Library sources enabled." : "Library sources disabled.");
+      toast.success(
+        next ? uiText("Library sources enabled.") : uiText("Library sources disabled."),
+      );
       if (next) await refresh();
     } catch (e) {
       setEnabled(!next);
@@ -326,8 +391,8 @@ export function ExternalLibrariesPanel({
     if (!name.trim() || (sourceKind === "mounted" ? !rootPath.trim() : connectionId === "")) {
       toast.error(
         sourceKind === "mounted"
-          ? "Name and folder path are required."
-          : "Name and a compatible remote connection are required.",
+          ? uiText("Name and folder path are required.")
+          : uiText("Name and a compatible remote connection are required."),
       );
       return;
     }
@@ -354,7 +419,7 @@ export function ExternalLibrariesPanel({
       setScanSchedule("0 * * * *");
       setWatchMode("auto");
       setMode("mirror");
-      toast.success("Library source added.");
+      toast.success(uiText("Library source added."));
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -367,9 +432,9 @@ export function ExternalLibrariesPanel({
     setBusyId(lib.id);
     try {
       const resp = await api.scan(lib.id);
-      trackImportJob(resp.job_id, `Scan ${lib.name}`);
+      trackImportJob(resp.job_id, uiMessage("Scan {value1}", { value1: String(lib.name) }));
       await pollScanJob(resp.job_id, api.jobStatus);
-      toast.success(`Scan complete for "${lib.name}".`);
+      toast.success(uiText('Scan complete for "{value1}".', { value1: String(lib.name) }));
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -395,7 +460,7 @@ export function ExternalLibrariesPanel({
     setBusyId(lib.id);
     try {
       await api.enroll(lib.id, { confirm_root_path: lib.root_path });
-      toast.success("Root verified. Rescan to resume indexing.");
+      toast.success(uiText("Root verified. Rescan to resume indexing."));
       setEnrollTarget(null);
       await refresh();
     } catch (e) {
@@ -424,7 +489,9 @@ export function ExternalLibrariesPanel({
     setBusyId(lib.id);
     try {
       await api.remove(lib.id);
-      toast.success(`Removed "${lib.name}". Source files were not touched.`);
+      toast.success(
+        uiText('Removed "{value1}". Source files were not touched.', { value1: String(lib.name) }),
+      );
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -445,18 +512,18 @@ export function ExternalLibrariesPanel({
               <FolderSync className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">Library sources</h3>
+              <h3 className="text-sm font-semibold text-foreground">{uiText("Library sources")}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them
-                into Vault storage. Source files stay externally owned and are never deleted by
-                PrintStash. Off by default.
+                {uiText(
+                  "Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them into Vault storage. Source files stay externally owned and are never deleted by PrintStash. Off by default.",
+                )}
               </p>
             </div>
           </div>
           <button
             type="button"
             role="switch"
-            aria-label="Library sources enabled"
+            aria-label={uiText("Library sources enabled")}
             aria-checked={enabled}
             disabled={!canEdit || enableBusy}
             onClick={() => toggleFeature(!enabled)}
@@ -478,10 +545,13 @@ export function ExternalLibrariesPanel({
             {libraries.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                 <FolderSync className="h-7 w-7 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-foreground">No library sources yet</p>
+                <p className="text-sm font-medium text-foreground">
+                  {uiText("No library sources yet")}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Add a mounted folder or connect remote storage to index existing models without
-                  copying them into the Vault.
+                  {uiText(
+                    "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
+                  )}
                 </p>
               </div>
             ) : (
@@ -505,7 +575,7 @@ export function ExternalLibrariesPanel({
                             </span>
                             {!lib.enabled && (
                               <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/70 border border-border rounded px-1.5 py-0.5">
-                                paused
+                                {uiText("paused")}
                               </span>
                             )}
                           </div>
@@ -514,8 +584,9 @@ export function ExternalLibrariesPanel({
                           </p>
                           {(lib.source_kind ?? "mounted") !== "mounted" && (
                             <p className="mt-1 text-2xs text-muted-foreground">
-                              {(lib.source_kind ?? "mounted").toUpperCase()} · remote source ·
-                              read-only
+                              {uiText("{value1} · remote source · read-only", {
+                                value1: String((lib.source_kind ?? "mounted").toUpperCase() ?? ""),
+                              })}
                             </p>
                           )}
                           <div
@@ -556,17 +627,17 @@ export function ExternalLibrariesPanel({
                                   disabled={busy}
                                   onClick={() => setEnrollTarget(lib)}
                                 >
-                                  Review and enroll
+                                  {uiText("Review and enroll")}
                                 </button>
                               )}
                             </div>
                           </div>
                           <p className="text-2xs text-muted-foreground mt-1">
                             {lib.collection_mode === "mirror"
-                              ? "Mirrors subfolders → collections"
-                              : "Single collection"}{" "}
-                            · {describeSchedule(lib.scan_schedule)} · last scan{" "}
-                            {formatDate(lib.last_scanned_at)}
+                              ? uiText("Mirrors subfolders → collections")
+                              : uiText("Single collection")}{" "}
+                            · {describeSchedule(lib.scan_schedule)}
+                            {uiText(" · last scan")} {formatDate(lib.last_scanned_at)}
                           </p>
                           <p className="text-2xs text-muted-foreground mt-0.5">
                             {watchStatus(lib)}
@@ -602,20 +673,29 @@ export function ExternalLibrariesPanel({
                           {lib.last_scan_status === "error" && (
                             <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
                               <AlertTriangle className="h-3 w-3" />
-                              {s?.error || "Last scan failed"}
+                              {s?.error || uiText("Last scan failed")}
                             </p>
                           )}
                           {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
                             s && (
                               <p className="text-2xs text-muted-foreground mt-1">
-                                +{s.added} added · {s.updated} updated · {s.removed} removed
-                                {s.errors.length > 0 ? ` · ${s.errors.length} errors` : ""}
+                                +{s.added}
+                                {uiText(" added · ")}
+                                {s.updated}
+                                {uiText(" updated · ")}
+                                {s.removed}
+                                {uiText(" removed")}
+                                {s.errors.length > 0
+                                  ? uiText(" · {value1} errors", {
+                                      value1: String(s.errors.length),
+                                    })
+                                  : ""}
                               </p>
                             )}
                           {lib.last_scan_status === "partial" && (
                             <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
                               <AlertTriangle className="h-3 w-3" />
-                              Some files could not be indexed
+                              {uiText("Some files could not be indexed")}
                             </p>
                           )}
                         </div>
@@ -624,17 +704,19 @@ export function ExternalLibrariesPanel({
                             type="button"
                             disabled={!canEdit || busy || !rootBound}
                             onClick={() => handleScan(lib)}
-                            title={rootBound ? undefined : "Verify the source before scanning."}
+                            title={
+                              rootBound ? undefined : uiText("Verify the source before scanning.")
+                            }
                             className={BTN_SECONDARY}
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
-                            {busy ? "Scanning" : "Scan now"}
+                            {busy ? uiText("Scanning") : uiText("Scan now")}
                           </button>
                           <button
                             type="button"
                             role="switch"
                             aria-checked={lib.enabled}
-                            aria-label="Auto-scan enabled"
+                            aria-label={uiText("Auto-scan enabled")}
                             disabled={!canEdit || busy || !rootBound}
                             onClick={() => handleToggleEnabled(lib)}
                             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
@@ -652,7 +734,7 @@ export function ExternalLibrariesPanel({
                             disabled={!canEdit || busy}
                             onClick={() => setDeleteTarget(lib)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
-                            aria-label="Remove library source"
+                            aria-label={uiText("Remove library source")}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -665,32 +747,33 @@ export function ExternalLibrariesPanel({
             )}
 
             <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
-              Remote connection profiles are managed in Settings → Remote storage. Create one there,
-              allow Library sources, then select it below.
+              {uiText(
+                "Remote connection profiles are managed in Settings → Remote storage. Create one there, allow Library sources, then select it below.",
+              )}
             </p>
 
             {/* Add a library source */}
             <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
               <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                Add a library source
+                {uiText("Add a library source")}
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  Source name
+                  {uiText("Source name")}
                   <input
                     className={INPUT}
-                    aria-label="Source name"
-                    placeholder="e.g. Workshop NAS"
+                    aria-label={uiText("Source name")}
+                    placeholder={uiText("e.g. Workshop NAS")}
                     value={name}
                     disabled={!canEdit}
                     onChange={(e) => setName(e.target.value)}
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  Source type
+                  {uiText("Source type")}
                   <select
                     className={INPUT}
-                    aria-label="Library source type"
+                    aria-label={uiText("Library source type")}
                     value={sourceKind}
                     disabled={!canEdit}
                     onChange={(event) => {
@@ -699,20 +782,20 @@ export function ExternalLibrariesPanel({
                       setConnectionId("");
                     }}
                   >
-                    <option value="mounted">Mounted folder (SMB/NFS/local)</option>
-                    <option value="s3">S3 / compatible</option>
-                    <option value="webdav">WebDAV / Nextcloud</option>
+                    <option value="mounted">{uiText("Mounted folder (SMB/NFS/local)")}</option>
+                    <option value="s3">{uiText("S3 / compatible")}</option>
+                    <option value="webdav">{uiText("WebDAV / Nextcloud")}</option>
                     <option value="sftp">SFTP</option>
-                    <option value="gdrive">Google Drive</option>
+                    <option value="gdrive">{uiText("Google Drive")}</option>
                   </select>
                 </label>
                 {sourceKind === "mounted" ? (
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-                    Mounted folder path
+                    {uiText("Mounted folder path")}
                     <input
                       className={INPUT}
-                      aria-label="Mounted folder path"
-                      placeholder="e.g. /mnt/nas/3d"
+                      aria-label={uiText("Mounted folder path")}
+                      placeholder={uiText("e.g. /mnt/nas/3d")}
                       value={rootPath}
                       disabled={!canEdit}
                       onChange={(e) => setRootPath(e.target.value)}
@@ -721,17 +804,17 @@ export function ExternalLibrariesPanel({
                 ) : (
                   <>
                     <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      Remote connection
+                      {uiText("Remote connection")}
                       <select
                         className={INPUT}
-                        aria-label="Remote source connection"
+                        aria-label={uiText("Remote source connection")}
                         value={connectionId}
                         disabled={!canEdit}
                         onChange={(event) =>
                           setConnectionId(event.target.value ? Number(event.target.value) : "")
                         }
                       >
-                        <option value="">Choose an enabled connection</option>
+                        <option value="">{uiText("Choose an enabled connection")}</option>
                         {connections
                           .filter(
                             (connection) =>
@@ -747,11 +830,11 @@ export function ExternalLibrariesPanel({
                       </select>
                     </label>
                     <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      Path within connection (optional)
+                      {uiText("Path within connection (optional)")}
                       <input
                         className={INPUT}
-                        aria-label="Source path within connection"
-                        placeholder="e.g. production/models"
+                        aria-label={uiText("Source path within connection")}
+                        placeholder={uiText("e.g. production/models")}
                         value={sourcePrefix}
                         disabled={!canEdit}
                         onChange={(event) => setSourcePrefix(event.target.value)}
@@ -760,7 +843,7 @@ export function ExternalLibrariesPanel({
                   </>
                 )}
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  Scan schedule
+                  {uiText("Scan schedule")}
                   <ScheduleControl
                     value={scanSchedule}
                     disabled={!canEdit}
@@ -770,7 +853,7 @@ export function ExternalLibrariesPanel({
                 </label>
                 {sourceKind === "mounted" && (
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    Real-time watching
+                    {uiText("Real-time watching")}
                     <select
                       className={INPUT}
                       value={watchMode}
@@ -786,25 +869,30 @@ export function ExternalLibrariesPanel({
                   </label>
                 )}
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  Collection layout
+                  {uiText("Collection layout")}
                   <select
                     className={INPUT}
-                    aria-label="Collection layout"
+                    aria-label={uiText("Collection layout")}
                     value={mode}
                     disabled={!canEdit}
                     onChange={(e) => setMode(parseCollectionMode(e.target.value))}
                   >
-                    <option value="mirror">Map subfolders to collections</option>
-                    <option value="single">Single collection (flat)</option>
+                    <option value="mirror">{uiText("Map subfolders to collections")}</option>
+                    <option value="single">{uiText("Single collection (flat)")}</option>
                   </select>
                 </label>
               </div>
               <p className="text-2xs text-muted-foreground">
-                PrintStash stores catalog metadata and thumbnails only; source files stay in their
-                original location.{" "}
+                {uiText(
+                  "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+                )}{" "}
                 {sourceKind === "mounted"
-                  ? "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back."
-                  : "Remote sources use bounded manual or scheduled scans and are always read-only."}
+                  ? uiText(
+                      "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back.",
+                    )
+                  : uiText(
+                      "Remote sources use bounded manual or scheduled scans and are always read-only.",
+                    )}
               </p>
               <div className="flex justify-end">
                 <button
@@ -814,7 +902,7 @@ export function ExternalLibrariesPanel({
                   className={BTN_PRIMARY}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  {busyId === "create" ? "Adding" : "Add source"}
+                  {busyId === "create" ? uiText("Adding") : uiText("Add source")}
                 </button>
               </div>
             </div>
@@ -824,13 +912,16 @@ export function ExternalLibrariesPanel({
         <ConfirmModal
           open={deleteTarget !== null}
           onClose={() => setDeleteTarget(null)}
-          title="Remove library source?"
+          title={uiText("Remove library source?")}
           description={
             deleteTarget
-              ? `"${deleteTarget.name}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.`
+              ? uiText(
+                  '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
+                  { value1: String(deleteTarget.name) },
+                )
               : ""
           }
-          confirmLabel="Remove"
+          confirmLabel={uiText("Remove")}
           busy={deleteTarget !== null && busyId === deleteTarget.id}
           onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
         />
@@ -839,13 +930,16 @@ export function ExternalLibrariesPanel({
           onClose={() => {
             if (busyId === null) setEnrollTarget(null);
           }}
-          title="Enroll mounted source root?"
+          title={uiText("Enroll mounted source root?")}
           description={
             enrollTarget
-              ? `Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ${enrollTarget.root_path}. This re-enables safe scans, watching, and writeback.`
+              ? uiText(
+                  "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
+                  { value1: String(enrollTarget.root_path) },
+                )
               : ""
           }
-          confirmLabel="Enroll root"
+          confirmLabel={uiText("Enroll root")}
           busy={enrollTarget !== null && busyId === enrollTarget.id}
           onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
         />

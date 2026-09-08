@@ -1,3 +1,6 @@
+import { uiText } from "@/lib/locale";
+import { knownUiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 /* eslint-disable react-refresh/only-export-components */
 import { useState } from "react";
 import { Cloud, HardDrive, Network, Server } from "lucide-react";
@@ -16,10 +19,34 @@ const CATEGORIES: Array<{
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: "this_machine", label: "This machine", icon: HardDrive },
-  { id: "s3_compatible", label: "S3-compatible object storage", icon: Cloud },
-  { id: "nextcloud_webdav", label: "Nextcloud and WebDAV", icon: Network },
-  { id: "nas_sftp", label: "NAS over SFTP", icon: Server },
+  {
+    id: "this_machine",
+    get label() {
+      return uiText("This machine");
+    },
+    icon: HardDrive,
+  },
+  {
+    id: "s3_compatible",
+    get label() {
+      return uiText("S3-compatible object storage");
+    },
+    icon: Cloud,
+  },
+  {
+    id: "nextcloud_webdav",
+    get label() {
+      return uiText("Nextcloud and WebDAV");
+    },
+    icon: Network,
+  },
+  {
+    id: "nas_sftp",
+    get label() {
+      return uiText("NAS over SFTP");
+    },
+    icon: Server,
+  },
 ];
 
 export type ProviderValues = StorageProviderConfigValues;
@@ -29,11 +56,11 @@ export function defaultProviderValues(provider: StorageProvider): ProviderValues
 }
 
 function tierLabel(tier: string): string {
-  return tier.charAt(0).toUpperCase() + tier.slice(1);
+  return knownUiText(tier);
 }
 
 function supportLabel(level: string | undefined): string {
-  return (level ?? "stable").charAt(0).toUpperCase() + (level ?? "stable").slice(1);
+  return knownUiText(level ?? "stable");
 }
 
 function providerConsequences(
@@ -59,6 +86,7 @@ export function StorageProviderPicker(props: {
   disabled?: boolean;
   activeTier?: string;
 }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
   const selected = props.providers.find((provider) => provider.id === props.providerId);
   const [categoryOverride, setCategoryOverride] = useState<ProviderCategory | null>(null);
@@ -69,8 +97,8 @@ export function StorageProviderPicker(props: {
   const consequences = selected
     ? providerConsequences(
         selected,
-        i18n?.t("storage.guardedCatalog") ?? "Confirmed catalog removal retains stored bytes.",
-        i18n?.t("storage.guardedRetention") ?? "Automatic physical deletion is unavailable.",
+        i18n?.t("storage.guardedCatalog") ?? uiText("storage.guardedCatalog"),
+        i18n?.t("storage.guardedRetention") ?? uiText("storage.guardedRetention"),
       )
     : [];
 
@@ -78,7 +106,7 @@ export function StorageProviderPicker(props: {
     <div className="space-y-5">
       <fieldset className="space-y-2">
         <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-          Storage category
+          {uiText("Storage category")}
         </legend>
         <div className="grid gap-2 sm:grid-cols-2">
           {CATEGORIES.map((category) => {
@@ -110,7 +138,7 @@ export function StorageProviderPicker(props: {
 
       <fieldset className="space-y-2">
         <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-          Provider
+          {uiText("Provider")}
         </legend>
         <div className="grid gap-2 sm:grid-cols-2">
           {props.providers
@@ -125,7 +153,9 @@ export function StorageProviderPicker(props: {
                 title={
                   provider.uses?.vault && !provider.uses.vault.available
                     ? storageOperationMessage(provider.uses.vault.reason, i18n?.t)
-                    : (provider.disabled_reason ?? undefined)
+                    : provider.disabled_reason
+                      ? storageOperationMessage(provider.disabled_reason, i18n?.t)
+                      : undefined
                 }
                 onClick={() => {
                   setCategoryOverride(null);
@@ -138,11 +168,13 @@ export function StorageProviderPicker(props: {
                 )}
               >
                 <span>
-                  <span className="block text-sm font-medium">{provider.label}</span>
+                  <span className="block text-sm font-medium">{knownUiText(provider.label)}</span>
                   <span className="block text-xs font-normal opacity-70">
                     {provider.uses?.vault && !provider.uses.vault.available
                       ? storageOperationMessage(provider.uses.vault.reason, i18n?.t)
-                      : (provider.disabled_reason ?? provider.description)}
+                      : provider.disabled_reason
+                        ? storageOperationMessage(provider.disabled_reason, i18n?.t)
+                        : knownUiText(provider.description)}
                   </span>
                 </span>
               </Button>
@@ -157,21 +189,34 @@ export function StorageProviderPicker(props: {
               <Badge variant="outline">
                 {i18n?.t("settings.storageSupport", {
                   level: supportLabel(selected.support_level),
-                }) ?? `Support: ${supportLabel(selected.support_level)}`}
+                }) ??
+                  uiText("Support: {value1}", {
+                    value1: String(supportLabel(selected.support_level)),
+                  })}
               </Badge>
-              <Badge variant="secondary">Expected: {tierLabel(selected.expected_tier)}</Badge>
+              <Badge variant="secondary">
+                {uiText("Expected: {value1}", {
+                  value1: String(tierLabel(selected.expected_tier) ?? ""),
+                })}
+              </Badge>
               {props.activeTier && (
-                <Badge variant="outline">Active: {tierLabel(props.activeTier)}</Badge>
+                <Badge variant="outline">
+                  {uiText("Active: {value1}", {
+                    value1: String(tierLabel(props.activeTier) ?? ""),
+                  })}
+                </Badge>
               )}
             </div>
-            <p className="text-sm text-on-surface">{selected.expected_tier_note}</p>
+            <p className="text-sm text-on-surface">{knownUiText(selected.expected_tier_note)}</p>
             {selected.expected_tier === "guarded" && (
-              <p className="text-xs font-medium text-on-surface">Guarded storage consequences</p>
+              <p className="text-xs font-medium text-on-surface">
+                {uiText("Guarded storage consequences")}
+              </p>
             )}
             {consequences.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
                 {consequences.map((consequence) => (
-                  <li key={consequence}>{consequence}</li>
+                  <li key={consequence}>{knownUiText(consequence)}</li>
                 ))}
               </ul>
             )}

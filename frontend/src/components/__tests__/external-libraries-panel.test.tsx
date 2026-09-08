@@ -356,7 +356,11 @@ describe("ExternalLibrariesPanel", () => {
       await user.click(screen.getByRole("button", { name: "Review and enroll" }));
       await user.click(await screen.findByRole("button", { name: "Enroll root" }));
 
-      expect(await screen.findByText("Root marker conflict.")).toBeVisible();
+      expect(
+        await screen.findByText(
+          "The library root belongs to another installation. Verify its location before enrolling it.",
+        ),
+      ).toBeVisible();
       expect(api.list).toHaveBeenCalledTimes(1);
     });
   });
@@ -511,7 +515,9 @@ describe("ExternalLibrariesPanel", () => {
 
       await user.click(screen.getByRole("button", { name: /Scan now/ }));
 
-      expect(await screen.findByText("Root path missing.")).toBeInTheDocument();
+      expect(
+        await screen.findByText("The library folder is unavailable. Check its path and mount."),
+      ).toBeInTheDocument();
     });
 
     it("re-reads the volume after a failed scan", async () => {

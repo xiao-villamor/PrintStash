@@ -23,14 +23,18 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: "MXN", label: "MXN — Mexican Peso ($)" },
 ];
 
-export function formatCurrency(value: number | null | undefined, code: string): string {
+export function formatCurrency(
+  value: number | null | undefined,
+  code: string,
+  locale = "en",
+): string {
   if (value == null) return "—";
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: code || "USD",
     }).format(value);
   } catch {
-    return `${value.toFixed(2)} ${code}`;
+    return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(value)} ${code}`;
   }
 }

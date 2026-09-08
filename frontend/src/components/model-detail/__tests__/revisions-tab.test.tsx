@@ -161,6 +161,19 @@ describe("RevisionsTab", () => {
         }),
       );
     });
+
+    it("localizes a successful revision update", async () => {
+      const user = userEvent.setup();
+      renderRevisions({
+        locale: "es",
+        routes: { "PATCH /api/v1/models/1/files/20/revision": json(aModel()) },
+      });
+      await user.click((await screen.findAllByRole("button", { name: "Editar revisión" }))[0]);
+
+      await user.click(screen.getByRole("button", { name: "Guardar" }));
+
+      expect(await screen.findByText("Revisión actualizada")).toBeInTheDocument();
+    });
   });
 
   describe("deleting a revision", () => {

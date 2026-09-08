@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { FilamentProfileRead, PrinterProfileRead } from "@/types";
 import {
@@ -37,7 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
 import { Localized } from "@/components/ui/localized";
 import { useI18n } from "@/lib/i18n";
-import { translateUiText } from "@/components/ui/localized";
+import { translateUiText } from "@/lib/locale";
 
 type FilamentEdit = {
   name: string;
@@ -138,6 +141,7 @@ function materialColor(type: string): string {
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
+  useUiLocale();
   return (
     <span className="mb-1.5 block text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
@@ -146,6 +150,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 }
 
 function RowLabel({ children }: { children: React.ReactNode }) {
+  useUiLocale();
   return (
     <span className="mb-1.5 block text-3xs font-semibold uppercase tracking-wider text-muted-foreground md:sr-only">
       {children}
@@ -154,6 +159,7 @@ function RowLabel({ children }: { children: React.ReactNode }) {
 }
 
 function RowStatus({ state }: { state?: "saving" | "saved" }) {
+  useUiLocale();
   if (state === "saving")
     return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
   if (state === "saved") return <Check className="h-3.5 w-3.5 text-emerald-500" />;
@@ -161,6 +167,7 @@ function RowStatus({ state }: { state?: "saving" | "saved" }) {
 }
 
 export function FilamentProfilesCard() {
+  useUiLocale();
   const auth = useRequireAuth();
   const { locale } = useI18n();
   const [activeTab, setActiveTab] = useState<"filaments" | "printers">("filaments");
@@ -249,7 +256,7 @@ export function FilamentProfilesCard() {
     }
     const parsedCost = parseOptionalNumber(newCost);
     if (parsedCost !== null && Number.isNaN(parsedCost)) {
-      toast.error("Invalid filament cost");
+      toast.error(uiText("Invalid filament cost"));
       return;
     }
     try {
@@ -266,7 +273,7 @@ export function FilamentProfilesCard() {
       setNewCost("");
       setNewNotes("");
       setShowAddFilament(false);
-      toast.success(`Filament preset "${trimmedName}" saved`);
+      toast.success(uiText('Filament preset "{value1}" saved', { value1: String(trimmedName) }));
       refresh();
     } catch (e: any) {
       setError(e.message);
@@ -308,7 +315,12 @@ export function FilamentProfilesCard() {
     setSyncing(true);
     try {
       const r = await syncSpoolmanFilaments();
-      toast.success(`Synced from Spoolman — ${r.created} added, ${r.updated + r.adopted} updated`);
+      toast.success(
+        uiText("Synced from Spoolman — {value1} added, {value2} updated", {
+          value1: String(r.created),
+          value2: String(r.updated + r.adopted),
+        }),
+      );
       await refresh();
     } catch (e: any) {
       setError(e.message);
@@ -328,9 +340,9 @@ export function FilamentProfilesCard() {
     if (parsedCost !== null && Number.isNaN(parsedCost)) {
       setFilamentValidationErrors((current) => ({
         ...current,
-        [profile.id]: "Cost must be 0 or more.",
+        [profile.id]: uiText("Cost must be 0 or more."),
       }));
-      toast.error("Invalid filament cost");
+      toast.error(uiText("Invalid filament cost"));
       return;
     }
     setFilamentValidationErrors((current) => {
@@ -371,10 +383,10 @@ export function FilamentProfilesCard() {
     try {
       if (deleteTarget.kind === "filament") {
         await deleteFilamentProfile(deleteTarget.id);
-        toast.success("Filament preset removed");
+        toast.success(uiText("Filament preset removed"));
       } else {
         await deletePrinterProfile(deleteTarget.id);
-        toast.success("Printer preset removed");
+        toast.success(uiText("Printer preset removed"));
       }
       setDeleteTarget(null);
       await refresh();
@@ -395,7 +407,7 @@ export function FilamentProfilesCard() {
     }
     const parsedNozzle = parseOptionalNumber(newPrinterNozzle);
     if (parsedNozzle !== null && Number.isNaN(parsedNozzle)) {
-      toast.error("Invalid nozzle diameter");
+      toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
     try {
@@ -410,7 +422,7 @@ export function FilamentProfilesCard() {
       setNewPrinterNozzle("");
       setNewPrinterNotes("");
       setShowAddPrinter(false);
-      toast.success(`Printer preset "${trimmedName}" saved`);
+      toast.success(uiText('Printer preset "{value1}" saved', { value1: String(trimmedName) }));
       refresh();
     } catch (e: any) {
       setError(e.message);
@@ -424,7 +436,7 @@ export function FilamentProfilesCard() {
     if (!printerDirty(profile, edit) || !edit.name.trim()) return;
     const parsedNozzle = parseOptionalNumber(edit.nozzle);
     if (parsedNozzle !== null && Number.isNaN(parsedNozzle)) {
-      toast.error("Invalid nozzle diameter");
+      toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
     const key = `p${profile.id}`;
@@ -462,14 +474,18 @@ export function FilamentProfilesCard() {
           onConfirm={confirmDeletePreset}
           busy={deleteBusy}
           title={
-            deleteTarget?.kind === "printer" ? "Delete printer preset?" : "Delete filament preset?"
+            deleteTarget?.kind === "printer"
+              ? uiText("Delete printer preset?")
+              : uiText("Delete filament preset?")
           }
           description={
             deleteTarget
-              ? `“${deleteTarget.name}” will be permanently deleted. This action cannot be undone.`
-              : "This preset will be permanently deleted."
+              ? uiText("“{value1}” will be permanently deleted. This action cannot be undone.", {
+                  value1: String(deleteTarget.name),
+                })
+              : uiText("This preset will be permanently deleted.")
           }
-          confirmLabel="Delete preset"
+          confirmLabel={uiText("Delete preset")}
         />
         {error && (
           <div
@@ -544,7 +560,7 @@ export function FilamentProfilesCard() {
                 <Plus className="h-3.5 w-3.5" />
                 {translateUiText(
                   locale,
-                  activeTab === "filaments" ? "New filament" : "New printer",
+                  activeTab === "filaments" ? uiText("New filament") : uiText("New printer"),
                 )}
                 <ChevronDown
                   className={`h-3.5 w-3.5 transition-transform duration-press ${(activeTab === "filaments" ? showAddFilament : showAddPrinter) ? "rotate-180" : ""}`}
@@ -558,10 +574,10 @@ export function FilamentProfilesCard() {
               <div className="flex items-center justify-between border-b px-5 py-3">
                 <div>
                   <h2 id="filament-presets-heading" className="text-sm font-semibold">
-                    Filament presets
+                    {uiText("Filament presets")}
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    Changes save automatically when leaving a row.
+                    {uiText("Changes save automatically when leaving a row.")}
                   </p>
                 </div>
               </div>
@@ -572,41 +588,41 @@ export function FilamentProfilesCard() {
                     e.preventDefault();
                     handleCreateFilament();
                   }}
-                  aria-label="Create filament preset"
+                  aria-label={uiText("Create filament preset")}
                   className="border-b bg-accent/30 p-5"
                 >
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <label>
-                      <FieldLabel>Name</FieldLabel>
+                      <FieldLabel>{uiText("Name")}</FieldLabel>
                       <Input
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
-                        placeholder="Everyday PLA"
+                        placeholder={uiText("Everyday PLA")}
                         className={compactInputClass}
                         autoFocus
                         required
                       />
                     </label>
                     <label>
-                      <FieldLabel>Material</FieldLabel>
+                      <FieldLabel>{uiText("Material")}</FieldLabel>
                       <Input
                         value={newType}
                         onChange={(e) => setNewType(e.target.value)}
-                        placeholder="PLA, PETG…"
+                        placeholder={uiText("PLA, PETG…")}
                         className={compactInputClass}
                       />
                     </label>
                     <label>
-                      <FieldLabel>Brand</FieldLabel>
+                      <FieldLabel>{uiText("Brand")}</FieldLabel>
                       <Input
                         value={newBrand}
                         onChange={(e) => setNewBrand(e.target.value)}
-                        placeholder="Manufacturer"
+                        placeholder={uiText("Manufacturer")}
                         className={compactInputClass}
                       />
                     </label>
                     <label>
-                      <FieldLabel>Cost per kg</FieldLabel>
+                      <FieldLabel>{uiText("Cost per kg")}</FieldLabel>
                       <Input
                         value={newCost}
                         onChange={(e) => setNewCost(e.target.value)}
@@ -616,11 +632,11 @@ export function FilamentProfilesCard() {
                       />
                     </label>
                     <label>
-                      <FieldLabel>Notes</FieldLabel>
+                      <FieldLabel>{uiText("Notes")}</FieldLabel>
                       <Input
                         value={newNotes}
                         onChange={(e) => setNewNotes(e.target.value)}
-                        placeholder="Optional"
+                        placeholder={uiText("Optional")}
                         className={compactInputClass}
                       />
                     </label>
@@ -633,11 +649,11 @@ export function FilamentProfilesCard() {
                       onClick={() => setShowAddFilament(false)}
                     >
                       <X className="h-3.5 w-3.5" />
-                      Cancel
+                      {uiText("Cancel")}
                     </Button>
                     <Button type="submit" size="xs" disabled={!newName.trim()}>
                       <Plus className="h-3.5 w-3.5" />
-                      Add preset
+                      {uiText("Add preset")}
                     </Button>
                   </div>
                 </form>
@@ -652,8 +668,8 @@ export function FilamentProfilesCard() {
               ) : filaments.length === 0 ? (
                 <EmptyState
                   icon={Layers}
-                  title="No filament presets"
-                  description="Create one to track materials, brands, and costs."
+                  title={uiText("No filament presets")}
+                  description={uiText("Create one to track materials, brands, and costs.")}
                   className="py-12"
                 />
               ) : (
@@ -680,7 +696,7 @@ export function FilamentProfilesCard() {
                           className="group grid gap-3 px-5 py-4 transition-colors duration-press hover:bg-muted/20 md:grid-cols-[minmax(10rem,1.3fr)_7rem_minmax(8rem,1fr)_7rem_minmax(8rem,1fr)_3.5rem] md:items-start md:gap-2"
                         >
                           <label>
-                            <RowLabel>Name</RowLabel>
+                            <RowLabel>{uiText("Name")}</RowLabel>
                             <div className="flex items-center gap-2">
                               <span
                                 className={`h-2.5 w-2.5 shrink-0 rounded-full ${edit.materialType ? materialColor(edit.materialType) : "bg-muted-foreground/30"}`}
@@ -691,45 +707,50 @@ export function FilamentProfilesCard() {
                                   updateFilamentEdit(profile.id, { name: e.target.value })
                                 }
                                 disabled={locked}
-                                aria-label={`Filament preset name ${profile.id}`}
+                                aria-label={uiText("Filament preset name {value1}", {
+                                  value1: String(profile.id),
+                                })}
                                 className={compactInputClass}
                               />
                             </div>
                             {profile.usage_count > 0 && (
                               <span className="mt-1 block pl-[1.125rem] text-3xs text-muted-foreground">
-                                Used by {profile.usage_count} file
-                                {profile.usage_count === 1 ? "" : "s"}
+                                {uiText("counts.usedByFiles", { count: profile.usage_count })}
                               </span>
                             )}
                           </label>
                           <label>
-                            <RowLabel>Material</RowLabel>
+                            <RowLabel>{uiText("Material")}</RowLabel>
                             <Input
                               value={edit.materialType}
                               onChange={(e) =>
                                 updateFilamentEdit(profile.id, { materialType: e.target.value })
                               }
                               disabled={locked}
-                              aria-label={`Filament type ${profile.id}`}
+                              aria-label={uiText("Filament type {value1}", {
+                                value1: String(profile.id),
+                              })}
                               placeholder="PLA"
                               className={compactInputClass}
                             />
                           </label>
                           <label>
-                            <RowLabel>Brand</RowLabel>
+                            <RowLabel>{uiText("Brand")}</RowLabel>
                             <Input
                               value={edit.materialBrand}
                               onChange={(e) =>
                                 updateFilamentEdit(profile.id, { materialBrand: e.target.value })
                               }
                               disabled={locked}
-                              aria-label={`Filament brand ${profile.id}`}
-                              placeholder="Brand"
+                              aria-label={uiText("Filament brand {value1}", {
+                                value1: String(profile.id),
+                              })}
+                              placeholder={uiText("Brand")}
                               className={compactInputClass}
                             />
                           </label>
                           <label>
-                            <RowLabel>Cost / kg</RowLabel>
+                            <RowLabel>{uiText("Cost / kg")}</RowLabel>
                             <Input
                               value={edit.cost}
                               onChange={(e) =>
@@ -737,7 +758,9 @@ export function FilamentProfilesCard() {
                               }
                               disabled={locked}
                               inputMode="decimal"
-                              aria-label={`Filament cost per kg ${profile.id}`}
+                              aria-label={uiText("Filament cost per kg {value1}", {
+                                value1: String(profile.id),
+                              })}
                               aria-invalid={Boolean(filamentValidationErrors[profile.id])}
                               aria-describedby={
                                 filamentValidationErrors[profile.id]
@@ -758,21 +781,23 @@ export function FilamentProfilesCard() {
                             )}
                           </label>
                           <label>
-                            <RowLabel>Notes</RowLabel>
+                            <RowLabel>{uiText("Notes")}</RowLabel>
                             <Input
                               value={edit.notes}
                               onChange={(e) =>
                                 updateFilamentEdit(profile.id, { notes: e.target.value })
                               }
                               disabled={locked}
-                              aria-label={`Filament notes ${profile.id}`}
-                              placeholder="Optional"
+                              aria-label={uiText("Filament notes {value1}", {
+                                value1: String(profile.id),
+                              })}
+                              placeholder={uiText("Optional")}
                               className={compactInputClass}
                             />
                           </label>
                           <div className="flex h-9 items-center justify-end gap-1 md:mt-5">
                             {linked ? (
-                              <Badge variant="success">Synced</Badge>
+                              <Badge variant="success">{uiText("Synced")}</Badge>
                             ) : (
                               <>
                                 <RowStatus state={rowStatus[`f${profile.id}`]} />
@@ -788,8 +813,10 @@ export function FilamentProfilesCard() {
                                     })
                                   }
                                   disabled={!auth.isAuthenticated}
-                                  aria-label={`Delete filament preset ${edit.name}`}
-                                  title="Delete"
+                                  aria-label={uiText("Delete filament preset {value1}", {
+                                    value1: String(edit.name),
+                                  })}
+                                  title={uiText("Delete")}
                                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -808,10 +835,10 @@ export function FilamentProfilesCard() {
             <section aria-labelledby="printer-presets-heading">
               <div className="border-b px-5 py-3">
                 <h2 id="printer-presets-heading" className="text-sm font-semibold">
-                  Printer presets
+                  {uiText("Printer presets")}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Changes save automatically when leaving a row.
+                  {uiText("Changes save automatically when leaving a row.")}
                 </p>
               </div>
 
@@ -821,32 +848,32 @@ export function FilamentProfilesCard() {
                     e.preventDefault();
                     handleCreatePrinter();
                   }}
-                  aria-label="Create printer preset"
+                  aria-label={uiText("Create printer preset")}
                   className="border-b bg-accent/30 p-5"
                 >
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <label>
-                      <FieldLabel>Name</FieldLabel>
+                      <FieldLabel>{uiText("Name")}</FieldLabel>
                       <Input
                         value={newPrinterName}
                         onChange={(e) => setNewPrinterName(e.target.value)}
-                        placeholder="Voron 2.4 — 0.4 mm"
+                        placeholder={uiText("Voron 2.4 — 0.4 mm")}
                         className={compactInputClass}
                         autoFocus
                         required
                       />
                     </label>
                     <label>
-                      <FieldLabel>Printer model</FieldLabel>
+                      <FieldLabel>{uiText("Printer model")}</FieldLabel>
                       <Input
                         value={newPrinterModel}
                         onChange={(e) => setNewPrinterModel(e.target.value)}
-                        placeholder="Machine model"
+                        placeholder={uiText("Machine model")}
                         className={compactInputClass}
                       />
                     </label>
                     <label>
-                      <FieldLabel>Nozzle diameter</FieldLabel>
+                      <FieldLabel>{uiText("Nozzle diameter")}</FieldLabel>
                       <Input
                         value={newPrinterNozzle}
                         onChange={(e) => setNewPrinterNozzle(e.target.value)}
@@ -856,11 +883,11 @@ export function FilamentProfilesCard() {
                       />
                     </label>
                     <label>
-                      <FieldLabel>Notes</FieldLabel>
+                      <FieldLabel>{uiText("Notes")}</FieldLabel>
                       <Input
                         value={newPrinterNotes}
                         onChange={(e) => setNewPrinterNotes(e.target.value)}
-                        placeholder="Optional"
+                        placeholder={uiText("Optional")}
                         className={compactInputClass}
                       />
                     </label>
@@ -873,11 +900,11 @@ export function FilamentProfilesCard() {
                       onClick={() => setShowAddPrinter(false)}
                     >
                       <X className="h-3.5 w-3.5" />
-                      Cancel
+                      {uiText("Cancel")}
                     </Button>
                     <Button type="submit" size="xs" disabled={!newPrinterName.trim()}>
                       <Plus className="h-3.5 w-3.5" />
-                      Add preset
+                      {uiText("Add preset")}
                     </Button>
                   </div>
                 </form>
@@ -892,8 +919,8 @@ export function FilamentProfilesCard() {
               ) : printers.length === 0 ? (
                 <EmptyState
                   icon={Printer}
-                  title="No printer presets"
-                  description="Create one to reuse machine and nozzle settings."
+                  title={uiText("No printer presets")}
+                  description={uiText("Create one to reuse machine and nozzle settings.")}
                   className="py-12"
                 />
               ) : (
@@ -918,24 +945,28 @@ export function FilamentProfilesCard() {
                           className="group grid gap-3 px-5 py-4 transition-colors duration-press hover:bg-muted/20 md:grid-cols-[minmax(11rem,1.3fr)_minmax(10rem,1fr)_7rem_minmax(10rem,1fr)_3.5rem] md:items-start md:gap-2"
                         >
                           <label>
-                            <RowLabel>Name</RowLabel>
+                            <RowLabel>{uiText("Name")}</RowLabel>
                             <Input
                               value={edit.name}
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { name: e.target.value })
                               }
                               disabled={!auth.isAuthenticated}
-                              aria-label={`Printer preset name ${profile.id}`}
+                              aria-label={uiText("Printer preset name {value1}", {
+                                value1: String(profile.id),
+                              })}
                               className={compactInputClass}
                             />
                             {(profile.slicer_name || profile.usage_count > 0) && (
                               <span className="mt-1 block text-3xs text-muted-foreground">
                                 {[
                                   profile.slicer_name
-                                    ? `Detected from ${profile.slicer_name}`
+                                    ? uiText("Detected from {value1}", {
+                                        value1: String(profile.slicer_name),
+                                      })
                                     : null,
                                   profile.usage_count > 0
-                                    ? `used by ${profile.usage_count} file${profile.usage_count === 1 ? "" : "s"}`
+                                    ? uiText("counts.usedByFiles", { count: profile.usage_count })
                                     : null,
                                 ]
                                   .filter(Boolean)
@@ -944,20 +975,22 @@ export function FilamentProfilesCard() {
                             )}
                           </label>
                           <label>
-                            <RowLabel>Printer model</RowLabel>
+                            <RowLabel>{uiText("Printer model")}</RowLabel>
                             <Input
                               value={edit.model}
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { model: e.target.value })
                               }
                               disabled={!auth.isAuthenticated}
-                              aria-label={`Printer model ${profile.id}`}
-                              placeholder="Machine model"
+                              aria-label={uiText("Printer model {value1}", {
+                                value1: String(profile.id),
+                              })}
+                              placeholder={uiText("Machine model")}
                               className={compactInputClass}
                             />
                           </label>
                           <label>
-                            <RowLabel>Nozzle</RowLabel>
+                            <RowLabel>{uiText("Nozzle")}</RowLabel>
                             <Input
                               value={edit.nozzle}
                               onChange={(e) =>
@@ -965,21 +998,25 @@ export function FilamentProfilesCard() {
                               }
                               disabled={!auth.isAuthenticated}
                               inputMode="decimal"
-                              aria-label={`Printer nozzle diameter ${profile.id}`}
+                              aria-label={uiText("Printer nozzle diameter {value1}", {
+                                value1: String(profile.id),
+                              })}
                               placeholder="0.4"
                               className={compactInputClass}
                             />
                           </label>
                           <label>
-                            <RowLabel>Notes</RowLabel>
+                            <RowLabel>{uiText("Notes")}</RowLabel>
                             <Input
                               value={edit.notes}
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { notes: e.target.value })
                               }
                               disabled={!auth.isAuthenticated}
-                              aria-label={`Printer notes ${profile.id}`}
-                              placeholder="Optional"
+                              aria-label={uiText("Printer notes {value1}", {
+                                value1: String(profile.id),
+                              })}
+                              placeholder={uiText("Optional")}
                               className={compactInputClass}
                             />
                           </label>
@@ -997,8 +1034,10 @@ export function FilamentProfilesCard() {
                                 })
                               }
                               disabled={!auth.isAuthenticated}
-                              aria-label={`Delete printer preset ${edit.name}`}
-                              title="Delete"
+                              aria-label={uiText("Delete printer preset {value1}", {
+                                value1: String(edit.name),
+                              })}
+                              title={uiText("Delete")}
                               className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                             >
                               <Trash2 className="h-3.5 w-3.5" />

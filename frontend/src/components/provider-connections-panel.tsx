@@ -1,5 +1,7 @@
 "use client";
 
+import { currentLocale } from "@/lib/locale";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound, Link, Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -66,9 +68,10 @@ function connectionFor(
 }
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    new Date(value),
-  );
+  return new Intl.DateTimeFormat(currentLocale(), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 export function ProviderConnectionsPanel({

@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Suspense, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
 import { Link } from "@/lib/link";
@@ -44,6 +47,7 @@ function subscribeLastVaultHref(onStoreChange: () => void): () => void {
 }
 
 function TopBarSearch() {
+  useUiLocale();
   const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -119,7 +123,8 @@ function TopBarSearch() {
           ref={inputRef}
           className="block w-full pl-10 pr-10 sm:pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-ring focus:border-primary dark:border-primary-soft text-sm transition-colors"
           placeholder={t("nav.search")}
-          aria-label="Search models"
+          data-model-search
+          aria-label={uiText("Search models")}
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -145,6 +150,7 @@ function TopBarSearch() {
 }
 
 export function TopBar() {
+  useUiLocale();
   const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
@@ -299,6 +305,7 @@ function ProfileMenu({
   onNavigate: () => void;
   onLogout: () => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const items = [
     { href: "/", label: t("nav.vault"), icon: Box },

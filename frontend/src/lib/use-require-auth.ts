@@ -16,6 +16,8 @@ import { useCallback, useMemo } from "react";
 
 import { isLoggedIn } from "@/lib/auth";
 import { toast } from "@/lib/toast";
+import { uiText } from "./locale";
+import { useUiLocale } from "./i18n";
 
 export interface UseRequireAuthReturn {
   /** True if the user holds a JWT. */
@@ -33,23 +35,21 @@ export interface UseRequireAuthReturn {
   showSessionExpiredToast(): void;
 }
 
-const AUTH_REQUIRED_MSG =
-  "Sign in required to perform this action. Use the login page to continue.";
-
 export function useRequireAuth(): UseRequireAuthReturn {
+  useUiLocale();
   const isAuthenticated = useMemo(() => isLoggedIn(), []);
 
-  const blockReason = useMemo(
-    () => (isAuthenticated ? null : "Sign in required"),
-    [isAuthenticated],
-  );
+  const blockReason = isAuthenticated ? null : uiText("Sign in required");
 
   const showAuthRequiredToast = useCallback(() => {
-    toast.warning("Authentication required", AUTH_REQUIRED_MSG);
+    toast.warning(
+      uiText("Authentication required"),
+      uiText("Sign in required to perform this action. Use the login page to continue."),
+    );
   }, []);
 
   const showSessionExpiredToast = useCallback(() => {
-    toast.warning("Session expired", "Please sign in again to continue.");
+    toast.warning(uiText("Session expired"), uiText("Please sign in again to continue."));
   }, []);
 
   const guardWrite = useCallback(

@@ -1,3 +1,6 @@
+import { knownUiText } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { getErrorMessage } from "@/lib/errors";
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ExternalLink, FileBox, FolderPlus, Link2, Tags, Trash2 } from "lucide-react";
 import { useParams } from "react-router-dom";
@@ -78,7 +81,7 @@ function statusLabel(item: InboxItem, t: ReturnType<typeof useI18n>["t"]): strin
     case "failed":
       return t("inbox.state.failed");
     default:
-      return item.state;
+      return knownUiText(item.state);
   }
 }
 
@@ -106,7 +109,7 @@ function providerLabel(item: InboxItem): string {
     item.manifest.schema_version === 2
       ? item.manifest.source.provider
       : item.source_hostname?.split(".").at(-2);
-  if (!provider) return "Web";
+  if (!provider) return uiText("Web");
   switch (provider.toLowerCase()) {
     case "cults3d":
       return "Cults3D";
@@ -333,7 +336,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
           role="alert"
           className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
-          {item.error_code}
+          {getErrorMessage(item.error_code)}
         </div>
       )}
       {item.state === "importing" && (

@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import {
@@ -41,6 +44,7 @@ const mainItems: NavItem[] = [
 const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];
 
 export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
+  useUiLocale();
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { t } = useI18n();
@@ -51,7 +55,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
       open={open}
       onClose={onClose}
       side="left"
-      ariaLabel="Navigation"
+      ariaLabel={uiText("Navigation")}
       containerClassName="md:hidden"
       className="w-[280px] max-w-[85vw] bg-surface-container-low shadow-xl flex flex-col"
     >
@@ -62,7 +66,9 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
           </div>
           <div>
             <h2 className="text-lg font-bold text-primary leading-tight">PrintStash</h2>
-            <p className="text-3xs text-on-surface-variant font-mono">Your prints, organized</p>
+            <p className="text-3xs text-on-surface-variant font-mono">
+              {uiText("Your prints, organized")}
+            </p>
           </div>
         </div>
         <button
@@ -110,7 +116,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
                 onClose();
               }}
               className="text-on-surface-variant hover:text-error transition-colors p-1"
-              title="Sign out"
+              title={uiText("Sign out")}
             >
               <LogOut className="h-4 w-4" />
             </button>

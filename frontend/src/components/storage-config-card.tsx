@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Save } from "lucide-react";
@@ -30,6 +33,7 @@ import {
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHealthRead | null }) {
+  useUiLocale();
   const { isAuthenticated } = useRequireAuth();
   const { t } = useI18n();
   const [cfg, setCfg] = useState<VaultConfigRead | null>(null);
@@ -104,9 +108,13 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       <Localized>
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">Storage configuration</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {uiText("Storage configuration")}
+            </h3>
           </div>
-          <div className="p-3 sm:p-4 lg:p-6 text-sm text-muted-foreground">Loading...</div>
+          <div className="p-3 sm:p-4 lg:p-6 text-sm text-muted-foreground">
+            {uiText("Loading...")}
+          </div>
         </div>
       </Localized>
     );
@@ -145,7 +153,9 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">Storage configuration</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {uiText("Storage configuration")}
+            </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               {t("settings.storageConfigDescription")}
             </p>
@@ -246,8 +256,9 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
             }
           />
           <p className="text-3xs text-muted-foreground">
-            Provider changes require an application restart. Storage risk acknowledgement remains
-            environment-only.
+            {uiText(
+              "Provider changes require an application restart. Storage risk acknowledgement remains environment-only.",
+            )}
           </p>
 
           {/* Save row */}
@@ -260,23 +271,27 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
                 className="flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
                 <Save className="h-3.5 w-3.5" />
-                {saveState === "saving" ? "Saving..." : "Save configuration"}
+                {saveState === "saving" ? uiText("Saving...") : uiText("Save configuration")}
               </button>
 
               {saveState === "saved" && (
-                <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+                <span className="text-xs text-green-600 dark:text-green-400">
+                  {uiText("Saved")}
+                </span>
               )}
 
               {saveState === "error" && (
                 <span className="text-xs text-red-600 dark:text-red-400">
-                  {errorMsg || "Error saving"}
+                  {errorMsg || uiText("Error saving")}
                 </span>
               )}
             </div>
           )}
 
           {!canEdit && (
-            <p className="text-xs text-muted-foreground italic">Sign in to modify configuration.</p>
+            <p className="text-xs text-muted-foreground italic">
+              {uiText("Sign in to modify configuration.")}
+            </p>
           )}
         </div>
         <ConfirmModal

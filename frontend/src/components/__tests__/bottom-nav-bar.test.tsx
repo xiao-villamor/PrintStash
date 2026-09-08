@@ -313,6 +313,7 @@ describe("BottomNavBar", () => {
       expect(screen.getByText("Vault")).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: /Language/ }));
+      await user.click(screen.getByRole("menuitemradio", { name: "Español" }));
 
       expect(screen.getByText("Bóveda")).toBeInTheDocument();
     });

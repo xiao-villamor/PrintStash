@@ -620,9 +620,13 @@ jobs:
           retention-days: 7
 
   docker-build:
-    name: Docker build (${{ matrix.image }}, ${{ matrix.arch }})
+    name: Docker build and Grype scan (${{ matrix.image }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.image == 'printstash' && 45 || 40 }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
     # Build each platform on its native architecture. Besides avoiding slow
     # QEMU emulation, this lets the full ARM image be loaded and STEP-smoked in
     # the same job instead of building that image twice.
@@ -681,7 +685,7 @@ jobs:
             arch: amd64
             platform: linux/amd64
             runner: ubuntu-latest
-            load: false
+            load: true
             step-smoke: false
           - image: printstash-frontend
             context: ./frontend
@@ -690,8 +694,16 @@ jobs:
             arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
-            load: false
+            load: true
             step-smoke: false
+          - image: printstash
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - image: printstash
+            arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -700,6 +712,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build image (no push)
+        if: matrix.image != 'printstash'
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
@@ -713,6 +726,31 @@ jobs:
           # ignore-error: a transient GitHub Actions Cache outage (e.g. a 503
           # while exporting) should not fail an otherwise-successful build.
           cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }},mode=max,ignore-error=true
+
+      - name: Build unified image (no push)
+        if: matrix.image == 'printstash'
+        uses: docker/bake-action@v7
+        with:
+          source: .
+          files: docker-bake.hcl
+          targets: unified
+          load: true
+          set: |
+            *.platform=${{ matrix.platform }}
+            unified.tags=printstash:${{ matrix.arch }}-ci
+            *.cache-from=type=gha,scope=printstash-${{ matrix.arch }}
+            unified.cache-to=type=gha,scope=printstash-${{ matrix.arch }},mode=max,ignore-error=true
+
+      - name: Scan image with Grype
+        uses: ./.github/actions/grype-scan
+        with:
+          image: ${{ matrix.image }}:${{ matrix.arch }}-ci
+          report-name: ci-${{ matrix.image }}-${{ matrix.arch }}
+          upload-sarif: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+
+      - name: Smoke-test unified container
+        if: matrix.image == 'printstash'
+        run: bash backend/scripts/test-unified-image.sh printstash:${{ matrix.arch }}-ci
 
       - name: Convert official BGCODE in the final native image
         if: matrix.storage-smoke

@@ -1,3 +1,6 @@
+import { knownUiText } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { CheckCircle2, Cloud, Loader2, PauseCircle, PlayCircle, Plus, Trash2 } from "lucide-react";
 
@@ -53,12 +56,13 @@ function isPurpose(value: string): value is StorageConnectionPurpose {
 }
 
 function purposeLabel(purpose: StorageConnectionPurpose): string {
-  if (purpose === "library") return "Library sources";
-  if (purpose === "backup") return "Backup replicas";
-  return "Backups + libraries";
+  if (purpose === "library") return uiText("Library sources");
+  if (purpose === "backup") return uiText("Backup replicas");
+  return uiText("Backups + libraries");
 }
 
 export function RemoteStorageConnections({ disabled = false }: { disabled?: boolean }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
   const [connections, setConnections] = useState<StorageConnection[]>([]);
   const [providers, setProviders] = useState<StorageProvider[]>([]);
@@ -168,7 +172,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           : [...current, created],
       );
       resetForm();
-      toast.success("Remote storage connection saved.");
+      toast.success(uiText("Remote storage connection saved."));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -180,7 +184,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     setBusy(connection.id);
     try {
       await probeStorageConnection(connection.id);
-      toast.success(`${connection.name} is reachable.`);
+      toast.success(uiText("{value1} is reachable.", { value1: String(connection.name) }));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -195,7 +199,11 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
         enabled: !connection.enabled,
       });
       setConnections((current) => current.map((row) => (row.id === updated.id ? updated : row)));
-      toast.success(updated.enabled ? "Remote connection resumed." : "Remote connection paused.");
+      toast.success(
+        updated.enabled
+          ? uiText("Remote connection resumed.")
+          : uiText("Remote connection paused."),
+      );
     } catch (error) {
       toast.error(error);
     } finally {
@@ -211,7 +219,12 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     try {
       const updated = await updateStorageConnection(connection.id, { purpose: nextPurpose });
       setConnections((current) => current.map((row) => (row.id === updated.id ? updated : row)));
-      toast.success(`${connection.name} will serve ${purposeLabel(nextPurpose).toLowerCase()}.`);
+      toast.success(
+        uiText("{value1} will serve {value2}.", {
+          value1: String(connection.name),
+          value2: String(purposeLabel(nextPurpose).toLowerCase()),
+        }),
+      );
     } catch (error) {
       toast.error(error);
     } finally {
@@ -225,7 +238,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       await deleteStorageConnection(connection.id);
       setConnections((current) => current.filter((row) => row.id !== connection.id));
       setRemoveTarget(null);
-      toast.success("Remote storage connection removed.");
+      toast.success(uiText("Remote storage connection removed."));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -241,30 +254,34 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             <Cloud className="h-4 w-4" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-foreground">Remote storage</h2>
+            <h2 className="text-sm font-semibold text-foreground">{uiText("Remote storage")}</h2>
             <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              Connect a remote location once, then use it for off-site backup replicas, read-only
-              Library sources, or both. Credentials remain encrypted on this server.
+              {uiText(
+                "Connect a remote location once, then use it for off-site backup replicas, read-only Library sources, or both. Credentials remain encrypted on this server.",
+              )}
             </p>
           </div>
         </header>
 
         <div className="border-b border-border">
           <div className="px-4 py-3 sm:px-5">
-            <h3 className="text-sm font-semibold text-foreground">Connections</h3>
+            <h3 className="text-sm font-semibold text-foreground">{uiText("Connections")}</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Pausing a connection stops new backup copies and library scans without forgetting its
-              credentials.
+              {uiText(
+                "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
+              )}
             </p>
           </div>
           {loading ? (
             <p className="flex items-center gap-2 px-4 pb-4 text-sm text-muted-foreground sm:px-5">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading connections…
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              {uiText(" Loading connections…")}
             </p>
           ) : connections.length === 0 ? (
             <p className="mx-4 mb-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground sm:mx-5">
-              No remote storage connected yet. Local backups and mounted Library sources continue to
-              work normally.
+              {uiText(
+                "No remote storage connected yet. Local backups and mounted Library sources continue to work normally.",
+              )}
             </p>
           ) : (
             <ul className="divide-y divide-border border-t border-border">
@@ -279,14 +296,15 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         {connection.name}
                       </p>
                       <Badge variant="outline">{connection.kind.toUpperCase()}</Badge>
-                      {connection.kind === "gdrive" && <Badge variant="secondary">Beta</Badge>}
+                      {connection.kind === "gdrive" && (
+                        <Badge variant="secondary">{uiText("Beta")}</Badge>
+                      )}
                       <Badge variant={connection.enabled ? "secondary" : "outline"}>
-                        {connection.enabled ? "Enabled" : "Paused"}
+                        {connection.enabled ? uiText("Enabled") : uiText("Paused")}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {connection.secret_fields_set.length} protected credential
-                      {connection.secret_fields_set.length === 1 ? "" : "s"}
+                      {uiText("counts.credentials", { count: connection.secret_fields_set.length })}
                     </p>
                     {connection.uses?.[connection.purpose === "library" ? "library" : "backup"]
                       ?.available === false && (
@@ -309,10 +327,10 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[minmax(12rem,15rem)_auto] sm:items-end">
                     <label className={FIELD_LABEL}>
-                      Use for
+                      {uiText("Use for")}
                       <select
                         className={SELECT}
-                        aria-label={`Use ${connection.name} for`}
+                        aria-label={uiText("Use {value1} for", { value1: String(connection.name) })}
                         value={connection.purpose}
                         disabled={disabled || busy !== null}
                         onChange={(event) => {
@@ -336,7 +354,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         disabled={disabled || busy !== null || catalogueFailed}
                         onClick={() => edit(connection)}
                       >
-                        Edit
+                        {uiText("Edit")}
                       </Button>
                       <Button
                         type="button"
@@ -345,7 +363,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         disabled={disabled || busy !== null || !connection.enabled}
                         onClick={() => void probe(connection)}
                       >
-                        <CheckCircle2 className="h-4 w-4" aria-hidden /> Test
+                        <CheckCircle2 className="h-4 w-4" aria-hidden />
+                        {uiText(" Test")}
                       </Button>
                       <Button
                         type="button"
@@ -359,7 +378,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         ) : (
                           <PlayCircle className="h-4 w-4" aria-hidden />
                         )}
-                        {connection.enabled ? "Pause" : "Resume"}
+                        {connection.enabled ? uiText("Pause") : uiText("Resume")}
                       </Button>
                       <Button
                         type="button"
@@ -368,7 +387,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         disabled={disabled || busy !== null}
                         onClick={() => setRemoveTarget(connection)}
                       >
-                        <Trash2 className="h-4 w-4" aria-hidden /> Remove
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                        {uiText(" Remove")}
                       </Button>
                     </div>
                   </div>
@@ -381,26 +401,29 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
         <div className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
           <div>
             <h3 className="text-sm font-semibold text-foreground">
-              {editing ? `Edit ${editing.name}` : "Add remote connection"}
+              {editing
+                ? uiText("Edit {value1}", { value1: String(editing.name) })
+                : uiText("Add remote connection")}
             </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Choose the remote location and its allowed uses. You can change the uses later while
-              nothing depends on them.
+              {uiText(
+                "Choose the remote location and its allowed uses. You can change the uses later while nothing depends on them.",
+              )}
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className={FIELD_LABEL}>
-              Connection name
+              {uiText("Connection name")}
               <Input
                 value={name}
                 maxLength={128}
                 disabled={disabled}
-                placeholder="Workshop storage"
+                placeholder={uiText("Workshop storage")}
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
             <label className={FIELD_LABEL}>
-              Provider
+              {uiText("Provider")}
               <select
                 className={SELECT}
                 value={providerId}
@@ -427,7 +450,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               </select>
             </label>
             <label className={FIELD_LABEL}>
-              Use for
+              {uiText("Use for")}
               <select
                 className={SELECT}
                 value={purpose}
@@ -459,32 +482,34 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           {selected && (
             <ul className="space-y-1 text-xs text-muted-foreground">
               {selected.consequences.map((text) => (
-                <li key={text}>{text}</li>
+                <li key={text}>{knownUiText(text)}</li>
               ))}
             </ul>
           )}
           {editing && (
             <p className="text-xs text-muted-foreground">
-              Leave stored credentials blank to keep them. Target changes are blocked while Library
-              sources or backups depend on this connection.
+              {uiText(
+                "Leave stored credentials blank to keep them. Target changes are blocked while Library sources or backups depend on this connection.",
+              )}
             </p>
           )}
           {purpose === "both" && (
             <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
-              Shared connections keep one base folder. Library source paths must stay separate from
-              the reserved printstash-backups folder.
+              {uiText(
+                "Shared connections keep one base folder. Library source paths must stay separate from the reserved printstash-backups folder.",
+              )}
             </p>
           )}
           <div className="flex justify-end gap-2">
             {editing && (
               <Button type="button" variant="outline" disabled={busy !== null} onClick={resetForm}>
-                Cancel editing
+                {uiText("Cancel editing")}
               </Button>
             )}
             {catalogueFailed && (
               <p className="mr-auto text-xs text-muted-foreground">
                 {i18n?.t("storage.operationUnavailable") ??
-                  "Storage information is unavailable. Reload to try again."}
+                  uiText("Storage information is unavailable. Reload to try again.")}
               </p>
             )}
             {selectedAvailability?.available === false && (
@@ -509,7 +534,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               ) : (
                 <Plus className="h-4 w-4" aria-hidden />
               )}
-              {editing ? "Save changes" : "Save connection"}
+              {editing ? uiText("Save changes") : uiText("Save connection")}
             </Button>
           </div>
         </div>
@@ -520,13 +545,16 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           onConfirm={() => {
             if (removeTarget) void remove(removeTarget);
           }}
-          title="Remove remote connection?"
+          title={uiText("Remove remote connection?")}
           description={
             removeTarget
-              ? `“${removeTarget.name}” can only be removed when no Library source or owned backup still depends on it.`
+              ? uiText(
+                  "“{value1}” can only be removed when no Library source or owned backup still depends on it.",
+                  { value1: String(removeTarget.name) },
+                )
               : ""
           }
-          confirmLabel="Remove connection"
+          confirmLabel={uiText("Remove connection")}
           busy={removeTarget !== null && busy === removeTarget.id}
         />
       </section>

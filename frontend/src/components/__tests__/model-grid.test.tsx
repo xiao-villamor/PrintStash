@@ -916,6 +916,7 @@ describe("ModelBrowser", () => {
           name: "Spares",
         }),
       );
+      expect(await screen.findByText("Renamed 1 folder")).toBeInTheDocument();
     });
 
     it("offers no tagging when a folder is in the selection", async () => {
@@ -1315,6 +1316,7 @@ describe("ModelBrowser", () => {
           name: "PLA only",
         }),
       );
+      expect(await screen.findByText("Saved view renamed")).toBeInTheDocument();
     });
 
     it("duplicates a view under a name nobody is using", async () => {

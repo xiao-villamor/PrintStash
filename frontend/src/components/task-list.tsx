@@ -1,8 +1,14 @@
 "use client";
 
+import { getErrorMessage } from "@/lib/errors";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
 
 import type { TaskItem } from "@/lib/task-center";
+import { taskTitle, taskDetail } from "@/lib/task-center";
+import { knownUiText } from "@/lib/locale";
 import { Link } from "@/lib/link";
 
 export function TaskList({
@@ -14,6 +20,7 @@ export function TaskList({
   onClear: () => void;
   compact?: boolean;
 }) {
+  useUiLocale();
   return (
     <div
       className={
@@ -24,7 +31,7 @@ export function TaskList({
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-          Tasks
+          {uiText("Tasks")}
         </span>
         {tasks.some((task) => task.status === "completed" || task.status === "failed") && (
           <button
@@ -32,13 +39,13 @@ export function TaskList({
             onClick={onClear}
             className="rounded font-mono text-3xs uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            Clear done
+            {uiText("Clear done")}
           </button>
         )}
       </div>
       {tasks.length === 0 ? (
         <div className="px-4 py-8 text-center font-mono text-xs text-muted-foreground">
-          No active tasks
+          {uiText("No active tasks")}
         </div>
       ) : (
         <div
@@ -56,6 +63,7 @@ export function TaskList({
 }
 
 function TaskRow({ task }: { task: TaskItem }) {
+  useUiLocale();
   const active = task.status === "pending" || task.status === "running";
   return (
     <div className="px-4 py-3">
@@ -71,17 +79,17 @@ function TaskRow({ task }: { task: TaskItem }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
-            <p className="truncate text-sm font-medium text-foreground">{task.title}</p>
+            <p className="truncate text-sm font-medium text-foreground">{taskTitle(task)}</p>
             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {task.status}
+              {knownUiText(task.status)}
             </span>
           </div>
           {task.detail && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{task.detail}</p>
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
           )}
           {active && task.total == null && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Discovering total… Safe to close this view.
+              {uiText("Discovering total… Safe to close this view.")}
             </p>
           )}
           <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
@@ -93,12 +101,14 @@ function TaskRow({ task }: { task: TaskItem }) {
           {!!task.failedItems?.length && (
             <details className="mt-2 text-xs text-muted-foreground">
               <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <ChevronDown className="h-3.5 w-3.5" /> Failed item details
+                <ChevronDown className="h-3.5 w-3.5" />
+                {uiText(" Failed item details")}
               </summary>
               <ul className="mt-2 space-y-1">
                 {task.failedItems.map((item, index) => (
                   <li key={`${item.name}-${index}`} className="break-words">
-                    <span className="font-medium text-foreground">{item.name}</span>: {item.reason}
+                    <span className="font-medium text-foreground">{item.name}</span>:{" "}
+                    {getErrorMessage(item.reason)}
                   </li>
                 ))}
               </ul>
@@ -110,7 +120,7 @@ function TaskRow({ task }: { task: TaskItem }) {
               onClick={() => window.dispatchEvent(new CustomEvent("printstash:review-import"))}
               className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Review and retry
+              {uiText("Review and retry")}
             </button>
           )}
           {task.thumbnailStatus === "failed" && !active && (
@@ -118,7 +128,7 @@ function TaskRow({ task }: { task: TaskItem }) {
               href="/settings?section=maintenance"
               className="mt-2 inline-flex rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              Repair thumbnail
+              {uiText("Repair thumbnail")}
             </Link>
           )}
         </div>

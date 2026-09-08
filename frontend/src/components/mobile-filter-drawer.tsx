@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { X } from "lucide-react";
 import { CollectionRead, PrinterRead, TagRead } from "@/types";
 import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-sidebar";
@@ -28,17 +31,18 @@ interface MobileFilterDrawerProps {
 }
 
 export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilterDrawerProps) {
+  useUiLocale();
   return (
     <Drawer
       open={open}
       onClose={onClose}
       side="left"
-      ariaLabel="Filters"
+      ariaLabel={uiText("Filters")}
       containerClassName="md:hidden"
       className="w-[280px] max-w-[85vw] bg-background shadow-xl"
     >
       <div className="flex items-center justify-between p-4 border-b border-border">
-        <h3 className="text-[18px] font-semibold text-foreground">Filters</h3>
+        <h3 className="text-[18px] font-semibold text-foreground">{uiText("Filters")}</h3>
         <button
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"

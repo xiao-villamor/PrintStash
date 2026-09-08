@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { ChevronDown, ExternalLink, Plus, Trash2, X } from "lucide-react";
 
 import { CollectionRead, FileRead, FileRevisionUpdate, ModelRead, TagRead } from "@/types";
@@ -58,6 +61,7 @@ export function OverviewTab({
   onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
   onAddRevision: () => void;
 }) {
+  useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
   const tagShown = editor.filteredTags.slice(0, 6);
   const tagItems = [...tagShown, ...(editor.canCreate ? [editor.tagInput.trim()] : [])];
@@ -95,7 +99,7 @@ export function OverviewTab({
         {!editing && model.description && (
           <section aria-labelledby="model-description-heading" className="space-y-1">
             <h2 id="model-description-heading" className="text-sm font-medium">
-              Description
+              {uiText("Description")}
             </h2>
             <p className="whitespace-pre-wrap text-sm text-muted-foreground">{model.description}</p>
           </section>
@@ -106,7 +110,7 @@ export function OverviewTab({
             {/* Collection picker */}
             <div>
               <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                Collection
+                {uiText("Collection")}
               </label>
               <DropdownMenu
                 open={editor.catOpen}
@@ -124,7 +128,7 @@ export function OverviewTab({
                     className="w-full h-10 flex items-center justify-between bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <span className={editor.collection ? "" : "text-on-surface-variant/60"}>
-                      {editor.collection || "None"}
+                      {editor.collection || uiText("None")}
                     </span>
                     <ChevronDown className="h-4 w-4 text-on-surface-variant" />
                   </button>
@@ -140,7 +144,7 @@ export function OverviewTab({
                   }}
                   className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
                 >
-                  None
+                  {uiText("None")}
                 </button>
                 {editor.collections.map((c) => (
                   <button
@@ -166,20 +170,20 @@ export function OverviewTab({
             {/* Description */}
             <div>
               <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                Description
+                {uiText("Description")}
               </label>
               <textarea
                 value={editor.description}
                 onChange={(e) => editor.setDescription(e.target.value)}
                 rows={2}
                 className="w-full bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
-                placeholder="Optional description"
+                placeholder={uiText("Optional description")}
               />
             </div>
             {/* Source URL */}
             <div>
               <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                Source URL
+                {uiText("Source URL")}
               </label>
               <input
                 type="url"
@@ -192,7 +196,7 @@ export function OverviewTab({
             {/* Tags */}
             <div>
               <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                Tags
+                {uiText("Tags")}
               </label>
               <div className="relative">
                 <input
@@ -209,7 +213,7 @@ export function OverviewTab({
                       editor.setTags((p) => p.slice(0, -1));
                     }
                   }}
-                  placeholder="Search or create — press Enter"
+                  placeholder={uiText("Search or create — press Enter")}
                   className="w-full h-10 bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 />
                 {editor.tagInput && (editor.filteredTags.length > 0 || editor.canCreate) && (
@@ -240,8 +244,8 @@ export function OverviewTab({
                         <button
                           type="button"
                           onClick={() => editor.deleteTag(t)}
-                          title={`Delete tag "${t.name}"`}
-                          aria-label={`Delete tag ${t.name}`}
+                          title={uiText('Delete tag "{value1}"', { value1: String(t.name) })}
+                          aria-label={uiText("Delete tag {value1}", { value1: String(t.name) })}
                           className="px-2 py-1.5 text-on-surface-variant/50 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                         >
                           <Trash2 className="h-3 w-3" />
@@ -260,7 +264,10 @@ export function OverviewTab({
                         }}
                         className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                       >
-                        <Plus className="h-3 w-3" /> Create &quot;{editor.tagInput.trim()}&quot;
+                        <Plus className="h-3 w-3" />
+                        {uiText(' Create "')}
+                        {editor.tagInput.trim()}
+                        {uiText('"')}
                       </button>
                     )}
                   </div>
@@ -277,7 +284,7 @@ export function OverviewTab({
                       <button
                         type="button"
                         onClick={() => editor.toggleTag(name)}
-                        aria-label={`Remove ${name}`}
+                        aria-label={uiText("Remove {value1}", { value1: String(name) })}
                         className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
                       >
                         <X className="h-3 w-3" />
@@ -298,7 +305,7 @@ export function OverviewTab({
                 className="inline-flex items-center gap-1.5 bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs uppercase tracking-wider hover:text-primary transition-colors"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                Source model
+                {uiText("Source model")}
               </a>
             )}
             {model.collection && (

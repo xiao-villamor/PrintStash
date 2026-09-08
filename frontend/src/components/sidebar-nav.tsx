@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
@@ -46,6 +49,7 @@ const mainItems: NavItem[] = [
 const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];
 
 export function SidebarNav() {
+  useUiLocale();
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { t } = useI18n();
@@ -75,7 +79,9 @@ export function SidebarNav() {
           <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">
             PrintStash
           </h1>
-          <p className="text-2xs text-muted-foreground font-mono">Your prints, organized</p>
+          <p className="text-2xs text-muted-foreground font-mono">
+            {uiText("Your prints, organized")}
+          </p>
         </div>
       </div>
 
@@ -123,7 +129,7 @@ export function SidebarNav() {
               type="button"
               onClick={() => void logout()}
               className="text-muted-foreground hover:text-red-500 transition-colors p-1"
-              title="Sign out"
+              title={uiText("Sign out")}
             >
               <LogOut className="h-4 w-4" />
             </button>

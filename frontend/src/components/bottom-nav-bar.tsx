@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { Link } from "@/lib/link";
 import { usePathname, useRouter } from "@/lib/navigation";
@@ -62,6 +65,7 @@ function isItemActive(item: NavItem, pathname: string): boolean {
 }
 
 export function BottomNavBar() {
+  useUiLocale();
   const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
@@ -145,6 +149,7 @@ export function BottomNavBar() {
 }
 
 function NavTab({ item, active, badge = 0 }: { item: NavItem; active: boolean; badge?: number }) {
+  useUiLocale();
   const { t } = useI18n();
   const className =
     "group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 active:scale-95 transition-transform duration-press";
@@ -178,6 +183,7 @@ function NavTab({ item, active, badge = 0 }: { item: NavItem; active: boolean; b
 // The active destination gets a filled "pill" behind the icon (Material-style),
 // so the highlight reads clearly without the label crowding into its neighbours.
 function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
+  useUiLocale();
   return (
     <span
       className={`flex h-7 w-[3.25rem] items-center justify-center rounded-full transition-colors ${
@@ -192,6 +198,7 @@ function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
 }
 
 function TabLabel({ active, children }: { active: boolean; children: React.ReactNode }) {
+  useUiLocale();
   return (
     <span
       className={`text-3xs font-medium leading-none tracking-tight ${
@@ -222,6 +229,7 @@ function MoreSheet({
   onLogout?: () => void;
   onClose: () => void;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const [tasksOpen, setTasksOpen] = useState(false);
   const activeTasks = tasks.filter(
@@ -302,7 +310,9 @@ function MoreSheet({
           <Bell className="h-4 w-4 text-muted-foreground" />
           <span className="flex-1">{t("nav.tasks")}</span>
           <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs text-muted-foreground">
-            {activeTasks ? `${activeTasks} active` : tasks.length}
+            {activeTasks
+              ? uiText("{value1} active", { value1: String(activeTasks) })
+              : tasks.length}
           </span>
         </button>
         {tasksOpen && <TaskList tasks={tasks} onClear={onClearTasks} compact />}

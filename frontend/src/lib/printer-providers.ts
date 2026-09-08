@@ -1,5 +1,6 @@
 import type { PrinterCreate, PrinterRead } from "@/types";
 import { SHARED_PRINTER_CONTRACT } from "@/generated/printer-contracts";
+import { knownUiText } from "./locale";
 
 export type PrinterSetupKind = (typeof SHARED_PRINTER_CONTRACT.setupOptions)[number]["value"];
 
@@ -16,8 +17,12 @@ export const PRINTER_SETUP_OPTIONS: Array<{
   description: string;
 }> = SHARED_PRINTER_CONTRACT.setupOptions.map(({ value, label, description }) => ({
   value,
-  label,
-  description: setupDescription(value, description),
+  get label() {
+    return knownUiText(label);
+  },
+  get description() {
+    return knownUiText(setupDescription(value, description));
+  },
 }));
 
 // Curated so the model picker on the printer card is a select, not free text

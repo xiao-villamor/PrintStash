@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Download, GitCompare, Loader2, Plus, Send, Star, XCircle } from "lucide-react";
 
 import { downloadAuthenticatedFile } from "@/lib/api";
@@ -30,22 +33,48 @@ export function RecommendedPrintCard({
   onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
   onAddRevision: () => void;
 }) {
+  useUiLocale();
   const meta = file?.metadata;
   const isSaving = file ? saving === file.id : false;
 
   const rows: PrintSettingRow[] = file
     ? [
-        { label: "PRINTER", value: meta?.printer_model ?? "—" },
-        { label: "MATERIAL", value: meta?.material_type ?? "—", chip: true },
-        { label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) },
         {
-          label: "EST. TIME",
+          get label() {
+            return uiText("PRINTER");
+          },
+          value: meta?.printer_model ?? "—",
+        },
+        {
+          get label() {
+            return uiText("MATERIAL");
+          },
+          value: meta?.material_type ?? "—",
+          chip: true,
+        },
+        {
+          get label() {
+            return uiText("LAYER HEIGHT");
+          },
+          value: formatMillimeters(meta?.layer_height_mm),
+        },
+        {
+          get label() {
+            return uiText("EST. TIME");
+          },
           value: formatDuration(meta?.estimated_time_s ?? null),
           highlight: true,
         },
-        { label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) },
         {
-          label: "SLICER",
+          get label() {
+            return uiText("FILAMENT");
+          },
+          value: formatGrams(meta?.filament_weight_g),
+        },
+        {
+          get label() {
+            return uiText("SLICER");
+          },
           value: [meta?.slicer_name, meta?.slicer_version].filter(Boolean).join(" ") || "—",
         },
       ]
@@ -55,28 +84,35 @@ export function RecommendedPrintCard({
     <Localized>
       <section>
         <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
-          <Star className="h-4 w-4 text-primary" /> Recommended Print
+          <Star className="h-4 w-4 text-primary" />
+          {uiText(" Recommended Print")}
         </h2>
 
         {!file ? (
           <div className="rounded border border-outline-variant bg-surface p-4 space-y-3">
             <p className="font-mono text-xs text-on-surface-variant leading-relaxed">
               {hasGcode
-                ? "No revision is marked as recommended yet. Mark a known-good G-code as recommended."
-                : "No sliced G-code yet. Add a revision to capture the settings that worked."}
+                ? uiText(
+                    "No revision is marked as recommended yet. Mark a known-good G-code as recommended.",
+                  )
+                : uiText(
+                    "No sliced G-code yet. Add a revision to capture the settings that worked.",
+                  )}
             </p>
             <button
               onClick={onAddRevision}
               className="w-full py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
             >
-              <Plus className="h-4 w-4" /> Add G-code revision
+              <Plus className="h-4 w-4" />
+              {uiText(" Add G-code revision")}
             </button>
           </div>
         ) : (
           <div className="rounded border border-primary/30 bg-primary-fixed/15 p-3 space-y-3">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
-                Rev {file.gcode_revision_number ?? file.version}
+                {uiText("Rev ")}
+                {file.gcode_revision_number ?? file.version}
               </span>
               <span
                 className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(file.revision_status)}`}
@@ -85,7 +121,8 @@ export function RecommendedPrintCard({
               </span>
               {file.is_recommended && (
                 <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                  <Star className="h-3 w-3 fill-current" /> Recommended
+                  <Star className="h-3 w-3 fill-current" />
+                  {uiText(" Recommended")}
                 </span>
               )}
             </div>
@@ -108,7 +145,8 @@ export function RecommendedPrintCard({
                 onClick={() => onSend(file.id)}
                 className="w-full py-2.5 bg-primary text-primary-foreground hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
               >
-                <Send className="h-4 w-4" /> Send to printer
+                <Send className="h-4 w-4" />
+                {uiText(" Send to printer")}
               </button>
             )}
             <div className="grid grid-cols-2 gap-2">
@@ -122,20 +160,23 @@ export function RecommendedPrintCard({
                 }
                 className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
               >
-                <Download className="h-4 w-4" /> Download
+                <Download className="h-4 w-4" />
+                {uiText(" Download")}
               </button>
               <button
                 onClick={onCompare}
                 className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
               >
-                <GitCompare className="h-4 w-4" /> Compare
+                <GitCompare className="h-4 w-4" />
+                {uiText(" Compare")}
               </button>
               <button
                 onClick={() => onMark(file, { revision_status: "failed" })}
                 disabled={isSaving}
                 className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
-                <XCircle className="h-4 w-4" /> Mark failed
+                <XCircle className="h-4 w-4" />
+                {uiText(" Mark failed")}
               </button>
               <button
                 onClick={() =>
@@ -149,7 +190,7 @@ export function RecommendedPrintCard({
                 ) : (
                   <Star className="h-4 w-4" />
                 )}{" "}
-                Recommend
+                {uiText("Recommend")}
               </button>
             </div>
           </div>

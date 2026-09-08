@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 /**
  * Gates the entire UI on the backend's setup status.
  *
@@ -29,6 +32,7 @@ interface Props {
 }
 
 export function SetupGate({ children }: Props) {
+  useUiLocale();
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
@@ -55,7 +59,7 @@ export function SetupGate({ children }: Props) {
         // existing AuthBanner / api-error UI can surface what went wrong.
         // We just log this and unblock the tree.
         console.warn("setup status probe failed:", err);
-        setError(err?.message ?? "unknown");
+        setError(err?.message ?? uiText("unknown"));
         setReady(true);
       });
     return () => {

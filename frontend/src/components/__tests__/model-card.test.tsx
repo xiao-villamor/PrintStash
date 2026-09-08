@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { I18nProvider } from "@/lib/i18n";
 import { ModelCard } from "@/components/model-card";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { ModelListItem, PrintSummaryRead } from "@/types";
@@ -213,5 +214,39 @@ describe("ModelCard", () => {
         expect(requestsWithMethod("DELETE").some((call) => call.url.endsWith("/star"))).toBe(true),
       );
     });
+  });
+});
+
+describe("localized model card", () => {
+  it("localizes card metric presentation", () => {
+    localStorage.setItem("printstash.locale", "es");
+    localStorage.setItem(
+      "printstash.card.metrics",
+      JSON.stringify(["layer_height", "material", "file_count"]),
+    );
+    render(
+      <MemoryRouter>
+        <I18nProvider>
+          <ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Files", { exact: true })).toBeVisible();
+    expect(screen.getByText("CAPA", { exact: true })).toBeVisible();
+    expect(screen.getByText("ARCH", { exact: true })).toBeVisible();
+    expect(screen.getByText("0,20 mm", { exact: true })).toBeVisible();
+    expect(screen.getByText("2 archivos", { exact: true })).toBeVisible();
+  });
+  it("localizes card actions while preserving the model name", () => {
+    localStorage.setItem("printstash.locale", "es");
+    renderApp(
+      <ModelCard
+        model={{ ...model, name: "Files" }}
+        onEditTags={vi.fn<(item: ModelListItem) => void>()}
+      />,
+      { locale: "es" },
+    );
+    expect(screen.getByRole("button", { name: "Añadir Files a favoritos" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Añadir etiquetas a Files" })).toBeVisible();
   });
 });

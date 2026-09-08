@@ -70,6 +70,10 @@ more helps with large meshes.
 **From a Git checkout**, use `docker compose -f docker-compose.simple.yml up -d`
 and include `-f docker-compose.simple.yml` in subsequent Compose commands.
 
+For a single container containing the full API and web UI, use
+[docker-compose.unified.yml](./docker-compose.unified.yml). Build and publishing
+instructions are in the [deployment guide](./docs/deployment.md#one-container-image).
+
 For ports, version pinning, host folders, upload limits, SSO, HTTPS, updates,
 and the purpose of the other Compose files, see
 [**Deployment and optional settings**](./docs/deployment.md).

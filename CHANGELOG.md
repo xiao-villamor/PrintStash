@@ -7,6 +7,12 @@
 - Artifact downloads use the canonical `/files/{id}/download` endpoint. The
   separate `download-url` and `download-direct` endpoints have been removed.
 
+- Interface text, accessible labels, errors, plural counts and offline screens
+  use shared language catalogs. Dates and numbers follow the selected language;
+  the language menu supports adding further locales without a two-language toggle.
+  Catalogs are static, typo-friendly sources with guarded imperative feedback and
+  a safe scaffold command for adding complete language drafts.
+
 - Backend code is organized by capability, with separate startup, storage,
   backup recovery and library query modules. G-code Revision deletion uses a
   shared business operation with product-specific authorization and persistence.
@@ -23,6 +29,14 @@
   HTTPS redirects when browser CORS is supported. Local files retain range
   delivery; originals, previews and thumbnails now revalidate privately, and
   shares/slicer downloads remain noncacheable.
+
+- Grype scans every AMD64 and ARM64 container image in CI and scans immutable
+  publishing digests before promotion. Each run retains readable, JSON and SARIF
+  vulnerability reports for 90 days and sends trusted-run results to GitHub code
+  scanning when it is available.
+
+- An optional unified Docker image runs the full API and web UI in one container,
+  with a single-service Compose file and tested AMD64/ARM64 publishing to GHCR.
 
 - Successful browser-extension CI jobs provide the validated Chrome Web Store
   ZIP as a direct download, retained for 30 days.

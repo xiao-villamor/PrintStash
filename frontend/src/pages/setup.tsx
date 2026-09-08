@@ -1,3 +1,6 @@
+import { storageOperationMessage } from "@/lib/storage-operations";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -40,6 +43,7 @@ const LIVE_DEPS: SetupPageDeps = {
 type AccountField = "username" | "password" | "confirm" | "email";
 
 export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }) {
+  useUiLocale();
   const router = useRouter();
   const { t } = useI18n();
   const [status, setStatus] = useState<SetupStatus | null>(null);
@@ -103,7 +107,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
       setValues(initial);
     }
     void prepare().catch(() => {
-      if (!cancelled) setError("setup.failed");
+      if (!cancelled) setError(uiText("setup.failed"));
     });
     return () => {
       cancelled = true;
@@ -148,7 +152,9 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   async function checkStorage() {
     const provider = providers.find((item) => item.id === providerId);
     const invalid = !provider?.selectable
-      ? (provider?.disabled_reason ?? t("setup.providerUnavailable"))
+      ? provider?.disabled_reason
+        ? storageOperationMessage(provider.disabled_reason, t)
+        : t("setup.providerUnavailable")
       : providerFormError(provider, values);
     if (invalid) {
       setCheck(null);

@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
@@ -23,6 +26,7 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
+  useUiLocale();
   // The pre-paint script in index.html already resolved the theme onto <html>;
   // read it back rather than re-resolving, so state can never disagree with the DOM.
   const [theme, setTheme] = useState<Theme>(() =>
@@ -40,8 +44,8 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      aria-label="Toggle theme"
+      title={theme === "dark" ? uiText("Switch to light mode") : uiText("Switch to dark mode")}
+      aria-label={uiText("Toggle theme")}
       className="text-muted-foreground hover:text-primary transition-colors flex items-center justify-center font-mono"
     >
       <span key={theme} className="animate-theme-icon inline-flex">

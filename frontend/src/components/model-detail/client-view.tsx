@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
@@ -21,6 +24,7 @@ export function ModelDetailClientView({
   id: number;
   initialModel: ModelRead | null;
 }) {
+  useUiLocale();
   const [model, setModel] = useState<ModelRead | null>(initialModel);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -48,17 +52,17 @@ export function ModelDetailClientView({
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
         <p className="text-lg font-semibold text-on-surface">
           {notFound
-            ? "Model not found"
+            ? uiText("Model not found")
             : needsAuth
-              ? "Sign in to view this model"
-              : "Couldn’t load this model"}
+              ? uiText("Sign in to view this model")
+              : uiText("Couldn’t load this model")}
         </p>
         <p className="text-sm text-on-surface-variant">
           {notFound
-            ? "This model doesn’t exist or has been deleted."
+            ? uiText("This model doesn’t exist or has been deleted.")
             : needsAuth
-              ? "This model lives in a collection you need access to."
-              : "A server error occurred. Reload to try again."}
+              ? uiText("This model lives in a collection you need access to.")
+              : uiText("A server error occurred. Reload to try again.")}
         </p>
       </div>
     );

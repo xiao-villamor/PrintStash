@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
@@ -36,6 +38,7 @@ function errorKey(message: string): MessageKey {
 }
 
 export default function MultipartBuildsPage() {
+  useUiLocale();
   const { id } = useParams();
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -44,6 +47,7 @@ export default function MultipartBuildsPage() {
 }
 
 function BuildList() {
+  useUiLocale();
   const { t } = useI18n();
   const [search] = useSearchParams();
   const compositionId = Number(search.get("multipart"));
@@ -194,6 +198,7 @@ function BuildList() {
 }
 
 function BuildDetail({ id }: { id: number }) {
+  useUiLocale();
   const { t } = useI18n();
   const [build, setBuild] = useState<MultipartBuild | null>(null);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
@@ -345,6 +350,7 @@ function BuildPart({
   disabled: boolean;
   mutate: (operation: () => Promise<MultipartBuild>) => Promise<void>;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const { user } = useAuth();
   const [files, setFiles] = useState<FileRead[]>([]);
@@ -452,7 +458,8 @@ function BuildPart({
               .filter((file) => file.model_id === part.selected_model_id)
               .map((file) => (
                 <option key={file.id} value={file.id}>
-                  {file.revision_label || `v${file.version}`} · {file.original_filename}
+                  {file.revision_label || uiText("v{value1}", { value1: String(file.version) })} ·{" "}
+                  {file.original_filename}
                 </option>
               ))}
           </select>
@@ -581,6 +588,7 @@ function Result({
   disabled: boolean;
   mutate: (operation: () => Promise<MultipartBuild>) => Promise<void>;
 }) {
+  useUiLocale();
   const { t } = useI18n();
   const [valid, setValid] = useState(attempt.valid_units ?? attempt.suggested_valid_units);
   const [key, setKey] = useState(() => crypto.randomUUID());

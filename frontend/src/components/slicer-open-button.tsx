@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useState } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 
@@ -52,6 +55,7 @@ export function SlicerOpenButton({
   fileType: string;
   size?: "sm" | "md";
 }) {
+  useUiLocale();
   const [open, setOpen] = useState(false);
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
@@ -73,7 +77,7 @@ export function SlicerOpenButton({
       const fileUrl = `${window.location.origin}${url}`;
       window.location.assign(slicerHref(scheme, fileUrl));
     } catch {
-      toast.error("Couldn't open in slicer");
+      toast.error(uiText("Couldn't open in slicer"));
     }
   }
 
@@ -87,7 +91,7 @@ export function SlicerOpenButton({
         <button
           data-menu-trigger
           onClick={() => setOpen((o) => !o)}
-          title="Open in slicer"
+          title={uiText("Open in slicer")}
           aria-haspopup="menu"
           aria-expanded={open}
           className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
@@ -99,7 +103,7 @@ export function SlicerOpenButton({
       contentClassName="min-w-[10rem] rounded border border-outline-variant bg-surface shadow-lg"
     >
       <p className="px-3 py-1.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant border-b border-outline-variant">
-        Open in slicer
+        {uiText("Open in slicer")}
       </p>
       {slicers.map(({ name, scheme }) => (
         <button

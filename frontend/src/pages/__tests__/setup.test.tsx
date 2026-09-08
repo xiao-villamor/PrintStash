@@ -235,7 +235,7 @@ beforeEach(() => {
 
 describe("SetupPage", () => {
   it.each([
-    ["unavailable", "Requires the full image"],
+    ["unavailable", "This connection requires the full API image."],
     ["unknown", "Choose an available storage provider."],
   ])("refuses a storage check for an %s provider", async (kind, message) => {
     vi.mocked(deps.getSetupStatus).mockResolvedValue({
@@ -246,7 +246,12 @@ describe("SetupPage", () => {
     vi.mocked(deps.getStorageProviders).mockResolvedValue(
       providers.map((provider) =>
         provider.id === "s3"
-          ? { ...provider, available: false, selectable: false, disabled_reason: message }
+          ? {
+              ...provider,
+              available: false,
+              selectable: false,
+              disabled_reason: "storage_dependency_missing",
+            }
           : provider,
       ),
     );
@@ -346,6 +351,7 @@ describe("SetupPage", () => {
     renderSetup();
     await screen.findByLabelText("Username");
     fireEvent.click(screen.getByRole("button", { name: /Language: English/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Español" }));
     expect(await screen.findByLabelText("Usuario")).toBeVisible();
   });
 });
@@ -357,6 +363,7 @@ describe("Storage form recovery", () => {
     await user.clear(screen.getByLabelText("Data directory"));
     await user.type(screen.getByLabelText("Data directory"), "/custom/files");
     await user.click(screen.getByRole("button", { name: /Language: English/ }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Español" }));
     expect(screen.getByDisplayValue("/custom/files")).toBeInTheDocument();
   });
 

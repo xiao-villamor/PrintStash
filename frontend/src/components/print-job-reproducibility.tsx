@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { lazy, Suspense, useState, type ComponentType } from "react";
 import { Download, Eye, ExternalLink, FileWarning, Loader2 } from "lucide-react";
 
@@ -35,28 +38,43 @@ function levelCopy(level: ReproducibilityLevel): LevelCopy {
   switch (level) {
     case "exact":
       return {
-        label: "Exactly reproducible",
-        description: "The archived artifact is available for this print.",
+        get label() {
+          return uiText("Exactly reproducible");
+        },
+        get description() {
+          return uiText("The archived artifact is available for this print.");
+        },
         className: "border-success/30 bg-success/10 text-success",
       };
     case "metadata":
       return {
-        label: "Partially reproducible",
-        description:
-          "Printer-reported identity and metadata are available; the original artifact is not archived.",
+        get label() {
+          return uiText("Partially reproducible");
+        },
+        get description() {
+          return uiText(
+            "Printer-reported identity and metadata are available; the original artifact is not archived.",
+          );
+        },
         className: "border-warning/30 bg-warning/10 text-warning",
       };
     default:
       return {
-        label: "External/basic evidence",
-        description:
-          "Only external print evidence is available; the original file is not archived.",
+        get label() {
+          return uiText("External/basic evidence");
+        },
+        get description() {
+          return uiText(
+            "Only external print evidence is available; the original file is not archived.",
+          );
+        },
         className: "border-border bg-muted text-muted-foreground",
       };
   }
 }
 
 function Detail({ label, value }: { label: string; value: string | number | null | undefined }) {
+  useUiLocale();
   if (value === null || value === undefined || value === "") return null;
   return (
     <div className="min-w-0">
@@ -81,6 +99,7 @@ export function PrintJobReproducibility({
   downloadFile?: DownloadFile;
   toolpathViewer?: ToolpathViewer;
 }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
   const [downloading, setDownloading] = useState(false);
   const [toolpathPreviewOpen, setToolpathPreviewOpen] = useState(false);
@@ -139,19 +158,19 @@ export function PrintJobReproducibility({
         <dl className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border pt-2 sm:grid-cols-3">
           {hasReportedIdentity && (
             <>
-              <Detail label="Reported name" value={resolved.identity.display_name} />
-              <Detail label="Task ID" value={resolved.identity.task_id} />
-              <Detail label="Subtask ID" value={resolved.identity.subtask_id} />
-              <Detail label="Project ID" value={resolved.identity.project_id} />
-              <Detail label="Profile ID" value={resolved.identity.profile_id} />
-              <Detail label="Printer file" value={resolved.identity.gcode_file} />
-              <Detail label="Plate" value={resolved.identity.plate_index} />
+              <Detail label={uiText("Reported name")} value={resolved.identity.display_name} />
+              <Detail label={uiText("Task ID")} value={resolved.identity.task_id} />
+              <Detail label={uiText("Subtask ID")} value={resolved.identity.subtask_id} />
+              <Detail label={uiText("Project ID")} value={resolved.identity.project_id} />
+              <Detail label={uiText("Profile ID")} value={resolved.identity.profile_id} />
+              <Detail label={uiText("Printer file")} value={resolved.identity.gcode_file} />
+              <Detail label={uiText("Plate")} value={resolved.identity.plate_index} />
             </>
           )}
           {hasReportedMetadata && (
             <>
               <Detail
-                label="Layers"
+                label={uiText("Layers")}
                 value={
                   resolved.metadata.current_layer !== null ||
                   resolved.metadata.total_layers !== null
@@ -160,7 +179,7 @@ export function PrintJobReproducibility({
                 }
               />
               <Detail
-                label="Nozzle"
+                label={uiText("Nozzle")}
                 value={
                   resolved.metadata.nozzle_diameter !== null
                     ? `${resolved.metadata.nozzle_diameter} mm`
@@ -180,7 +199,7 @@ export function PrintJobReproducibility({
           <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           <div className="min-w-0 font-mono text-2xs">
             <p>
-              <span className="font-semibold">Error code:</span> {resolved.error.code}
+              <span className="font-semibold">{uiText("Error code:")}</span> {resolved.error.code}
             </p>
             <p className="break-words">{resolved.error.message}</p>
           </div>
@@ -196,10 +215,10 @@ export function PrintJobReproducibility({
               size="xs"
               loading={downloading}
               onClick={() => void downloadArtifact()}
-              aria-label="Download archived artifact"
+              aria-label={uiText("Download archived artifact")}
             >
               <Download className="h-3.5 w-3.5" aria-hidden />
-              Download archived artifact
+              {uiText("Download archived artifact")}
             </Button>
           )}
           {canPreview && (

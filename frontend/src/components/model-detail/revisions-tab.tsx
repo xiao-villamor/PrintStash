@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import {
   Check,
@@ -71,6 +74,7 @@ export function RevisionsTab({
   onAddRevision: () => void;
   canEdit: boolean;
 }) {
+  useUiLocale();
   const { auth, saving, update, remove } = useRevisionUpdater(modelId, onModel);
   const { data: availableTags = [] } = useTags();
 
@@ -161,7 +165,9 @@ export function RevisionsTab({
     try {
       await batchSetRevisionLabels(Array.from(selectedRevisionIds), batchLabel);
       onModel(await getModel(modelId));
-      toast.success(`Updated ${selectedRevisionIds.size} revision labels`);
+      toast.success(
+        uiText("Updated {value1} revision labels", { value1: String(selectedRevisionIds.size) }),
+      );
       setSelectedRevisionIds(new Set());
       setSelecting(false);
       setBatchLabel("");
@@ -175,7 +181,9 @@ export function RevisionsTab({
   async function saveArtifactTags(file: FileRead, tags: string[]) {
     try {
       onModel(await replaceFileTags(modelId, file.id, tags));
-      toast.success(`Tags updated for ${file.original_filename}`);
+      toast.success(
+        uiText("Tags updated for {value1}", { value1: String(file.original_filename) }),
+      );
     } catch (error) {
       toast.error(error);
       throw error;
@@ -190,16 +198,19 @@ export function RevisionsTab({
           onClose={() => setDeleteTarget(null)}
           onConfirm={confirmDeleteRevision}
           busy={deleteBusy}
-          title="Delete revision?"
+          title={uiText("Delete revision?")}
           description={
             deleteTarget
-              ? `Rev ${deleteTarget.gcode_revision_number ?? deleteTarget.version} (${deleteTarget.original_filename}) will be moved to trash.`
-              : "This revision will be moved to trash."
+              ? uiText("Rev {value1} ({value2}) will be moved to trash.", {
+                  value1: String(deleteTarget.gcode_revision_number ?? deleteTarget.version),
+                  value2: String(deleteTarget.original_filename),
+                })
+              : uiText("This revision will be moved to trash.")
           }
         />
         <section>
           <div className="mb-4 flex items-center justify-between gap-3 border-b border-outline-variant pb-1">
-            <h2 className="text-lg font-semibold text-on-surface">G-code Revisions</h2>
+            <h2 className="text-lg font-semibold text-on-surface">{uiText("G-code Revisions")}</h2>
             <div className="flex items-center gap-2">
               {gcodeFiles.length > 0 && (
                 <Button
@@ -212,7 +223,7 @@ export function RevisionsTab({
                   }}
                   disabled={!auth.isAuthenticated}
                 >
-                  {selecting ? "Cancel selection" : "Edit labels"}
+                  {selecting ? uiText("Cancel selection") : uiText("Edit labels")}
                 </Button>
               )}
               <Button
@@ -221,22 +232,23 @@ export function RevisionsTab({
                 size="xs"
                 onClick={onAddRevision}
                 disabled={!auth.isAuthenticated}
-                title={auth.blockReason ?? "Add G-code revision"}
+                title={auth.blockReason ?? uiText("Add G-code revision")}
               >
-                <Plus className="h-3.5 w-3.5" /> Add
+                <Plus className="h-3.5 w-3.5" />
+                {uiText(" Add")}
               </Button>
             </div>
           </div>
           {selecting && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-outline-variant bg-surface-container-low p-2">
               <span className="font-mono text-xs text-on-surface-variant">
-                {selectedRevisionIds.size} selected
+                {uiText("{value1} selected", { value1: String(selectedRevisionIds.size ?? "") })}
               </span>
               <Input
                 value={batchLabel}
                 onChange={(event) => setBatchLabel(event.target.value)}
                 maxLength={128}
-                placeholder="Label (blank clears)"
+                placeholder={uiText("Label (blank clears)")}
                 className="min-w-48 flex-1"
               />
               <Button
@@ -246,14 +258,14 @@ export function RevisionsTab({
                 disabled={selectedRevisionIds.size === 0}
                 onClick={applyBatchLabel}
               >
-                Apply label
+                {uiText("Apply label")}
               </Button>
             </div>
           )}
           <div className="space-y-3">
             {gcodeFiles.length === 0 && (
               <p className="font-mono text-xs text-on-surface-variant">
-                No sliced G-code revisions yet.
+                {uiText("No sliced G-code revisions yet.")}
               </p>
             )}
             {gcodeFiles.map((f) => {
@@ -277,13 +289,16 @@ export function RevisionsTab({
                             return next;
                           });
                         }}
-                        ariaLabel={`Select revision ${f.gcode_revision_number ?? f.version}`}
+                        ariaLabel={uiText("Select revision {value1}", {
+                          value1: String(f.gcode_revision_number ?? f.version),
+                        })}
                       />
                     )}
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5 mb-1">
                         <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
-                          Rev {f.gcode_revision_number ?? f.version}
+                          {uiText("Rev ")}
+                          {f.gcode_revision_number ?? f.version}
                         </span>
                         {f.revision_label && (
                           <span className="border border-outline-variant rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
@@ -297,7 +312,8 @@ export function RevisionsTab({
                         </span>
                         {f.is_recommended && (
                           <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                            <Star className="h-3 w-3 fill-current" /> Recommended
+                            <Star className="h-3 w-3 fill-current" />
+                            {uiText(" Recommended")}
                           </span>
                         )}
                         {uploadedTo.map((row) => (
@@ -314,7 +330,9 @@ export function RevisionsTab({
                       </p>
                       <p className="font-mono text-2xs text-on-surface-variant">
                         {formatBytes(f.size_bytes)} · {timeAgo(f.uploaded_at)}
-                        {fileMeta?.layer_height_mm ? ` · ${fileMeta.layer_height_mm}mm` : ""}
+                        {fileMeta?.layer_height_mm
+                          ? uiText(" · {value1}mm", { value1: String(fileMeta.layer_height_mm) })
+                          : ""}
                         {fileMeta?.material_type ? ` · ${fileMeta.material_type}` : ""}
                         {fileMeta?.estimated_time_s
                           ? ` · ${formatDuration(fileMeta.estimated_time_s)}`
@@ -326,7 +344,9 @@ export function RevisionsTab({
                           tags={f.tags}
                           availableTags={availableTags}
                           canEdit={canEdit}
-                          help="Artifact tags make the owning Model discoverable without changing the Model’s direct tags."
+                          help={uiText(
+                            "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
+                          )}
                           onSave={(tags) => saveArtifactTags(f, tags)}
                         />
                       </div>
@@ -340,7 +360,7 @@ export function RevisionsTab({
                       <button
                         onClick={() => startRevisionEdit(f)}
                         disabled={!auth.isAuthenticated}
-                        title={auth.blockReason ?? "Edit revision"}
+                        title={auth.blockReason ?? uiText("Edit revision")}
                         className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Pencil className="h-4 w-4" />
@@ -364,7 +384,7 @@ export function RevisionsTab({
                             f.original_filename,
                           ).catch((e) => toast.error(e))
                         }
-                        title="Download"
+                        title={uiText("Download")}
                         className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
                       >
                         <Download className="h-4 w-4" />
@@ -373,7 +393,7 @@ export function RevisionsTab({
                         type="button"
                         onClick={() => deleteRevision(f)}
                         disabled={!auth.isAuthenticated || saving === f.id}
-                        title={auth.blockReason ?? "Delete revision"}
+                        title={auth.blockReason ?? uiText("Delete revision")}
                         className="text-on-surface-variant hover:text-error p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {saving === f.id ? (
@@ -391,7 +411,7 @@ export function RevisionsTab({
                         value={revisionLabel}
                         onChange={(e) => setRevisionLabel(e.target.value)}
                         maxLength={128}
-                        placeholder="Revision label"
+                        placeholder={uiText("Revision label")}
                         className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                       <select
@@ -411,7 +431,9 @@ export function RevisionsTab({
                         value={revisionNotes}
                         onChange={(e) => setRevisionNotes(e.target.value)}
                         rows={2}
-                        placeholder="Notes about print outcome, fit, filament, or what to try next"
+                        placeholder={uiText(
+                          "Notes about print outcome, fit, filament, or what to try next",
+                        )}
                         className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                       />
                       <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
@@ -421,7 +443,7 @@ export function RevisionsTab({
                           onChange={(e) => setRevisionRecommended(e.target.checked)}
                           className="rounded"
                         />
-                        Mark as recommended G-code for this model
+                        {uiText("Mark as recommended G-code for this model")}
                       </label>
                       <div className="flex gap-2">
                         <button
@@ -429,7 +451,7 @@ export function RevisionsTab({
                           disabled={saving === f.id}
                           className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50"
                         >
-                          Cancel
+                          {uiText("Cancel")}
                         </button>
                         <button
                           onClick={() => saveRevision(f)}
@@ -441,7 +463,7 @@ export function RevisionsTab({
                           ) : (
                             <Check className="h-4 w-4" />
                           )}
-                          {saving === f.id ? "Saving..." : "Save"}
+                          {saving === f.id ? uiText("Saving...") : uiText("Save")}
                         </button>
                       </div>
                     </div>
@@ -455,7 +477,8 @@ export function RevisionsTab({
         {allFiles.length >= 2 && compareLeft && compareRight && (
           <section>
             <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
-              <GitCompare className="h-4 w-4" /> Compare Artifacts
+              <GitCompare className="h-4 w-4" />
+              {uiText(" Compare Artifacts")}
             </h2>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
@@ -466,7 +489,11 @@ export function RevisionsTab({
                 >
                   {allFiles.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.file_type.toUpperCase()} v{f.version} — {f.original_filename}
+                      {uiText("{value1} v{value2} — {value3}", {
+                        value1: String(f.file_type.toUpperCase() ?? ""),
+                        value2: String(f.version ?? ""),
+                        value3: String(f.original_filename ?? ""),
+                      })}
                     </option>
                   ))}
                 </select>
@@ -477,7 +504,11 @@ export function RevisionsTab({
                 >
                   {allFiles.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.file_type.toUpperCase()} v{f.version} — {f.original_filename}
+                      {uiText("{value1} v{value2} — {value3}", {
+                        value1: String(f.file_type.toUpperCase() ?? ""),
+                        value2: String(f.version ?? ""),
+                        value3: String(f.original_filename ?? ""),
+                      })}
                     </option>
                   ))}
                 </select>

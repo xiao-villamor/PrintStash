@@ -1,0 +1,78 @@
+name: Scan container image with Grype
+description: Create user-readable and machine-readable vulnerability reports for one image
+
+inputs:
+  image:
+    description: Local image tag or immutable registry digest to scan
+    required: true
+  report-name:
+    description: Unique artifact and code-scanning category name
+    required: true
+  upload-sarif:
+    description: Upload the SARIF report to GitHub code scanning
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Scan image
+      shell: bash
+      env:
+        GRYPE_IMAGE: ghcr.io/anchore/grype:v0.118.0@sha256:8a93fc48da96bd6ec5981279d099b69de11541dc68fdf222fb9161f8ff284af7
+        IMAGE: ${{ inputs.image }}
+        DB_CACHE_DIR: ${{ runner.temp }}/grype-db-cache
+        REPORT_DIR: ${{ runner.temp }}/grype-${{ inputs.report-name }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$REPORT_DIR"
+        mkdir -p "$DB_CACHE_DIR"
+        docker run --rm --user 0 \
+          --volume /var/run/docker.sock:/var/run/docker.sock \
+          --volume "$REPORT_DIR:/reports" \
+          --volume "$DB_CACHE_DIR:/grype-db" \
+          --env GRYPE_DB_CACHE_DIR=/grype-db \
+          "$GRYPE_IMAGE" "docker:$IMAGE" \
+          --by-cve \
+          --output table=/reports/report.txt \
+          --output json=/reports/report.json \
+          --output sarif=/reports/report.sarif
+
+        jq -r --arg image "$IMAGE" \
+          -f "$GITHUB_ACTION_PATH/summary.jq" \
+          "$REPORT_DIR/report.json" > "$REPORT_DIR/summary.md"
+
+    - name: Upload vulnerability report bundle
+      if: always()
+      id: report
+      uses: actions/upload-artifact@v4
+      with:
+        name: grype-${{ inputs.report-name }}
+        path: ${{ runner.temp }}/grype-${{ inputs.report-name }}/
+        if-no-files-found: warn
+        retention-days: 90
+
+    - name: Upload SARIF report
+      if: success() && inputs.upload-sarif == 'true'
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+      with:
+        sarif_file: ${{ runner.temp }}/grype-${{ inputs.report-name }}/report.sarif
+        category: grype/${{ inputs.report-name }}
+
+    - name: Publish scan summary
+      if: always()
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        REPORT_DIR: ${{ runner.temp }}/grype-${{ inputs.report-name }}
+        REPORT_URL: ${{ steps.report.outputs.artifact-url }}
+      run: |
+        if [[ -f "$REPORT_DIR/summary.md" ]]; then
+          cat "$REPORT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          printf '\n\n[Download the complete table, JSON, and SARIF reports](%s)\n' \
+            "$REPORT_URL" >> "$GITHUB_STEP_SUMMARY"
+        else
+          printf '## Grype container vulnerability report\n\nScan failed for `%s`; inspect the job log.\n' \
+            "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
+        fi

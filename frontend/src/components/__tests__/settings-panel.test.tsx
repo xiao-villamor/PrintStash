@@ -315,7 +315,11 @@ describe("SettingsPanel", () => {
       const dialog = screen.getByRole("dialog", { name: "Restart PrintStash?" });
       await user.click(within(dialog).getByRole("button", { name: "Restart now" }));
 
-      expect(await screen.findByText("Restart failed.")).toBeVisible();
+      expect(
+        await screen.findByText(
+          "The server could not restart. Check the server logs and try again.",
+        ),
+      ).toBeVisible();
       expect(screen.getByRole("dialog", { name: "Restart PrintStash?" })).toBeVisible();
     });
 
@@ -1011,7 +1015,7 @@ describe("SettingsPanel", () => {
         },
       });
 
-      expect(await screen.findByText(/1\.0 MB · opendal:gdrive/i)).toBeVisible();
+      expect(await screen.findByText(/1 MB · opendal:gdrive/i)).toBeVisible();
     });
 
     it("keeps a backup visible when deletion fails", async () => {
@@ -1306,7 +1310,11 @@ describe("SettingsPanel", () => {
 
       await user.click(await screen.findByRole("button", { name: /Backup now/ }));
 
-      expect(await screen.findByText("Backup blob missing.")).toBeVisible();
+      expect(
+        await screen.findByText(
+          "A file needed for the backup is missing. Check the storage and try again.",
+        ),
+      ).toBeVisible();
     });
 
     it("allows retrying after a backup failure", async () => {
@@ -1320,7 +1328,9 @@ describe("SettingsPanel", () => {
       const backupNow = await screen.findByRole("button", { name: /Backup now/ });
 
       await user.click(backupNow);
-      await screen.findByText("Backup blob missing.");
+      await screen.findByText(
+        "A file needed for the backup is missing. Check the storage and try again.",
+      );
 
       expect(backupNow).toBeEnabled();
     });
@@ -1760,7 +1770,9 @@ describe("SettingsPanel", () => {
 
       await user.click(await screen.findByRole("button", { name: /JSON/ }));
 
-      expect(await screen.findByText("Export too large.")).toBeInTheDocument();
+      expect(
+        await screen.findByText("The export is too large. Select fewer models and try again."),
+      ).toBeInTheDocument();
     });
   });
 

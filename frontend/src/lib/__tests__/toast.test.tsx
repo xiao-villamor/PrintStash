@@ -73,11 +73,13 @@ describe("toast.error", () => {
       expect(await screen.findByText("This model no longer exists.")).toBeInTheDocument();
     });
 
-    it("humanises a code this build has no wording for", async () => {
+    it("shows translated recovery copy for an unavailable library root", async () => {
       // A blank toast is worse than an awkward one: the user learns nothing.
       raise("root_path_missing");
 
-      expect(await screen.findByText("Root path missing.")).toBeInTheDocument();
+      expect(
+        await screen.findByText("The library folder is unavailable. Check its path and mount."),
+      ).toBeInTheDocument();
     });
   });
 

@@ -618,3 +618,44 @@ describe("waitForImportJob", () => {
     await expect(pending).resolves.toMatchObject({ state: "completed" });
   });
 });
+
+describe("task localization", () => {
+  it("updates stored task messages on language change without translating user names", async () => {
+    const { uiMessage, setLocale } = await import("@/lib/locale");
+    tc.createTask({
+      title: uiMessage("Upload {value1}", { value1: "Files {value2}" }),
+      detail: uiMessage("Queued"),
+    });
+    const task = tc.listTasks()[0];
+    expect(tc.taskTitle(task)).toBe("Upload Files {value2}");
+    setLocale("es");
+    expect(tc.taskTitle(task)).toBe("Cargar Files {value2}");
+    expect(tc.taskDetail(task)).toBe("En cola");
+    // Reloading task storage keeps the descriptor, not just the original English snapshot.
+    vi.resetModules();
+    const reloaded = await loadTaskCenter();
+    expect(reloaded.taskTitle(reloaded.listTasks()[0])).toBe("Cargar Files {value2}");
+  });
+
+  it("translates legacy controlled task titles", async () => {
+    const { setLocale } = await import("@/lib/locale");
+    tc.createTask({ title: "Queued" });
+
+    setLocale("es");
+
+    expect(tc.taskTitle(tc.listTasks()[0])).toBe("En cola");
+    setLocale("en");
+  });
+
+  it("localizes failed task error details", async () => {
+    const { setLocale } = await import("@/lib/locale");
+    tc.createTask({ title: "Backup", status: "failed", error: "backup_blob_missing" });
+
+    setLocale("es");
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Falta un archivo necesario para la copia de seguridad. Comprueba el almacenamiento y vuelve a intentarlo.",
+    );
+    setLocale("en");
+  });
+});

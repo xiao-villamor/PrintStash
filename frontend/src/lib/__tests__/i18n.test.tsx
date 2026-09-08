@@ -1,50 +1,35 @@
-/*
- * Translating the interface without translating the user's own words.
- *
- * That line is the whole file. A model called "Bracket", a collection called
- * "Parts", a filament called "PLA" — these are the user's content, and a
- * translation layer that rewrites them corrupts data the user typed. So the
- * catalog is keyed on *complete UI messages*, and a partial or nested match is
- * deliberately not translated: matching fragments is how "Parts" the collection
- * becomes "Piezas" on a Spanish install.
- *
- * A new browser defaults to English rather than to its own `Accept-Language`.
- * That is a decision, not an oversight: the backend, the logs and the docs are
- * English, and a self-hoster debugging a first-run problem in a language they
- * did not choose has one more thing to fight.
- *
- * Accessible labels are asserted alongside visible text because they are the
- * half that silently stays English — nothing looks wrong on screen when a screen
- * reader is the only thing reading it.
+/**
+ * Explicit translation must update React surfaces without touching user content.
+ * Locale selection is persisted, while inaccessible storage remains non-fatal.
  */
-
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocaleToggle } from "@/components/locale-toggle";
-import { DomLocalization, Localized } from "@/components/ui/localized";
-import { translateUiText } from "@/components/ui/localized";
-import { I18nProvider, useI18n } from "@/lib/i18n";
+import { I18nProvider, useI18n, useUiLocale } from "@/lib/i18n";
+import { setLocale, uiText } from "@/lib/locale";
+import { Modal } from "@/components/ui/modal";
 
-function Probe() {
-  const { t } = useI18n();
-  return <p>{t("auth.welcome")}</p>;
-}
-
-function LibrarySourcesProbe() {
+function Probe({ name = "Files" }: { name?: string }) {
+  useUiLocale();
   const { t } = useI18n();
   return (
-    <Localized>
-      <section aria-label={t("settings.libraries")}>
-        <p>Library sources</p>
-      </section>
-    </Localized>
+    <section aria-label={uiText("Settings sections")}>
+      <h1>{t("auth.welcome")}</h1>
+      <p>{name}</p>
+      <button title={uiText("New collection")}>{uiText("Storage configuration")}</button>
+    </section>
   );
 }
 
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  setLocale("en");
+});
+
 describe("I18nProvider", () => {
-  it("defaults a new browser to English regardless of browser language", async () => {
+  it("defaults a new browser to English regardless of browser language", () => {
     localStorage.clear();
     vi.spyOn(window.navigator, "language", "get").mockReturnValue("es-ES");
 
@@ -54,12 +39,11 @@ describe("I18nProvider", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText("Welcome back")).toBeInTheDocument();
-    await waitFor(() => expect(localStorage.getItem("printstash.locale")).toBe("en"));
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeVisible();
     expect(document.documentElement.lang).toBe("en");
   });
 
-  it("persists locale and switches typed messages", async () => {
+  it("updates explicit messages after selecting a language", async () => {
     localStorage.setItem("printstash.locale", "en");
     render(
       <I18nProvider>
@@ -68,135 +52,78 @@ describe("I18nProvider", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText("Welcome back")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Language/ }));
-    expect(screen.getByText("Te damos la bienvenida")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Language:/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Español" }));
+
+    expect(screen.getByRole("heading", { name: "Te damos la bienvenida" })).toBeVisible();
     expect(localStorage.getItem("printstash.locale")).toBe("es");
     expect(document.documentElement.lang).toBe("es");
   });
 
   it("localizes page content and accessible labels", () => {
     localStorage.setItem("printstash.locale", "es");
+
     render(
       <I18nProvider>
-        <Localized>
-          <section aria-label="Settings sections">
-            <h1>All Models</h1>
-            <p>2 models total</p>
-            <button title="New collection">Storage configuration</button>
-          </section>
-        </Localized>
+        <Probe />
       </I18nProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Todos los modelos" })).toBeInTheDocument();
-    expect(screen.getByText("2 modelos en total")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Secciones de ajustes" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Secciones de ajustes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Configuración de almacenamiento" })).toHaveAttribute(
       "title",
       "Nueva colección",
     );
   });
 
-  it("localizes the vault result count", () => {
+  it("preserves user text matching a message identifier", () => {
     localStorage.setItem("printstash.locale", "es");
 
     render(
       <I18nProvider>
-        <Localized>
-          <p>0 items shown</p>
-        </Localized>
+        <Probe name="Files" />
       </I18nProvider>,
     );
 
-    expect(screen.getByText("0 elementos mostrados")).toBeInTheDocument();
+    expect(screen.getByText("Files", { exact: true })).toBeVisible();
+    expect(screen.queryByText("Archivos", { exact: true })).toBeNull();
   });
 
-  it("translates Library sources terminology into Spanish", () => {
+  it("localizes a dialog outside the application root", () => {
     localStorage.setItem("printstash.locale", "es");
-    render(
-      <I18nProvider>
-        <LibrarySourcesProbe />
-      </I18nProvider>,
-    );
-
-    expect(screen.getByRole("region", { name: "Fuentes de biblioteca" })).toBeInTheDocument();
-    expect(screen.getByText("Fuentes de biblioteca")).toBeInTheDocument();
-    expect(
-      translateUiText(
-        "es",
-        '"Workshop NAS" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
-      ),
-    ).toContain('"Workshop NAS" se quitará');
-    expect(
-      translateUiText(
-        "es",
-        "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: /mnt/models. This re-enables safe scans, watching, and writeback.",
-      ),
-    ).toContain("Verifica que esta ruta montada exacta");
-  });
-
-  it("only translates complete UI messages and preserves user content", () => {
-    expect(translateUiText("es", "All Models")).toBe("Todos los modelos");
-    expect(translateUiText("es", "My Models collection")).toBe("My Models collection");
-    expect(translateUiText("es", "Model name: Dragon")).toBe("Model name: Dragon");
-    expect(translateUiText("es", "2 models total")).toBe("2 modelos en total");
-  });
-
-  it("translates nested legacy component text without rewriting user content", async () => {
-    localStorage.setItem("printstash.locale", "es");
-    const container = document.createElement("div");
-    container.id = "root";
-    document.body.append(container);
-
-    function NestedLegacySurface() {
-      return (
-        <section title="No backups available.">
-          <p>No backups available.</p>
-          <p>My Models collection</p>
-        </section>
-      );
-    }
+    const close = vi.fn<() => void>();
 
     render(
       <I18nProvider>
-        <NestedLegacySurface />
-        <DomLocalization />
+        <Modal open onClose={close} title={uiText("Settings")}>
+          <Probe />
+        </Modal>
       </I18nProvider>,
-      { container },
     );
 
-    await waitFor(() => expect(screen.getByText("No hay copias disponibles.")).toBeInTheDocument());
-    expect(screen.getByText("My Models collection")).toBeInTheDocument();
-    expect(screen.getByTitle("No hay copias disponibles.")).toBeInTheDocument();
-    container.remove();
+    expect(screen.getByRole("dialog", { name: "Ajustes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cerrar" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Te damos la bienvenida" })).toBeVisible();
   });
 
-  it("restores legacy labels immediately when switching back to English", async () => {
+  it("preserves language when persistence is unavailable", async () => {
     localStorage.setItem("printstash.locale", "en");
-    const container = document.createElement("div");
-    container.id = "root";
-    document.body.append(container);
-
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage unavailable");
+    });
     render(
       <I18nProvider>
         <LocaleToggle />
-        <button aria-label="Search models">Search models</button>
-        <DomLocalization />
+        <Probe />
       </I18nProvider>,
-      { container },
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /Language/ }));
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Buscar modelos" })).toBeInTheDocument(),
-    );
-    await userEvent.click(screen.getByRole("button", { name: /Idioma/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Language:/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "Español" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Search models" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "Te damos la bienvenida" })).toBeVisible(),
     );
-    expect(screen.queryByRole("button", { name: "Buscar modelos" })).toBeNull();
-    container.remove();
+    expect(document.documentElement.lang).toBe("es");
   });
 });

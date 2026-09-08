@@ -100,7 +100,7 @@ export interface RenderAppOptions extends Omit<RenderOptions, "wrapper"> {
   /** The session the tree sees. Defaults to a superuser. */
   auth?: AuthState;
   /** Locale for the i18n provider. Defaults to English. */
-  locale?: "en" | "es";
+  locale?: import("@/lib/locale").Locale;
   /**
    * What `matchMedia` answers. jsdom has no layout, so every responsive branch
    * would otherwise throw — and a component that reads one is not "untested",

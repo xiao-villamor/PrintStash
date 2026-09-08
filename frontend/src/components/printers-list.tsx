@@ -1,5 +1,9 @@
 "use client";
 
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
 import { PrinterRead, type PrinterCreate, type PrinterStatus } from "@/types";
@@ -25,7 +29,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { TabBar } from "@/components/ui/tabs";
 import { Localized } from "@/components/ui/localized";
 import { useOptionalI18n } from "@/lib/i18n";
-import { translateUiText } from "@/components/ui/localized";
+import { translateUiText } from "@/lib/locale";
 import { FleetMaintenancePanel, FleetQueuePanel } from "@/components/fleet-panels";
 import { usePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
@@ -71,6 +75,7 @@ function parseSetupKind(value: string): PrinterSetupKind | null {
 }
 
 export function PrintersPage() {
+  useUiLocale();
   const { user } = useAuth();
   const locale = useOptionalI18n()?.locale ?? "en";
   // Shared printers cache: mutations through the api layer invalidate
@@ -132,7 +137,7 @@ export function PrintersPage() {
     setDeleteBusy(true);
     try {
       await deletePrinter(printer.id);
-      toast.success(`Printer "${printer.name}" removed`);
+      toast.success(uiText('Printer "{value1}" removed', { value1: String(printer.name) }));
       setDeleteTarget(null);
     } catch (e) {
       toast.error(e);
@@ -149,18 +154,20 @@ export function PrintersPage() {
           onClose={() => setDeleteTarget(null)}
           onConfirm={confirmDelete}
           busy={deleteBusy}
-          title="Remove printer?"
+          title={uiText("Remove printer?")}
           description={
             deleteTarget
-              ? `"${deleteTarget.name}" will be removed from PrintStash.`
-              : "This printer will be removed from PrintStash."
+              ? uiText('"{value1}" will be removed from PrintStash.', {
+                  value1: String(deleteTarget.name),
+                })
+              : uiText("This printer will be removed from PrintStash.")
           }
-          confirmLabel="Remove"
+          confirmLabel={uiText("Remove")}
         />
         <div className="flex w-full flex-col gap-6">
           <PageHeader
-            title="Printers"
-            description="Connected printer endpoints"
+            title={uiText("Printers")}
+            description={uiText("Connected printer endpoints")}
             actions={
               <>
                 <Button
@@ -172,7 +179,7 @@ export function PrintersPage() {
                   }}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
-                  Refresh
+                  {uiText("Refresh")}
                 </Button>
                 <Button
                   size="xs"
@@ -183,7 +190,7 @@ export function PrintersPage() {
                   disabled={!user?.is_superuser}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  {user?.is_superuser ? "Add printer" : "Admin required"}
+                  {user?.is_superuser ? uiText("Add printer") : uiText("Admin required")}
                 </Button>
               </>
             }
@@ -215,29 +222,40 @@ export function PrintersPage() {
               )}
 
               {!loading && printers.length > 0 && (
-                <section aria-label="Fleet summary" className="animate-panel-in space-y-3">
+                <section
+                  aria-label={uiText("Fleet summary")}
+                  className="animate-panel-in space-y-3"
+                >
                   <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                     {[
                       {
-                        label: "Active jobs",
+                        get label() {
+                          return uiText("Active jobs");
+                        },
                         value: dashboard?.active_jobs ?? 0,
                         icon: Play,
                         tone: "text-primary",
                       },
                       {
-                        label: "Printing",
+                        get label() {
+                          return uiText("Printing");
+                        },
                         value: statusCounts.printing ?? 0,
                         icon: PrinterIcon,
                         tone: "text-primary",
                       },
                       {
-                        label: "Needs attention",
+                        get label() {
+                          return uiText("Needs attention");
+                        },
                         value: attentionCount,
                         icon: CircleAlert,
                         tone: attentionCount ? "text-destructive" : "text-muted-foreground",
                       },
                       {
-                        label: "Ready",
+                        get label() {
+                          return uiText("Ready");
+                        },
                         value: statusCounts.ready ?? 0,
                         icon: Check,
                         tone: "text-success",
@@ -265,7 +283,7 @@ export function PrintersPage() {
                   {printerGroups.length > 1 && (
                     <div
                       className="flex flex-wrap items-center gap-2"
-                      aria-label="Filter printers by group"
+                      aria-label={uiText("Filter printers by group")}
                     >
                       <Button
                         type="button"
@@ -273,7 +291,7 @@ export function PrintersPage() {
                         size="xs"
                         onClick={() => setSelectedGroup(null)}
                       >
-                        All groups
+                        {uiText("All groups")}
                       </Button>
                       {printerGroups.map((group) => (
                         <Button
@@ -284,7 +302,7 @@ export function PrintersPage() {
                           onClick={() => setSelectedGroup(group.name)}
                         >
                           <Layers3 className="h-3.5 w-3.5" />
-                          {group.name === "__ungrouped" ? "Ungrouped" : group.name}
+                          {group.name === "__ungrouped" ? uiText("Ungrouped") : group.name}
                           <span className="text-muted-foreground">{group.count}</span>
                         </Button>
                       ))}
@@ -306,12 +324,12 @@ export function PrintersPage() {
               ) : printers.length === 0 ? (
                 <EmptyState
                   icon={PrinterIcon}
-                  title="No printers configured yet."
+                  title={uiText("No printers configured yet.")}
                   action={
                     user?.is_superuser ? (
                       <Button size="xs" onClick={() => setAddOpen(true)}>
                         <Plus className="h-3.5 w-3.5" />
-                        Add your first printer
+                        {uiText("Add your first printer")}
                       </Button>
                     ) : undefined
                   }
@@ -347,7 +365,7 @@ export function PrintersPage() {
                             </Badge>
                             {p.capabilities.support_level === "beta" && (
                               <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-3xs uppercase tracking-wider text-amber-600">
-                                Beta
+                                {uiText("Beta")}
                               </span>
                             )}
                             <Badge
@@ -372,7 +390,8 @@ export function PrintersPage() {
                         <dl className="grid gap-3 text-sm">
                           <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
                             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <PrinterIcon className="h-3.5 w-3.5" /> Model
+                              <PrinterIcon className="h-3.5 w-3.5" />
+                              {uiText(" Model")}
                             </dt>
                             <dd className="min-w-0">
                               <PrinterModelBadge printer={p} canEdit={p.access.can_admin} />
@@ -380,23 +399,29 @@ export function PrintersPage() {
                           </div>
                           <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
                             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <Network className="h-3.5 w-3.5" /> Endpoint
+                              <Network className="h-3.5 w-3.5" />
+                              {uiText(" Endpoint")}
                             </dt>
                             <dd
                               className="truncate font-mono text-xs text-foreground"
-                              title={p.access.can_admin ? providerAddress(p) : "Restricted"}
+                              title={p.access.can_admin ? providerAddress(p) : uiText("Restricted")}
                             >
-                              {p.access.can_admin ? providerAddress(p) : "Restricted"}
+                              {p.access.can_admin ? providerAddress(p) : uiText("Restricted")}
                             </dd>
                           </div>
                           <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
                             <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <Clock3 className="h-3.5 w-3.5" /> Activity
+                              <Clock3 className="h-3.5 w-3.5" />
+                              {uiText(" Activity")}
                             </dt>
                             <dd className="text-xs text-foreground">
                               {p.last_seen_at
-                                ? `Seen ${new Date(p.last_seen_at).toLocaleString()}`
-                                : "Never connected"}
+                                ? uiText("Seen {value1}", {
+                                    value1: String(
+                                      new Date(p.last_seen_at).toLocaleString(currentLocale()),
+                                    ),
+                                  })
+                                : uiText("Never connected")}
                             </dd>
                           </div>
                         </dl>
@@ -412,7 +437,7 @@ export function PrintersPage() {
                             role="alert"
                             className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs leading-relaxed text-destructive"
                           >
-                            <span className="font-medium">Connection issue: </span>
+                            <span className="font-medium">{uiText("Connection issue: ")}</span>
                             <span className="line-clamp-2">{p.last_error}</span>
                           </div>
                         )}
@@ -432,13 +457,13 @@ export function PrintersPage() {
                           className="flex items-center gap-1 rounded px-2 py-1 text-3xs uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Trash2 className="h-3 w-3" />
-                          {p.access.can_admin ? "Remove" : "Restricted"}
+                          {p.access.can_admin ? uiText("Remove") : uiText("Restricted")}
                         </button>
                         <Link
                           href={`/printers/${p.id}`}
                           className="flex items-center gap-1 rounded border border-border px-2.5 py-1.5 text-3xs uppercase tracking-wider text-foreground transition-colors hover:border-primary hover:text-primary"
                         >
-                          Open
+                          {uiText("Open")}
                           <ArrowRight className="h-3 w-3" />
                         </Link>
                       </div>
@@ -477,6 +502,7 @@ export function PrintersPage() {
 }
 
 function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
+  useUiLocale();
   const modelName = printer.model_name || printer.detected_model;
   const artwork = printerArtwork(modelName);
   const [imageUrl, setImageUrl] = useState(artwork.imageUrl);
@@ -486,7 +512,7 @@ function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
     <div className="relative flex h-44 items-center justify-center border-b border-border bg-muted/40 px-6 py-4">
       <img
         src={imageUrl}
-        alt={`${modelName || printer.name} printer`}
+        alt={uiText("{value1} printer", { value1: String(modelName || printer.name) })}
         referrerPolicy="no-referrer"
         onError={() => setImageUrl("/images/printers/generic-fdm.png")}
         className="h-full w-full object-contain"
@@ -498,7 +524,7 @@ function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
           rel="noreferrer noopener"
           className="absolute bottom-2 right-2 rounded bg-background/90 px-1.5 py-0.5 text-3xs text-muted-foreground hover:text-foreground"
         >
-          Image: OrcaSlicer
+          {uiText("Image: OrcaSlicer")}
         </a>
       )}
     </div>
@@ -508,6 +534,7 @@ function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
 const OTHER_MODEL_OPTION = "__other__";
 
 function PrinterModelBadge({ printer, canEdit }: { printer: PrinterRead; canEdit: boolean }) {
+  useUiLocale();
   const [editing, setEditing] = useState(false);
   const displayModel = printer.model_name || printer.detected_model;
   const [selected, setSelected] = useState(() =>
@@ -561,7 +588,7 @@ function PrinterModelBadge({ printer, canEdit }: { printer: PrinterRead; canEdit
         setEditing(true);
       }}
     >
-      {displayModel || (canEdit ? "Set model" : "Model unknown")}
+      {displayModel || (canEdit ? uiText("Set model") : uiText("Model unknown"))}
       {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
     </button>
   );
@@ -589,6 +616,7 @@ function PrinterModelPicker({
   onClose: () => void;
   onSave: () => void;
 }) {
+  useUiLocale();
   const [query, setQuery] = useState("");
   const [brand, setBrand] = useState("All");
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -604,22 +632,25 @@ function PrinterModelPicker({
       <Modal
         open
         onClose={onClose}
-        title="Select printer model"
+        title={uiText("Select printer model")}
         className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden"
       >
         <div className="border-b border-border pb-4">
           <label className="relative block">
-            <span className="sr-only">Search printer models</span>
+            <span className="sr-only">{uiText("Search printer models")}</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search printer models"
+              placeholder={uiText("Search printer models")}
               className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
-          <div className="mt-3 flex gap-1 overflow-x-auto pb-1" aria-label="Printer brands">
+          <div
+            className="mt-3 flex gap-1 overflow-x-auto pb-1"
+            aria-label={uiText("Printer brands")}
+          >
             {MODEL_BRANDS.map((item) => (
               <button
                 key={item}
@@ -668,7 +699,7 @@ function PrinterModelPicker({
             </div>
           ) : (
             <div className="flex min-h-52 items-center justify-center text-sm text-muted-foreground">
-              No printer models match your search.
+              {uiText("No printer models match your search.")}
             </div>
           )}
         </div>
@@ -681,7 +712,9 @@ function PrinterModelPicker({
               onChange={() => onSelectedChange(OTHER_MODEL_OPTION)}
               className="h-4 w-4 accent-primary"
             />
-            <span className="shrink-0 text-sm font-medium text-foreground">Custom model</span>
+            <span className="shrink-0 text-sm font-medium text-foreground">
+              {uiText("Custom model")}
+            </span>
             <input
               value={customValue}
               onFocus={() => onSelectedChange(OTHER_MODEL_OPTION)}
@@ -689,16 +722,16 @@ function PrinterModelPicker({
                 onSelectedChange(OTHER_MODEL_OPTION);
                 onCustomValueChange(event.target.value);
               }}
-              placeholder="Enter model name"
+              placeholder={uiText("Enter model name")}
               className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
           <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {uiText("Cancel")}
             </Button>
             <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>
-              Save model
+              {uiText("Save model")}
             </Button>
           </div>
         </div>
@@ -708,6 +741,7 @@ function PrinterModelPicker({
 }
 
 function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  useUiLocale();
   const [name, setName] = useState("");
   const [setupKind, setSetupKind] = useState<PrinterSetupKind>("moonraker");
   const [url, setUrl] = useState("");
@@ -770,10 +804,10 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
         payload.octoprint_api_key = octoprintApiKey;
       }
       await createPrinter(payload);
-      toast.success(`Printer "${name.trim()}" added`);
+      toast.success(uiText('Printer "{value1}" added', { value1: String(name.trim()) }));
       onCreated();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Could not add printer");
+      setErr(e instanceof Error ? e.message : uiText("Could not add printer"));
       toast.error(e);
     } finally {
       submittingRef.current = false;
@@ -787,14 +821,14 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
         onClose={onClose}
         className="bg-card border border-border rounded w-full max-w-md p-6 shadow-lg"
       >
-        <h3 className="text-lg font-semibold text-foreground mb-5">Add printer</h3>
+        <h3 className="text-lg font-semibold text-foreground mb-5">{uiText("Add printer")}</h3>
         <form onSubmit={submit} className="space-y-4">
           <div>
             <label
               htmlFor="printer-name"
               className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
             >
-              Name
+              {uiText("Name")}
             </label>
             <input
               id="printer-name"
@@ -810,7 +844,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
               htmlFor="printer-integration"
               className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
             >
-              Integration
+              {uiText("Integration")}
             </label>
             <select
               id="printer-integration"
@@ -839,14 +873,14 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
               className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
             >
               {setupKind === "prusalink"
-                ? "PrusaLink URL"
+                ? uiText("PrusaLink URL")
                 : setupKind === "octoprint"
-                  ? "OctoPrint URL"
+                  ? uiText("OctoPrint URL")
                   : setupKind === "moonraker"
-                    ? "Moonraker URL"
+                    ? uiText("Moonraker URL")
                     : setupKind === "elegoo_neptune4"
-                      ? "Printer URL"
-                      : "Printer host or IP"}
+                      ? uiText("Printer URL")
+                      : uiText("Printer host or IP")}
             </label>
             <input
               id="printer-address"
@@ -871,9 +905,9 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 htmlFor="moonraker-api-key"
                 className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
               >
-                {setupKind === "elegoo_neptune4" ? "API key" : "Moonraker API key"}{" "}
+                {setupKind === "elegoo_neptune4" ? uiText("API key") : uiText("Moonraker API key")}{" "}
                 <span className="font-normal normal-case tracking-normal opacity-60">
-                  (optional)
+                  {uiText("(optional)")}
                 </span>
               </label>
               <input
@@ -882,7 +916,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 value={moonrakerKey}
                 onChange={(e) => setMoonrakerKey(e.target.value)}
                 className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                placeholder="Leave blank if auth is disabled"
+                placeholder={uiText("Leave blank if auth is disabled")}
               />
             </div>
           )}
@@ -893,7 +927,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   htmlFor="bambu-serial"
                   className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                 >
-                  Printer serial
+                  {uiText("Printer serial")}
                 </label>
                 <input
                   id="bambu-serial"
@@ -908,7 +942,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   htmlFor="bambu-access-code"
                   className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                 >
-                  LAN access code
+                  {uiText("LAN access code")}
                 </label>
                 <input
                   id="bambu-access-code"
@@ -928,7 +962,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   htmlFor="prusalink-auth"
                   className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                 >
-                  Authentication
+                  {uiText("Authentication")}
                 </label>
                 <select
                   id="prusalink-auth"
@@ -939,8 +973,8 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   }}
                   className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
                 >
-                  <option value="digest">Username and password (recommended)</option>
-                  <option value="api_key">Legacy API key</option>
+                  <option value="digest">{uiText("Username and password (recommended)")}</option>
+                  <option value="api_key">{uiText("Legacy API key")}</option>
                 </select>
               </div>
               {prusaAuthMode === "digest" && (
@@ -949,7 +983,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                     htmlFor="prusalink-username"
                     className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                   >
-                    Username
+                    {uiText("Username")}
                   </label>
                   <input
                     id="prusalink-username"
@@ -965,7 +999,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   htmlFor="prusalink-secret"
                   className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                 >
-                  {prusaAuthMode === "digest" ? "Password" : "API key"}
+                  {prusaAuthMode === "digest" ? uiText("Password") : uiText("API key")}
                 </label>
                 <input
                   id="prusalink-secret"
@@ -984,7 +1018,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 htmlFor="octoprint-api-key"
                 className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
               >
-                API key
+                {uiText("API key")}
               </label>
               <input
                 id="octoprint-api-key"
@@ -1002,9 +1036,9 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 htmlFor="centauri-mainboard-id"
                 className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
               >
-                Mainboard ID{" "}
+                {uiText("Mainboard ID")}{" "}
                 <span className="font-normal normal-case tracking-normal opacity-60">
-                  (recommended)
+                  {uiText("(recommended)")}
                 </span>
               </label>
               <input
@@ -1012,24 +1046,24 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 value={centauriMainboardId}
                 onChange={(e) => setCentauriMainboardId(e.target.value)}
                 className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
-                placeholder="From printer discovery or diagnostics"
+                placeholder={uiText("From printer discovery or diagnostics")}
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Needed for reliable printer commands while idle, paused, or errored.
+                {uiText("Needed for reliable printer commands while idle, paused, or errored.")}
               </p>
             </div>
           )}
           {setupKind === "elegoo_centauri_carbon_2" && (
             <>
               <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">
-                Enable LAN Only in printer network settings before connecting.
+                {uiText("Enable LAN Only in printer network settings before connecting.")}
               </div>
               <div>
                 <label
                   htmlFor="centauri-access-code"
                   className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
                 >
-                  Printer access code
+                  {uiText("Printer access code")}
                 </label>
                 <input
                   id="centauri-access-code"
@@ -1047,14 +1081,14 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
               htmlFor="printer-notes"
               className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
             >
-              Notes
+              {uiText("Notes")}
             </label>
             <input
               id="printer-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              placeholder="Optional"
+              placeholder={uiText("Optional")}
             />
           </div>
           {err && (
@@ -1064,10 +1098,10 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
           )}
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {uiText("Cancel")}
             </Button>
             <Button type="submit" loading={submitting} disabled={!name || !url}>
-              Add printer
+              {uiText("Add printer")}
             </Button>
           </div>
         </form>

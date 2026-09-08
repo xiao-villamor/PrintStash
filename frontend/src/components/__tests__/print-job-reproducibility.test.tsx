@@ -27,7 +27,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
-import { DomLocalization, Localized } from "@/components/ui/localized";
+import { Localized } from "@/components/ui/localized";
 import { I18nProvider } from "@/lib/i18n";
 import {
   resolvePrintJobReproducibility,
@@ -353,7 +353,6 @@ describe("PrintJobReproducibility", () => {
             />
           </Localized>
         </MemoryRouter>
-        <DomLocalization />
       </I18nProvider>,
       { container },
     );

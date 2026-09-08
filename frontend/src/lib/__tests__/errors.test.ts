@@ -12,9 +12,7 @@
  * token refresh, so a 401 that failed to be recognised logs the user out, and a
  * 500 wrongly recognised as one puts them in a refresh loop.
  *
- * Unknown codes are humanised rather than hidden. A code nobody has written copy
- * for yet still has to render as a sentence, or every new backend error surfaces
- * to users as a blank message.
+ * Unknown codes use a localized recovery message; technical codes remain in ApiError.
  */
 
 import { describe, expect, it } from "vitest";
@@ -53,6 +51,13 @@ describe("parseApiError", () => {
     expect(err.detail).toBe("upstream is down");
   });
 
+  it("falls back to the status string for structured validation details", () => {
+    const err = parseApiError(new Error('HTTP 422: {"detail":[{"loc":["body","name"]}]}'));
+
+    expect(err.status).toBe(422);
+    expect(err.code).toBe("422");
+  });
+
   it("returns a status-0 'unknown' error for unrecognised input", () => {
     const err = parseApiError("a plain string");
     expect(err.status).toBe(0);
@@ -88,13 +93,27 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage("archive_blob_hash_mismatch")).toMatch(/Vault audit/);
   });
 
-  it("humanises unknown codes as sentence-case messages", () => {
-    expect(getErrorMessage("some_new_code")).toBe("Some new code.");
+  it("gives unknown codes a localized recovery message", () => {
+    expect(getErrorMessage("some_new_code")).toBe(getErrorMessage("unknown"));
   });
 
   it("userMessage parses then maps in one step", () => {
     expect(userMessage(new Error('HTTP 401: {"detail":"invalid_credentials"}'))).toBe(
       "Invalid username or password.",
     );
+  });
+});
+
+describe("localized error recovery", () => {
+  it("localizes error recovery", () => {
+    localStorage.setItem("printstash.locale", "es");
+    try {
+      expect(getErrorMessage("invalid_credentials")).toBe("Usuario o contraseña incorrectos.");
+      expect(getErrorMessage("future_backend_code")).toBe(
+        "Se ha producido un error al conectar con el servidor. Comprueba que PrintStash esté funcionando e inténtalo de nuevo.",
+      );
+    } finally {
+      localStorage.removeItem("printstash.locale");
+    }
   });
 });

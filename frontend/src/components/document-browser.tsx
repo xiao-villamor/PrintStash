@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useRef, useState } from "react";
 import { FileText, FileType2, Loader2, Plus, Trash2, Upload } from "lucide-react";
 
@@ -12,6 +15,7 @@ import type { DocumentKind, DocumentListItem } from "@/types";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 function KindIcon({ kind }: { kind: DocumentKind }) {
+  useUiLocale();
   if (kind === "pdf") return <FileType2 className="w-5 h-5 text-red-500" />;
   if (kind === "markdown") return <FileText className="w-5 h-5 text-primary" />;
   return <FileText className="w-5 h-5 text-muted-foreground" />;
@@ -38,6 +42,7 @@ export function DocumentBrowser({
   collectionPath: string | null;
   canCreate: boolean;
 }) {
+  useUiLocale();
   const router = useRouter();
   // One state for "which collection these documents were loaded for", so the
   // spinner is derived from the fetch that has actually completed instead of a
@@ -117,11 +122,11 @@ export function DocumentBrowser({
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmRemove}
         busy={deleteBusy}
-        title="Delete document?"
+        title={uiText("Delete document?")}
         description={
           deleteTarget
-            ? `"${deleteTarget.name}" will be moved to trash.`
-            : "This document will be moved to trash."
+            ? uiText('"{value1}" will be moved to trash.', { value1: String(deleteTarget.name) })
+            : uiText("This document will be moved to trash.")
         }
       />
       <div className="p-4 sm:p-6">
@@ -132,14 +137,15 @@ export function DocumentBrowser({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover"
             >
               <Plus className="w-4 h-4" />
-              New document
+              {uiText("New document")}
             </button>
             <button
               onClick={() => fileRef.current?.click()}
               disabled={busy}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted disabled:opacity-50"
             >
-              <Upload className="w-4 h-4 text-muted-foreground" /> Upload PDF / file
+              <Upload className="w-4 h-4 text-muted-foreground" />
+              {uiText(" Upload PDF / file")}
             </button>
             <input
               ref={fileRef}
@@ -158,8 +164,10 @@ export function DocumentBrowser({
         ) : docs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
             <FileText className="w-8 h-8 mb-2 opacity-40" />
-            <p className="text-sm">No documents here yet.</p>
-            {canCreate && <p className="text-xs mt-1">Create a markdown doc or upload a PDF.</p>}
+            <p className="text-sm">{uiText("No documents here yet.")}</p>
+            {canCreate && (
+              <p className="text-xs mt-1">{uiText("Create a markdown doc or upload a PDF.")}</p>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
@@ -183,7 +191,7 @@ export function DocumentBrowser({
                 {canEditItem(doc) && (
                   <button
                     onClick={() => remove(doc)}
-                    title="Delete document"
+                    title={uiText("Delete document")}
                     className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-red-600 transition-opacity"
                   >
                     <Trash2 className="w-4 h-4" />

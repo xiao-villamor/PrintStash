@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useState } from "react";
 import {
   Bookmark,
@@ -72,6 +75,7 @@ export function SavedViewSelector({
   triggerSize?: "xs" | "sm";
   triggerVariant?: "outline" | "ghost";
 }) {
+  useUiLocale();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<number[]>(readRecent);
@@ -137,9 +141,9 @@ export function SavedViewSelector({
               className={cn("max-w-44", triggerClassName)}
             >
               <Bookmark className="h-4 w-4" />
-              <span className="truncate">{active?.name ?? "Saved views"}</span>
+              <span className="truncate">{active?.name ?? uiText("Saved views")}</span>
               {active && modified && (
-                <span className="text-warning" aria-label="Modified saved view">
+                <span className="text-warning" aria-label={uiText("Modified saved view")}>
                   •
                 </span>
               )}
@@ -154,8 +158,8 @@ export function SavedViewSelector({
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Find a saved view..."
-                aria-label="Find a saved view"
+                placeholder={uiText("Find a saved view...")}
+                aria-label={uiText("Find a saved view")}
                 className="pl-8"
               />
             </div>
@@ -174,15 +178,17 @@ export function SavedViewSelector({
                   >
                     <span className="min-w-0 flex-1 truncate">{view.name}</span>
                     {!query && index < recentIds.length && recentIds.includes(view.id) && (
-                      <span className="font-mono text-3xs text-muted-foreground">Recent</span>
+                      <span className="font-mono text-3xs text-muted-foreground">
+                        {uiText("Recent")}
+                      </span>
                     )}
                     {view.id === activeId && <Check className="h-4 w-4 text-primary" />}
                   </button>
                   <div className="flex pr-1 opacity-70 group-hover:opacity-100">
                     <button
                       type="button"
-                      title="Update with current filters"
-                      aria-label={`Update ${view.name}`}
+                      title={uiText("Update with current filters")}
+                      aria-label={uiText("Update {value1}", { value1: String(view.name) })}
                       onClick={() => void run(() => onUpdate(view))}
                       className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
@@ -190,8 +196,8 @@ export function SavedViewSelector({
                     </button>
                     <button
                       type="button"
-                      title="Rename"
-                      aria-label={`Rename ${view.name}`}
+                      title={uiText("Rename")}
+                      aria-label={uiText("Rename {value1}", { value1: String(view.name) })}
                       onClick={() => {
                         setEditing(view);
                         setName(view.name);
@@ -203,8 +209,8 @@ export function SavedViewSelector({
                     </button>
                     <button
                       type="button"
-                      title="Duplicate"
-                      aria-label={`Duplicate ${view.name}`}
+                      title={uiText("Duplicate")}
+                      aria-label={uiText("Duplicate {value1}", { value1: String(view.name) })}
                       onClick={() => void run(() => onDuplicate(view))}
                       className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
@@ -212,8 +218,8 @@ export function SavedViewSelector({
                     </button>
                     <button
                       type="button"
-                      title="Delete"
-                      aria-label={`Delete ${view.name}`}
+                      title={uiText("Delete")}
+                      aria-label={uiText("Delete {value1}", { value1: String(view.name) })}
                       onClick={() => {
                         setDeleting(view);
                         setMenuOpen(false);
@@ -227,7 +233,7 @@ export function SavedViewSelector({
               ))
             ) : (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                {views.length ? "No matching views" : "No saved views yet"}
+                {views.length ? uiText("No matching views") : uiText("No saved views yet")}
               </p>
             )}
           </div>
@@ -240,14 +246,15 @@ export function SavedViewSelector({
               }}
               className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <BookmarkPlus className="h-4 w-4 text-muted-foreground" /> Save current view
+              <BookmarkPlus className="h-4 w-4 text-muted-foreground" />
+              {uiText(" Save current view")}
             </button>
           </div>
         </DropdownMenu>
         <Modal
           open={!!editing}
           onClose={() => setEditing(null)}
-          title="Rename saved view"
+          title={uiText("Rename saved view")}
           className="max-w-sm"
         >
           <form
@@ -269,10 +276,10 @@ export function SavedViewSelector({
             />
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setEditing(null)}>
-                Cancel
+                {uiText("Cancel")}
               </Button>
               <Button type="submit" loading={busy} disabled={!name.trim()}>
-                Rename
+                {uiText("Rename")}
               </Button>
             </div>
           </form>
@@ -287,11 +294,15 @@ export function SavedViewSelector({
               setDeleting(null);
             })
           }
-          title="Delete saved view?"
+          title={uiText("Delete saved view?")}
           description={
-            deleting ? `“${deleting.name}” will be removed. Models are not affected.` : ""
+            deleting
+              ? uiText("“{value1}” will be removed. Models are not affected.", {
+                  value1: String(deleting.name),
+                })
+              : ""
           }
-          confirmLabel="Delete"
+          confirmLabel={uiText("Delete")}
           busy={busy}
         />
       </>

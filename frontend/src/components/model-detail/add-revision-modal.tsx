@@ -1,5 +1,9 @@
 "use client";
 
+import { uiMessage } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent } from "react";
 import { FileCode2, Plus, Star, Upload, X } from "lucide-react";
@@ -26,6 +30,7 @@ export function AddGcodeRevisionModal({
   onClose: () => void;
   onUploaded: (model: ModelRead) => void;
 }) {
+  useUiLocale();
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
@@ -38,7 +43,7 @@ export function AddGcodeRevisionModal({
   function selectFile(nextFile: File | null) {
     if (nextFile && !isGcodeFile(nextFile.name)) {
       setFile(null);
-      setError("Choose a .gcode, .g, .gco, or .bgcode file.");
+      setError(uiText("Choose a .gcode, .g, .gco, or .bgcode file."));
       return;
     }
     setFile(nextFile);
@@ -55,8 +60,8 @@ export function AddGcodeRevisionModal({
     e.preventDefault();
     if (!file || submitting) return;
     const taskId = createTask({
-      title: `Upload revision ${file.name}`,
-      detail: "Uploading G-code revision",
+      title: uiMessage("Upload revision {value1}", { value1: String(file.name) }),
+      detail: uiMessage("Uploading G-code revision"),
       status: "running",
       progress: 20,
     });
@@ -70,20 +75,20 @@ export function AddGcodeRevisionModal({
       form.append("revision_status", "needs_test");
       form.append("is_recommended", String(recommended));
       updateTask(taskId, {
-        detail: "Adding revision to model",
+        detail: uiMessage("Adding revision to model"),
         status: "running",
         progress: 70,
       });
       onUploaded(await addGcodeRevision(modelId, form));
       updateTask(taskId, {
-        detail: "Revision uploaded",
+        detail: uiMessage("Revision uploaded"),
         status: "completed",
         progress: 100,
       });
     } catch (e: any) {
       setError(e.message);
       updateTask(taskId, {
-        detail: e.message || "Revision upload failed",
+        detail: e.message || uiMessage("Revision upload failed"),
         status: "failed",
         progress: 100,
       });
@@ -100,12 +105,14 @@ export function AddGcodeRevisionModal({
         onClose={() => {
           if (!submitting) onClose();
         }}
-        title="Add G-code revision"
+        title={uiText("Add G-code revision")}
         className="max-w-lg"
       >
         <form onSubmit={submit} className="space-y-5">
           <p className="-mt-2 text-sm leading-relaxed text-muted-foreground">
-            Upload another slice while keeping earlier settings and print history available.
+            {uiText(
+              "Upload another slice while keeping earlier settings and print history available.",
+            )}
           </p>
 
           <input
@@ -117,7 +124,7 @@ export function AddGcodeRevisionModal({
           />
 
           <div className="space-y-1.5">
-            <span className="text-sm font-medium text-foreground">G-code file</span>
+            <span className="text-sm font-medium text-foreground">{uiText("G-code file")}</span>
             {file ? (
               <div
                 onDragEnter={(event) => {
@@ -138,7 +145,7 @@ export function AddGcodeRevisionModal({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
                   <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-                    {formatBytes(file.size)} · G-code
+                    {uiText("{value1} · G-code", { value1: String(formatBytes(file.size) ?? "") })}
                   </p>
                 </div>
                 <Button
@@ -147,7 +154,7 @@ export function AddGcodeRevisionModal({
                   size="xs"
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  Replace
+                  {uiText("Replace")}
                 </Button>
                 <Button
                   type="button"
@@ -157,7 +164,7 @@ export function AddGcodeRevisionModal({
                     selectFile(null);
                     if (fileInputRef.current) fileInputRef.current.value = "";
                   }}
-                  aria-label="Remove selected file"
+                  aria-label={uiText("Remove selected file")}
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -184,10 +191,10 @@ export function AddGcodeRevisionModal({
                   <Upload className="h-5 w-5" />
                 </span>
                 <span className="text-sm font-medium text-foreground">
-                  Choose G-code or drop it here
+                  {uiText("Choose G-code or drop it here")}
                 </span>
                 <span className="mt-1 text-xs text-muted-foreground">
-                  .gcode, .g, .gco, or .bgcode
+                  {uiText(".gcode, .g, .gco, or .bgcode")}
                 </span>
               </button>
             )}
@@ -204,21 +211,23 @@ export function AddGcodeRevisionModal({
 
           <div className="grid gap-4">
             <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Revision label <span className="font-normal text-muted-foreground">Optional</span>
+              {uiText("Revision label ")}
+              <span className="font-normal text-muted-foreground">{uiText("Optional")}</span>
               <Input
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
                 maxLength={128}
-                placeholder="e.g. Stronger walls"
+                placeholder={uiText("e.g. Stronger walls")}
               />
             </label>
             <label className="space-y-1.5 text-sm font-medium text-foreground">
-              Notes <span className="font-normal text-muted-foreground">Optional</span>
+              {uiText("Notes ")}
+              <span className="font-normal text-muted-foreground">{uiText("Optional")}</span>
               <textarea
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 rows={3}
-                placeholder="What changed in this slice?"
+                placeholder={uiText("What changed in this slice?")}
                 className={cn(inputClasses, "h-auto resize-none")}
               />
             </label>
@@ -234,7 +243,7 @@ export function AddGcodeRevisionModal({
               checked={recommended}
               onChange={setRecommended}
               disabled={submitting}
-              ariaLabel="Mark as recommended"
+              ariaLabel={uiText("Mark as recommended")}
               className="mt-0.5"
             />
             <Star
@@ -244,21 +253,22 @@ export function AddGcodeRevisionModal({
               )}
             />
             <div>
-              <p className="text-sm font-medium text-foreground">Mark as recommended</p>
+              <p className="text-sm font-medium text-foreground">{uiText("Mark as recommended")}</p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                Makes this default revision for downloads and printer sends. Current recommendation
-                will be replaced.
+                {uiText(
+                  "Makes this default revision for downloads and printer sends. Current recommendation will be replaced.",
+                )}
               </p>
             </div>
           </div>
 
           <div className="-mx-6 -mb-6 flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-              Cancel
+              {uiText("Cancel")}
             </Button>
             <Button type="submit" loading={submitting} disabled={!file}>
               {!submitting && <Plus className="h-4 w-4" />}
-              {submitting ? "Adding revision…" : "Add revision"}
+              {submitting ? uiText("Adding revision…") : uiText("Add revision")}
             </Button>
           </div>
         </form>

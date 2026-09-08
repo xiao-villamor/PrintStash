@@ -1,7 +1,10 @@
 "use client";
 
+import { getErrorMessage } from "./errors";
+
 import { listIngestJobs } from "@/lib/api/models";
 import type { IngestJobStatus } from "@/types";
+import { uiText, knownUiText, uiMessage, type MessageDescriptor } from "./locale";
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
@@ -23,6 +26,8 @@ export interface TaskItem {
   id: string;
   title: string;
   detail?: string;
+  titleMessage?: MessageDescriptor;
+  detailMessage?: MessageDescriptor;
   status: TaskStatus;
   progress: number;
   createdAt: number;
@@ -40,6 +45,8 @@ export interface TaskItem {
   completion?: IngestJobStatus["completion"];
   thumbnailStatus?: IngestJobStatus["thumbnail_status"];
   thumbnailReason?: string | null;
+  currentItem?: string | null;
+  error?: string | null;
   serverUpdatedAt?: string | null;
   retryable?: boolean;
   failedItems?: Array<{ name: string; reason: string; retryable: boolean }>;
@@ -177,16 +184,70 @@ export function listTasks(): TaskItem[] {
   return [...tasks].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function createTask(
-  input: Pick<TaskItem, "title"> &
-    Partial<Omit<TaskItem, "id" | "title" | "createdAt" | "updatedAt">>,
-): string {
+type TaskText = string | MessageDescriptor;
+type TaskPatch = Partial<Omit<TaskItem, "id" | "title" | "detail" | "createdAt" | "updatedAt">> & {
+  title?: TaskText;
+  detail?: TaskText;
+};
+
+function taskTextPatch(input: TaskPatch): Partial<TaskItem> {
+  const { title, detail, ...rest } = input;
+  if (title !== undefined) {
+    rest.titleMessage = title instanceof Object ? title : undefined;
+  }
+  if (detail !== undefined) {
+    rest.detailMessage = detail instanceof Object ? detail : undefined;
+  }
+  const result: Partial<TaskItem> = { ...rest };
+  if (title !== undefined)
+    result.title = title instanceof Object ? uiText(title.key, title.values) : title;
+  if (detail !== undefined)
+    result.detail = detail instanceof Object ? uiText(detail.key, detail.values) : detail;
+  return result;
+}
+
+export function taskTitle(task: TaskItem): string {
+  return task.titleMessage
+    ? uiText(task.titleMessage.key, task.titleMessage.values)
+    : knownUiText(task.title);
+}
+
+export function taskDetail(task: TaskItem): string | undefined {
+  if (task.detailMessage) return uiText(task.detailMessage.key, task.detailMessage.values);
+  if (task.status === "failed" && task.error) return getErrorMessage(task.error);
+  if ((task.jobId || task.jobIds?.length) && task.stage && task.status !== "failed") {
+    return detailForJob({
+      job_id: task.jobId,
+      state: task.status,
+      stage: task.stage,
+      processed: task.processed,
+      total: task.total,
+      succeeded: task.succeeded,
+      deduplicated: task.deduplicated,
+      skipped: task.skipped,
+      failed: task.failed,
+      completion: task.completion,
+      thumbnail_reason: task.thumbnailReason,
+      current_item: task.currentItem,
+      error: task.error,
+    });
+  }
+  return task.detail
+    ? task.status === "failed"
+      ? getErrorMessage(task.detail)
+      : knownUiText(task.detail)
+    : undefined;
+}
+
+export function createTask(input: TaskPatch & { title: TaskText }): string {
   const now = Date.now();
   const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
   tasks = [
     {
       id,
-      ...input,
+      ...taskTextPatch(input),
+      title:
+        input.title instanceof Object ? uiText(input.title.key, input.title.values) : input.title,
       status: input.status ?? "pending",
       progress: clampProgress(input.progress ?? 0),
       createdAt: now,
@@ -200,14 +261,11 @@ export function createTask(
   return id;
 }
 
-export function updateTask(
-  id: string,
-  patch: Partial<Omit<TaskItem, "id" | "createdAt" | "updatedAt">>,
-): void {
+export function updateTask(id: string, patch: TaskPatch): void {
   const now = Date.now();
   tasks = tasks.map((task) => {
     if (task.id !== id) return task;
-    const next: TaskItem = { ...task, ...patch, updatedAt: now };
+    const next: TaskItem = { ...task, ...taskTextPatch(patch), updatedAt: now };
     next.progress = patch.progress === undefined ? task.progress : clampProgress(patch.progress);
     // A completed task always reads as fully done, whatever progress it reported.
     if (patch.status === "completed") next.progress = 100;
@@ -241,19 +299,36 @@ export function clearCompletedTasks(): void {
   scheduleCleanup();
 }
 
-function detailForJob(job: IngestJobStatus): string {
-  const stage = job.stage?.replaceAll("_", " ") ?? job.state;
+function detailForJob(job: Pick<IngestJobStatus, "state"> & Partial<IngestJobStatus>): string {
+  const stage = knownUiText(job.stage ?? job.state);
   const count = job.total == null ? "" : ` ${job.processed ?? 0}/${job.total}`;
   const item = job.current_item ? ` · ${job.current_item}` : "";
   if (job.state === "completed") {
     if (job.completion === "partial") {
-      const reason = job.thumbnail_reason ?? job.error ?? "optional output unavailable";
-      return `${job.succeeded ?? 0} succeeded · partial: ${reason} · repair available in Vault Maintenance`;
+      const reason =
+        job.thumbnail_reason || job.error
+          ? getErrorMessage(job.thumbnail_reason ?? job.error ?? "unknown")
+          : uiText("optional output unavailable");
+      return uiText(
+        "{succeeded} succeeded · partial: {reason} · repair available in Vault Maintenance",
+        { succeeded: job.succeeded ?? 0, reason },
+      );
     }
-    return `${job.succeeded ?? 0} succeeded, ${job.deduplicated ?? 0} deduplicated, ${job.skipped ?? 0} skipped, ${job.failed ?? 0} failed`;
+    return uiText(
+      "{succeeded} succeeded, {deduplicated} deduplicated, {skipped} skipped, {failed} failed",
+      {
+        succeeded: job.succeeded ?? 0,
+        deduplicated: job.deduplicated ?? 0,
+        skipped: job.skipped ?? 0,
+        failed: job.failed ?? 0,
+      },
+    );
   }
-  if (job.state === "failed") return job.error ?? "Import failed before anything was added";
-  return `${stage}${count}${item} · continues in background`;
+  if (job.state === "failed")
+    return job.error
+      ? getErrorMessage(job.error)
+      : uiText("Import failed before anything was added");
+  return uiText("{stage}{count}{item} · continues in background", { stage, count, item });
 }
 
 function isTerminal(job: IngestJobStatus): boolean {
@@ -311,10 +386,12 @@ function applyJob(job: IngestJobStatus): void {
     failedItems: job.failed_items,
     thumbnailStatus: job.thumbnail_status,
     thumbnailReason: job.thumbnail_reason,
+    currentItem: job.current_item,
+    error: job.error,
     serverUpdatedAt: job.updated_at,
   };
   if (existing) updateTask(existing.id, patch);
-  else createTask({ title: "Import", ...patch });
+  else createTask({ title: uiMessage("Import"), ...patch });
   publishTerminal(job);
 }
 
@@ -337,7 +414,10 @@ function applyGroupedJobs(task: TaskItem, jobs: IngestJobStatus[]): void {
     updateTask(task.id, {
       status: "completed",
       progress: 100,
-      detail: expected === 1 ? "Upload processed" : `${expected} files processed`,
+      detail:
+        expected === 1
+          ? uiMessage("Upload processed")
+          : uiMessage("files.processed", { count: expected }),
     });
     return;
   }
@@ -355,10 +435,14 @@ function applyGroupedJobs(task: TaskItem, jobs: IngestJobStatus[]): void {
       : "pending",
     progress: completedProgress / expected,
     detail: current ? detailForJob(current) : task.detail,
+    stage: current?.stage,
+    currentItem: current?.current_item,
+    processed: current?.processed,
+    total: current?.total,
   });
 }
 
-export function trackImportJob(jobId: string, title: string): string {
+export function trackImportJob(jobId: string, title: TaskText): string {
   const existing = tasks.find((task) => task.jobId === jobId || task.jobIds?.includes(jobId));
   if (existing) return existing.id;
   const taskId = createTask({

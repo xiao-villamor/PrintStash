@@ -1,5 +1,9 @@
 "use client";
 
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Link2, Loader2, X } from "lucide-react";
 
@@ -26,6 +30,7 @@ export function ShareDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  useUiLocale();
   const [links, setLinks] = useState<ShareLinkRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -71,7 +76,7 @@ export function ShareDialog({
       const full = shareUrl(created.url);
       setLastToken(full);
       await navigator.clipboard?.writeText(full).catch(() => {});
-      toast.success("Share link created and copied.");
+      toast.success(uiText("Share link created and copied."));
       setLinks(await listModelShares(modelId));
     } catch (e) {
       toast.error(e);
@@ -115,15 +120,18 @@ export function ShareDialog({
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
           <div>
             <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
-              <Link2 className="h-4 w-4" /> Share model
+              <Link2 className="h-4 w-4" />
+              {uiText(" Share model")}
             </h3>
             <p className="text-xs text-on-surface-variant mt-0.5">
-              Public, expiring, read-only links. Anyone with the link can view this model only.
+              {uiText(
+                "Public, expiring, read-only links. Anyone with the link can view this model only.",
+              )}
             </p>
           </div>
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={uiText("Close")}
             className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
           >
             <X className="h-4 w-4" />
@@ -136,7 +144,7 @@ export function ShareDialog({
             <div className="flex items-end gap-3">
               <label className="block">
                 <span className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                  Expires (days)
+                  {uiText("Expires (days)")}
                 </span>
                 <input
                   type="number"
@@ -154,13 +162,13 @@ export function ShareDialog({
                   onChange={(e) => setAllowDownload(e.target.checked)}
                   className="accent-primary"
                 />
-                <span className="text-xs text-on-surface">Allow file download</span>
+                <span className="text-xs text-on-surface">{uiText("Allow file download")}</span>
               </label>
             </div>
             {gcodeFiles.length > 0 && (
               <div className="space-y-2">
                 <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                  Revisions
+                  {uiText("Revisions")}
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -172,7 +180,7 @@ export function ShareDialog({
                         : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
                     }`}
                   >
-                    Every revision
+                    {uiText("Every revision")}
                   </button>
                   <button
                     type="button"
@@ -183,7 +191,7 @@ export function ShareDialog({
                         : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
                     }`}
                   >
-                    Selected revisions
+                    {uiText("Selected revisions")}
                   </button>
                 </div>
                 {revisionScope === "selected" && (
@@ -201,9 +209,10 @@ export function ShareDialog({
                         />
                         <span className="min-w-0">
                           <span className="block text-xs text-on-surface truncate">
-                            Rev {f.gcode_revision_number ?? f.version}
+                            {uiText("Rev ")}
+                            {f.gcode_revision_number ?? f.version}
                             {f.revision_label ? ` · ${f.revision_label}` : ""}
-                            {f.is_recommended ? " · Recommended" : ""}
+                            {f.is_recommended ? uiText(" · Recommended") : ""}
                           </span>
                           <span className="block font-mono text-3xs text-on-surface-variant truncate">
                             {f.original_filename}
@@ -226,14 +235,14 @@ export function ShareDialog({
               ) : (
                 <Link2 className="h-4 w-4" />
               )}
-              Create link
+              {uiText("Create link")}
             </button>
           </div>
 
           {lastToken && (
             <div className="rounded border border-primary/40 bg-primary/5 p-3">
               <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                New link (copy it now)
+                {uiText("New link (copy it now)")}
               </p>
               <div className="flex items-center gap-2">
                 <input
@@ -258,12 +267,14 @@ export function ShareDialog({
           {/* Existing */}
           <div>
             <h4 className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-2">
-              Active links
+              {uiText("Active links")}
             </h4>
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-on-surface-variant" />
             ) : links.length === 0 ? (
-              <p className="font-mono text-2xs text-on-surface-variant/70">No share links yet.</p>
+              <p className="font-mono text-2xs text-on-surface-variant/70">
+                {uiText("No share links yet.")}
+              </p>
             ) : (
               <div className="space-y-2">
                 {links.map((l) => (
@@ -273,15 +284,25 @@ export function ShareDialog({
                   >
                     <div className="min-w-0">
                       <p className="font-mono text-2xs text-on-surface">
-                        {l.is_active ? "Active" : l.revoked_at ? "Revoked" : "Expired"}
-                        {l.allow_download ? " · downloadable" : " · view-only"}
+                        {l.is_active
+                          ? uiText("Active")
+                          : l.revoked_at
+                            ? uiText("Revoked")
+                            : uiText("Expired")}
+                        {l.allow_download ? uiText(" · downloadable") : uiText(" · view-only")}
                         {l.revision_file_ids?.length
-                          ? ` · ${l.revision_file_ids.length} revs`
-                          : " · all revs"}
+                          ? uiText(" · {value1} revs", {
+                              value1: String(l.revision_file_ids.length),
+                            })
+                          : uiText(" · all revs")}
                       </p>
                       <p className="font-mono text-3xs text-on-surface-variant">
-                        expires {new Date(l.expires_at).toLocaleDateString()} · {l.access_count}{" "}
-                        views
+                        {uiText("expires {value1} · {value2} views", {
+                          value1: String(
+                            new Date(l.expires_at).toLocaleDateString(currentLocale()) ?? "",
+                          ),
+                          value2: String(l.access_count ?? ""),
+                        })}
                       </p>
                     </div>
                     {l.is_active && (
@@ -289,7 +310,7 @@ export function ShareDialog({
                         onClick={() => doRevoke(l.id)}
                         className="font-mono text-3xs uppercase tracking-wider text-error hover:underline shrink-0"
                       >
-                        Revoke
+                        {uiText("Revoke")}
                       </button>
                     )}
                   </div>

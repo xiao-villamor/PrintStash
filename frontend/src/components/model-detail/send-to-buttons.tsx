@@ -1,5 +1,10 @@
 "use client";
 
+import { knownUiText } from "@/lib/locale";
+import { uiMessage } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@/lib/link";
 import { FileCode2, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
@@ -90,6 +95,7 @@ export function SendToButtons({
   preselectFileId?: number;
   commands?: SendToCommands;
 }) {
+  useUiLocale();
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -212,7 +218,7 @@ export function SendToButtons({
           return;
         }
       } catch (e: any) {
-        setError(e.message || "Compatibility check failed");
+        setError(e.message || uiText("Compatibility check failed"));
         return;
       }
     }
@@ -230,7 +236,11 @@ export function SendToButtons({
           strategy: routingStrategy,
           printer_id: routingStrategy === "manual" ? selectedPrinters[0]?.id : undefined,
           spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
-          spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
+          spool_name: spool
+            ? spool.filament_name ||
+              spool.name ||
+              uiText("Spool {value1}", { value1: String(spool.id) })
+            : null,
           spool_filament_id: spool?.filament_id ?? null,
           priority,
           target_group: targetGroup.trim() || null,
@@ -248,9 +258,13 @@ export function SendToButtons({
           await commands.createFleetBatch(batch);
         } else await commands.enqueueFleetJob(payload);
         setShowSend(false);
-        toast.success(quantity > 1 ? `Created ${quantity}-copy batch` : "Added to fleet queue");
+        toast.success(
+          quantity > 1
+            ? uiText("Created {value1}-copy batch", { value1: String(quantity) })
+            : uiText("Added to fleet queue"),
+        );
       } catch (e: any) {
-        setError(e.message || "Queue failed");
+        setError(e.message || uiText("Queue failed"));
       } finally {
         setSending(false);
       }
@@ -258,13 +272,16 @@ export function SendToButtons({
     }
     if (selectedPrinters.length === 0) return;
     if (startPrint && !selectedPrintersCanStart) {
-      setError("One or more selected printers support upload only.");
+      setError(uiText("One or more selected printers support upload only."));
       return;
     }
     const file = gcodeFiles.find((candidate) => candidate.id === selectedFile);
     const taskId = createTask({
-      title: `Send ${file?.original_filename ?? "G-code"}`,
-      detail: `Sending to ${selectedPrinters.length} printer${selectedPrinters.length === 1 ? "" : "s"}`,
+      title: uiMessage("Send {value1}", { value1: String(file?.original_filename ?? "G-code") }),
+      detail: uiMessage("printers.sending", {
+        value1: String(selectedPrinters.length),
+        count: Number(selectedPrinters.length),
+      }),
       status: "running",
       progress: 5,
     });
@@ -280,13 +297,20 @@ export function SendToButtons({
             file_id: selectedFile,
             start_print: startPrint,
             spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
-            spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
+            spool_name: spool
+              ? spool.filament_name ||
+                spool.name ||
+                uiText("Spool {value1}", { value1: String(spool.id) })
+              : null,
             spool_filament_id: spool ? spool.filament_id : null,
             compatibility_policy: allowMismatch ? "allow_mismatch" : "safe",
           });
           completed += 1;
           updateTask(taskId, {
-            detail: `${completed}/${selectedPrinters.length} printers completed`,
+            detail: uiMessage("{value1}/{value2} printers completed", {
+              value1: String(completed),
+              value2: String(selectedPrinters.length),
+            }),
             status: "running",
             progress: 10 + (completed / selectedPrinters.length) * 85,
           });
@@ -313,25 +337,37 @@ export function SendToButtons({
               `${printer.name}: ${result.reason?.message ?? "unknown error"}`,
           )
           .join("; ");
-        const message = `${successes.length}/${selectedPrinters.length} printers succeeded — ${reasons}`;
+        const message = uiText("{value1}/{value2} printers succeeded — {value3}", {
+          value1: String(successes.length),
+          value2: String(selectedPrinters.length),
+          value3: String(reasons),
+        });
         setError(message);
         updateTask(taskId, {
           detail: message,
           status: successes.length > 0 ? "completed" : "failed",
           progress: 100,
         });
-        toast.warning("Some sends failed", reasons);
+        toast.warning(uiText("Some sends failed"), reasons);
       } else {
         updateTask(taskId, {
-          detail: startPrint ? "Print started on selected printers" : "Sent to selected printers",
+          detail: startPrint
+            ? uiMessage("Print started on selected printers")
+            : uiMessage("Sent to selected printers"),
           status: "completed",
           progress: 100,
         });
         setShowSend(false);
         toast.success(
           startPrint
-            ? `Print started on ${successes.length} printer${successes.length === 1 ? "" : "s"}`
-            : `Sent to ${successes.length} printer${successes.length === 1 ? "" : "s"}`,
+            ? uiText("printers.started", {
+                value1: String(successes.length),
+                count: Number(successes.length),
+              })
+            : uiText("printers.sent", {
+                value1: String(successes.length),
+                count: Number(successes.length),
+              }),
         );
       }
     } catch (e: any) {
@@ -354,11 +390,18 @@ export function SendToButtons({
   const requiredWeightG = selectedFileDetails?.metadata?.filament_weight_g ?? null;
   const spoolCoverageWarning = selectedSpool
     ? requiredWeightG == null
-      ? "This revision's filament weight is unknown — can't verify it fits the selected spool."
+      ? uiText(
+          "This revision's filament weight is unknown — can't verify it fits the selected spool.",
+        )
       : selectedSpool.remaining_weight == null
-        ? "The selected spool has no tracked remaining weight — can't verify it covers this print."
+        ? uiText(
+            "The selected spool has no tracked remaining weight — can't verify it covers this print.",
+          )
         : requiredWeightG > selectedSpool.remaining_weight
-          ? `This revision needs ~${formatGrams(requiredWeightG)}; the selected spool has ~${formatGrams(selectedSpool.remaining_weight)} left.`
+          ? uiText("This revision needs ~{value1}; the selected spool has ~{value2} left.", {
+              value1: String(formatGrams(requiredWeightG)),
+              value2: String(formatGrams(selectedSpool.remaining_weight)),
+            })
           : null
     : null;
 
@@ -372,38 +415,47 @@ export function SendToButtons({
             setConfirmMismatch(false);
             void send(true);
           }}
-          title="Print with a known material mismatch?"
-          description="The selected G-code material or nozzle does not match the printer’s known loaded state. Continuing records an audited override. Color differences alone do not block printing."
-          confirmLabel="Print anyway"
+          title={uiText("Print with a known material mismatch?")}
+          description={uiText(
+            "The selected G-code material or nozzle does not match the printer’s known loaded state. Continuing records an audited override. Color differences alone do not block printing.",
+          )}
+          confirmLabel={uiText("Print anyway")}
         />
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              Printer status
+              {uiText("Printer status")}
             </span>
             <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
               {printersLoading ? (
                 <>
                   <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground">Checking…</span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {uiText("Checking…")}
+                  </span>
                 </>
               ) : printers.length === 0 ? (
                 <>
                   <WifiOff className="h-3 w-3 text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground">No printers</span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {uiText("No printers")}
+                  </span>
                 </>
               ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-success" />
                   <span className="font-mono text-xs font-bold tracking-wider text-success">
-                    {onlineCount}/{selectedPrinters.length} online
+                    {uiText("{value1}/{value2} online", {
+                      value1: String(onlineCount ?? ""),
+                      value2: String(selectedPrinters.length ?? ""),
+                    })}
                   </span>
                 </>
               ) : (
                 <>
                   <WifiOff className="h-3 w-3 text-warning" />
                   <span className="font-mono text-xs capitalize text-warning">
-                    No selected printer online
+                    {uiText("No selected printer online")}
                   </span>
                 </>
               )}
@@ -420,15 +472,16 @@ export function SendToButtons({
               <div className="flex items-center gap-2">
                 <WifiOff className="h-4 w-4 text-on-surface-variant" />
                 <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
-                  No printers configured
+                  {uiText("No printers configured")}
                 </span>
               </div>
               <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
-                Connect a supported printer to send files directly from the Vault.
+                {uiText("Connect a supported printer to send files directly from the Vault.")}
               </p>
               <Button asChild size="sm" className="mt-1 w-full">
                 <Link href="/printers">
-                  <PrinterIcon className="h-4 w-4" /> Configure printer
+                  <PrinterIcon className="h-4 w-4" />
+                  {uiText(" Configure printer")}
                 </Link>
               </Button>
             </div>
@@ -447,16 +500,18 @@ export function SendToButtons({
               >
                 {!auth.isAuthenticated ? (
                   <>
-                    <Send className="h-4 w-4" /> Sign in to send
+                    <Send className="h-4 w-4" />
+                    {uiText(" Sign in to send")}
                   </>
                 ) : (
                   <>
-                    <Send className="h-4 w-4" /> Send to printer
+                    <Send className="h-4 w-4" />
+                    {uiText(" Send to printer")}
                   </>
                 )}
               </Button>
               <Button asChild variant="outline" size="sm" className="w-full">
-                <Link href="/printers">Manage printers</Link>
+                <Link href="/printers">{uiText("Manage printers")}</Link>
               </Button>
             </div>
           )}
@@ -467,7 +522,7 @@ export function SendToButtons({
           onClose={() => {
             if (!sending) setShowSend(false);
           }}
-          title="Send to printer"
+          title={uiText("Send to printer")}
           className="flex max-h-[calc(100vh-2rem)] max-w-2xl flex-col overflow-hidden"
         >
           <div
@@ -480,24 +535,25 @@ export function SendToButtons({
               </div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">
-                  {selectedFileDetails?.original_filename ?? "Select G-code revision"}
+                  {selectedFileDetails?.original_filename ?? uiText("Select G-code revision")}
                 </p>
                 <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-                  {selectedPrinters.length} printer{selectedPrinters.length === 1 ? "" : "s"}{" "}
-                  selected
+                  {uiText("counts.selectedPrinters", { count: selectedPrinters.length })}
                 </p>
               </div>
             </div>
 
             <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm font-medium text-foreground">Action</legend>
+              <legend className="mb-2 text-sm font-medium text-foreground">
+                {uiText("Action")}
+              </legend>
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
                   variant={deliveryMode === "send" ? "secondary" : "outline"}
                   onClick={() => setDeliveryMode("send")}
                 >
-                  Send now
+                  {uiText("Send now")}
                 </Button>
                 <Button
                   type="button"
@@ -508,7 +564,7 @@ export function SendToButtons({
                     if (!user?.is_superuser) setRoutingStrategy("manual");
                   }}
                 >
-                  Add to queue
+                  {uiText("Add to queue")}
                 </Button>
               </div>
             </fieldset>
@@ -516,7 +572,7 @@ export function SendToButtons({
             {deliveryMode === "queue" && (
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Routing
+                  {uiText("Routing")}
                   <select
                     value={routingStrategy}
                     onChange={(event) => {
@@ -526,14 +582,16 @@ export function SendToButtons({
                     className={selectClassName}
                   >
                     {user?.is_superuser && (
-                      <option value="least_busy">Least busy eligible printer</option>
+                      <option value="least_busy">{uiText("Least busy eligible printer")}</option>
                     )}
-                    {user?.is_superuser && <option value="default">Default printer</option>}
-                    <option value="manual">Choose printer</option>
+                    {user?.is_superuser && (
+                      <option value="default">{uiText("Default printer")}</option>
+                    )}
+                    <option value="manual">{uiText("Choose printer")}</option>
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Copies
+                  {uiText("Copies")}
                   <input
                     className={selectClassName}
                     type="number"
@@ -543,7 +601,7 @@ export function SendToButtons({
                   />
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Priority
+                  {uiText("Priority")}
                   <select
                     className={selectClassName}
                     value={priority}
@@ -552,18 +610,18 @@ export function SendToButtons({
                       if (next) setPriority(next);
                     }}
                   >
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="rush">Rush</option>
+                    <option value="low">{uiText("Low")}</option>
+                    <option value="normal">{uiText("Normal")}</option>
+                    <option value="rush">{uiText("Rush")}</option>
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  Printer group
+                  {uiText("Printer group")}
                   <input
                     className={selectClassName}
                     value={targetGroup}
                     onChange={(event) => setTargetGroup(event.target.value)}
-                    placeholder="Any group"
+                    placeholder={uiText("Any group")}
                   />
                 </label>
               </div>
@@ -571,7 +629,7 @@ export function SendToButtons({
 
             {compatibility && (deliveryMode === "send" || routingStrategy === "manual") && (
               <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                Compatibility:{" "}
+                {uiText("Compatibility:")}{" "}
                 {compatibility.printers
                   .map(
                     (row) =>
@@ -580,7 +638,7 @@ export function SendToButtons({
                   .join(" · ")}
                 {compatibility.printers.some((row) => row.verdict === "unknown") && (
                   <span className="mt-1 block">
-                    Unknown state remains usable and will not block this action.
+                    {uiText("Unknown state remains usable and will not block this action.")}
                   </span>
                 )}
               </div>
@@ -588,7 +646,9 @@ export function SendToButtons({
 
             {(deliveryMode === "send" || routingStrategy === "manual") && (
               <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-medium text-foreground">Printers</legend>
+                <legend className="mb-2 text-sm font-medium text-foreground">
+                  {uiText("Printers")}
+                </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {printers.map((printer) => {
                     const formatSupported =
@@ -615,7 +675,7 @@ export function SendToButtons({
                           checked={selected}
                           onChange={() => togglePrinter(printer.id)}
                           disabled={disabled || sending}
-                          ariaLabel={`Select ${printer.name}`}
+                          ariaLabel={uiText("Select {value1}", { value1: String(printer.name) })}
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-medium text-foreground">
@@ -626,21 +686,21 @@ export function SendToButtons({
                               variant={offline ? "warning" : "success"}
                               className="font-mono text-3xs uppercase tracking-wider"
                             >
-                              {printer.status}
+                              {knownUiText(printer.status)}
                             </Badge>
                             <Badge
                               variant="outline"
                               className="font-mono text-3xs uppercase tracking-wider"
                             >
                               {!printer.access.can_print
-                                ? "No print access"
+                                ? uiText("No print access")
                                 : !printer.capabilities.can_upload
-                                  ? "Upload unsupported"
+                                  ? uiText("Upload unsupported")
                                   : !formatSupported
-                                    ? "Format unsupported"
+                                    ? uiText("Format unsupported")
                                     : printer.capabilities.can_start
-                                      ? "Upload + start"
-                                      : "Upload only"}
+                                      ? uiText("Upload + start")
+                                      : uiText("Upload only")}
                             </Badge>
                           </span>
                         </span>
@@ -653,7 +713,7 @@ export function SendToButtons({
 
             {availablePrinters.length === 0 && (
               <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                No configured printer supports Vault upload/send.
+                {uiText("No configured printer supports Vault upload/send.")}
               </div>
             )}
 
@@ -661,7 +721,7 @@ export function SendToButtons({
               className={`grid gap-4 ${spoolmanEnabled && spools.length > 0 ? "sm:grid-cols-2" : ""}`}
             >
               <label className="space-y-1.5 text-sm font-medium text-foreground">
-                G-code revision
+                {uiText("G-code revision")}
                 <select
                   value={selectedFile}
                   onChange={(e) => setSelectedFile(Number(e.target.value))}
@@ -669,16 +729,17 @@ export function SendToButtons({
                 >
                   {gcodeFiles.map((file) => (
                     <option key={file.id} value={file.id}>
-                      Rev {file.gcode_revision_number ?? file.version}
+                      {uiText("Rev ")}
+                      {file.gcode_revision_number ?? file.version}
                       {file.revision_label ? ` · ${file.revision_label}` : ""}
-                      {file.id === defaultFile?.id ? " · Recommended" : ""}
+                      {file.id === defaultFile?.id ? uiText(" · Recommended") : ""}
                     </option>
                   ))}
                 </select>
               </label>
               {spoolmanEnabled && spools.length > 0 && (
                 <label className="space-y-1.5 text-sm font-medium text-foreground">
-                  Spool
+                  {uiText("Spool")}
                   <select
                     value={selectedSpoolId}
                     onChange={(e) =>
@@ -686,14 +747,18 @@ export function SendToButtons({
                     }
                     className={selectClassName}
                   >
-                    <option value="">No spool</option>
+                    <option value="">{uiText("No spool")}</option>
                     {spools.map((spool) => (
                       <option key={spool.id} value={spool.id}>
-                        {(spool.filament_name || spool.name || `Spool ${spool.id}`) +
+                        {(spool.filament_name ||
+                          spool.name ||
+                          uiText("Spool {value1}", { value1: String(spool.id) })) +
                           (spool.vendor_name ? ` · ${spool.vendor_name}` : "") +
                           (spool.location ? ` · ${spool.location}` : "") +
                           (spool.remaining_weight != null
-                            ? ` (${formatGrams(spool.remaining_weight)} left)`
+                            ? uiText(" ({value1} left)", {
+                                value1: String(formatGrams(spool.remaining_weight)),
+                              })
                             : "")}
                       </option>
                     ))}
@@ -716,19 +781,21 @@ export function SendToButtons({
                   checked={startPrint}
                   onChange={setStartPrint}
                   disabled={!selectedPrintersCanStart || sending}
-                  ariaLabel="Start print immediately"
+                  ariaLabel={uiText("Start print immediately")}
                   className="mt-0.5"
                 />
                 <span>
                   <span className="block text-sm font-medium text-foreground">
-                    Start print immediately
+                    {uiText("Start print immediately")}
                   </span>
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                    Off by default. When enabled, selected printers begin printing after upload.
+                    {uiText(
+                      "Off by default. When enabled, selected printers begin printing after upload.",
+                    )}
                   </span>
                   {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
                     <span className="mt-1 block text-xs text-warning">
-                      Remove upload-only printers to enable this option.
+                      {uiText("Remove upload-only printers to enable this option.")}
                     </span>
                   )}
                 </span>
@@ -737,11 +804,13 @@ export function SendToButtons({
 
             {selectedUploads.length > 0 && (
               <div className="rounded-md border border-success/30 bg-success/10 p-3 text-xs text-success">
-                Already uploaded to{" "}
-                {selectedUploads
-                  .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
-                  .join(", ")}
-                .
+                {uiText("Already uploaded to {value1}.", {
+                  value1: String(
+                    selectedUploads
+                      .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
+                      .join(", ") ?? "",
+                  ),
+                })}
               </div>
             )}
             {displayError && (
@@ -756,7 +825,7 @@ export function SendToButtons({
 
           <div className="-mx-6 -mb-6 mt-5 flex shrink-0 justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
             <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
-              Cancel
+              {uiText("Cancel")}
             </Button>
             <Button
               onClick={() => void send()}
@@ -771,13 +840,13 @@ export function SendToButtons({
               {!sending && <Send className="h-4 w-4" />}
               {sending
                 ? deliveryMode === "queue"
-                  ? "Queuing…"
-                  : "Sending…"
+                  ? uiText("Queuing…")
+                  : uiText("Sending…")
                 : deliveryMode === "queue"
-                  ? "Add to queue"
+                  ? uiText("Add to queue")
                   : startPrint
-                    ? "Send & start print"
-                    : "Send to printer"}
+                    ? uiText("Send & start print")
+                    : uiText("Send to printer")}
             </Button>
           </div>
         </Modal>

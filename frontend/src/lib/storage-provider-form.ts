@@ -1,3 +1,4 @@
+import { knownUiText, uiText } from "./locale";
 import type {
   StorageConnectionConfiguration,
   StorageProvider,
@@ -28,14 +29,15 @@ export function providerFormError(
   const missing = providerFields(provider, use).find(
     (field) => field.required && !present(field.name),
   );
-  if (missing) return `${missing.label} is required.`;
+  if (missing) return uiText("{field} is required.", { field: knownUiText(missing.label) });
   for (const rule of provider.requirements ?? []) {
     const [first, second] = rule.fields;
     if (rule.kind === "exactly_one" && rule.fields.filter(present).length !== 1)
-      return rule.message;
-    if (rule.kind === "requires" && present(first) && !present(second)) return rule.message;
+      return knownUiText(rule.message);
+    if (rule.kind === "requires" && present(first) && !present(second))
+      return knownUiText(rule.message);
     if (rule.kind === "not_value" && String(values[first] ?? "") === rule.value)
-      return rule.message;
+      return knownUiText(rule.message);
   }
   return null;
 }

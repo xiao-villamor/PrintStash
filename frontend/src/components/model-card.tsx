@@ -1,5 +1,9 @@
 "use client";
 
+import { formatNumber } from "@/lib/format";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
@@ -44,60 +48,84 @@ interface StarOverride {
 function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  if (hours > 0)
+    return `${formatNumber(hours, { style: "unit", unit: "hour", unitDisplay: "narrow" })} ${formatNumber(minutes, { style: "unit", unit: "minute", unitDisplay: "narrow" })}`;
+  return formatNumber(minutes, { style: "unit", unit: "minute", unitDisplay: "narrow" });
 }
 
 const REVISION_CONFIG = {
   known_good: {
-    label: "Known Good",
+    get label() {
+      return uiText("Known Good");
+    },
     classes:
       "bg-green-50 dark:bg-green-950/50 text-green-700 border-green-200 dark:border-green-800",
   },
   needs_test: {
-    label: "Needs Test",
+    get label() {
+      return uiText("Needs Test");
+    },
     classes:
       "bg-amber-50 dark:bg-amber-950/50 text-amber-700 border-amber-200 dark:border-amber-800",
   },
   failed: {
-    label: "Failed",
+    get label() {
+      return uiText("Failed");
+    },
     classes: "bg-red-50 dark:bg-red-950/50 text-red-700 border-red-200 dark:border-red-800",
   },
-  archived: { label: "Archived", classes: "bg-muted text-muted-foreground border-border" },
+  archived: {
+    get label() {
+      return uiText("Archived");
+    },
+    classes: "bg-muted text-muted-foreground border-border",
+  },
 } satisfies Record<FileRevisionStatus, { label: string; classes: string }>;
 
 const METRIC_CONFIG = {
   layer_height: {
-    abbr: "LYR",
+    get abbr() {
+      return uiText("LYR");
+    },
     getValue: (m) =>
       m.print_summary?.layer_height_mm != null
-        ? `${m.print_summary.layer_height_mm.toFixed(2)} mm`
+        ? `${formatNumber(m.print_summary.layer_height_mm, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} mm`
         : "—",
   },
   print_time: {
-    abbr: "TIME",
+    get abbr() {
+      return uiText("TIME");
+    },
     getValue: (m) =>
       m.print_summary?.estimated_time_s != null
         ? formatTime(m.print_summary.estimated_time_s)
         : "—",
   },
   filament_weight: {
-    abbr: "WGT",
+    get abbr() {
+      return uiText("WGT");
+    },
     getValue: (m) =>
       m.print_summary?.filament_weight_g != null
-        ? `${Math.round(m.print_summary.filament_weight_g)} g`
+        ? `${formatNumber(Math.round(m.print_summary.filament_weight_g))} g`
         : "—",
   },
   material: {
-    abbr: "MAT",
+    get abbr() {
+      return uiText("MAT");
+    },
     getValue: (m) => m.print_summary?.material_type ?? "—",
   },
   slicer: {
-    abbr: "SLR",
+    get abbr() {
+      return uiText("SLR");
+    },
     getValue: (m) => m.print_summary?.slicer_name ?? "—",
   },
   file_count: {
-    abbr: "FILES",
+    get abbr() {
+      return uiText("FILES");
+    },
     getValue: (m) => `${m.file_count}`,
   },
 } satisfies Record<CardMetricId, { abbr: string; getValue: (model: ModelListItem) => string }>;
@@ -109,11 +137,12 @@ function RevisionBadge({
   status: FileRevisionStatus | null | undefined;
   label?: string | null;
 }) {
+  useUiLocale();
   if (!status) return null;
   const cfg = REVISION_CONFIG[status];
   const accessibleLabel = label
-    ? `Revision status: ${cfg.label}; label: ${label}`
-    : `Revision status: ${cfg.label}`;
+    ? uiText("Revision status: {status}; label: {label}", { status: cfg.label, label })
+    : uiText("Revision status: {status}", { status: cfg.label });
   return (
     <span
       aria-label={accessibleLabel}
@@ -140,6 +169,7 @@ function MetricCell({
   model: ModelListItem;
   isLast: boolean;
 }) {
+  useUiLocale();
   const cfg = METRIC_CONFIG[id];
   return (
     <div className={`py-2 px-1 text-center bg-muted/50 ${isLast ? "" : "border-r border-border"}`}>
@@ -168,6 +198,7 @@ function ModelCardInner({
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
 }) {
+  useUiLocale();
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
   // The card owns an optimistic star only until the server says otherwise: a
@@ -242,7 +273,7 @@ function ModelCardInner({
             <Checkbox
               checked={selected}
               onChange={() => onToggleSelect?.(model.id)}
-              ariaLabel={`Select ${model.name}`}
+              ariaLabel={uiText("Select {value1}", { value1: String(model.name) })}
             />
           </div>
         )}
@@ -255,7 +286,9 @@ function ModelCardInner({
           }}
           disabled={starBusy}
           aria-label={
-            starred ? `Remove ${model.name} from favorites` : `Add ${model.name} to favorites`
+            starred
+              ? uiText("Remove {value1} from favorites", { value1: String(model.name) })
+              : uiText("Add {value1} to favorites", { value1: String(model.name) })
           }
           className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
         >
@@ -272,9 +305,11 @@ function ModelCardInner({
               onEditTags(model);
             }}
             aria-label={
-              model.tags.length > 0 ? `Edit tags for ${model.name}` : `Add tags to ${model.name}`
+              model.tags.length > 0
+                ? uiText("Edit tags for {value1}", { value1: String(model.name) })
+                : uiText("Add tags to {value1}", { value1: String(model.name) })
             }
-            title={model.tags.length > 0 ? "Edit tags" : "Add tags"}
+            title={model.tags.length > 0 ? uiText("Edit tags") : uiText("Add tags")}
             className="absolute right-2 top-12 z-10 bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
           >
             <Tags className="h-4 w-4" />
@@ -318,7 +353,7 @@ function ModelCardInner({
             {hasPrinter && (
               <div className="absolute bottom-2 right-2">
                 <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
-                  On printer
+                  {uiText("On printer")}
                 </span>
               </div>
             )}
@@ -370,7 +405,7 @@ function ModelCardInner({
                 </span>
               )}
               <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                {model.file_count} {model.file_count === 1 ? "File" : "Files"}
+                {uiText("counts.cardFiles", { count: model.file_count })}
               </span>
               {ps?.material_type && (
                 <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
@@ -418,6 +453,7 @@ export function ModelCard({
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
 }) {
+  useUiLocale();
   // `readCardMetrics` already falls back to the defaults when there is no stored
   // preference, so it is the correct initial value rather than something to
   // re-read after mount.

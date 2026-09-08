@@ -1,3 +1,7 @@
+import { formatNumber } from "@/lib/format";
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
 import {
   Area,
@@ -24,28 +28,83 @@ import type { StatsPeriod } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { formatCurrency } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
-import { translateUiText } from "@/components/ui/localized";
+import { translateUiText } from "@/lib/locale";
 import type { CollectionStatRead, FilamentStatRead, PrintStatisticsRead } from "@/types";
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
-  { value: "7d", label: "7 days" },
-  { value: "30d", label: "30 days" },
-  { value: "90d", label: "90 days" },
-  { value: "1y", label: "1 year" },
-  { value: "all", label: "All time" },
+  {
+    value: "7d",
+    get label() {
+      return uiText("7 days");
+    },
+  },
+  {
+    value: "30d",
+    get label() {
+      return uiText("30 days");
+    },
+  },
+  {
+    value: "90d",
+    get label() {
+      return uiText("90 days");
+    },
+  },
+  {
+    value: "1y",
+    get label() {
+      return uiText("1 year");
+    },
+  },
+  {
+    value: "all",
+    get label() {
+      return uiText("All time");
+    },
+  },
 ];
 
 const METRICS = [
-  { id: "cost", label: "Cost" },
-  { id: "filament", label: "Filament" },
-  { id: "prints", label: "Prints" },
+  {
+    id: "cost",
+    get label() {
+      return uiText("Cost");
+    },
+  },
+  {
+    id: "filament",
+    get label() {
+      return uiText("Filament");
+    },
+  },
+  {
+    id: "prints",
+    get label() {
+      return uiText("Prints");
+    },
+  },
 ] as const;
 type Metric = (typeof METRICS)[number]["id"];
 
 const CHART_TYPES = [
-  { id: "area", label: "Area" },
-  { id: "line", label: "Line" },
-  { id: "bar", label: "Bar" },
+  {
+    id: "area",
+    get label() {
+      return uiText("Area");
+    },
+  },
+  {
+    id: "line",
+    get label() {
+      return uiText("Line");
+    },
+  },
+  {
+    id: "bar",
+    get label() {
+      return uiText("Bar");
+    },
+  },
 ] as const;
 type ChartType = (typeof CHART_TYPES)[number]["id"];
 
@@ -71,6 +130,7 @@ function ChartTooltip({
   valueLabel: string;
   formatValue?: (v: number) => string;
 }) {
+  useUiLocale();
   const { locale } = useI18n();
   if (!active || !payload || payload.length === 0) return null;
   const raw = payload[0]?.value;
@@ -88,7 +148,8 @@ function ChartTooltip({
 
 function formatFilament(grams: number | null | undefined): string {
   if (grams == null) return "—";
-  if (grams >= 1000) return `${(grams / 1000).toFixed(2)} kg`;
+  if (grams >= 1000)
+    return `${formatNumber(grams / 1000, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`;
   return `${Math.round(grams)} g`;
 }
 
@@ -101,6 +162,7 @@ function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  useUiLocale();
   const { locale } = useI18n();
   return (
     <div className="inline-flex shrink-0 rounded-md border border-border bg-card p-0.5">
@@ -134,6 +196,7 @@ function MetricCard({
   value: string;
   tone?: "blue" | "cyan" | "violet";
 }) {
+  useUiLocale();
   const { locale } = useI18n();
   const toneClasses = {
     blue: "bg-accent text-primary",
@@ -161,15 +224,35 @@ function MetricCard({
 
 function filamentLabel(f: FilamentStatRead): string {
   if (f.material_type && f.material_brand) return `${f.material_brand} ${f.material_type}`;
-  return f.material_type || f.material_brand || "Unknown";
+  return f.material_type || f.material_brand || uiText("Unknown");
 }
 
 type WidgetId = "collections" | "filaments" | "models" | "printers";
 const WIDGETS: { id: WidgetId; label: string }[] = [
-  { id: "models", label: "Most printed models" },
-  { id: "printers", label: "Printer workload" },
-  { id: "filaments", label: "Filament usage" },
-  { id: "collections", label: "Top collections" },
+  {
+    id: "models",
+    get label() {
+      return uiText("Most printed models");
+    },
+  },
+  {
+    id: "printers",
+    get label() {
+      return uiText("Printer workload");
+    },
+  },
+  {
+    id: "filaments",
+    get label() {
+      return uiText("Filament usage");
+    },
+  },
+  {
+    id: "collections",
+    get label() {
+      return uiText("Top collections");
+    },
+  },
 ];
 const ALL_WIDGET_IDS: readonly WidgetId[] = WIDGETS.map((widget) => widget.id);
 const WIDGET_PREFERENCE_KEY = "printstash:statistics-widgets";
@@ -206,6 +289,7 @@ function RankingCard({
   tone?: "blue" | "cyan" | "violet";
   formatValue?: (value: number) => string;
 }) {
+  useUiLocale();
   const { locale } = useI18n();
   const max = Math.max(...data.map((item) => item.value), 1);
   const localizedTitle = translateUiText(locale, title);
@@ -220,7 +304,7 @@ function RankingCard({
       <CardHeader className="border-b border-border/70 pb-3">
         <CardTitle className="text-sm font-semibold">{localizedTitle}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          {translateUiText(locale, `Ranked by ${localizedValueLabel.toLowerCase()}`)}
+          {uiText("Ranked by {metric}", { metric: localizedValueLabel })}
         </p>
       </CardHeader>
       <CardContent className="pt-4">
@@ -260,6 +344,7 @@ function RankingCard({
 }
 
 function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; currency: string }) {
+  useUiLocale();
   const { locale } = useI18n();
   const [metric, setMetric] = useState<Metric>("cost");
   const [chartType, setChartType] = useState<ChartType>("area");
@@ -295,7 +380,7 @@ function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; curre
       tickMargin={10}
       tick={AXIS_TICK}
       tickFormatter={(value) =>
-        new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
+        new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric" }).format(
           new Date(`${value}T00:00:00`),
         )
       }
@@ -324,7 +409,7 @@ function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; curre
       <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <CardTitle className="text-sm font-semibold">
-            {translateUiText(locale, `${metricLabel} over time`)}
+            {uiText("{metric} over time", { metric: localizedMetricLabel })}
           </CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">
             {translateUiText(locale, "Completed jobs in selected period")}
@@ -397,6 +482,7 @@ function StatsContent({
   currency: string;
   visibleWidgets: Set<WidgetId>;
 }) {
+  useUiLocale();
   const { locale } = useI18n();
   if (stats.total_prints === 0) {
     return (
@@ -439,29 +525,34 @@ function StatsContent({
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard
           icon={Coins}
-          label="Total cost"
+          label={uiText("Total cost")}
           value={formatCurrency(stats.total_cost, currency)}
         />
-        <MetricCard icon={Boxes} label="Prints" value={String(stats.total_prints)} tone="cyan" />
+        <MetricCard
+          icon={Boxes}
+          label={uiText("Prints")}
+          value={String(stats.total_prints)}
+          tone="cyan"
+        />
         <MetricCard
           icon={Weight}
-          label="Filament used"
+          label={uiText("Filament used")}
           value={formatFilament(stats.total_filament_g)}
           tone="violet"
         />
         <MetricCard
           icon={Layers}
-          label="Avg / print"
+          label={uiText("Avg / print")}
           value={formatFilament(stats.avg_filament_g)}
         />
         <MetricCard
           icon={Clock}
-          label="Print time"
+          label={uiText("Print time")}
           value={formatDuration(stats.total_print_time_s)}
         />
         <MetricCard
           icon={Weight}
-          label="7-day forecast"
+          label={uiText("7-day forecast")}
           value={formatFilament(weeklyFilament)}
           tone="violet"
         />
@@ -476,7 +567,7 @@ function StatsContent({
       <div className="grid gap-6 lg:grid-cols-2">
         {visibleWidgets.has("models") && (
           <RankingCard
-            title="Most printed models"
+            title={uiText("Most printed models")}
             data={modelData}
             valueLabel="Prints"
             formatValue={(value) => `${value}×`}
@@ -484,7 +575,7 @@ function StatsContent({
         )}
         {visibleWidgets.has("printers") && (
           <RankingCard
-            title="Printer workload"
+            title={uiText("Printer workload")}
             data={printerData}
             valueLabel="Print hours"
             tone="cyan"
@@ -493,7 +584,7 @@ function StatsContent({
         )}
         {visibleWidgets.has("filaments") && (
           <RankingCard
-            title="Filament usage"
+            title={uiText("Filament usage")}
             data={filamentData}
             valueLabel="Filament weight"
             tone="violet"
@@ -502,7 +593,7 @@ function StatsContent({
         )}
         {visibleWidgets.has("collections") && (
           <RankingCard
-            title="Top collections"
+            title={uiText("Top collections")}
             data={collectionRanking}
             valueLabel="Prints"
             formatValue={(value) => `${value}×`}
@@ -514,6 +605,7 @@ function StatsContent({
 }
 
 export default function StatisticsPage() {
+  useUiLocale();
   const { locale } = useI18n();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);

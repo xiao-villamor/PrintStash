@@ -5,7 +5,6 @@ import { QueryClientProvider } from "@tanstack/react-query";
 
 import { queryClient } from "@/lib/query-client";
 import { I18nProvider } from "@/lib/i18n";
-import { DomLocalization } from "@/components/ui/localized";
 import { registerPwa } from "@/lib/pwa";
 
 import "@/fonts.css";
@@ -25,7 +24,6 @@ createRoot(document.getElementById("root")!).render(
     <I18nProvider>
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
-        <DomLocalization />
         {ReactQueryDevtools ? (
           <Suspense fallback={null}>
             <ReactQueryDevtools initialIsOpen={false} />

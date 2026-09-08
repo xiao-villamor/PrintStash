@@ -1,5 +1,10 @@
 "use client";
 
+import { knownUiText } from "@/lib/locale";
+
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useState } from "react";
 import { Check, CheckCircle2, Clock, Loader2, Plus, RefreshCw, XCircle } from "lucide-react";
 
@@ -28,6 +33,7 @@ export function PrintHistorySection({
   gcodeFiles: FileRead[];
   onJobCreated: (job: ModelPrintJobRead) => void;
 }) {
+  useUiLocale();
   const [showAdd, setShowAdd] = useState(false);
   const [mode, setMode] = useState<PrintHistoryMode>("manual");
 
@@ -89,7 +95,11 @@ export function PrintHistorySection({
         file_id: selectedFileId,
         state: jobState,
         spool_id: selectedSpoolId,
-        spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
+        spool_name: spool
+          ? spool.filament_name ||
+            spool.name ||
+            uiText("Spool {value1}", { value1: String(spool.id) })
+          : null,
         spool_filament_id: spool ? spool.filament_id : null,
         started_at: startedAt || null,
         finished_at: finishedAt || null,
@@ -97,7 +107,7 @@ export function PrintHistorySection({
       });
       onJobCreated(job);
       setShowAdd(false);
-      toast.success("Print record added");
+      toast.success(uiText("Print record added"));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -118,9 +128,11 @@ export function PrintHistorySection({
       if (imported > 0) {
         const refreshed = await getModelPrintJobs(modelId);
         refreshed.forEach((j) => onJobCreated(j));
-        toast.success(`Imported ${imported} job${imported === 1 ? "" : "s"} from printer`);
+        toast.success(
+          uiText("jobs.imported", { value1: String(imported), count: Number(imported) }),
+        );
       } else {
-        toast.success("No new jobs to import");
+        toast.success(uiText("No new jobs to import"));
       }
     } catch (e) {
       toast.error(e);
@@ -134,13 +146,15 @@ export function PrintHistorySection({
       <section>
         <div className="flex items-center justify-between mb-4 pb-1 border-b border-outline-variant">
           <h2 className="text-lg font-semibold text-on-surface flex items-center gap-2">
-            <Clock className="h-4 w-4" /> Print History
+            <Clock className="h-4 w-4" />
+            {uiText(" Print History")}
           </h2>
           <button
             onClick={openAdd}
             className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low"
           >
-            <Plus className="h-3.5 w-3.5" /> Add Record
+            <Plus className="h-3.5 w-3.5" />
+            {uiText(" Add Record")}
           </button>
         </div>
 
@@ -163,7 +177,7 @@ export function PrintHistorySection({
                       : "text-on-surface-variant hover:bg-surface-container-high"
                   }`}
                 >
-                  {m === "manual" ? "Manual Entry" : "Auto from Printer"}
+                  {m === "manual" ? uiText("Manual Entry") : uiText("Auto from Printer")}
                 </button>
               ))}
             </div>
@@ -173,7 +187,7 @@ export function PrintHistorySection({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Printer
+                      {uiText("Printer")}
                     </label>
                     <select
                       value={adhocPrinter ? "__adhoc__" : (selectedPrinterId ?? "")}
@@ -189,18 +203,18 @@ export function PrintHistorySection({
                       }}
                       className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
-                      <option value="">Select printer…</option>
+                      <option value="">{uiText("Select printer…")}</option>
                       {printers.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
-                      <option value="__adhoc__">Other (not listed)…</option>
+                      <option value="__adhoc__">{uiText("Other (not listed)…")}</option>
                     </select>
                   </div>
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      G-code Revision
+                      {uiText("G-code Revision")}
                     </label>
                     <select
                       value={selectedFileId ?? ""}
@@ -209,10 +223,11 @@ export function PrintHistorySection({
                       }
                       className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
-                      <option value="">Select revision…</option>
+                      <option value="">{uiText("Select revision…")}</option>
                       {gcodeFiles.map((f, i) => (
                         <option key={f.id} value={f.id}>
-                          Rev {i + 1} — {f.original_filename}
+                          {uiText("Rev ")}
+                          {i + 1} — {f.original_filename}
                         </option>
                       ))}
                     </select>
@@ -221,35 +236,35 @@ export function PrintHistorySection({
                 {adhocPrinter && (
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Printer name
+                      {uiText("Printer name")}
                     </label>
                     <input
                       value={adhocPrinterName}
                       onChange={(e) => setAdhocPrinterName(e.target.value)}
                       maxLength={128}
-                      placeholder="e.g. Garage Prusa MK4"
+                      placeholder={uiText("e.g. Garage Prusa MK4")}
                       className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
                 <div>
                   <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                    Result
+                    {uiText("Result")}
                   </label>
                   <select
                     value={jobState}
                     onChange={(e) => setJobState(e.target.value)}
                     className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                   >
-                    <option value="completed">Completed</option>
-                    <option value="failed">Failed</option>
-                    <option value="cancelled">Cancelled</option>
+                    <option value="completed">{uiText("Completed")}</option>
+                    <option value="failed">{uiText("Failed")}</option>
+                    <option value="cancelled">{uiText("Cancelled")}</option>
                   </select>
                 </div>
                 {spoolmanEnabled && spools.length > 0 && (
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Spool (opt.)
+                      {uiText("Spool (opt.)")}
                     </label>
                     <select
                       value={selectedSpoolId ?? ""}
@@ -258,13 +273,17 @@ export function PrintHistorySection({
                       }
                       className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
-                      <option value="">No spool</option>
+                      <option value="">{uiText("No spool")}</option>
                       {spools.map((s) => (
                         <option key={s.id} value={s.id}>
-                          {(s.filament_name || s.name || `Spool ${s.id}`) +
+                          {(s.filament_name ||
+                            s.name ||
+                            uiText("Spool {value1}", { value1: String(s.id) })) +
                             (s.vendor_name ? ` · ${s.vendor_name}` : "") +
                             (s.remaining_weight != null
-                              ? ` (${formatGrams(s.remaining_weight)} left)`
+                              ? uiText(" ({value1} left)", {
+                                  value1: String(formatGrams(s.remaining_weight)),
+                                })
                               : "")}
                         </option>
                       ))}
@@ -274,7 +293,7 @@ export function PrintHistorySection({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Started (opt.)
+                      {uiText("Started (opt.)")}
                     </label>
                     <input
                       type="datetime-local"
@@ -285,7 +304,7 @@ export function PrintHistorySection({
                   </div>
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Finished (opt.)
+                      {uiText("Finished (opt.)")}
                     </label>
                     <input
                       type="datetime-local"
@@ -298,12 +317,12 @@ export function PrintHistorySection({
                 {jobState === "failed" && (
                   <div>
                     <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      Error (opt.)
+                      {uiText("Error (opt.)")}
                     </label>
                     <input
                       value={jobError}
                       onChange={(e) => setJobError(e.target.value)}
-                      placeholder="Describe what went wrong…"
+                      placeholder={uiText("Describe what went wrong…")}
                       className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
@@ -319,25 +338,26 @@ export function PrintHistorySection({
                     ) : (
                       <Check className="h-3.5 w-3.5" />
                     )}
-                    Save
+                    {uiText("Save")}
                   </button>
                   <button
                     onClick={() => setShowAdd(false)}
                     className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
                   >
-                    Cancel
+                    {uiText("Cancel")}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="space-y-2">
                 <p className="font-mono text-2xs text-on-surface-variant">
-                  Fetch recent print history from a Moonraker printer and import jobs matching this
-                  model&apos;s G-code files.
+                  {uiText(
+                    "Fetch recent print history from a Moonraker printer and import jobs matching this model's G-code files.",
+                  )}
                 </p>
                 <div>
                   <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                    Printer
+                    {uiText("Printer")}
                   </label>
                   <select
                     value={selectedPrinterId ?? ""}
@@ -348,7 +368,7 @@ export function PrintHistorySection({
                     }}
                     className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                   >
-                    <option value="">Select printer…</option>
+                    <option value="">{uiText("Select printer…")}</option>
                     {printers.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -371,7 +391,7 @@ export function PrintHistorySection({
                           {r.filename}
                         </span>
                         <span className="opacity-50">
-                          {r.imported ? "imported" : "already exists"}
+                          {r.imported ? uiText("imported") : uiText("already exists")}
                         </span>
                       </div>
                     ))}
@@ -379,7 +399,7 @@ export function PrintHistorySection({
                 )}
                 {importDone && importResults.length === 0 && (
                   <p className="font-mono text-2xs text-on-surface-variant">
-                    No matching jobs found on this printer.
+                    {uiText("No matching jobs found on this printer.")}
                   </p>
                 )}
                 <div className="flex gap-2 pt-1">
@@ -393,13 +413,13 @@ export function PrintHistorySection({
                     ) : (
                       <RefreshCw className="h-3.5 w-3.5" />
                     )}
-                    Fetch &amp; Import
+                    {uiText("Fetch & Import")}
                   </button>
                   <button
                     onClick={() => setShowAdd(false)}
                     className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
                   >
-                    Close
+                    {uiText("Close")}
                   </button>
                 </div>
               </div>
@@ -409,7 +429,7 @@ export function PrintHistorySection({
 
         {jobs.length === 0 ? (
           <p className="font-mono text-xs text-on-surface-variant">
-            No print history yet. Add a record manually or import from a printer.
+            {uiText("No print history yet. Add a record manually or import from a printer.")}
           </p>
         ) : (
           <div className="space-y-2">
@@ -440,7 +460,9 @@ export function PrintHistorySection({
                       <span className="font-mono text-[13px] text-on-surface truncate">
                         {job.source === "external"
                           ? printJobArtifactLabel(job)
-                          : `Rev ${job.gcode_revision_number ?? "—"}`}{" "}
+                          : uiText("Rev {value1}", {
+                              value1: String(job.gcode_revision_number ?? "—"),
+                            })}{" "}
                         · {job.printer_name}
                       </span>
                     </div>
@@ -456,13 +478,13 @@ export function PrintHistorySection({
                   </p>
                   {job.source === "external" && (
                     <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
-                      {job.artifact_evidence.replaceAll("_", " ")}
+                      {knownUiText(job.artifact_evidence)}
                     </p>
                   )}
                   <PrintJobReproducibility job={job} previewHref={`/models/${modelId}`} />
                   {(job.actual_duration_s != null || job.filament_used_g != null) && (
                     <p className="font-mono text-2xs text-on-surface-variant">
-                      <span className="text-emerald-600">measured</span>
+                      <span className="text-emerald-600">{uiText("measured")}</span>
                       {job.actual_duration_s != null
                         ? ` · ${formatDuration(job.actual_duration_s)}`
                         : ""}
@@ -472,7 +494,7 @@ export function PrintHistorySection({
                   )}
                   {job.spool_name && (
                     <p className="font-mono text-2xs text-on-surface-variant">
-                      spool · {job.spool_name}
+                      {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
                     </p>
                   )}
                   {job.error && (

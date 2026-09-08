@@ -494,7 +494,7 @@ function storageProviders() {
       available: false,
       selectable: false,
       support_level: "beta",
-      disabled_reason: "Requires the full image",
+      disabled_reason: "storage_dependency_missing",
       fields: [
         {
           name: "host",

@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
@@ -50,32 +52,32 @@ const sourceTabApi: SourceTabApi = {
 };
 
 const LABELS = {
-  title: ["source.field.title", "Title"],
-  description: ["source.field.description", "Description"],
-  instructions: ["source.field.instructions", "Instructions"],
-  creator_name: ["source.field.creatorName", "Creator"],
-  creator_id: ["source.field.creatorId", "Creator ID"],
-  creator_url: ["source.field.creatorUrl", "Creator profile"],
-  license_code: ["source.field.licenseCode", "License code"],
-  license_url: ["source.field.licenseUrl", "License URL"],
-  license_text: ["source.field.licenseText", "License"],
-  attribution_text: ["source.field.attributionText", "Attribution"],
-  published_at: ["source.published", "Published"],
-  updated_at: ["source.updated", "Updated"],
-} satisfies Record<ProvenanceFieldRead["field_name"], [MessageKey, string]>;
+  title: "source.field.title",
+  description: "source.field.description",
+  instructions: "source.field.instructions",
+  creator_name: "source.field.creatorName",
+  creator_id: "source.field.creatorId",
+  creator_url: "source.field.creatorUrl",
+  license_code: "source.field.licenseCode",
+  license_url: "source.field.licenseUrl",
+  license_text: "source.field.licenseText",
+  attribution_text: "source.field.attributionText",
+  published_at: "source.published",
+  updated_at: "source.updated",
+} satisfies Record<ProvenanceFieldRead["field_name"], MessageKey>;
 
 const ORIGIN_LABELS = {
-  confirmed: ["source.origin.confirmed", "Source"],
-  inferred: ["source.origin.inferred", "Inferred"],
-  user: ["source.origin.user", "Edited"],
-} satisfies Record<ProvenanceOrigin, [MessageKey, string]>;
+  confirmed: "source.origin.confirmed",
+  inferred: "source.origin.inferred",
+  user: "source.origin.user",
+} satisfies Record<ProvenanceOrigin, MessageKey>;
 
 function provenanceOriginLabel(
   origin: ProvenanceOrigin,
   i18n: ReturnType<typeof useOptionalI18n>,
 ): string {
-  const [key, fallback] = ORIGIN_LABELS[provenanceOriginKey(origin)];
-  return i18n?.t(key) ?? fallback;
+  const key = ORIGIN_LABELS[provenanceOriginKey(origin)];
+  return i18n?.t(key) ?? uiText(key);
 }
 
 function SourceField({
@@ -97,11 +99,11 @@ function SourceField({
   onSaved: (next: ModelProvenanceRead) => void;
   last?: boolean;
 }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
-  const t = (key: MessageKey, fallback: string, values?: Record<string, string>) =>
-    i18n?.t(key, values) ?? fallback;
-  const [labelKey, labelFallback] = LABELS[field.field_name];
-  const label = t(labelKey, labelFallback);
+  const t = (key: MessageKey, values?: Record<string, string>) =>
+    i18n?.t(key, values) ?? uiText(key, values);
+  const label = t(LABELS[field.field_name]);
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(field.effective_value);
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -134,7 +136,7 @@ function SourceField({
         ? { name: field.effective_value }
         : { description: field.effective_value };
     void updateModel(modelId, payload)
-      .then(() => toast.success(t("source.modelUpdated", "Model updated")))
+      .then(() => toast.success(t("source.modelUpdated")))
       .catch(toast.error);
   };
   return (
@@ -152,11 +154,11 @@ function SourceField({
           <Input
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            aria-label={t("source.override", `${label} override`, { label })}
+            aria-label={t("source.override", { label })}
           />
           <div className="flex flex-wrap gap-2">
             <Button size="xs" onClick={save}>
-              {t("source.save", "Save")}
+              {t("source.save")}
             </Button>
             <Button
               size="xs"
@@ -166,11 +168,11 @@ function SourceField({
                 setEditing(false);
               }}
             >
-              {t("source.cancel", "Cancel")}
+              {t("source.cancel")}
             </Button>
             {field.user_override_set && (
               <Button size="xs" variant="ghost" onClick={() => setRestoreOpen(true)}>
-                {t("source.restore", "Restore captured value")}
+                {t("source.restore")}
               </Button>
             )}
           </div>
@@ -191,8 +193,8 @@ function SourceField({
             ) : (
               field.effective_value ||
               (field.field_name.startsWith("license")
-                ? t("source.notSupplied", "Not supplied by source")
-                : t("source.notSuppliedGeneric", "Not supplied"))
+                ? t("source.notSupplied")
+                : t("source.notSuppliedGeneric"))
             )}
           </div>
           {canEdit && (
@@ -200,8 +202,8 @@ function SourceField({
               {(field.field_name === "title" || field.field_name === "description") && (
                 <Button size="xs" variant="outline" onClick={applyToModel}>
                   {field.field_name === "title"
-                    ? (i18n?.t("source.useTitle") ?? "Use source title")
-                    : (i18n?.t("source.useDescription") ?? "Use source description")}
+                    ? (i18n?.t("source.useTitle") ?? uiText("Use source title"))
+                    : (i18n?.t("source.useDescription") ?? uiText("Use source description"))}
                 </Button>
               )}
               {/* Every field renders one of these, so the visible word alone leaves a
@@ -210,10 +212,10 @@ function SourceField({
               <Button
                 size="xs"
                 variant="ghost"
-                aria-label={t("source.editField", `Edit ${label}`, { field: label })}
+                aria-label={t("source.editField", { field: label })}
                 onClick={() => setEditing(true)}
               >
-                {t("source.edit", "Edit")}
+                {t("source.edit")}
               </Button>
             </div>
           )}
@@ -222,18 +224,17 @@ function SourceField({
       {field.field_name === "license_text" && (
         <p className="col-span-full mt-1 text-xs text-muted-foreground @xl/source:col-start-2">
           {i18n?.t("source.licenseDisclaimer") ??
-            "PrintStash preserves published license text and does not grant, interpret, or expand rights."}
+            uiText(
+              "PrintStash preserves published license text and does not grant, interpret, or expand rights.",
+            )}
         </p>
       )}
       <ConfirmModal
         open={restoreOpen}
         onClose={() => setRestoreOpen(false)}
-        title={t("source.restoreTitle", "Restore captured value?")}
-        description={t(
-          "source.restoreDescription",
-          "This discards your correction and restores the value captured from the source.",
-        )}
-        confirmLabel={t("source.restoreConfirm", "Restore")}
+        title={t("source.restoreTitle")}
+        description={t("source.restoreDescription")}
+        confirmLabel={t("source.restoreConfirm")}
         onConfirm={restore}
       />
     </div>
@@ -241,15 +242,16 @@ function SourceField({
 }
 
 function SourceTags({ tags, last = false }: { tags: string[]; last?: boolean }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
   if (tags.length === 0) return null;
   return (
     <div
       className={`flex flex-col gap-2 px-3 py-3 @xl/source:grid @xl/source:grid-cols-[minmax(8rem,0.32fr)_minmax(0,1fr)] @xl/source:items-start ${last ? "" : "border-b border-surface-container-high"}`}
-      aria-label={i18n?.t("source.tags") ?? "Source tags"}
+      aria-label={i18n?.t("source.tags") ?? uiText("Source tags")}
     >
       <span className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
-        {i18n?.t("source.tags") ?? "Source tags"}
+        {i18n?.t("source.tags") ?? uiText("Source tags")}
       </span>
       <div className="flex flex-wrap gap-1.5">
         {tags.map((tag) => (
@@ -276,6 +278,7 @@ function SourceCover({
   canEdit: boolean;
   api: SourceTabApi;
 }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
   const t = (
     key:
@@ -292,25 +295,7 @@ function SourceCover({
       | "source.coverAvailable"
       | "source.coverEmpty"
       | "source.coverUnavailable",
-  ) =>
-    i18n?.t(key) ??
-    {
-      "source.cover": "Private representative cover",
-      "source.coverUpload": "Upload cover",
-      "source.coverReplace": "Replace cover",
-      "source.coverDelete": "Delete cover",
-      "source.coverReplaceTitle": "Replace private cover?",
-      "source.coverReplaceDescription":
-        "The existing private representative cover will be replaced.",
-      "source.coverDeleteTitle": "Delete private cover?",
-      "source.coverDeleteDescription":
-        "This removes the private representative cover from this source.",
-      "source.coverInvalid": "Choose a JPEG, PNG, or WebP image.",
-      "source.coverTooLarge": "Cover images must be 15 MiB or smaller.",
-      "source.coverAvailable": "A private representative cover is available.",
-      "source.coverEmpty": "No private representative cover uploaded.",
-      "source.coverUnavailable": "Private representative cover preview is unavailable.",
-    }[key];
+  ) => i18n?.t(key) ?? uiText(key);
   const [cover, setCover] = useState<ModelSourceCoverRead | null>(null);
   const [busy, setBusy] = useState<"upload" | "delete" | null>(null);
   const [replaceOpen, setReplaceOpen] = useState(false);
@@ -483,6 +468,7 @@ function SourceIdentityRow({
   children: ReactNode;
   last?: boolean;
 }) {
+  useUiLocale();
   return (
     <div
       className={`flex flex-col gap-1 px-3 py-2.5 @lg/source:flex-row @lg/source:items-center @lg/source:justify-between ${last ? "" : "border-b border-surface-container-high"}`}
@@ -504,9 +490,10 @@ export function SourceTab({
   canEdit: boolean;
   api?: SourceTabApi;
 }) {
+  useUiLocale();
   const i18n = useOptionalI18n();
-  const t = (key: MessageKey, fallback: string, values?: Record<string, string>) =>
-    i18n?.t(key, values) ?? fallback;
+  const t = (key: MessageKey, values?: Record<string, string>) =>
+    i18n?.t(key, values) ?? uiText(key, values);
   const [data, setData] = useState<ModelProvenanceRead | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -523,15 +510,7 @@ export function SourceTab({
       </div>
     );
   if (failed || !data?.sources.length)
-    return (
-      <EmptyState
-        title={t("source.emptyTitle", "No captured source")}
-        description={t(
-          "source.emptyDescription",
-          "This Model has no structured source snapshot yet.",
-        )}
-      />
-    );
+    return <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />;
   return (
     <div className="@container/source space-y-8">
       {data.sources.map((source) => {
@@ -544,19 +523,19 @@ export function SourceTab({
                 id={`source-heading-${source.id}`}
                 className="mb-4 border-b border-outline-variant pb-1 text-lg font-semibold text-on-surface"
               >
-                {t("source.title", "Source")}
+                {t("source.title")}
               </h2>
               <dl
                 className="overflow-hidden rounded border border-outline-variant bg-surface"
                 data-testid="source-identity-panel"
               >
-                <SourceIdentityRow label={t("source.provider", "Provider")}>
+                <SourceIdentityRow label={t("source.provider")}>
                   <span className="inline-flex flex-wrap items-center justify-start gap-2 @lg/source:justify-end">
                     <span className="capitalize">{source.provider}</span>
-                    <Badge variant="secondary">{t("source.capturedStatus", "Captured")}</Badge>
+                    <Badge variant="secondary">{t("source.capturedStatus")}</Badge>
                   </span>
                 </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.url", "Source URL")}>
+                <SourceIdentityRow label={t("source.url")}>
                   {canonicalUrl ? (
                     <a
                       href={canonicalUrl}
@@ -571,16 +550,16 @@ export function SourceTab({
                     <span className="break-all text-muted-foreground">{source.canonical_url}</span>
                   )}
                 </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.sourceId", "Source ID")}>
-                  {source.source_item_id || t("source.notSuppliedGeneric", "Not supplied")}
+                <SourceIdentityRow label={t("source.sourceId")}>
+                  {source.source_item_id || t("source.notSuppliedGeneric")}
                 </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.revision", "Revision")}>
-                  {source.source_revision || t("source.notSuppliedGeneric", "Not supplied")}
+                <SourceIdentityRow label={t("source.revision")}>
+                  {source.source_revision || t("source.notSuppliedGeneric")}
                 </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.captured", "Captured")}>
+                <SourceIdentityRow label={t("source.captured")}>
                   {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
                 </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.checked", "Last checked")} last>
+                <SourceIdentityRow label={t("source.checked")} last>
                   {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
                 </SourceIdentityRow>
               </dl>
@@ -592,7 +571,7 @@ export function SourceTab({
                   id={`metadata-heading-${source.id}`}
                   className="mb-4 border-b border-outline-variant pb-1 text-lg font-semibold text-on-surface"
                 >
-                  {t("source.metadata", "Captured metadata")}
+                  {t("source.metadata")}
                 </h2>
                 <div className="overflow-hidden rounded border border-outline-variant bg-surface">
                   <SourceTags tags={source.tags ?? []} last={source.fields.length === 0} />

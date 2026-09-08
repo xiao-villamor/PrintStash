@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, PlugZap, Save } from "lucide-react";
@@ -18,6 +21,7 @@ const INPUT_CLASS =
 const SECRET_MASK = "********";
 
 export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
+  useUiLocale();
   const qc = useQueryClient();
   const { data: status, isLoading } = useSpoolmanStatus();
   const enabled = !!status?.enabled;
@@ -69,7 +73,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
           // Leave the stored key untouched when the mask is unchanged.
           api_key: apiKey === SECRET_MASK ? undefined : apiKey,
         },
-        "Saved.",
+        uiText("Saved."),
       ),
     [mutate, baseUrl, apiKey],
   );
@@ -90,9 +94,13 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
         api_key: apiKey === SECRET_MASK ? undefined : apiKey,
       });
       if (res.connected) {
-        setNotice(`Connected${res.version ? ` — Spoolman v${res.version}` : ""}.`);
+        setNotice(
+          uiText("Connected{value1}.", {
+            value1: String(res.version ? ` — Spoolman v${res.version}` : ""),
+          }),
+        );
       } else {
-        setError(res.error || "Spoolman did not respond.");
+        setError(res.error || uiText("Spoolman did not respond."));
       }
     } catch (e) {
       setError(userMessage(e));
@@ -108,8 +116,9 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">Spoolman</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Track filament inventory and per-print consumption with a self-hosted Spoolman
-              instance. Off by default.
+              {uiText(
+                "Track filament inventory and per-print consumption with a self-hosted Spoolman instance. Off by default.",
+              )}
             </p>
           </div>
           <span
@@ -119,22 +128,28 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 : "text-muted-foreground border-border"
             }`}
           >
-            {!enabled ? "Disabled" : connected ? "Connected" : "Not connected"}
+            {!enabled
+              ? uiText("Disabled")
+              : connected
+                ? uiText("Connected")
+                : uiText("Not connected")}
           </span>
         </div>
 
         <div className="p-3 sm:p-4 lg:p-6 space-y-4">
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <p className="text-sm text-muted-foreground">{uiText("Loading…")}</p>
           ) : !canEdit ? (
             <p className="text-xs text-muted-foreground italic">
-              Only an administrator can configure Spoolman.
+              {uiText("Only an administrator can configure Spoolman.")}
             </p>
           ) : (
             <>
               {/* Master switch */}
               <label className="flex items-center justify-between gap-3 cursor-pointer">
-                <span className="text-sm text-foreground">Enable Spoolman integration</span>
+                <span className="text-sm text-foreground">
+                  {uiText("Enable Spoolman integration")}
+                </span>
                 <input
                   type="checkbox"
                   checked={enabled}
@@ -153,7 +168,9 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 }}
               >
                 <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Base URL</label>
+                  <label className="block text-2xs text-muted-foreground mb-1">
+                    {uiText("Base URL")}
+                  </label>
                   <input
                     type="url"
                     value={baseUrl}
@@ -164,14 +181,15 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 </div>
                 <div>
                   <label className="block text-2xs text-muted-foreground mb-1">
-                    API key <span className="opacity-60">(optional)</span>
+                    {uiText("API key ")}
+                    <span className="opacity-60">{uiText("(optional)")}</span>
                   </label>
                   <input
                     type="password"
                     autoComplete="off"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Only if Spoolman sits behind an authenticating proxy"
+                    placeholder={uiText("Only if Spoolman sits behind an authenticating proxy")}
                     className={INPUT_CLASS}
                   />
                 </div>
@@ -186,7 +204,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     ) : (
                       <Save className="h-3.5 w-3.5" />
                     )}
-                    Save
+                    {uiText("Save")}
                   </button>
                   <button
                     type="button"
@@ -195,7 +213,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground font-mono text-xs uppercase tracking-wider hover:bg-muted disabled:opacity-50 transition-colors"
                   >
                     <PlugZap className="h-3.5 w-3.5" />
-                    Test connection
+                    {uiText("Test connection")}
                   </button>
                 </div>
               </form>
@@ -205,10 +223,11 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 <div className="space-y-2 pt-1 border-t border-border">
                   <label className="flex items-center justify-between gap-3 cursor-pointer pt-3">
                     <span className="text-sm text-foreground">
-                      Write consumption back to Spoolman
+                      {uiText("Write consumption back to Spoolman")}
                       <span className="block text-2xs text-muted-foreground">
-                        Decrements the selected spool by measured filament when a print completes
-                        (Moonraker-measured prints only).
+                        {uiText(
+                          "Decrements the selected spool by measured filament when a print completes (Moonraker-measured prints only).",
+                        )}
                       </span>
                     </span>
                     <input
@@ -224,10 +243,9 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
                         <span>
-                          Moonraker&apos;s native Spoolman integration is already decrementing the
-                          active spool, so PrintStash automatically skips its own write-back to
-                          avoid double-counting. Only override this if you have disabled
-                          Moonraker&apos;s hook and want PrintStash to count consumption.
+                          {uiText(
+                            "Moonraker's native Spoolman integration is already decrementing the active spool, so PrintStash automatically skips its own write-back to avoid double-counting. Only override this if you have disabled Moonraker's hook and want PrintStash to count consumption.",
+                          )}
                         </span>
                       </div>
                       <label className="flex items-center gap-2 cursor-pointer pl-5">
@@ -238,7 +256,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                           onChange={(e) => toggleWriteForce(e.target.checked)}
                           className="h-3.5 w-3.5 flex-shrink-0"
                         />
-                        <span>Write back anyway (I disabled Moonraker&apos;s hook)</span>
+                        <span>{uiText("Write back anyway (I disabled Moonraker's hook)")}</span>
                       </label>
                     </div>
                   )}
@@ -249,7 +267,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
               {enabled && connected && spools && spools.length > 0 && (
                 <div className="pt-1 border-t border-border">
                   <h4 className="text-2xs uppercase tracking-wider text-muted-foreground pt-3 pb-2">
-                    Inventory
+                    {uiText("Inventory")}
                   </h4>
                   <ul className="space-y-1">
                     {spools.map((s) => (
@@ -267,14 +285,18 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                             }}
                           />
                           <span className="truncate text-foreground">
-                            {s.filament_name || s.name || `Spool ${s.id}`}
+                            {s.filament_name ||
+                              s.name ||
+                              uiText("Spool {value1}", { value1: String(s.id) })}
                             {s.vendor_name ? (
                               <span className="text-muted-foreground"> · {s.vendor_name}</span>
                             ) : null}
                           </span>
                         </span>
                         <span className="font-mono text-xs text-muted-foreground flex-shrink-0">
-                          {formatGrams(s.remaining_weight)} left
+                          {uiText("{value1} left", {
+                            value1: String(formatGrams(s.remaining_weight) ?? ""),
+                          })}
                         </span>
                       </li>
                     ))}

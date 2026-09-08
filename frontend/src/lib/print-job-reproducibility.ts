@@ -1,3 +1,4 @@
+import { knownUiText } from "./locale";
 import type {
   PrintJobIdentityRead,
   PrintJobReportedMetadataRead,
@@ -65,7 +66,8 @@ const CAPTURE_ERROR_MESSAGES = {
 } satisfies Record<string, string>;
 
 function captureErrorMessage(code: string): string | undefined {
-  return Object.entries(CAPTURE_ERROR_MESSAGES).find(([key]) => key === code)?.[1];
+  const message = Object.entries(CAPTURE_ERROR_MESSAGES).find(([key]) => key === code)?.[1];
+  return message ? knownUiText(message) : undefined;
 }
 
 const ARCHIVED_ARTIFACT_EVIDENCE = new Set(["vault", "gcode_archived", "project_archived"]);
@@ -119,7 +121,7 @@ function legacyError(job: PrintJobReproducibilityInput): PrintJobReproducibility
 
   return {
     code: resolvedCode,
-    message,
+    message: knownUiText(message),
   };
 }
 
@@ -131,7 +133,7 @@ function normalizeContractError(
   if (mappedMessage && error.message.trim() === error.code) {
     return { ...error, message: mappedMessage };
   }
-  return error;
+  return { ...error, message: knownUiText(error.message) };
 }
 
 function basename(path: string | null | undefined): string | null {
@@ -145,10 +147,11 @@ export function printJobArtifactLabel(job: PrintJobReproducibilityInput): string
   const reportedName = basename(resolvePrintJobReproducibility(job).identity.gcode_file);
   if (reportedName) return reportedName;
   if (isArchivedPrintArtifact(job.artifact_evidence)) {
-    if (job.source !== "external") return basename(job.remote_filename) ?? ARCHIVED_ARTIFACT_LABEL;
-    return ARCHIVED_ARTIFACT_LABEL;
+    if (job.source !== "external")
+      return basename(job.remote_filename) ?? knownUiText(ARCHIVED_ARTIFACT_LABEL);
+    return knownUiText(ARCHIVED_ARTIFACT_LABEL);
   }
-  return EXTERNAL_PRINT_EVIDENCE_LABEL;
+  return knownUiText(EXTERNAL_PRINT_EVIDENCE_LABEL);
 }
 
 /** Normalize the additive contract while keeping old server responses readable. */

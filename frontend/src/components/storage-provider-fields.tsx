@@ -1,3 +1,6 @@
+import { uiText } from "@/lib/locale";
+import { knownUiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
 import { useId } from "react";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +26,7 @@ export function StorageProviderFields({
   editing?: boolean;
   onClear?: (name: string) => void;
 }) {
+  useUiLocale();
   const prefix = useId();
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -35,8 +39,8 @@ export function StorageProviderFields({
               htmlFor={id}
               className="flex items-center justify-between gap-2 text-xs font-medium text-on-surface-variant"
             >
-              <span>{field.label}</span>
-              {!field.required && <span>Optional</span>}
+              <span>{knownUiText(field.label)}</span>
+              {!field.required && <span>{uiText("Optional")}</span>}
             </label>
             {field.options?.length ? (
               <select
@@ -48,7 +52,7 @@ export function StorageProviderFields({
               >
                 {field.options.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {knownUiText(option)}
                   </option>
                 ))}
               </select>
@@ -59,7 +63,7 @@ export function StorageProviderFields({
                 value={String(values[field.name] ?? "")}
                 disabled={disabled}
                 required={field.required && !stored}
-                placeholder={stored ? "Stored — leave blank to keep" : undefined}
+                placeholder={stored ? uiText("Stored — leave blank to keep") : undefined}
                 autoComplete={field.secret ? "new-password" : "off"}
                 aria-describedby={`${id}-help`}
                 onChange={(event) =>
@@ -71,8 +75,8 @@ export function StorageProviderFields({
               />
             )}
             <p id={`${id}-help`} className="text-xs text-on-surface-variant">
-              {field.help}
-              {stored ? " A value is currently stored." : ""}
+              {knownUiText(field.help)}
+              {stored ? uiText(" A value is currently stored.") : ""}
             </p>
             {editing && stored && !field.required && onClear && (
               <Button
@@ -83,8 +87,8 @@ export function StorageProviderFields({
                 onClick={() => onClear(field.name)}
               >
                 {values[field.name] === ""
-                  ? "Credential will be cleared"
-                  : `Clear stored ${field.label.toLowerCase()}`}
+                  ? uiText("Credential will be cleared")
+                  : uiText("Clear stored {value1}", { value1: knownUiText(field.label) })}
               </Button>
             )}
           </div>

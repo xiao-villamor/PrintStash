@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useMemo, useState } from "react";
 import { FolderInput, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
 import { CollectionRead, TagRead } from "@/types";
@@ -40,6 +43,7 @@ export function BatchToolbar({
   onDeleteSelection: () => void;
   onClear: () => void;
 }) {
+  useUiLocale();
   const [moveOpen, setMoveOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -58,7 +62,7 @@ export function BatchToolbar({
           className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur transition-[opacity,transform] duration-fast ease-out data-[state=closed]:translate-y-2 data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:translate-y-0"
         >
           <span className="px-2 font-mono text-xs font-semibold text-foreground">
-            {count} selected
+            {uiText("{value1} selected", { value1: String(count ?? "") })}
           </span>
           <div className="h-5 w-px bg-border" />
           <button
@@ -68,7 +72,7 @@ export function BatchToolbar({
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
           >
             <FolderInput className="h-4 w-4 text-muted-foreground" />
-            Move
+            {uiText("Move")}
           </button>
           {modelCount > 0 && selectedCollections.length === 0 && (
             <button
@@ -78,7 +82,7 @@ export function BatchToolbar({
               className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             >
               <Tag className="h-4 w-4 text-muted-foreground" />
-              Tag
+              {uiText("Tag")}
             </button>
           )}
           {selectedCollections.length > 0 && (
@@ -88,7 +92,8 @@ export function BatchToolbar({
               disabled={busy}
               className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <Pencil className="h-4 w-4 text-muted-foreground" /> Rename
+              <Pencil className="h-4 w-4 text-muted-foreground" />
+              {uiText(" Rename")}
             </button>
           )}
           <button
@@ -98,7 +103,7 @@ export function BatchToolbar({
             className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
-            Delete
+            {uiText("Delete")}
           </button>
           <div className="h-5 w-px bg-border" />
           <button
@@ -106,7 +111,7 @@ export function BatchToolbar({
             onClick={onClear}
             disabled={busy}
             className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
-            aria-label="Clear selection"
+            aria-label={uiText("Clear selection")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -159,13 +164,13 @@ export function BatchToolbar({
           setDeleteOpen(false);
           onDeleteSelection();
         }}
-        title={`Delete ${count} selected item${count !== 1 ? "s" : ""}?`}
+        title={uiText("items.deleteSelected", { value1: String(count), count: Number(count) })}
         description={
           selectedCollections.length
-            ? "Selected folders and their contents move to trash."
-            : "They move to trash and can be restored until purged."
+            ? uiText("Selected folders and their contents move to trash.")
+            : uiText("They move to trash and can be restored until purged.")
         }
-        confirmLabel="Delete"
+        confirmLabel={uiText("Delete")}
         busy={busy}
       />
     </>
@@ -191,6 +196,7 @@ function MoveDialog({
   onClose: () => void;
   onConfirm: (target: string, parentId: number | null) => void;
 }) {
+  useUiLocale();
   const [target, setTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const blockedPaths = useMemo(
@@ -215,14 +221,14 @@ function MoveDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Move ${count} item${count !== 1 ? "s" : ""}`}
+      title={uiText("items.move", { value1: String(count), count: Number(count) })}
       className="max-w-md"
     >
       <Input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Find destination..."
-        aria-label="Find destination"
+        placeholder={uiText("Find destination...")}
+        aria-label={uiText("Find destination")}
         className="mb-2"
       />
       <div className="max-h-72 overflow-y-auto rounded border border-border">
@@ -236,7 +242,7 @@ function MoveDialog({
                 : "text-muted-foreground hover:bg-muted"
             }`}
           >
-            None (root)
+            {uiText("None (root)")}
           </button>
         )}
         {sorted.map((c) => (
@@ -255,7 +261,7 @@ function MoveDialog({
         ))}
         {sorted.length === 0 && (
           <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-            No valid destinations
+            {uiText("No valid destinations")}
           </p>
         )}
       </div>
@@ -266,7 +272,7 @@ function MoveDialog({
           disabled={busy}
           className="flex-1 h-9 rounded border border-border text-sm font-mono uppercase tracking-wider text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
         >
-          Cancel
+          {uiText("Cancel")}
         </button>
         <button
           type="button"
@@ -281,7 +287,7 @@ function MoveDialog({
           disabled={busy || target === null}
           className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Move here
+          {uiText("Move here")}
         </button>
       </div>
     </Modal>
@@ -301,6 +307,7 @@ function RenameCollectionsDialog({
   onClose: () => void;
   onConfirm: (names: Record<number, string>) => void;
 }) {
+  useUiLocale();
   const [names, setNames] = useState<Record<number, string>>({});
   const values = Object.fromEntries(
     collections.map((collection) => [collection.id, names[collection.id] ?? collection.name]),
@@ -312,7 +319,10 @@ function RenameCollectionsDialog({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Rename ${collections.length} folder${collections.length !== 1 ? "s" : ""}`}
+      title={uiText("folders.rename", {
+        value1: String(collections.length),
+        count: Number(collections.length),
+      })}
       className="max-w-md"
     >
       <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
@@ -339,7 +349,7 @@ function RenameCollectionsDialog({
           disabled={busy}
           className="h-9 rounded border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
         >
-          Cancel
+          {uiText("Cancel")}
         </button>
         <button
           type="button"
@@ -347,7 +357,7 @@ function RenameCollectionsDialog({
           disabled={busy || !valid}
           className="h-9 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
         >
-          Rename
+          {uiText("Rename")}
         </button>
       </div>
     </Modal>
@@ -369,6 +379,7 @@ function TagDialog({
   onClose: () => void;
   onConfirm: (add: string[], remove: string[]) => void;
 }) {
+  useUiLocale();
   const [add, setAdd] = useState<string[]>([]);
   const [remove, setRemove] = useState<string[]>([]);
 
@@ -384,19 +395,19 @@ function TagDialog({
         reset();
         onClose();
       }}
-      title={`Tag ${count} model${count !== 1 ? "s" : ""}`}
+      title={uiText("models.tag", { value1: String(count), count: Number(count) })}
       className="max-w-md"
     >
       <div className="space-y-4">
         <ChipEditor
-          label="Add tags"
+          label={uiText("Add tags")}
           suggestions={tags}
           values={add}
           onChange={setAdd}
           accent="add"
         />
         <ChipEditor
-          label="Remove tags"
+          label={uiText("Remove tags")}
           suggestions={tags}
           values={remove}
           onChange={setRemove}
@@ -413,7 +424,7 @@ function TagDialog({
           disabled={busy}
           className="flex-1 h-9 rounded border border-border text-sm font-mono uppercase tracking-wider text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
         >
-          Cancel
+          {uiText("Cancel")}
         </button>
         <button
           type="button"
@@ -424,7 +435,7 @@ function TagDialog({
           disabled={busy || (add.length === 0 && remove.length === 0)}
           className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Apply
+          {uiText("Apply")}
         </button>
       </div>
     </Modal>
@@ -444,6 +455,7 @@ function ChipEditor({
   onChange: (next: string[]) => void;
   accent: "add" | "remove";
 }) {
+  useUiLocale();
   const [input, setInput] = useState("");
   const needle = input.trim().toLowerCase();
   const filtered = needle
@@ -495,7 +507,9 @@ function ChipEditor({
             }
           }}
           placeholder={
-            accent === "add" ? "Search or create — press Enter" : "Search tags — press Enter"
+            accent === "add"
+              ? uiText("Search or create — press Enter")
+              : uiText("Search tags — press Enter")
           }
           className="w-full h-10 bg-background text-foreground font-mono text-sm border border-border rounded px-3 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
         />
@@ -528,7 +542,10 @@ function ChipEditor({
                 onClick={() => commit(input)}
                 className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-muted flex items-center gap-2 ${filtered.length === nav.activeIndex ? "bg-muted" : ""}`}
               >
-                <Plus className="h-3 w-3" /> Create &quot;{input.trim()}&quot;
+                <Plus className="h-3 w-3" />
+                {uiText(' Create "')}
+                {input.trim()}
+                {uiText('"')}
               </button>
             )}
           </div>
@@ -545,7 +562,7 @@ function ChipEditor({
               <button
                 type="button"
                 onClick={() => onChange(values.filter((v) => v !== name))}
-                aria-label={`Remove ${name}`}
+                aria-label={uiText("Remove {value1}", { value1: String(name) })}
                 className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-foreground/10"
               >
                 <X className="h-3 w-3" />

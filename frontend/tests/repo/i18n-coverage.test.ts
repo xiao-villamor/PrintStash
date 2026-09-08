@@ -1,75 +1,46 @@
-/*
- * Every translatable string in the app has a Spanish entry, checked by walking
- * the source rather than the catalog.
- *
- * A missing translation does not fail anything at runtime: the key falls through
- * to English, so a Spanish user sees a sentence in English and nobody notices
- * until they report it. The only way to catch that is to enumerate the literals
- * the JSX actually renders and demand a catalog entry for each — which is what
- * this does.
- *
- * It runs over the real component tree, so adding a translatable string without
- * translating it fails here at the moment it is written, in the PR that wrote it.
- */
-
+/** Guard authored JSX and accessibility copy at the source, before rendering. */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-import { parseSync, Visitor } from "oxc-parser";
+import { parseSync, Visitor, type Expression } from "oxc-parser";
+import { CHANGELOG } from "@/lib/changelog";
 import { describe, expect, it } from "vitest";
+import { getMessageCatalog, isMessageKey, SUPPORTED_LOCALES } from "@/lib/locale";
 
-import { hasUiTranslation } from "@/components/ui/localized";
-
-const NON_TRANSLATABLE_LITERALS = new Set([
-  ".gcode, .g, .gco, or .bgcode",
-  "· v",
-  "· Z",
-  "*/30 * * * * (min hour dom mon dow)",
-  "/api/v1/auth/login",
-  "&quot;",
-  "&rdquo;?",
-  "# Document&#10;&#10;Write markdown. Paste or drop images to embed them.",
-  "°C",
-  "→ recycle bin",
-  "3D",
-  "Authentik",
-  "auto",
-  "Create &quot;",
-  "Delete &ldquo;",
-  "GCode",
-  "GCODE",
-  "GitHub",
-  "Klipper",
-  "mm",
-  "Moonraker",
-  "my-backup-bucket",
-  "my-vault-bucket",
+// Brands, protocols, sample addresses and standard units have no translated copy.
+const TECHNICAL = new Set([
+  "SFTP",
   "PLA",
-  "PLA, PETG…",
-  "printstash",
   "PrintStash",
   "PrintStash ·",
-  "PrintStash v",
-  "Select all on screen (",
-  "Spoolman",
-  "token",
+  "GCODE",
+  "GCode",
+  "G-code",
+  "3D",
+  "Authentik",
+  "Klipper",
+  "Moonraker",
+  "URL",
+  "°C",
   "Voron 2.4",
-  "Voron 2.4 — 0.4 mm",
-  "you@example.com",
-  "(Printables / MakerWorld), or a direct file/.zip link — fetched on the server.",
-  "Fetch &amp; Import",
-  "Fetch recent print history from a Moonraker printer and import jobs matching this model&apos;s G-code files.",
-  "Moonraker&apos;s native Spoolman integration is already decrementing the active spool, so PrintStash automatically skips its own write-back to avoid double-counting. Only override this if you have disabled Moonraker&apos;s hook and want PrintStash to count consumption.",
-  "Write back anyway (I disabled Moonraker&apos;s hook)",
-  "http://spoolman.local:7912",
-  "https://&lt;id&gt;.r2.cloudflarestorage.com",
-  "https://<id>.r2.cloudflarestorage.com",
-  "https://auth.example.com/application/o/printstash",
-  "https://printables.com/model/...",
+  "JSON",
+  "GitHub",
+  "Spoolman",
   "https://www.printables.com/model/...",
+  "https://auth.example.com/application/o/printstash",
+  "http://mk4.local",
+  "http://octopi.local",
+  "http://printer.local:7125",
+  "/api/v1/auth/login",
+  "http://spoolman.local:7912",
+  "https://example.com/hook",
+  "https://discord.com/api/webhooks/…",
+  "123456:ABC-DEF…",
+  "-1001234567890",
+  "https://ntfy.sh",
+  "my-printer-alerts",
+  "tk_…",
 ]);
-
-const TRANSLATABLE_ATTRIBUTES = new Set([
+const ATTRIBUTES = new Set([
   "title",
   "placeholder",
   "aria-label",
@@ -78,53 +49,203 @@ const TRANSLATABLE_ATTRIBUTES = new Set([
   "label",
   "confirmLabel",
   "hint",
+  "help",
+  "emptyText",
+  "cancelLabel",
+  "closeLabel",
 ]);
 
-function uiLiterals(file: string): string[] {
-  const parsed = parseSync(file, readFileSync(file, "utf8"), { lang: "tsx" });
-  const values = new Set<string>();
+function unlocalizedCopy(source: string): string[] {
+  const values: string[] = [];
   const add = (value: string) => {
-    const normalized = value.replace(/\s+/g, " ").trim();
-    if (normalized.length > 1 && /[A-Za-z]/.test(normalized)) values.add(normalized);
+    const text = value.replace(/\s+/g, " ").trim();
+    if (/[A-Za-z]/.test(text) && !TECHNICAL.has(text)) values.push(text);
   };
+  const expression = (node: Expression) => {
+    if (node.type === "ParenthesizedExpression") expression(node.expression);
+    if (
+      node.type === "Literal" &&
+      "value" in node &&
+      (node.raw?.startsWith('"') || node.raw?.startsWith("'"))
+    )
+      add(String(node.value));
+    if (node.type === "ConditionalExpression") {
+      expression(node.consequent);
+      expression(node.alternate);
+    }
+    if (node.type === "LogicalExpression") expression(node.right);
+    if (node.type === "TemplateLiteral")
+      node.quasis.forEach((part) => add(part.value.cooked ?? part.value.raw));
+  };
+  const parsed = parseSync("copy.tsx", source, { lang: "tsx" });
   new Visitor({
     JSXText(node) {
-      // Raw source text, so HTML entities stay encoded and match the catalog keys.
-      add(node.raw ?? node.value);
+      add(String(node.value));
+    },
+    JSXElement(node) {
+      for (const child of node.children)
+        if (
+          child.type === "JSXExpressionContainer" &&
+          child.expression.type !== "JSXEmptyExpression"
+        )
+          expression(child.expression);
+    },
+    JSXFragment(node) {
+      for (const child of node.children)
+        if (
+          child.type === "JSXExpressionContainer" &&
+          child.expression.type !== "JSXEmptyExpression"
+        )
+          expression(child.expression);
     },
     JSXAttribute(node) {
-      if (node.name.type !== "JSXIdentifier") return;
-      if (!TRANSLATABLE_ATTRIBUTES.has(node.name.name)) return;
-      // `JSXAttributeValue` narrows `"Literal"` to `StringLiteral`, so `value` is a string.
-      if (node.value?.type !== "Literal") return;
-      add(node.value.value);
+      if (node.name.type !== "JSXIdentifier" || !ATTRIBUTES.has(node.name.name)) return;
+      if (node.value?.type === "Literal") add(node.value.value);
+      if (
+        node.value?.type === "JSXExpressionContainer" &&
+        node.value.expression.type !== "JSXEmptyExpression"
+      )
+        expression(node.value.expression);
+    },
+    CallExpression(node) {
+      if (node.callee.type !== "MemberExpression" || node.callee.property.type !== "Identifier")
+        return;
+      if (!new Set(["success", "warning", "info", "error"]).has(node.callee.property.name)) return;
+      const object = node.callee.object;
+      const isToast =
+        (object.type === "Identifier" && object.name === "toast") ||
+        (object.type === "MemberExpression" &&
+          object.property.type === "Identifier" &&
+          object.property.name === "toast");
+      if (!isToast) return;
+      const first = node.arguments[0];
+      if (first?.type !== "SpreadElement") expression(first);
+    },
+    Property(node) {
+      const key = node.key;
+      const name =
+        key.type === "Identifier" ? key.name : key.type === "Literal" ? String(key.value) : null;
+      if (!node.computed && name !== null && ATTRIBUTES.has(name)) {
+        if (node.value.type === "Literal") {
+          if (node.value.value === null) return;
+          const value = String(node.value.value);
+          const semanticKey = /^[a-z][\w]*(?:\.[\w]+)+$/.test(value) && isMessageKey(value);
+          if (!semanticKey) add(value);
+        }
+        if (node.value.type === "TemplateLiteral")
+          node.value.quasis.forEach((part) => add(part.value.cooked ?? part.value.raw));
+        if (node.value.type === "ConditionalExpression") expression(node.value);
+      }
     },
   }).visit(parsed.program);
-  return [...values];
+  return values;
 }
-
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(path);
-    return /\.tsx?$/.test(entry.name) ? [path] : [];
+    if (entry.isDirectory())
+      return new Set(["__tests__", "generated", "test-support"]).has(entry.name)
+        ? []
+        : sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [path] : [];
   });
+}
+function parameters(value: string): string[] {
+  return [...new Set([...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]))].sort();
 }
 
 describe("translationCoverage", () => {
-  it("covers every translatable JSX literal with a Spanish catalog entry", () => {
-    const files = sourceFiles("src").filter(
-      (file) =>
-        !file.includes("/__tests__/") &&
-        !file.endsWith("localized.tsx") &&
-        !file.endsWith("i18n.tsx"),
+  it("rejects untranslated UI copy", () => {
+    expect(
+      unlocalizedCopy(
+        '<button title="Open dialog" aria-label={`Delete ${name}`}>{ok ? "Done" : "Retry"} Save</button>',
+      ),
+    ).toEqual(expect.arrayContaining(["Open dialog", "Delete", "Done", "Retry", "Save"]));
+    expect(
+      unlocalizedCopy(
+        '<button title={uiText("Open dialog")}>{uiText("Save")}{model.name}</button>',
+      ),
+    ).toEqual([]);
+  });
+  it("rejects hardcoded imperative presentation copy", () => {
+    expect(
+      unlocalizedCopy(
+        'toast.success("Saved"); deps.toast.warning(`Skipped ${count}`); const field = { placeholder: "Helpful copy" };',
+      ),
+    ).toEqual(expect.arrayContaining(["Saved", "Skipped", "Helpful copy"]));
+    expect(
+      unlocalizedCopy(
+        'toast.success(uiText("save.success")); const field = { placeholder: uiText("form.help") };',
+      ),
+    ).toEqual([]);
+  });
+  it("has no unwrapped authored JSX copy", () => {
+    expect(
+      sourceFiles("src").flatMap((file) =>
+        unlocalizedCopy(readFileSync(file, "utf8")).map((text) => `${file}: ${text}`),
+      ),
+    ).toEqual([]);
+  });
+  it("has no hardcoded imperative presentation copy", () => {
+    expect(
+      sourceFiles("src").flatMap((file) =>
+        unlocalizedCopy(readFileSync(file, "utf8")).map((text) => `${file}: ${text}`),
+      ),
+    ).toEqual([]);
+  });
+  it("keeps catalog text out of ignored component fallbacks", () => {
+    expect(
+      sourceFiles("src").flatMap((file) =>
+        /\b_fallback\b/.test(readFileSync(file, "utf8")) ? [file] : [],
+      ),
+    ).toEqual([]);
+  });
+  it("localizes the release notes displayed in About", () => {
+    const release = CHANGELOG[0];
+    expect([release.date, ...release.changes].filter((message) => !isMessageKey(message))).toEqual(
+      [],
     );
-    const missing = files.flatMap((file) =>
-      uiLiterals(file)
-        .filter((value) => !NON_TRANSLATABLE_LITERALS.has(value) && !hasUiTranslation("es", value))
-        .map((value) => `${file}: ${value}`),
-    );
-
-    expect(missing).toEqual([]);
+  });
+  it.each(SUPPORTED_LOCALES)("validates every key, plural form and parameter in %s", (locale) => {
+    const base = getMessageCatalog("en");
+    const catalog = getMessageCatalog(locale);
+    expect(Object.keys(catalog).sort()).toEqual(Object.keys(base).sort());
+    for (const key of Object.keys(base).filter(isMessageKey)) {
+      const source = base[key];
+      const target = catalog[key];
+      const sourceForms = source instanceof Object ? Object.values(source) : [source];
+      const expected = [...new Set(sourceForms.flatMap(parameters))].sort();
+      expect({ key, plural: target instanceof Object }).toEqual({
+        key,
+        plural: source instanceof Object,
+      });
+      const forms = target instanceof Object ? Object.values(target) : [target];
+      expect({ key, fallback: target instanceof Object ? Boolean(target.other) : true }).toEqual({
+        key,
+        fallback: true,
+      });
+      for (const form of forms) {
+        expect({ locale, key, empty: form.trim().length === 0 }).toEqual({
+          locale,
+          key,
+          empty: false,
+        });
+        expect({ locale, key, parameters: parameters(form) }).toEqual({
+          locale,
+          key,
+          parameters: expected,
+        });
+        expect({ locale, key, encodedEntity: /&(?:amp|quot|apos|lt|gt);/i.test(form) }).toEqual({
+          locale,
+          key,
+          encodedEntity: false,
+        });
+        expect({ locale, key, draft: /TODO\([^)]+\):/.test(form) }).toEqual({
+          locale,
+          key,
+          draft: false,
+        });
+      }
+    }
   });
 });

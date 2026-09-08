@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   publish:
     permissions:
+      actions: read
       contents: read
       packages: write
+      security-events: write
     uses: ./.github/workflows/container-publish.yml
     secrets: inherit

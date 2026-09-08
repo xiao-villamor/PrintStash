@@ -1,5 +1,9 @@
 "use client";
 
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "@/lib/link";
@@ -134,6 +138,7 @@ function getBedSize(printerModel: string | null | undefined): BedSize {
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
+  useUiLocale();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -279,7 +284,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     setDeleting(true);
     try {
       await deleteModel(model.id);
-      toast.success("Model deleted");
+      toast.success(uiText("Model deleted"));
       // Return to the folder the model lived in, not the root — deleting one
       // model shouldn't kick the user out of the collection they were browsing.
       router.push(model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/");
@@ -319,7 +324,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       });
       setModel(updated);
       setEditing(false);
-      toast.success("Model updated");
+      toast.success(uiText("Model updated"));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -374,7 +379,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     try {
       await deleteTag(tag.id);
       setEditTags((p) => p.filter((n) => n.toLowerCase() !== tag.name.toLowerCase()));
-      toast.success(`Tag "${tag.name}" deleted`);
+      toast.success(uiText('Tag "{value1}" deleted', { value1: String(tag.name) }));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -458,20 +463,26 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           onClose={() => setConfirmDeleteOpen(false)}
           onConfirm={doDelete}
           busy={deleting}
-          title="Delete model?"
-          description="This will move the model to trash. Files will be permanently removed after the retention period."
-          confirmLabel="Delete"
+          title={uiText("Delete model?")}
+          description={uiText(
+            "This will move the model to trash. Files will be permanently removed after the retention period.",
+          )}
+          confirmLabel={uiText("Delete")}
         />
         <ConfirmModal
           open={!!deleteTagTarget}
           onClose={() => setDeleteTagTarget(null)}
           onConfirm={confirmDeleteTag}
           busy={deleteTagBusy}
-          title="Delete tag?"
+          title={uiText("Delete tag?")}
           description={
             deleteTagTarget
-              ? `"${deleteTagTarget.name}" will be removed from ${deleteTagTarget.model_count} model${deleteTagTarget.model_count === 1 ? "" : "s"}.`
-              : "This tag will be removed from the model."
+              ? uiText("tags.removeFromModels", {
+                  value1: String(deleteTagTarget.name),
+                  value2: String(deleteTagTarget.model_count),
+                  count: Number(deleteTagTarget.model_count),
+                })
+              : uiText("This tag will be removed from the model.")
           }
         />
         {addRevisionOpen && (
@@ -481,7 +492,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             onUploaded={(updated) => {
               setModel(updated);
               setAddRevisionOpen(false);
-              toast.success("G-code revision added");
+              toast.success(uiText("G-code revision added"));
             }}
           />
         )}
@@ -516,7 +527,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   aria-invalid={!editName.trim()}
                   aria-describedby={!editName.trim() ? "model-name-error" : undefined}
                   className="w-full bg-surface text-on-surface font-mono text-lg border border-outline-variant rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                  placeholder="Model name"
+                  placeholder={uiText("Model name")}
                 />
               ) : (
                 <h1 className="text-xl font-semibold text-on-surface leading-tight truncate">
@@ -525,21 +536,26 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               )}
               <span className="font-mono text-xs text-on-surface-variant">
                 {(meshFile ?? sourceFiles[0]) && (
-                  <>{(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()} source · </>
+                  <>
+                    {(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()}
+                    {uiText(" source · ")}
+                  </>
                 )}
-                {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"} · Last
-                updated {timeAgo(model.updated_at)}
+                {uiText("counts.revisions", { count: gcodeFiles.length })}
+                {uiText(" · Last updated ")}
+                {timeAgo(model.updated_at)}
               </span>
               {editing && !editName.trim() && (
                 <p id="model-name-error" role="alert" className="mt-1 text-xs text-destructive">
-                  Model name is required.
+                  {uiText("Model name is required.")}
                 </p>
               )}
               {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                   {recommendedGcode && (
                     <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                      <Star className="h-3 w-3 fill-current" /> Recommended Rev{" "}
+                      <Star className="h-3 w-3 fill-current" />
+                      {uiText(" Recommended Rev")}{" "}
                       {recommendedGcode.gcode_revision_number ?? recommendedGcode.version}
                     </span>
                   )}
@@ -568,10 +584,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             {editing ? (
               <>
                 <Button variant="outline" size="sm" onClick={cancelEdit}>
-                  Cancel
+                  {uiText("Cancel")}
                 </Button>
                 <Button size="sm" onClick={saveEdit} loading={saving} disabled={!editName.trim()}>
-                  {!saving && <Check className="h-4 w-4" />} {saving ? "Saving…" : "Save"}
+                  {!saving && <Check className="h-4 w-4" />}{" "}
+                  {saving ? uiText("Saving…") : uiText("Save")}
                 </Button>
               </>
             ) : (
@@ -583,8 +600,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     size="sm"
                     aria-label={
                       model.tags.length > 0
-                        ? `Edit tags for ${model.name}`
-                        : `Add tags to ${model.name}`
+                        ? uiText("Edit tags for {value1}", { value1: String(model.name) })
+                        : uiText("Add tags to {value1}", { value1: String(model.name) })
                     }
                     onClick={() => {
                       setTagDialogSession((session) => session + 1);
@@ -592,7 +609,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     }}
                   >
                     <Tags className="h-4 w-4" />
-                    {model.tags.length > 0 ? "Edit tags" : "Add tags"}
+                    {model.tags.length > 0 ? uiText("Edit tags") : uiText("Add tags")}
                   </Button>
                 )}
                 <Button
@@ -603,7 +620,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   disabled={starBusy || !auth.isAuthenticated}
                 >
                   <Star className={`h-4 w-4 ${model.starred ? "fill-current text-primary" : ""}`} />
-                  {model.starred ? "Favorited" : "Favorite"}
+                  {model.starred ? uiText("Favorited") : uiText("Favorite")}
                 </Button>
                 <DropdownMenu
                   open={actionsOpen}
@@ -617,7 +634,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                       onClick={() => setActionsOpen((open) => !open)}
                       aria-haspopup="menu"
                       aria-expanded={actionsOpen}
-                      aria-label="Model actions"
+                      aria-label={uiText("Model actions")}
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </Button>
@@ -635,7 +652,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     disabled={!auth.isAuthenticated || !canEditModel}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Link2 className="h-4 w-4" /> Share
+                    <Link2 className="h-4 w-4" />
+                    {uiText(" Share")}
                   </button>
                   <button
                     type="button"
@@ -648,7 +666,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     disabled={!auth.isAuthenticated || !canEditModel}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Pencil className="h-4 w-4" /> Edit details
+                    <Pencil className="h-4 w-4" />
+                    {uiText(" Edit details")}
                   </button>
                   <button
                     type="button"
@@ -661,7 +680,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     disabled={deleting || !auth.isAuthenticated || !canEditModel}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <Trash2 className="h-4 w-4" /> Delete model
+                    <Trash2 className="h-4 w-4" />
+                    {uiText(" Delete model")}
                   </button>
                 </DropdownMenu>
               </>
@@ -737,18 +757,24 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                             }
                           </p>
                           <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                            G-code toolpath
+                            {uiText("G-code toolpath")}
                           </p>
                         </>
                       ) : (
                         <>
                           <p className="truncate font-mono text-2xs text-on-surface">
-                            Viewing: {meshFile?.original_filename}
+                            {uiText("Viewing: ")}
+                            {meshFile?.original_filename}
                           </p>
                           <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                            Source model
+                            {uiText("Source model")}
                             {recommendedGcode
-                              ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
+                              ? uiText(" · Recommended G-code: Rev {value1}", {
+                                  value1: String(
+                                    recommendedGcode.gcode_revision_number ??
+                                      recommendedGcode.version,
+                                  ),
+                                })
                               : ""}
                           </p>
                         </>
@@ -765,14 +791,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <button
                   onClick={() => viewerControls.current?.zoomIn()}
                   className="flex h-11 w-11 items-center justify-center border-r border-outline-variant text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
-                  title="Zoom in"
+                  title={uiText("Zoom in")}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => viewerControls.current?.zoomOut()}
                   className="flex h-11 w-11 items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
-                  title="Zoom out"
+                  title={uiText("Zoom out")}
                 >
                   <Minus className="h-4 w-4" />
                 </button>
@@ -780,7 +806,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               <button
                 onClick={() => viewerControls.current?.resetView()}
                 className="flex h-11 items-center justify-center rounded border border-outline-variant bg-surface-container-lowest/90 px-3 text-on-surface-variant shadow-sm backdrop-blur transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9"
-                title="Reset view"
+                title={uiText("Reset view")}
               >
                 <RotateCcw className="h-4 w-4" />
               </button>
@@ -792,7 +818,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span className="font-mono text-[13px] text-on-surface">
-                    {meta.bbox_x_mm}×{meta.bbox_y_mm}×{meta.bbox_z_mm} mm
+                    {uiText("{value1}×{value2}×{value3} mm", {
+                      value1: String(meta.bbox_x_mm ?? ""),
+                      value2: String(meta.bbox_y_mm ?? ""),
+                      value3: String(meta.bbox_z_mm ?? ""),
+                    })}
                   </span>
                 </div>
               </div>
@@ -807,13 +837,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           >
             <div
               role="separator"
-              aria-label="Resize details panel"
+              aria-label={uiText("Resize details panel")}
               aria-orientation="vertical"
               aria-valuemin={DETAIL_SIDEBAR_MIN_WIDTH}
               aria-valuemax={DETAIL_SIDEBAR_MAX_WIDTH}
               aria-valuenow={detailSidebarWidth}
               tabIndex={0}
-              title="Drag to resize · Double-click to reset"
+              title={uiText("Drag to resize · Double-click to reset")}
               onPointerDown={startDetailSidebarResize}
               onDoubleClick={() => setDetailSidebarWidth(DETAIL_SIDEBAR_DEFAULT_WIDTH)}
               onKeyDown={(event) => {
@@ -953,12 +983,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                      Sync status
+                      {uiText("Sync status")}
                     </span>
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
                       <Wifi className="h-3 w-3 text-on-surface-variant" />
                       <span className="font-mono text-xs text-on-surface-variant">
-                        No G-code file
+                        {uiText("No G-code file")}
                       </span>
                     </div>
                   </div>
@@ -966,7 +996,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               )}
               <div className="flex items-center justify-between border-t border-surface-container-highest pt-3">
                 <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  Files
+                  {uiText("Files")}
                 </span>
                 <span className="font-mono text-sm text-on-surface font-semibold">
                   {model.files.length}
@@ -974,10 +1004,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  Created
+                  {uiText("Created")}
                 </span>
                 <span className="font-mono text-xs text-on-surface">
-                  {new Date(model.created_at).toLocaleDateString()}
+                  {new Date(model.created_at).toLocaleDateString(currentLocale())}
                 </span>
               </div>
             </div>

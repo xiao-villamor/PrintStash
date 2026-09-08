@@ -1,5 +1,15 @@
 "use client";
 
+import {
+  currentLocale,
+  knownUiText,
+  uiMessage,
+  uiText,
+  type MessageDescriptor,
+} from "@/lib/locale";
+import { formatNumber } from "@/lib/format";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@/lib/link";
 import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
@@ -91,11 +101,11 @@ const SECTION_HEADER_CLASS =
   "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
 
 function checkLabel(name: string): string {
-  return name.replaceAll("_", " ");
+  return knownUiText(name);
 }
 
 function actionLabel(name: string): string {
-  return name.replaceAll("_", " ");
+  return knownUiText(name);
 }
 
 /**
@@ -136,6 +146,7 @@ export function PrinterDetailPage({
   printerId: number;
   initialPrinter?: PrinterRead;
 }) {
+  useUiLocale();
   const auth = useRequireAuth();
   const [printer, setPrinter] = useState<PrinterRead | null>(initialPrinter ?? null);
   const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
@@ -242,7 +253,7 @@ export function PrinterDetailPage({
         }
       };
     } catch (e: any) {
-      setError(`WS error: ${e.message}`);
+      setError(uiText("WS error: {value1}", { value1: String(e.message) }));
     }
   }
 
@@ -281,7 +292,7 @@ export function PrinterDetailPage({
     }
   }
 
-  async function machineAction<T>(key: string, fn: () => Promise<T>, successMsg: string) {
+  async function machineAction<T>(key: string, fn: () => Promise<T>, success: MessageDescriptor) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
@@ -289,7 +300,7 @@ export function PrinterDetailPage({
     setMachineBusy(key);
     try {
       await fn();
-      toast.success(successMsg);
+      toast.success(uiText(success.key, success.values));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -300,13 +311,16 @@ export function PrinterDetailPage({
   function applyTemp(heater: "extruder" | "bed", raw: string, clear: () => void) {
     const t = Number(raw);
     if (!Number.isFinite(t) || t < 0 || t > 500) {
-      toast.error("Enter a temperature between 0 and 500.");
+      toast.error(uiText("Enter a temperature between 0 and 500."));
       return;
     }
     void machineAction(
       `set-${heater}`,
       () => setPrinterTemperature(printerId, heater, t).then(clear),
-      `${heater === "extruder" ? "Hotend" : "Bed"} set to ${t}°C`,
+      uiMessage("{value1} set to {value2}°C", {
+        value1: String(heater === "extruder" ? "Hotend" : "Bed"),
+        value2: String(t),
+      }),
     );
   }
 
@@ -317,7 +331,7 @@ export function PrinterDetailPage({
         await setPrinterTemperature(printerId, "extruder", p.hotend);
         await setPrinterTemperature(printerId, "bed", p.bed);
       },
-      `Preheating for ${p.name}`,
+      uiMessage("Preheating for {value1}", { value1: String(p.name) }),
     );
   }
 
@@ -328,7 +342,7 @@ export function PrinterDetailPage({
         await setPrinterTemperature(printerId, "extruder", 0);
         await setPrinterTemperature(printerId, "bed", 0);
       },
-      "Cooling down",
+      uiMessage("printer.cooldownSuccess"),
     );
   }
 
@@ -341,7 +355,11 @@ export function PrinterDetailPage({
   }
 
   async function confirmEmergencyStopAction() {
-    await machineAction("estop", () => emergencyStopPrinter(printerId), "Emergency stop sent");
+    await machineAction(
+      "estop",
+      () => emergencyStopPrinter(printerId),
+      uiMessage("printer.emergencyStopSuccess"),
+    );
     setConfirmEmergencyStop(false);
   }
 
@@ -355,7 +373,7 @@ export function PrinterDetailPage({
     try {
       setPrinterFiles(await syncPrinterFiles(printerId));
       await loadPrinter();
-      toast.success("Printer files synced");
+      toast.success(uiText("Printer files synced"));
     } catch (e) {
       toast.error(e);
       await loadPrinter();
@@ -377,7 +395,7 @@ export function PrinterDetailPage({
         file_id: file.file_id,
       });
       await loadJobs();
-      toast.success(`Print started (job #${job.id})`);
+      toast.success(uiText("Print started (job #{value1})", { value1: String(job.id) }));
       setActiveTab("status");
     } catch (e) {
       toast.error(e);
@@ -402,7 +420,7 @@ export function PrinterDetailPage({
     try {
       setPrinterFiles(await deletePrinterFile(printerId, file.id));
       await loadPrinter();
-      toast.success("Printer file deleted");
+      toast.success(uiText("Printer file deleted"));
     } catch (e) {
       toast.error(e);
       await loadPrinter();
@@ -440,9 +458,11 @@ export function PrinterDetailPage({
           }}
           onConfirm={confirmEmergencyStopAction}
           busy={machineBusy === "estop"}
-          title="Emergency stop printer?"
-          description="This halts the printer immediately and requires a firmware restart."
-          confirmLabel="Emergency stop"
+          title={uiText("Emergency stop printer?")}
+          description={uiText(
+            "This halts the printer immediately and requires a firmware restart.",
+          )}
+          confirmLabel={uiText("Emergency stop")}
         />
         <ConfirmModal
           open={!!deleteTarget}
@@ -451,11 +471,14 @@ export function PrinterDetailPage({
           }}
           onConfirm={confirmDeleteRemoteFile}
           busy={deletingFileId !== null}
-          title="Delete printer file?"
+          title={uiText("Delete printer file?")}
           description={
             deleteTarget
-              ? `${deleteTarget.remote_filename} will be deleted from ${printer.name}.`
-              : "This file will be deleted from the printer."
+              ? uiText("{value1} will be deleted from {value2}.", {
+                  value1: String(deleteTarget.remote_filename),
+                  value2: String(printer.name),
+                })
+              : uiText("This file will be deleted from the printer.")
           }
         />
         <div className="w-full space-y-6">
@@ -465,21 +488,22 @@ export function PrinterDetailPage({
               href="/printers"
               className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
             >
-              <ArrowLeft className="h-4 w-4" /> Printers
+              <ArrowLeft className="h-4 w-4" />
+              {uiText(" Printers")}
             </Link>
             <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5">
               {wsConnected ? (
                 <>
                   <Wifi className="h-3 w-3 text-emerald-500" />
                   <span className="font-mono text-3xs font-semibold uppercase tracking-wider text-emerald-600">
-                    Live
+                    {uiText("Live")}
                   </span>
                 </>
               ) : (
                 <>
                   <WifiOff className="h-3 w-3 text-amber-500" />
                   <span className="font-mono text-3xs uppercase tracking-wider text-amber-500">
-                    Reconnecting…
+                    {uiText("Reconnecting…")}
                   </span>
                 </>
               )}
@@ -495,7 +519,7 @@ export function PrinterDetailPage({
               </span>
               {printer.capabilities.support_level === "beta" && (
                 <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
-                  Beta
+                  {uiText("Beta")}
                 </span>
               )}
               <span className="flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1">
@@ -503,14 +527,14 @@ export function PrinterDetailPage({
                   className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
                 />
                 <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  {printer.status}
+                  {knownUiText(printer.status)}
                 </span>
               </span>
             </div>
             <p className="font-mono text-xs text-muted-foreground break-all">
               {printer.access.can_admin
                 ? providerAddress(printer)
-                : `${printer.access.role} access`}
+                : uiText("{value1} access", { value1: String(printer.access.role) })}
             </p>
           </div>
 
@@ -528,33 +552,83 @@ export function PrinterDetailPage({
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatusMetric label="Klipper" value={webhook.state || printer.status} />
-            <StatusMetric label="File" value={ps.filename || "Idle"} truncate />
+            <StatusMetric label={uiText("File")} value={ps.filename || "Idle"} truncate />
             <StatusMetric
-              label="Progress"
-              value={progress != null ? `${progress.toFixed(1)}%` : "—"}
+              label={uiText("Progress")}
+              value={
+                progress != null
+                  ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
+                  : "—"
+              }
             />
-            <StatusMetric label="Homed" value={toolhead.homed_axes || "—"} />
+            <StatusMetric label={uiText("Homed")} value={toolhead.homed_axes || "—"} />
           </div>
 
           <div className="border-b border-border">
             <TabBar
               tabs={[
-                { key: "status" as const, label: "Status" },
-                { key: "files" as const, label: "Files" },
-                { key: "jobs" as const, label: "Jobs" },
+                {
+                  key: "status" as const,
+                  get label() {
+                    return uiText("Status");
+                  },
+                },
+                {
+                  key: "files" as const,
+                  get label() {
+                    return uiText("Files");
+                  },
+                },
+                {
+                  key: "jobs" as const,
+                  get label() {
+                    return uiText("Jobs");
+                  },
+                },
                 ...(printer.access.can_print
-                  ? [{ key: "materials" as const, label: "Materials & tools" }]
-                  : []),
-                ...(printer.access.can_admin
-                  ? [{ key: "maintenance" as const, label: "Maintenance" }]
-                  : []),
-                ...(printer.provider === "moonraker" && printer.access.can_admin
-                  ? [{ key: "config" as const, label: "Config" }]
+                  ? [
+                      {
+                        key: "materials" as const,
+                        get label() {
+                          return uiText("Materials & tools");
+                        },
+                      },
+                    ]
                   : []),
                 ...(printer.access.can_admin
                   ? [
-                      { key: "diagnostics" as const, label: "Diagnostics" },
-                      { key: "settings" as const, label: "Settings" },
+                      {
+                        key: "maintenance" as const,
+                        get label() {
+                          return uiText("Maintenance");
+                        },
+                      },
+                    ]
+                  : []),
+                ...(printer.provider === "moonraker" && printer.access.can_admin
+                  ? [
+                      {
+                        key: "config" as const,
+                        get label() {
+                          return uiText("Config");
+                        },
+                      },
+                    ]
+                  : []),
+                ...(printer.access.can_admin
+                  ? [
+                      {
+                        key: "diagnostics" as const,
+                        get label() {
+                          return uiText("Diagnostics");
+                        },
+                      },
+                      {
+                        key: "settings" as const,
+                        get label() {
+                          return uiText("Settings");
+                        },
+                      },
                     ]
                   : []),
               ]}
@@ -575,20 +649,24 @@ export function PrinterDetailPage({
               {/* Current print */}
               <section className={`${SECTION_CLASS} lg:col-span-2`}>
                 <div className={SECTION_HEADER_CLASS}>
-                  <h2 className="text-sm font-semibold text-foreground">Current print</h2>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {uiText("Current print")}
+                  </h2>
                 </div>
                 {hasCurrentPrint ? (
                   <div className="space-y-5 p-6">
-                    <Row label="FILE" value={ps.filename || "—"} truncate />
-                    <Row label="STATE" value={ps.state || "—"} capitalize />
+                    <Row label={uiText("FILE")} value={ps.filename || "—"} truncate />
+                    <Row label={uiText("STATE")} value={ps.state || "—"} capitalize />
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          Progress
+                          {uiText("Progress")}
                         </span>
                         <span className="font-mono text-xs text-foreground font-semibold">
-                          {progress != null ? `${progress.toFixed(1)}%` : "—"}
+                          {progress != null
+                            ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
+                            : "—"}
                         </span>
                       </div>
                       <div className="h-2 w-full overflow-hidden rounded bg-muted">
@@ -600,8 +678,16 @@ export function PrinterDetailPage({
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <Row label="ELAPSED" value={formatDuration(ps.print_duration)} stack />
-                      <Row label="TOTAL" value={formatDuration(ps.total_duration)} stack />
+                      <Row
+                        label={uiText("ELAPSED")}
+                        value={formatDuration(ps.print_duration)}
+                        stack
+                      />
+                      <Row
+                        label={uiText("TOTAL")}
+                        value={formatDuration(ps.total_duration)}
+                        stack
+                      />
                     </div>
 
                     <div className="border-t border-border pt-4 space-y-3">
@@ -616,7 +702,7 @@ export function PrinterDetailPage({
                           }
                           busy={busy === "pause"}
                           icon={Pause}
-                          label={printer.access.can_control ? "Pause" : "No access"}
+                          label={printer.access.can_control ? uiText("Pause") : uiText("No access")}
                         />
                         <ControlButton
                           onClick={() => control("resume", () => resumePrinter(printerId))}
@@ -628,7 +714,9 @@ export function PrinterDetailPage({
                           }
                           busy={busy === "resume"}
                           icon={Play}
-                          label={printer.access.can_control ? "Resume" : "No access"}
+                          label={
+                            printer.access.can_control ? uiText("Resume") : uiText("No access")
+                          }
                         />
                         <ControlButton
                           onClick={() => control("cancel", () => cancelPrinter(printerId))}
@@ -640,14 +728,16 @@ export function PrinterDetailPage({
                           }
                           busy={busy === "cancel"}
                           icon={Square}
-                          label={printer.access.can_control ? "Cancel" : "No access"}
+                          label={
+                            printer.access.can_control ? uiText("Cancel") : uiText("No access")
+                          }
                           destructive
                         />
                       </div>
                       <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                         {printer.access.can_control
-                          ? "Controls permitted by your printer role."
-                          : "Control role required."}
+                          ? uiText("Controls permitted by your printer role.")
+                          : uiText("Control role required.")}
                       </p>
                     </div>
                   </div>
@@ -656,11 +746,17 @@ export function PrinterDetailPage({
                     <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
                       <FileText className="h-5 w-5" />
                     </span>
-                    <h3 className="text-sm font-semibold text-foreground">No active print</h3>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {uiText("No active print")}
+                    </h3>
                     <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
                       {printer.status === "offline"
-                        ? "Printer is offline. Print details will appear after it reconnects."
-                        : "Start a file from the Files tab to see live progress and controls here."}
+                        ? uiText(
+                            "Printer is offline. Print details will appear after it reconnects.",
+                          )
+                        : uiText(
+                            "Start a file from the Files tab to see live progress and controls here.",
+                          )}
                     </p>
                     {printer.status !== "offline" && printer.capabilities.can_list_files && (
                       <button
@@ -669,7 +765,7 @@ export function PrinterDetailPage({
                         className={cn(BTN_SECONDARY, "mt-5")}
                       >
                         <FileText className="h-3.5 w-3.5" />
-                        Browse files
+                        {uiText("Browse files")}
                       </button>
                     )}
                   </div>
@@ -681,20 +777,22 @@ export function PrinterDetailPage({
                 <div className={SECTION_HEADER_CLASS}>
                   <div className="flex items-center gap-2">
                     <Thermometer className="h-4 w-4 text-muted-foreground" />
-                    <h2 className="text-sm font-semibold text-foreground">Temperatures</h2>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      {uiText("Temperatures")}
+                    </h2>
                   </div>
                 </div>
                 <div className="space-y-5 p-5">
                   <div className="grid grid-cols-2 gap-3">
-                    <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
-                    <TempRow label="Bed" cur={bed.temperature} tgt={bed.target} />
+                    <TempRow label={uiText("Hotend")} cur={ext.temperature} tgt={ext.target} />
+                    <TempRow label={uiText("Bed")} cur={bed.temperature} tgt={bed.target} />
                   </div>
 
                   {printer.capabilities.can_send_gcode && (
                     <div className="border-t border-border pt-4 space-y-4">
                       <div className="space-y-2">
                         <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          Preheat
+                          {uiText("Preheat")}
                         </span>
                         <div className="flex flex-wrap gap-2">
                           {PREHEAT_PRESETS.map((p) => (
@@ -702,7 +800,10 @@ export function PrinterDetailPage({
                               key={p.name}
                               onClick={() => preheat(p)}
                               disabled={!printer.access.can_control || machineBusy !== null}
-                              title={`Hotend ${p.hotend}°C · Bed ${p.bed}°C`}
+                              title={uiText("Hotend {value1}°C · Bed {value2}°C", {
+                                value1: String(p.hotend),
+                                value2: String(p.bed),
+                              })}
                               className={BTN_SECONDARY}
                             >
                               {machineBusy === `preheat-${p.name}` && (
@@ -719,13 +820,13 @@ export function PrinterDetailPage({
                             {machineBusy === "cooldown" && (
                               <Loader2 className="h-3 w-3 animate-spin" />
                             )}
-                            Cooldown
+                            {uiText("Cooldown")}
                           </button>
                         </div>
                       </div>
 
                       <SetTempInput
-                        label="Hotend target"
+                        label={uiText("Hotend target")}
                         value={hotendTarget}
                         onChange={setHotendTarget}
                         onApply={() =>
@@ -735,7 +836,7 @@ export function PrinterDetailPage({
                         disabled={!printer.access.can_control || machineBusy !== null}
                       />
                       <SetTempInput
-                        label="Bed target"
+                        label={uiText("Bed target")}
                         value={bedTarget}
                         onChange={setBedTarget}
                         onApply={() => applyTemp("bed", bedTarget, () => setBedTarget(""))}
@@ -749,7 +850,7 @@ export function PrinterDetailPage({
                             void machineAction(
                               "home",
                               () => homePrinter(printerId),
-                              "Homing all axes",
+                              uiMessage("printer.homeSuccess"),
                             )
                           }
                           disabled={!printer.access.can_control || machineBusy !== null}
@@ -760,7 +861,7 @@ export function PrinterDetailPage({
                           ) : (
                             <Home className="h-3.5 w-3.5" />
                           )}
-                          Home all
+                          {uiText("Home all")}
                         </button>
                         <button
                           onClick={emergencyStop}
@@ -772,7 +873,7 @@ export function PrinterDetailPage({
                           ) : (
                             <Power className="h-3.5 w-3.5" />
                           )}
-                          E-stop
+                          {uiText("E-stop")}
                         </button>
                       </div>
                     </div>
@@ -787,7 +888,9 @@ export function PrinterDetailPage({
               <div className={SECTION_HEADER_CLASS}>
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold text-foreground">Printer files</h2>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {uiText("Printer files")}
+                  </h2>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
                     {printerFiles.length}
                   </span>
@@ -799,7 +902,7 @@ export function PrinterDetailPage({
                     !printer.access.can_admin ||
                     !printer.capabilities.can_list_files
                   }
-                  title={auth.blockReason ?? "Sync printer files"}
+                  title={auth.blockReason ?? uiText("Sync printer files")}
                   className={BTN_SECONDARY}
                 >
                   {syncingFiles ? (
@@ -807,7 +910,7 @@ export function PrinterDetailPage({
                   ) : (
                     <RefreshCcw className="h-3.5 w-3.5" />
                   )}
-                  {syncingFiles ? "Syncing" : "Sync"}
+                  {syncingFiles ? uiText("Syncing") : uiText("Sync")}
                 </button>
               </div>
               {printer.last_error && printer.status === "offline" && (
@@ -818,20 +921,20 @@ export function PrinterDetailPage({
               {printerFiles.length === 0 ? (
                 <div className="p-10 text-center font-mono text-xs text-muted-foreground">
                   {printer.capabilities.can_list_files
-                    ? "No printer files synced yet."
-                    : "Printer file inventory is not supported by this provider."}
+                    ? uiText("No printer files synced yet.")
+                    : uiText("Printer file inventory is not supported by this provider.")}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        <th className="py-3 px-4 font-medium">Remote file</th>
-                        <th className="py-3 px-4 font-medium">Vault match</th>
-                        <th className="py-3 px-4 font-medium text-right">Size</th>
-                        <th className="py-3 px-4 font-medium">Status</th>
-                        <th className="py-3 px-4 font-medium">Last seen</th>
-                        <th className="py-3 px-4 font-medium text-right">Action</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Remote file")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Vault match")}</th>
+                        <th className="py-3 px-4 font-medium text-right">{uiText("Size")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Status")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Last seen")}</th>
+                        <th className="py-3 px-4 font-medium text-right">{uiText("Action")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -856,7 +959,7 @@ export function PrinterDetailPage({
                               </Link>
                             ) : (
                               <span className="font-mono text-xs text-muted-foreground">
-                                External
+                                {uiText("External")}
                               </span>
                             )}
                           </td>
@@ -869,7 +972,7 @@ export function PrinterDetailPage({
                             </span>
                           </td>
                           <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(f.last_seen_at).toLocaleString()}
+                            {new Date(f.last_seen_at).toLocaleString(currentLocale())}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex justify-end gap-2">
@@ -881,7 +984,7 @@ export function PrinterDetailPage({
                                   startingFileId !== null ||
                                   deletingFileId !== null
                                 }
-                                title={auth.blockReason ?? "Start this printer file"}
+                                title={auth.blockReason ?? uiText("Start this printer file")}
                                 className={BTN_SECONDARY}
                               >
                                 {startingFileId === f.id ? (
@@ -889,7 +992,7 @@ export function PrinterDetailPage({
                                 ) : (
                                   <Play className="h-3 w-3" />
                                 )}
-                                Start
+                                {uiText("Start")}
                               </button>
                               <button
                                 onClick={() => deleteRemoteFile(f)}
@@ -902,8 +1005,8 @@ export function PrinterDetailPage({
                                 }
                                 title={
                                   ps.filename === f.remote_filename
-                                    ? "Cannot delete active print file"
-                                    : (auth.blockReason ?? "Delete this printer file")
+                                    ? uiText("Cannot delete active print file")
+                                    : (auth.blockReason ?? uiText("Delete this printer file"))
                                 }
                                 className={BTN_DANGER}
                               >
@@ -912,7 +1015,7 @@ export function PrinterDetailPage({
                                 ) : (
                                   <Trash2 className="h-3 w-3" />
                                 )}
-                                Delete
+                                {uiText("Delete")}
                               </button>
                             </div>
                           </td>
@@ -950,28 +1053,28 @@ export function PrinterDetailPage({
           {activeTab === "jobs" && (
             <section className={`${SECTION_CLASS} animate-panel-in`}>
               <div className={SECTION_HEADER_CLASS}>
-                <h2 className="text-sm font-semibold text-foreground">Print history</h2>
+                <h2 className="text-sm font-semibold text-foreground">{uiText("Print history")}</h2>
                 {jobs.length > 0 && (
                   <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs font-semibold text-muted-foreground">
-                    {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
+                    {uiText("counts.jobs", { count: jobs.length })}
                   </span>
                 )}
               </div>
               {jobs.length === 0 ? (
                 <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  No print jobs yet.
+                  {uiText("No print jobs yet.")}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        <th className="py-3 px-4 font-medium">When</th>
-                        <th className="py-3 px-4 font-medium">File</th>
-                        <th className="py-3 px-4 font-medium">State</th>
-                        <th className="py-3 px-4 font-medium text-right">Progress</th>
-                        <th className="py-3 px-4 font-medium">Started</th>
-                        <th className="py-3 px-4 font-medium">Finished</th>
+                        <th className="py-3 px-4 font-medium">{uiText("When")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("File")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("State")}</th>
+                        <th className="py-3 px-4 font-medium text-right">{uiText("Progress")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Started")}</th>
+                        <th className="py-3 px-4 font-medium">{uiText("Finished")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -981,7 +1084,7 @@ export function PrinterDetailPage({
                           className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
                         >
                           <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(j.created_at).toLocaleString()}
+                            {new Date(j.created_at).toLocaleString(currentLocale())}
                           </td>
                           <td className="py-3 px-4 max-w-[260px]">
                             {j.artifact_evidence === "vault" ||
@@ -1003,7 +1106,7 @@ export function PrinterDetailPage({
                             )}
                             {j.source === "external" && (
                               <span className="mt-1 block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                                {j.artifact_evidence.replaceAll("_", " ")}
+                                {knownUiText(j.artifact_evidence)}
                               </span>
                             )}
                             <PrintJobReproducibility
@@ -1018,17 +1121,21 @@ export function PrinterDetailPage({
                           </td>
                           <td className="py-3 px-4">
                             <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">
-                              {j.state}
+                              {knownUiText(j.state)}
                             </span>
                           </td>
                           <td className="py-3 px-4 text-right font-mono text-xs text-foreground">
-                            {(j.progress * 100).toFixed(0)}%
+                            {formatNumber(j.progress * 100, { maximumFractionDigits: 0 })}%
                           </td>
                           <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {j.started_at ? new Date(j.started_at).toLocaleTimeString() : "—"}
+                            {j.started_at
+                              ? new Date(j.started_at).toLocaleTimeString(currentLocale())
+                              : "—"}
                           </td>
                           <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {j.finished_at ? new Date(j.finished_at).toLocaleTimeString() : "—"}
+                            {j.finished_at
+                              ? new Date(j.finished_at).toLocaleTimeString(currentLocale())
+                              : "—"}
                           </td>
                         </tr>
                       ))}
@@ -1045,7 +1152,7 @@ export function PrinterDetailPage({
                 <div className="flex items-center gap-2">
                   <Settings className="h-4 w-4 text-muted-foreground" />
                   <h2 className="text-sm font-semibold text-foreground">
-                    Moonraker and Klipper config
+                    {uiText("Moonraker and Klipper config")}
                   </h2>
                 </div>
                 <button
@@ -1058,12 +1165,12 @@ export function PrinterDetailPage({
                   ) : (
                     <RefreshCcw className="h-3.5 w-3.5" />
                   )}
-                  {loadingConfig ? "Loading" : "Refresh"}
+                  {loadingConfig ? uiText("Loading") : uiText("Refresh")}
                 </button>
               </div>
               {!moonrakerConfig ? (
                 <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  {loadingConfig ? "Loading config…" : "Config not loaded."}
+                  {loadingConfig ? uiText("Loading config…") : uiText("Config not loaded.")}
                 </div>
               ) : (
                 <div className="p-4 sm:p-6 space-y-4">
@@ -1071,8 +1178,14 @@ export function PrinterDetailPage({
                     <ConfigSummary title="Moonraker" data={moonrakerConfig.server_info} />
                     <ConfigSummary title="Klipper" data={moonrakerConfig.printer_info} />
                   </div>
-                  <ConfigBlock title="Moonraker config" data={moonrakerConfig.moonraker_config} />
-                  <ConfigBlock title="Klipper config" data={moonrakerConfig.klipper_config} />
+                  <ConfigBlock
+                    title={uiText("Moonraker config")}
+                    data={moonrakerConfig.moonraker_config}
+                  />
+                  <ConfigBlock
+                    title={uiText("Klipper config")}
+                    data={moonrakerConfig.klipper_config}
+                  />
                 </div>
               )}
             </section>
@@ -1083,7 +1196,9 @@ export function PrinterDetailPage({
               <div className={SECTION_HEADER_CLASS}>
                 <div className="flex items-center gap-2">
                   <Info className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold text-foreground">Provider diagnostics</h2>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {uiText("Provider diagnostics")}
+                  </h2>
                 </div>
                 <button
                   onClick={loadDiagnostics}
@@ -1095,13 +1210,13 @@ export function PrinterDetailPage({
                   ) : (
                     <RefreshCcw className="h-3.5 w-3.5" />
                   )}
-                  {checkingDiagnostics ? "Checking" : "Refresh"}
+                  {checkingDiagnostics ? uiText("Checking") : uiText("Refresh")}
                 </button>
               </div>
 
               {!diagnostics ? (
                 <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  Diagnostics have not loaded yet.
+                  {uiText("Diagnostics have not loaded yet.")}
                 </div>
               ) : (
                 <div className="p-4 sm:p-6 space-y-5">
@@ -1123,20 +1238,25 @@ export function PrinterDetailPage({
                           diagnostics.ok ? "text-emerald-600" : "text-amber-600"
                         }`}
                       >
-                        {diagnostics.ok ? "Provider reachable" : "Needs attention"}
+                        {diagnostics.ok ? uiText("Provider reachable") : uiText("Needs attention")}
                       </span>
                     </div>
                     <p className="mt-2 text-sm text-muted-foreground">
-                      {providerLabel({ provider: diagnostics.provider })} is marked{" "}
-                      {diagnostics.support_level}.
+                      {uiText("{value1} is marked {value2}.", {
+                        value1: String(providerLabel({ provider: diagnostics.provider }) ?? ""),
+                        value2: String(diagnostics.support_level ?? ""),
+                      })}
                     </p>
                   </div>
 
                   {diagnostics.notes.length > 0 && (
                     <div className="rounded border border-border bg-muted/40 p-4 space-y-2">
                       {diagnostics.notes.map((note) => (
-                        <p key={note} className="text-sm text-muted-foreground leading-relaxed">
-                          {note}
+                        <p
+                          key={knownUiText(note)}
+                          className="text-sm text-muted-foreground leading-relaxed"
+                        >
+                          {knownUiText(note)}
                         </p>
                       ))}
                     </div>
@@ -1145,7 +1265,9 @@ export function PrinterDetailPage({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="rounded border border-border overflow-hidden">
                       <div className="border-b border-border px-4 py-3">
-                        <h3 className="text-sm font-semibold text-foreground">Checks</h3>
+                        <h3 className="text-sm font-semibold text-foreground">
+                          {uiText("Checks")}
+                        </h3>
                       </div>
                       <div className="divide-y divide-border">
                         {diagnostics.checks.map((check) => (
@@ -1161,7 +1283,7 @@ export function PrinterDetailPage({
                               </div>
                               {!check.ok && (
                                 <div className="mt-1 font-mono text-2xs text-red-600 break-words">
-                                  {check.code ?? "provider_error"}
+                                  {check.code ?? uiText("provider_error")}
                                   {check.detail ? `: ${check.detail}` : ""}
                                 </div>
                               )}
@@ -1173,7 +1295,9 @@ export function PrinterDetailPage({
 
                     <div className="rounded border border-border overflow-hidden">
                       <div className="border-b border-border px-4 py-3">
-                        <h3 className="text-sm font-semibold text-foreground">Capabilities</h3>
+                        <h3 className="text-sm font-semibold text-foreground">
+                          {uiText("Capabilities")}
+                        </h3>
                       </div>
                       <div className="grid grid-cols-2 gap-px bg-border">
                         {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
@@ -1186,7 +1310,7 @@ export function PrinterDetailPage({
                                 enabled ? "text-emerald-600" : "text-muted-foreground"
                               }`}
                             >
-                              {enabled ? "Supported" : "Unavailable"}
+                              {enabled ? uiText("Supported") : uiText("Unavailable")}
                             </div>
                           </div>
                         ))}
@@ -1197,7 +1321,7 @@ export function PrinterDetailPage({
                   {diagnostics.unsupported_actions.length > 0 && (
                     <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
                       <div className="font-mono text-3xs uppercase tracking-wider text-amber-600 font-semibold">
-                        Unsupported in this provider
+                        {uiText("Unsupported in this provider")}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {diagnostics.unsupported_actions.map((action) => (
@@ -1222,6 +1346,7 @@ export function PrinterDetailPage({
 }
 
 function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObject }) {
+  useUiLocale();
   // Scalars only: nested objects and arrays are unreadable in a two-column summary and
   // are already shown in full by the raw ConfigBlock below. `instanceof Object` is false
   // for every JSON scalar and for null, which is exactly the set worth summarising.
@@ -1263,6 +1388,7 @@ function PrinterSettings({
   canEdit: boolean;
   onSaved: (printer: PrinterRead) => void;
 }) {
+  useUiLocale();
   const [name, setName] = useState(printer.name);
   const [modelName, setModelName] = useState(printer.model_name ?? "");
   const [group, setGroup] = useState(printer.group ?? "");
@@ -1333,7 +1459,7 @@ function PrinterSettings({
       const updated = await updatePrinter(printer.id, payload);
       onSaved(updated);
       setSecret("");
-      toast.success("Printer settings saved");
+      toast.success(uiText("Printer settings saved"));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not save printer settings";
       setError(message);
@@ -1350,17 +1476,21 @@ function PrinterSettings({
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
             <div>
-              <h2 className="text-sm font-semibold text-foreground">Printer settings</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">Connection and display details</p>
+              <h2 className="text-sm font-semibold text-foreground">
+                {uiText("Printer settings")}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {uiText("Connection and display details")}
+              </p>
             </div>
           </div>
           <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
-            Save changes
+            {uiText("Save changes")}
           </Button>
         </div>
         <div className="grid gap-6 p-5 lg:grid-cols-2 lg:p-6">
           <div className="space-y-4">
-            <SettingsField label="Name">
+            <SettingsField label={uiText("Name")}>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -1368,13 +1498,16 @@ function PrinterSettings({
                 disabled={!canEdit}
               />
             </SettingsField>
-            <SettingsField label="Model" hint="Pick a known model or type your own">
+            <SettingsField
+              label={uiText("Model")}
+              hint={uiText("Pick a known model or type your own")}
+            >
               {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
               <Input
                 list="printer-model-options"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                placeholder={printer.detected_model ?? "Auto-detected"}
+                placeholder={printer.detected_model ?? uiText("Auto-detected")}
                 disabled={!canEdit}
               />
               <datalist id="printer-model-options">
@@ -1383,15 +1516,15 @@ function PrinterSettings({
                 ))}
               </datalist>
             </SettingsField>
-            <SettingsField label="Group" hint="Optional farm grouping">
+            <SettingsField label={uiText("Group")} hint={uiText("Optional farm grouping")}>
               <Input
                 value={group}
                 onChange={(e) => setGroup(e.target.value)}
-                placeholder="Workshop"
+                placeholder={uiText("Workshop")}
                 disabled={!canEdit}
               />
             </SettingsField>
-            <SettingsField label="Notes">
+            <SettingsField label={uiText("Notes")}>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -1403,9 +1536,9 @@ function PrinterSettings({
           </div>
           <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
             <div>
-              <p className="text-sm font-semibold text-foreground">Connection</p>
+              <p className="text-sm font-semibold text-foreground">{uiText("Connection")}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {providerLabel(printer)} configuration
+                {uiText("{value1} configuration", { value1: String(providerLabel(printer) ?? "") })}
               </p>
             </div>
             <SettingsField
@@ -1414,7 +1547,7 @@ function PrinterSettings({
                 printer.provider === "prusalink" ||
                 printer.provider === "octoprint"
                   ? "URL"
-                  : "Host or IP"
+                  : uiText("Host or IP")
               }
             >
               <Input
@@ -1425,7 +1558,7 @@ function PrinterSettings({
               />
             </SettingsField>
             {printer.provider === "bambu_lan" && (
-              <SettingsField label="Printer serial">
+              <SettingsField label={uiText("Printer serial")}>
                 <Input
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
@@ -1435,7 +1568,7 @@ function PrinterSettings({
               </SettingsField>
             )}
             {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
-              <SettingsField label="Username">
+              <SettingsField label={uiText("Username")}>
                 <Input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -1447,8 +1580,10 @@ function PrinterSettings({
             {printer.provider === "elegoo_centauri" &&
               printer.provider_variant === "elegoo_centauri_carbon" && (
                 <SettingsField
-                  label="Mainboard ID"
-                  hint="Needed for reliable printer commands while idle, paused, or errored."
+                  label={uiText("Mainboard ID")}
+                  hint={uiText(
+                    "Needed for reliable printer commands while idle, paused, or errored.",
+                  )}
                 >
                   <Input
                     value={mainboardId}
@@ -1457,12 +1592,12 @@ function PrinterSettings({
                   />
                 </SettingsField>
               )}
-            <SettingsField label={secretLabel} hint="Leave blank to keep current value">
+            <SettingsField label={secretLabel} hint={uiText("Leave blank to keep current value")}>
               <Input
                 type="password"
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
-                placeholder="Unchanged"
+                placeholder={uiText("Unchanged")}
                 disabled={!canEdit}
               />
             </SettingsField>
@@ -1476,11 +1611,12 @@ function PrinterSettings({
               />
               <span>
                 <span className="block text-sm font-medium text-foreground">
-                  Provider material sync
+                  {uiText("Provider material sync")}
                 </span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Import supported AMS or active-Spoolman state. Turn off to use manual state
-                  exclusively.
+                  {uiText(
+                    "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
+                  )}
                 </span>
               </span>
             </label>
@@ -1494,15 +1630,18 @@ function PrinterSettings({
               />
               <span>
                 <span className="block text-sm font-medium text-foreground">
-                  Require operator release
+                  {uiText("Require operator release")}
                 </span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">
-                  After a managed print completes, block scheduling until an operator releases or
-                  holds the printer.
+                  {uiText(
+                    "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                  )}
                 </span>
               </span>
             </label>
-            {!canEdit && <p className="text-xs text-warning">Sign in to edit printer settings.</p>}
+            {!canEdit && (
+              <p className="text-xs text-warning">{uiText("Sign in to edit printer settings.")}</p>
+            )}
             {error && (
               <p role="alert" className="text-xs text-destructive">
                 {error}
@@ -1524,6 +1663,7 @@ function SettingsField({
   hint?: string;
   children: React.ReactNode;
 }) {
+  useUiLocale();
   return (
     <label className="block space-y-1.5">
       <span className="flex items-center justify-between gap-3 text-xs font-medium text-foreground">
@@ -1536,6 +1676,7 @@ function SettingsField({
 }
 
 function ConfigBlock({ title, data }: { title: string; data: ProviderJsonObject }) {
+  useUiLocale();
   return (
     <div className="rounded border border-border overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -1557,6 +1698,7 @@ function StatusMetric({
   value: string;
   truncate?: boolean;
 }) {
+  useUiLocale();
   return (
     <div className="rounded border border-border bg-background p-3">
       <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
@@ -1585,6 +1727,7 @@ function Row({
   capitalize?: boolean;
   stack?: boolean;
 }) {
+  useUiLocale();
   if (stack) {
     return (
       <div className="space-y-1">
@@ -1624,6 +1767,7 @@ function ControlButton({
   label: string;
   destructive?: boolean;
 }) {
+  useUiLocale();
   return (
     <button
       onClick={onClick}
@@ -1655,6 +1799,7 @@ function SetTempInput({
   busy?: boolean;
   disabled?: boolean;
 }) {
+  useUiLocale();
   return (
     <div className="flex items-end gap-2">
       <label className="flex-1 space-y-1">
@@ -1676,13 +1821,14 @@ function SetTempInput({
       </label>
       <button onClick={onApply} disabled={disabled || value === ""} className={BTN_SECONDARY}>
         {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-        Set
+        {uiText("Set")}
       </button>
     </div>
   );
 }
 
 function TempRow({ label, cur, tgt }: { label: string; cur?: number; tgt?: number }) {
+  useUiLocale();
   const pct =
     tgt != null && tgt > 0 && cur != null ? Math.min(100, Math.max(0, (cur / tgt) * 100)) : null;
   return (
@@ -1694,11 +1840,17 @@ function TempRow({ label, cur, tgt }: { label: string; cur?: number; tgt?: numbe
         </span>
       </div>
       <div className="mt-2 font-mono text-xl font-semibold leading-none text-foreground">
-        {cur != null ? cur.toFixed(1) : "—"}
+        {cur != null
+          ? formatNumber(cur, { maximumFractionDigits: 1, minimumFractionDigits: 1 })
+          : "—"}
         <span className="ml-0.5 text-xs font-normal text-muted-foreground">°C</span>
       </div>
       <div className="mt-1 min-h-4 font-mono text-3xs text-muted-foreground">
-        {tgt != null && tgt > 0 ? `Target ${tgt.toFixed(0)}°C` : "No target"}
+        {tgt != null && tgt > 0
+          ? uiText("Target {value1}°C", {
+              value1: String(formatNumber(tgt, { maximumFractionDigits: 0 })),
+            })
+          : uiText("No target")}
       </div>
       {pct != null && (
         <div className="mt-2 h-1 w-full overflow-hidden rounded bg-muted">

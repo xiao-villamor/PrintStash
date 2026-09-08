@@ -1,5 +1,9 @@
 "use client";
 
+import { userMessage } from "@/lib/errors";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useRouter } from "@/lib/navigation";
@@ -28,6 +32,7 @@ function readOidcCallback(): OidcCallback {
 }
 
 export default function LoginPage() {
+  useUiLocale();
   const { login, refresh, user } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
@@ -84,7 +89,7 @@ export default function LoginPage() {
       if (err.message?.includes("401")) {
         setFormError(t("auth.invalid"));
       } else {
-        setFormError(err.message || t("auth.failed"));
+        setFormError(userMessage(err));
       }
     } finally {
       setBusy(false);
@@ -171,7 +176,11 @@ export default function LoginPage() {
               </div>
 
               <div className="flex items-center gap-2.5">
-                <Checkbox checked={remember_me} onChange={setremember_me} ariaLabel="Remember me" />
+                <Checkbox
+                  checked={remember_me}
+                  onChange={setremember_me}
+                  ariaLabel={uiText("Remember me")}
+                />
                 <span className="text-sm text-on-surface-variant">{t("auth.remember")}</span>
               </div>
 

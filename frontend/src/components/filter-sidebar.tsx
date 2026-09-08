@@ -1,5 +1,9 @@
 "use client";
 
+import { knownUiText } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -153,6 +157,7 @@ function DraggableModelLeaf({
   model: OutlinerModelRead;
   isDraggingThisModel: boolean;
 }) {
+  useUiLocale();
   const router = useRouter();
   const { attributes, listeners, setNodeRef } = useDraggable({
     id: `model-${model.id}`,
@@ -180,6 +185,7 @@ function DraggableModelLeaf({
 }
 
 function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
+  useUiLocale();
   const router = useRouter();
 
   return (
@@ -187,7 +193,7 @@ function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
       <div
         onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
         className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
-        title={`${multipart.name} · Multipart set`}
+        title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
       >
         <Boxes className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
         <span className="truncate">{multipart.name}</span>
@@ -221,6 +227,7 @@ function OutlinerLeaves({
   leaves: OutlinerLeaf[];
   dragging: DragPayload | null;
 }) {
+  useUiLocale();
   return leaves.map((leaf) =>
     leaf.kind === "model" ? (
       <DraggableModelLeaf
@@ -265,6 +272,7 @@ function CollectionTreeRow({
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
 }) {
+  useUiLocale();
   const [confirming, setConfirming] = useState(false);
 
   const {
@@ -343,20 +351,18 @@ function CollectionTreeRow({
         {confirming ? (
           <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
             <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
-              Delete &ldquo;{node.cat.name}&rdquo;?
+              {uiText("Delete “{value1}”?", { value1: String(node.cat.name ?? "") })}
             </p>
             {hasContent && (
               <p className="text-3xs text-muted-foreground mb-1.5 leading-snug">
                 {descCount > 0 && (
-                  <span>
-                    {descCount} subcollection{descCount !== 1 ? "s" : ""}
-                  </span>
+                  <span>{uiText("counts.subcollections", { count: descCount })}</span>
                 )}
                 {descCount > 0 && node.cat.model_count > 0 && " · "}
                 {node.cat.model_count > 0 && (
                   <span>
-                    {node.cat.model_count} model{node.cat.model_count !== 1 ? "s" : ""} → recycle
-                    bin
+                    {uiText("counts.models", { count: node.cat.model_count })}
+                    {uiText(" → recycle bin")}
                   </span>
                 )}
               </p>
@@ -367,7 +373,7 @@ function CollectionTreeRow({
                 onClick={() => setConfirming(false)}
                 className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-muted hover:bg-muted/70 text-muted-foreground transition-colors"
               >
-                Cancel
+                {uiText("Cancel")}
               </button>
               <button
                 type="button"
@@ -377,7 +383,7 @@ function CollectionTreeRow({
                 }}
                 className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
               >
-                Delete
+                {uiText("Delete")}
               </button>
             </div>
           </div>
@@ -401,7 +407,7 @@ function CollectionTreeRow({
                   toggle(node.cat.path);
                 }}
                 className="rounded p-0.5 hover:bg-muted/80 flex-shrink-0"
-                aria-label={isOpen ? "Collapse" : "Expand"}
+                aria-label={isOpen ? uiText("Collapse") : uiText("Expand")}
               >
                 <ChevronRight
                   className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -429,7 +435,7 @@ function CollectionTreeRow({
               {...listeners}
               onPointerDown={(e) => e.stopPropagation()}
               className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover/row:opacity-100 flex-shrink-0"
-              title="Drag to reorder"
+              title={uiText("Drag to reorder")}
             >
               <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
                 <circle cx="5" cy="4" r="1.2" />
@@ -449,7 +455,7 @@ function CollectionTreeRow({
                   setConfirming(true);
                 }}
                 className="p-0.5 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover/row:opacity-100 flex-shrink-0 rounded transition-colors"
-                title="Delete collection"
+                title={uiText("Delete collection")}
               >
                 <Trash2 className="h-2.5 w-2.5" />
               </button>
@@ -507,6 +513,7 @@ function DroppableAllModels({
   visibleModelIds: Set<number> | null;
   visibleMultipartIds: Set<number> | null;
 }) {
+  useUiLocale();
   const { setNodeRef, isOver } = useDroppable({
     id: "collection-root",
     data: { collectionPath: null, collectionId: null } satisfies CollectionDropData,
@@ -527,7 +534,7 @@ function DroppableAllModels({
           ref={setNodeRef}
           role="button"
           tabIndex={0}
-          aria-label="All Models"
+          aria-label={uiText("All Models")}
           onClick={onClick}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
@@ -551,7 +558,7 @@ function DroppableAllModels({
                 onToggleExpand();
               }}
               className="rounded p-0.5 hover:bg-muted flex-shrink-0 mr-1"
-              aria-label={isExpanded ? "Collapse" : "Expand"}
+              aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
             >
               <ChevronRight
                 className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
@@ -563,14 +570,15 @@ function DroppableAllModels({
             />
           )}
           <FolderOpen className="h-4 w-4 mr-2 text-primary" />
-          All Models
+          {uiText("All Models")}
         </div>
         {isExpanded && leaves.length > 0 && (
           <div className="ml-5 border-l border-border pl-4 min-w-0">
             <OutlinerLeaves leaves={leaves} dragging={dragging} />
             {leaves.length > 8 && (
               <div className="px-2 py-1 text-3xs text-muted-foreground">
-                +{leaves.length - 8} more
+                +{leaves.length - 8}
+                {uiText(" more")}
               </div>
             )}
           </div>
@@ -605,6 +613,7 @@ export function FilterSidebarContent({
   libraryView,
   onLibraryViewChange,
 }: FilterSidebarProps) {
+  useUiLocale();
   const { t } = useI18n();
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
@@ -860,18 +869,8 @@ export function FilterSidebarContent({
             ? "bg-red-500"
             : "bg-slate-400";
 
-  const statusLabel = (s: string) =>
-    s === "printing"
-      ? "Printing"
-      : s === "ready"
-        ? "Ready"
-        : s === "paused"
-          ? "Paused"
-          : s === "error"
-            ? "Error"
-            : s === "offline"
-              ? "Offline"
-              : "Unknown";
+  const statusLabel = (status: string) =>
+    knownUiText(status.charAt(0).toUpperCase() + status.slice(1));
 
   const statusTextColor = (s: string) =>
     s === "printing"
@@ -927,12 +926,12 @@ export function FilterSidebarContent({
           <section>
             <div className="flex items-center justify-between mb-2 pl-2 pr-1">
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                Collections
+                {uiText("Collections")}
               </h3>
               <button
                 onClick={onCreateCollection}
                 className="p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-                title="Create Collection"
+                title={uiText("Create Collection")}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -962,7 +961,9 @@ export function FilterSidebarContent({
                   treeFiltered &&
                   (visibleModelIds?.size ?? 0) === 0 &&
                   (visibleMultipartIds?.size ?? 0) === 0 ? (
-                    <p className="py-2 text-3xs text-muted-foreground font-mono">No results.</p>
+                    <p className="py-2 text-3xs text-muted-foreground font-mono">
+                      {uiText("No results.")}
+                    </p>
                   ) : (
                     visibleRoots.map((node) => (
                       <CollectionTreeRow
@@ -991,7 +992,7 @@ export function FilterSidebarContent({
           {canViewPrinters && (
             <section>
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                Printer
+                {uiText("Printer")}
               </h3>
               <div className="space-y-0.5">
                 <button
@@ -1019,7 +1020,7 @@ export function FilterSidebarContent({
                       strokeWidth="2"
                     />
                   </svg>
-                  Any location
+                  {uiText("Any location")}
                 </button>
                 <div className="space-y-0.5">
                   <button
@@ -1051,13 +1052,13 @@ export function FilterSidebarContent({
                         strokeWidth="2"
                       />
                     </svg>
-                    <span className="font-medium">On a printer</span>
+                    <span className="font-medium">{uiText("On a printer")}</span>
                   </button>
                   {printerExpanded && (
                     <div className="ml-4 border-l border-border">
                       {printers.length === 0 ? (
                         <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
-                          No printers configured
+                          {uiText("No printers configured")}
                         </p>
                       ) : (
                         printers.map((printer) => (
@@ -1104,7 +1105,7 @@ export function FilterSidebarContent({
                   }`}
                 >
                   <Folder className="h-4 w-4 mr-2 text-primary" />
-                  Vault only
+                  {uiText("Vault only")}
                 </button>
               </div>
             </section>
@@ -1117,13 +1118,13 @@ export function FilterSidebarContent({
           {tags.length > 0 && (
             <section>
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                Tags
+                {uiText("Tags")}
               </h3>
               <div className="relative mb-2">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Filter tags..."
+                  placeholder={uiText("Filter tags...")}
                   value={tagFilter}
                   onChange={(e) => {
                     setTagFilter(e.target.value);
@@ -1143,7 +1144,7 @@ export function FilterSidebarContent({
               </div>
               {filteredTags.length === 0 ? (
                 <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
-                  No matching tags.
+                  {uiText("No matching tags.")}
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
@@ -1176,7 +1177,9 @@ export function FilterSidebarContent({
                   onClick={() => setShowAllTags(!showAllTags)}
                   className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
                 >
-                  {showAllTags ? "Show fewer" : `Show all ${filteredTags.length} tags`}
+                  {showAllTags
+                    ? uiText("Show fewer")
+                    : uiText("Show all {value1} tags", { value1: String(filteredTags.length) })}
                 </button>
               )}
             </section>
@@ -1214,6 +1217,7 @@ export interface FilterSidebarProps {
 }
 
 export function FilterSidebar(props: FilterSidebarProps) {
+  useUiLocale();
   const [outlinerFilter, setOutlinerFilter] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
@@ -1261,7 +1265,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
             </span>
             <input
               className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              placeholder="Filter outliner..."
+              placeholder={uiText("Filter outliner...")}
               type="text"
               value={outlinerFilter}
               onChange={(e) => setOutlinerFilter(e.target.value)}

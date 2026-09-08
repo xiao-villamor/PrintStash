@@ -1,5 +1,10 @@
 "use client";
 
+import { translate } from "@/lib/locale";
+
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { type ComponentType, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
@@ -24,8 +29,6 @@ const DefaultPdfViewer = lazy(() =>
   import("@/components/pdf-viewer").then((m) => ({ default: m.PdfViewer })),
 );
 
-const NEW_DOCUMENT_NAME = "Untitled document";
-
 type ViewMode = "preview" | "edit";
 
 /** The name and body the editor is holding, tagged with the document it belongs to. */
@@ -47,6 +50,7 @@ export default function DocumentDetailPage({
 }: {
   pdfViewer?: ComponentType<{ file: Blob }>;
 } = {}) {
+  const locale = useUiLocale();
   const { id } = useParams();
   const isNew = id === "new";
   const docId = Number(id);
@@ -63,7 +67,7 @@ export default function DocumentDetailPage({
   const newDocument = useMemo<DocumentRead>(
     () => ({
       id: 0,
-      name: NEW_DOCUMENT_NAME,
+      name: translate(locale, "Untitled document"),
       kind: "markdown",
       collection: collectionParam,
       collection_id: collectionId,
@@ -73,7 +77,7 @@ export default function DocumentDetailPage({
       updated_at: "",
       body: "",
     }),
-    [collectionParam, collectionId],
+    [collectionParam, collectionId, locale],
   );
 
   const [loadedDoc, setLoadedDoc] = useState<DocumentRead | null>(null);
@@ -152,7 +156,7 @@ export default function DocumentDetailPage({
         if (isImage) url = URL.createObjectURL(blob);
         setBinaryPreview({ documentId: doc.id, kind: doc.kind, blob, imageUrl: url });
       })
-      .catch(() => alive && toast.error("Could not load PDF"));
+      .catch(() => alive && toast.error(uiText("Could not load PDF")));
     return () => {
       alive = false;
       if (url) URL.revokeObjectURL(url);
@@ -173,7 +177,7 @@ export default function DocumentDetailPage({
     const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (!images.length || !doc) return;
     if (isNew) {
-      toast.error("Save the document before adding images.");
+      toast.error(uiText("Save the document before adding images."));
       return;
     }
     setUploading(true);
@@ -195,7 +199,7 @@ export default function DocumentDetailPage({
     try {
       if (isNew) {
         const created = await createDocument({
-          name: draftName.trim() || NEW_DOCUMENT_NAME,
+          name: draftName.trim() || uiText("Untitled document"),
           collection_id: collectionId,
           body: draftBody,
         });
@@ -248,7 +252,8 @@ export default function DocumentDetailPage({
             href={backHref}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="w-4 h-4" /> Back
+            <ArrowLeft className="w-4 h-4" />
+            {uiText(" Back")}
           </Link>
           {mode === "edit" ? (
             <input
@@ -265,7 +270,8 @@ export default function DocumentDetailPage({
               onClick={() => setModeChoice("edit")}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
             >
-              <Pencil className="w-3.5 h-3.5" /> Edit
+              <Pencil className="w-3.5 h-3.5" />
+              {uiText(" Edit")}
             </button>
           )}
           {isMarkdown && mode === "edit" && (
@@ -274,7 +280,8 @@ export default function DocumentDetailPage({
                 onClick={() => setModeChoice("preview")}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
               >
-                <Eye className="w-3.5 h-3.5" /> Preview
+                <Eye className="w-3.5 h-3.5" />
+                {uiText(" Preview")}
               </button>
               <button
                 onClick={save}
@@ -286,7 +293,7 @@ export default function DocumentDetailPage({
                 ) : (
                   <Save className="w-3.5 h-3.5" />
                 )}
-                Save
+                {uiText("Save")}
               </button>
             </>
           )}
@@ -295,7 +302,8 @@ export default function DocumentDetailPage({
               onClick={downloadFile}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
             >
-              <Download className="w-3.5 h-3.5" /> Download
+              <Download className="w-3.5 h-3.5" />
+              {uiText(" Download")}
             </button>
           )}
         </div>
@@ -321,23 +329,26 @@ export default function DocumentDetailPage({
                       handleImages(e.dataTransfer.files);
                     }
                   }}
-                  placeholder="# Document&#10;&#10;Write markdown. Paste or drop images to embed them."
+                  placeholder={uiText(
+                    "# Document\n\nWrite markdown. Paste or drop images to embed them.",
+                  )}
                   className="w-full flex-1 min-h-0 resize-none bg-surface text-foreground font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <div className="mt-1 text-xs text-muted-foreground">
                   {uploading ? (
                     <span className="flex items-center gap-1.5">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading image…
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      {uiText(" Uploading image…")}
                     </span>
                   ) : (
-                    "Markdown · paste or drop images to embed"
+                    uiText("Markdown · paste or drop images to embed")
                   )}
                 </div>
               </div>
             ) : draftBody ? (
               <MarkdownView source={draftBody} />
             ) : (
-              <p className="text-sm text-muted-foreground">This document is empty.</p>
+              <p className="text-sm text-muted-foreground">{uiText("This document is empty.")}</p>
             ))}
 
           {/* PDF: themed inline viewer (pdf.js) */}
@@ -369,7 +380,8 @@ export default function DocumentDetailPage({
           {/* Other binary: download only */}
           {doc.kind === "other" && !isImage && (
             <p className="text-sm text-muted-foreground">
-              {doc.filename ?? "File"} — use Download to open it.
+              {doc.filename ?? uiText("File")}
+              {uiText(" — use Download to open it.")}
             </p>
           )}
         </div>

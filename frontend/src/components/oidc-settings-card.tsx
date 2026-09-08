@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { useEffect, useState } from "react";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 
@@ -50,6 +53,7 @@ function Field({
   hint,
   ...props
 }: React.ComponentProps<typeof Input> & { label: string; hint?: string }) {
+  useUiLocale();
   return (
     <label className="space-y-1.5">
       <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
@@ -73,6 +77,7 @@ export function OidcSettingsCard({
   loadConfig?: () => Promise<OidcConfig>;
   saveConfig?: (payload: OidcConfigUpdate) => Promise<OidcConfig>;
 } = {}) {
+  useUiLocale();
   const [draft, setDraft] = useState<OidcDraft>(EMPTY);
   const [clientSecret, setClientSecret] = useState("");
   const [hasClientSecret, setHasClientSecret] = useState(false);
@@ -114,7 +119,7 @@ export function OidcSettingsCard({
 
   async function save() {
     if (draft.oidc_enabled && (!draft.oidc_issuer_url.trim() || !draft.oidc_client_id.trim())) {
-      toast.error("Issuer URL and client ID are required before enabling SSO.");
+      toast.error(uiText("Issuer URL and client ID are required before enabling SSO."));
       return;
     }
     setSaving(true);
@@ -126,7 +131,7 @@ export function OidcSettingsCard({
       setHasClientSecret(config.has_oidc_client_secret);
       setClientSecret("");
       setClearClientSecret(false);
-      toast.success("Single sign-on settings saved.");
+      toast.success(uiText("Single sign-on settings saved."));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -144,10 +149,11 @@ export function OidcSettingsCard({
                 <ShieldCheck className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-sm">OpenID Connect</CardTitle>
+                <CardTitle className="text-sm">{uiText("OpenID Connect")}</CardTitle>
                 <CardDescription className="mt-1 text-xs">
-                  Connect Authentik, Authelia, Keycloak, or another standards-compatible identity
-                  provider. Local login stays available.
+                  {uiText(
+                    "Connect Authentik, Authelia, Keycloak, or another standards-compatible identity provider. Local login stays available.",
+                  )}
                 </CardDescription>
               </div>
             </div>
@@ -157,36 +163,38 @@ export function OidcSettingsCard({
         <CardContent className="space-y-5 p-4 sm:p-5">
           <label className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
             <span>
-              <span className="block text-sm font-medium text-foreground">Enable SSO login</span>
+              <span className="block text-sm font-medium text-foreground">
+                {uiText("Enable SSO login")}
+              </span>
               <span className="block text-xs text-muted-foreground">
-                Shows provider button on login page.
+                {uiText("Shows provider button on login page.")}
               </span>
             </span>
             <Checkbox
               checked={draft.oidc_enabled}
               onChange={(value) => set("oidc_enabled", value)}
-              ariaLabel="Enable SSO login"
+              ariaLabel={uiText("Enable SSO login")}
               disabled={loading || saving}
             />
           </label>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Field
-              label="Issuer URL"
+              label={uiText("Issuer URL")}
               value={draft.oidc_issuer_url}
               onChange={(event) => set("oidc_issuer_url", event.target.value)}
               placeholder="https://auth.example.com/application/o/printstash"
               disabled={loading || saving}
             />
             <Field
-              label="Client ID"
+              label={uiText("Client ID")}
               value={draft.oidc_client_id}
               onChange={(event) => set("oidc_client_id", event.target.value)}
-              placeholder="printstash"
+              placeholder={uiText("printstash")}
               disabled={loading || saving}
             />
             <Field
-              label="Client secret"
+              label={uiText("Client secret")}
               type="password"
               value={clientSecret}
               onChange={(event) => {
@@ -194,12 +202,14 @@ export function OidcSettingsCard({
                 setClearClientSecret(false);
               }}
               placeholder={
-                hasClientSecret ? "Configured — enter to replace" : "Optional for public clients"
+                hasClientSecret
+                  ? uiText("Configured — enter to replace")
+                  : uiText("Optional for public clients")
               }
               disabled={loading || saving}
             />
             <Field
-              label="Login button label"
+              label={uiText("Login button label")}
               value={draft.oidc_display_name}
               onChange={(event) => set("oidc_display_name", event.target.value)}
               placeholder="Authentik"
@@ -212,58 +222,58 @@ export function OidcSettingsCard({
               <Checkbox
                 checked={clearClientSecret}
                 onChange={setClearClientSecret}
-                ariaLabel="Clear stored client secret"
+                ariaLabel={uiText("Clear stored client secret")}
                 disabled={saving}
               />
-              Clear stored client secret when saving
+              {uiText("Clear stored client secret when saving")}
             </label>
           )}
 
           <details className="rounded-md border border-border bg-background">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              Advanced mapping
+              {uiText("Advanced mapping")}
             </summary>
             <div className="grid gap-4 border-t border-border p-3 lg:grid-cols-2">
               <Field
-                label="Scopes"
+                label={uiText("Scopes")}
                 value={draft.oidc_scopes}
                 onChange={(event) => set("oidc_scopes", event.target.value)}
                 disabled={saving}
               />
               <Field
-                label="Admin groups"
+                label={uiText("Admin groups")}
                 value={draft.oidc_admin_groups}
                 onChange={(event) => set("oidc_admin_groups", event.target.value)}
-                hint="Comma-separated group names granted superuser access."
+                hint={uiText("Comma-separated group names granted superuser access.")}
                 disabled={saving}
               />
               <Field
-                label="Username claim"
+                label={uiText("Username claim")}
                 value={draft.oidc_username_claim}
                 onChange={(event) => set("oidc_username_claim", event.target.value)}
                 disabled={saving}
               />
               <Field
-                label="Groups claim"
+                label={uiText("Groups claim")}
                 value={draft.oidc_groups_claim}
                 onChange={(event) => set("oidc_groups_claim", event.target.value)}
                 disabled={saving}
               />
               <Field
-                label="Public callback URL override"
+                label={uiText("Public callback URL override")}
                 value={draft.oidc_redirect_uri}
                 onChange={(event) => set("oidc_redirect_uri", event.target.value)}
-                hint="Leave blank unless reverse-proxy URL detection is incorrect."
+                hint={uiText("Leave blank unless reverse-proxy URL detection is incorrect.")}
                 disabled={saving}
               />
               <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
                 <Checkbox
                   checked={draft.oidc_allow_insecure_http}
                   onChange={(value) => set("oidc_allow_insecure_http", value)}
-                  ariaLabel="Allow insecure HTTP issuer"
+                  ariaLabel={uiText("Allow insecure HTTP issuer")}
                   disabled={saving}
                 />
-                Allow HTTP issuer on trusted LAN
+                {uiText("Allow HTTP issuer on trusted LAN")}
               </label>
             </div>
           </details>
@@ -271,7 +281,7 @@ export function OidcSettingsCard({
           <div className="flex justify-end border-t border-border pt-4">
             <Button type="button" onClick={save} loading={saving} disabled={loading}>
               <KeyRound className="h-4 w-4" />
-              Save SSO settings
+              {uiText("Save SSO settings")}
             </Button>
           </div>
         </CardContent>

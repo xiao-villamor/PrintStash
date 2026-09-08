@@ -1,4 +1,4 @@
-import { messageCatalogs, type MessageKey } from "@/lib/i18n";
+import { uiText, type MessageKey } from "@/lib/locale";
 
 const REASONS = {
   storage_dependency_missing: "storage.fullImageRequired",
@@ -19,7 +19,7 @@ const REASONS = {
 
 export function storageOperationMessage(
   reason: string,
-  translate: (key: MessageKey) => string = (key) => messageCatalogs.en[key],
+  translate: (key: MessageKey) => string = uiText,
 ): string {
   return translate(
     Object.entries(REASONS).find(([code]) => code === reason)?.[1] ??

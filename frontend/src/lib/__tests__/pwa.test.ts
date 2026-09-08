@@ -81,7 +81,7 @@ describe("registerServiceWorker", () => {
   it("uses versioned caches, offline navigation fallback, and revalidation", () => {
     const source = readFileSync(`${process.cwd()}/public/sw.js`, "utf8");
 
-    expect(source).toContain('const CACHE = "printstash-shell-v3"');
+    expect(source).toContain('const CACHE = "printstash-shell-v4"');
     expect(source).toContain('caches.match("/offline.html")');
     expect(source).toContain("event.waitUntil(network.catch");
     expect(source).toContain('event.data?.type === "SKIP_WAITING"');

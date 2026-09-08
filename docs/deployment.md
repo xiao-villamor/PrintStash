@@ -24,6 +24,106 @@ All commands below assume you saved the simple file as `docker-compose.yml`.
 From a repository checkout, keep its original name and use
 `docker compose -f docker-compose.simple.yml` instead of `docker compose`.
 
+## One-container image
+
+The optional [unified Compose file](../docker-compose.unified.yml) runs the full
+API and nginx web UI in one container, with SQLite and local storage:
+
+```bash
+docker compose -f docker-compose.unified.yml up -d
+```
+
+Open `http://localhost:3000`. It uses
+`ghcr.io/xiao-villamor/printstash:latest`, once published, and retains the same
+five volume names as the other local Compose files. To switch an existing local
+installation, back up first, stop the old stack without removing its volumes,
+keep the same Compose project name, and carry over custom settings and mounts.
+Do not run both stacks against the same data.
+
+Put both API settings and `NGINX_CLIENT_MAX_BODY_SIZE` under
+`services.printstash.environment`. `PUID`/`PGID`, automatic migrations and the
+Settings restart button work through the existing API entrypoint. If either
+service exits, the container exits and Compose restarts the application.
+
+To use an image published from your fork, set these optional values in `.env`:
+
+```dotenv
+PRINTSTASH_IMAGE=ghcr.io/your-github-account/printstash
+PRINTSTASH_VERSION=latest
+PRINTSTASH_HTTP_PORT=3000
+```
+
+Build from a checkout with Docker Buildx (the API and frontend both come from
+that checkout; no published PrintStash base image is required):
+
+```bash
+docker buildx bake -f docker-bake.hcl unified --load
+PRINTSTASH_IMAGE=printstash PRINTSTASH_VERSION=local docker compose -f docker-compose.unified.yml up -d
+```
+
+The existing **GHCR Release Images** workflow publishes native AMD64 and ARM64
+images on release tags after CI passes. Run **Manual Docker Images** on the
+default branch to publish `latest`. Both use the repository owner's GHCR namespace
+and the built-in `GITHUB_TOKEN`; a separate registry password is unnecessary. Each architecture
+runs the container tests before its digest is promoted to shared release tags.
+Pull-request CI builds and tests without publishing.
+
+### Container vulnerability reports
+
+Grype scans every AMD64 and ARM64 image during pull-request and main-branch CI.
+Publishing scans the immutable per-architecture digest before that digest can be
+promoted into a multi-platform tag. A scanner, registry or vulnerability-database
+failure stops the job; vulnerability matches remain report-only so an unfixed
+upstream package does not silently make releases impossible.
+
+Open the workflow run's **Artifacts** section and download the artifact named
+`grype-ci-<image>-<architecture>` or
+`grype-publish-<image>-<architecture>`. Each bundle is retained for 90 days and
+contains:
+
+- `summary.md` — severity totals and the number of matches with a known fix;
+- `report.txt` — the complete human-readable Grype table;
+- `report.json` — structured findings for automation and deeper triage;
+- `report.sarif` — the report submitted to **Security → Code scanning** on
+  trusted runs when code scanning is enabled for the repository. An unavailable
+  Security-tab integration does not discard or block the downloadable reports.
+
+Reports are snapshots against the vulnerability database available when the
+workflow ran. Re-run CI when you need a current assessment of an unchanged
+image.
+
+On a fork, enable Actions before running the manual workflow. After the first
+publish, open the `printstash` package's settings and change visibility to
+**Public** if anonymous downloads are wanted. GHCR initially creates packages
+as private even for public repositories; see
+[GitHub's container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+### Unraid, CasaOS and other container dashboards
+
+Add the published image as a custom container with these settings:
+
+| Setting | Value |
+| --- | --- |
+| Image | `ghcr.io/xiao-villamor/printstash:latest` (or your fork's namespace) |
+| Network | Bridge |
+| Web port | Host port of your choice → container TCP port `3000` |
+| Persistent folder | A dedicated host folder → `/data` (read/write) |
+| Environment | `VAULT_SETUP_MODE=trusted_network`, `VAULT_RESTART_ENABLED=true` |
+| Restart policy | `unless-stopped` |
+| Stop timeout | `60` seconds |
+
+The `/data` mount retains the SQLite database, uploaded files, thumbnails,
+staging and backups across container updates. The image also includes the full
+backend's optional storage adapters; SQLite remains the default database.
+For host-folder ownership, set `PUID` and `PGID` to positive numeric IDs that
+should own the data (both default to `10001`). Leave the image's entrypoint and
+command at their defaults so ownership setup and migrations run before startup.
+
+Open `http://<server-ip>:<host-port>` on a trusted network and complete the initial
+administrator registration. The frontend proxies the API internally, so only
+port `3000` needs publishing. These are custom-container settings; this change
+does not publish an Unraid Community Apps or CasaOS app-store listing.
+
 ## Add an optional setting
 
 Add API settings under `services.api.environment` in your downloaded file.
@@ -264,6 +364,7 @@ at `http://localhost:3000/api/v1/health` (use your chosen host/port).
 | File | Purpose |
 | --- | --- |
 | **`docker-compose.simple.yml`** | **Recommended for a new local install.** Light API image, two services, minimal configuration. |
+| `docker-compose.unified.yml` | Full API and web UI in one container, with native AMD64/ARM64 images. |
 | `docker-compose.yml` | Existing configurable deployment with opt-in PostgreSQL and S3 profiles. |
 | `docker-compose.light.yml` | Smaller API image without browser automation or STEP tessellation; exposes advanced variables. |
 | `docker-compose.prod.yml` | Standalone configuration for a TLS reverse proxy, with localhost binding and log rotation. |

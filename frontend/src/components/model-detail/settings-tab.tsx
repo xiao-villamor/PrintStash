@@ -1,5 +1,10 @@
 "use client";
 
+import { formatNumber } from "@/lib/format";
+import { currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { MetadataPreferences } from "@/lib/metadata-preferences";
 import { MetadataRead } from "@/types";
 
@@ -16,6 +21,7 @@ export function SettingsTab({
   printSettingRows: PrintSettingRow[];
   preferences: MetadataPreferences;
 }) {
+  useUiLocale();
   const hasMeshGeometry = Boolean(meta?.volume_mm3 || meta?.triangle_count);
   const hasEmbeddedSlicerMetadata = Boolean(
     meta &&
@@ -48,14 +54,16 @@ export function SettingsTab({
         {printSettingRows.length === 0 && !geometryOnly && (
           <div className="rounded border border-outline-variant bg-surface px-3 py-3">
             <p className="font-mono text-xs leading-relaxed text-on-surface-variant">
-              No print settings recorded yet. Add a sliced G-code revision to capture them.
+              {uiText(
+                "No print settings recorded yet. Add a sliced G-code revision to capture them.",
+              )}
             </p>
           </div>
         )}
         {printSettingRows.length > 0 && (
           <section>
             <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-              Print Settings
+              {uiText("Print Settings")}
             </h2>
             <div className="bg-surface border border-outline-variant rounded flex flex-col">
               {printSettingRows.map((row, index) => (
@@ -75,8 +83,9 @@ export function SettingsTab({
         {geometryOnly && (
           <div className="rounded border border-outline-variant bg-surface px-3 py-3">
             <p className="font-mono text-xs leading-relaxed text-on-surface-variant">
-              This file contains mesh geometry only. Printer, material, and slicer settings are not
-              embedded. Add a sliced G-code or 3MF revision to capture them.
+              {uiText(
+                "This file contains mesh geometry only. Printer, material, and slicer settings are not embedded. Add a sliced G-code or 3MF revision to capture them.",
+              )}
             </p>
           </div>
         )}
@@ -86,22 +95,26 @@ export function SettingsTab({
           (preferences.mesh_triangles && meta?.triangle_count)) && (
           <section>
             <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-              Mesh Geometry
+              {uiText("Mesh Geometry")}
             </h2>
             <div className="bg-surface border border-outline-variant rounded flex flex-col">
               {preferences.mesh_volume && meta?.volume_mm3 && (
                 <SettingRow
-                  label="VOLUME"
+                  label={uiText("VOLUME")}
                   value={
                     meta.volume_mm3 < 1000
-                      ? `${meta.volume_mm3.toFixed(1)} mm³`
-                      : `${(meta.volume_mm3 / 1000).toFixed(2)} cm³`
+                      ? `${formatNumber(meta.volume_mm3, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} mm³`
+                      : `${formatNumber(meta.volume_mm3 / 1000, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} cm³`
                   }
                   last={!preferences.mesh_triangles || !meta?.triangle_count}
                 />
               )}
               {preferences.mesh_triangles && meta?.triangle_count && (
-                <SettingRow label="TRIANGLES" value={meta.triangle_count.toLocaleString()} last />
+                <SettingRow
+                  label={uiText("TRIANGLES")}
+                  value={meta.triangle_count.toLocaleString(currentLocale())}
+                  last
+                />
               )}
             </div>
           </section>
@@ -110,8 +123,11 @@ export function SettingsTab({
         {/* Slicer info */}
         {preferences.slicer_info && meta?.slicer_name && (
           <p className="font-mono text-xs text-on-surface-variant">
-            Sliced with {meta.slicer_name}
-            {meta.slicer_version ? ` v${meta.slicer_version}` : ""}
+            {uiText("Sliced with ")}
+            {meta.slicer_name}
+            {meta.slicer_version
+              ? uiText(" v{value1}", { value1: String(meta.slicer_version) })
+              : ""}
           </p>
         )}
       </>

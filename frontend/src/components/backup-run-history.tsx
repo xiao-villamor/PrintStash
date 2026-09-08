@@ -1,3 +1,4 @@
+import { currentLocale } from "@/lib/locale";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
@@ -95,7 +96,7 @@ export function BackupRunHistory({
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-medium">{runLabels[run.outcome]}</p>
               <time className="text-xs text-muted-foreground" dateTime={run.created_at}>
-                {new Date(run.created_at).toLocaleString()}
+                {new Date(run.created_at).toLocaleString(currentLocale())}
               </time>
             </div>
             <ul className="space-y-3">
@@ -110,7 +111,7 @@ export function BackupRunHistory({
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {destination.verified_at
-                        ? `${t("settings.backupLastVerified")}: ${new Date(destination.verified_at).toLocaleString()}`
+                        ? `${t("settings.backupLastVerified")}: ${new Date(destination.verified_at).toLocaleString(currentLocale())}`
                         : t("settings.backupNeverVerified")}
                     </p>
                     {destination.error_code && (

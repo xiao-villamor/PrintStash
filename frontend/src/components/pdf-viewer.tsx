@@ -1,5 +1,8 @@
 "use client";
 
+import { uiText } from "@/lib/locale";
+import { useUiLocale } from "@/lib/i18n";
+
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, Loader2, ZoomIn, ZoomOut } from "lucide-react";
@@ -28,6 +31,7 @@ export function PdfViewer({
   file: Blob;
   renderDocument?: DocumentRenderer;
 }) {
+  useUiLocale();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [numPages, setNumPages] = useState(0);
@@ -56,7 +60,12 @@ export function PdfViewer({
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3">
-        <button className={btn} onClick={() => go(-1)} disabled={page <= 1} title="Previous page">
+        <button
+          className={btn}
+          onClick={() => go(-1)}
+          disabled={page <= 1}
+          title={uiText("Previous page")}
+        >
           <ChevronLeft className="w-4 h-4" />
         </button>
         <span className="text-xs font-mono text-muted-foreground tabular-nums">
@@ -66,7 +75,7 @@ export function PdfViewer({
           className={btn}
           onClick={() => go(1)}
           disabled={!numPages || page >= numPages}
-          title="Next page"
+          title={uiText("Next page")}
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -75,14 +84,19 @@ export function PdfViewer({
             className={btn}
             onClick={() => zoom(-0.25)}
             disabled={scale <= 0.5}
-            title="Zoom out"
+            title={uiText("Zoom out")}
           >
             <ZoomOut className="w-4 h-4" />
           </button>
           <span className="text-xs font-mono text-muted-foreground tabular-nums w-10 text-center">
             {Math.round(scale * 100)}%
           </span>
-          <button className={btn} onClick={() => zoom(0.25)} disabled={scale >= 3} title="Zoom in">
+          <button
+            className={btn}
+            onClick={() => zoom(0.25)}
+            disabled={scale >= 3}
+            title={uiText("Zoom in")}
+          >
             <ZoomIn className="w-4 h-4" />
           </button>
         </div>
@@ -94,7 +108,7 @@ export function PdfViewer({
       >
         {loadError ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
-            <p>Could not render this PDF.</p>
+            <p>{uiText("Could not render this PDF.")}</p>
             <p className="mt-2 max-w-md break-words font-mono text-xs">{loadError}</p>
           </div>
         ) : (

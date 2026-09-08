@@ -27,7 +27,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelProvenanceRead, ProvenanceFieldRead } from "@/types";
 import { SourceTab, type SourceTabApi } from "@/components/model-detail/source-tab";
-import { I18nProvider, messageCatalogs } from "@/lib/i18n";
+import { I18nProvider, getMessageCatalog } from "@/lib/i18n";
 
 /** Written as a code point so the fixture survives every editor and diff tool. */
 const NUL = String.fromCharCode(0);
@@ -174,9 +174,9 @@ describe("SourceTab", () => {
   });
 
   it("keeps English origin labels as the typed catalog fallback without a provider", async () => {
-    expect(messageCatalogs.en["source.origin.confirmed"]).toBe("Source");
-    expect(messageCatalogs.en["source.origin.inferred"]).toBe("Inferred");
-    expect(messageCatalogs.en["source.origin.user"]).toBe("Edited");
+    expect(getMessageCatalog("en")["source.origin.confirmed"]).toBe("Source");
+    expect(getMessageCatalog("en")["source.origin.inferred"]).toBe("Inferred");
+    expect(getMessageCatalog("en")["source.origin.user"]).toBe("Edited");
 
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 

@@ -164,7 +164,7 @@ describe("SpoolmanConnectCard", () => {
 
       await user.click(screen.getByRole("button", { name: /Save/ }));
 
-      expect(await screen.findByText("Invalid url.")).toBeInTheDocument();
+      expect(await screen.findByText("Invalid URL.")).toBeInTheDocument();
     });
   });
 

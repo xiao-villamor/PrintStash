@@ -401,6 +401,19 @@ describe("PrinterDetailPage", () => {
       );
     });
 
+    it("localizes the cooldown confirmation", async () => {
+      const user = userEvent.setup();
+      renderPrinter({
+        locale: "es",
+        routes: { "POST /api/v1/printers/4/temperature": json({ ok: true }) },
+      });
+      await screen.findByText("Voron");
+
+      await user.click(screen.getByRole("button", { name: "Enfriar" }));
+
+      expect(await screen.findByText("Enfriando")).toBeInTheDocument();
+    });
+
     it("offers no presets on a printer that takes no G-code", async () => {
       // Bambu in LAN mode accepts jobs but not raw commands, so a preheat
       // button there is a button that answers 409.

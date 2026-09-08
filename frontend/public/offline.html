@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#2563eb" />
-    <title>PrintStash · Offline</title>
+    <title data-message="shell.offlineTitle">PrintStash · Offline</title>
+    <script defer src="/locale-shell.js"></script>
     <style>
       :root {
         color-scheme: light dark;
@@ -43,12 +44,12 @@
   </head>
   <body>
     <main>
-      <h1>PrintStash is offline</h1>
-      <p>
+      <h1 data-message="shell.offlineHeading">PrintStash is offline</h1>
+      <p data-message="shell.offlineHelp">
         Cached app screens remain available. Printer and library changes need a connection to your
         server.
       </p>
-      <button type="button" onclick="location.reload()">Try again</button>
+      <button type="button" data-message="shell.retry" data-offline-retry>Try again</button>
     </main>
   </body>
 </html>

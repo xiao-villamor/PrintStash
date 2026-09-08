@@ -1,3 +1,5 @@
+import { knownUiText, uiText, isMessageKey } from "./locale";
+
 /**
  * Structured API error with server-detail extraction.
  *
@@ -206,10 +208,11 @@ function isKnownErrorCode(code: string): code is KnownErrorCode {
 
 /** Return a user-presentable message for a given server detail code. */
 export function getErrorMessage(code: string): string {
-  if (isKnownErrorCode(code)) return ERROR_MESSAGES[code];
-  const humanized = code.replace(/_/g, " ").trim();
-  if (!humanized) return ERROR_MESSAGES.unknown;
-  return `${humanized.charAt(0).toUpperCase()}${humanized.slice(1)}.`;
+  if (isKnownErrorCode(code)) return knownUiText(ERROR_MESSAGES[code]);
+  if (isMessageKey(code)) return uiText(code);
+  return uiText(
+    "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+  );
 }
 
 /** Return a user-presentable message for any caught error. */

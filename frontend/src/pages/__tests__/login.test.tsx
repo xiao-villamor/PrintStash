@@ -163,7 +163,9 @@ describe("LoginPage", () => {
 
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("HTTP 503: down");
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+      );
     });
 
     it("marks the fields as the thing that failed", async () => {

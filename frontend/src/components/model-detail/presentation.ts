@@ -1,3 +1,4 @@
+import { uiText, knownUiText } from "@/lib/locale";
 /**
  * Presentation maps and derived-row builders shared by the model-detail tabs.
  */
@@ -16,12 +17,42 @@ import { MetadataPreferences } from "@/lib/metadata-preferences";
 export type TabKey = "overview" | "source" | "settings" | "revisions" | "files" | "history";
 
 export const TABS: { key: TabKey; label: string }[] = [
-  { key: "overview", label: "Overview" },
-  { key: "source", label: "Source" },
-  { key: "settings", label: "Settings" },
-  { key: "revisions", label: "Revisions" },
-  { key: "files", label: "Files" },
-  { key: "history", label: "History" },
+  {
+    key: "overview",
+    get label() {
+      return uiText("Overview");
+    },
+  },
+  {
+    key: "source",
+    get label() {
+      return uiText("Source");
+    },
+  },
+  {
+    key: "settings",
+    get label() {
+      return uiText("Settings");
+    },
+  },
+  {
+    key: "revisions",
+    get label() {
+      return uiText("Revisions");
+    },
+  },
+  {
+    key: "files",
+    get label() {
+      return uiText("Files");
+    },
+  },
+  {
+    key: "history",
+    get label() {
+      return uiText("History");
+    },
+  },
 ];
 
 export function normalizeRecommendedGcodeFiles<
@@ -61,24 +92,64 @@ export function revisionStatusClass(status: FileRevisionStatus | null): string {
 }
 
 export function revisionStatusLabel(status: FileRevisionStatus | null): string {
-  return status ? REVISION_STATUS_LABELS[status] : "Unmarked";
+  return knownUiText(status ? REVISION_STATUS_LABELS[status] : "Unmarked");
 }
 
 export function headerStatusLabel(status: FileRevisionStatus | null): string {
-  return status === "known_good" ? "Printed OK" : revisionStatusLabel(status);
+  return status === "known_good" ? uiText("Printed OK") : revisionStatusLabel(status);
 }
 
 export type PrintJobTone = "success" | "error" | "progress";
 
 export const PRINT_JOB_PRESENTATION = {
-  queued: { label: "Queued", tone: "progress" },
-  uploading: { label: "Uploading", tone: "progress" },
-  started: { label: "Started", tone: "progress" },
-  printing: { label: "Printing", tone: "progress" },
-  paused: { label: "Paused", tone: "progress" },
-  completed: { label: "Success", tone: "success" },
-  cancelled: { label: "Cancelled", tone: "error" },
-  failed: { label: "Failed", tone: "error" },
+  queued: {
+    get label() {
+      return uiText("Queued");
+    },
+    tone: "progress",
+  },
+  uploading: {
+    get label() {
+      return uiText("Uploading");
+    },
+    tone: "progress",
+  },
+  started: {
+    get label() {
+      return uiText("Started");
+    },
+    tone: "progress",
+  },
+  printing: {
+    get label() {
+      return uiText("Printing");
+    },
+    tone: "progress",
+  },
+  paused: {
+    get label() {
+      return uiText("Paused");
+    },
+    tone: "progress",
+  },
+  completed: {
+    get label() {
+      return uiText("Success");
+    },
+    tone: "success",
+  },
+  cancelled: {
+    get label() {
+      return uiText("Cancelled");
+    },
+    tone: "error",
+  },
+  failed: {
+    get label() {
+      return uiText("Failed");
+    },
+    tone: "error",
+  },
 } satisfies Record<PrintJobState, { label: string; tone: PrintJobTone }>;
 
 export function printJobToneClass(tone: PrintJobTone): string {
@@ -106,47 +177,83 @@ export function buildPrintSettingRows(
   const rows: PrintSettingRow[] = [];
 
   if (preferences.printer_profile) {
-    rows.push({ label: "PRINTER PROFILE", value: meta?.printer_model ?? "—" });
+    rows.push({
+      get label() {
+        return uiText("PRINTER PROFILE");
+      },
+      value: meta?.printer_model ?? "—",
+    });
   }
 
   if (preferences.material) {
     rows.push({
-      label: "MATERIAL",
+      get label() {
+        return uiText("MATERIAL");
+      },
       value: meta?.material_type ?? "—",
       chip: true,
     });
   }
 
   if (preferences.filament_profile && meta?.material_brand) {
-    rows.push({ label: "FILAMENT PROFILE", value: meta.material_brand });
+    rows.push({
+      get label() {
+        return uiText("FILAMENT PROFILE");
+      },
+      value: meta.material_brand,
+    });
   }
 
   if (preferences.layer_height) {
-    rows.push({ label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) });
+    rows.push({
+      get label() {
+        return uiText("LAYER HEIGHT");
+      },
+      value: formatMillimeters(meta?.layer_height_mm),
+    });
   }
 
   if (preferences.first_layer && meta?.first_layer_height_mm) {
     rows.push({
-      label: "FIRST LAYER",
+      get label() {
+        return uiText("FIRST LAYER");
+      },
       value: formatMillimeters(meta.first_layer_height_mm),
     });
   }
 
   if (preferences.nozzle) {
-    rows.push({ label: "NOZZLE", value: formatMillimeters(meta?.nozzle_diameter_mm) });
+    rows.push({
+      get label() {
+        return uiText("NOZZLE");
+      },
+      value: formatMillimeters(meta?.nozzle_diameter_mm),
+    });
   }
 
   if (preferences.infill) {
-    rows.push({ label: "INFILL", value: formatPercent(meta?.infill_percent) });
+    rows.push({
+      get label() {
+        return uiText("INFILL");
+      },
+      value: formatPercent(meta?.infill_percent),
+    });
   }
 
   if (preferences.walls && meta?.wall_loops) {
-    rows.push({ label: "WALLS", value: String(meta.wall_loops) });
+    rows.push({
+      get label() {
+        return uiText("WALLS");
+      },
+      value: String(meta.wall_loops),
+    });
   }
 
   if (preferences.top_bottom && (meta?.top_shell_layers || meta?.bottom_shell_layers)) {
     rows.push({
-      label: "TOP / BOTTOM",
+      get label() {
+        return uiText("TOP / BOTTOM");
+      },
       value: `${meta?.top_shell_layers ?? "—"} / ${meta?.bottom_shell_layers ?? "—"}`,
     });
   }
@@ -156,34 +263,58 @@ export function buildPrintSettingRows(
     meta?.support_material !== null &&
     meta?.support_material !== undefined
   ) {
-    rows.push({ label: "SUPPORTS", value: meta.support_material ? "Yes" : "No" });
+    rows.push({
+      get label() {
+        return uiText("SUPPORTS");
+      },
+      value: meta.support_material ? uiText("Yes") : uiText("No"),
+    });
   }
 
   if (preferences.nozzle_temp && meta?.nozzle_temperature_c) {
     rows.push({
-      label: "NOZZLE TEMP",
+      get label() {
+        return uiText("NOZZLE TEMP");
+      },
       value: formatTemperature(meta.nozzle_temperature_c),
     });
   }
 
   if (preferences.bed_temp && meta?.bed_temperature_c) {
-    rows.push({ label: "BED TEMP", value: formatTemperature(meta.bed_temperature_c) });
+    rows.push({
+      get label() {
+        return uiText("BED TEMP");
+      },
+      value: formatTemperature(meta.bed_temperature_c),
+    });
   }
 
   if (preferences.estimated_time) {
     rows.push({
-      label: "EST. TIME",
+      get label() {
+        return uiText("EST. TIME");
+      },
       value: formatDuration(meta?.estimated_time_s ?? null),
       highlight: true,
     });
   }
 
   if (preferences.filament_weight) {
-    rows.push({ label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) });
+    rows.push({
+      get label() {
+        return uiText("FILAMENT");
+      },
+      value: formatGrams(meta?.filament_weight_g),
+    });
   }
 
   if (preferences.filament_cost && meta?.filament_cost) {
-    rows.push({ label: "FILAMENT COST", value: formatCost(meta.filament_cost) });
+    rows.push({
+      get label() {
+        return uiText("FILAMENT COST");
+      },
+      value: formatCost(meta.filament_cost),
+    });
   }
 
   return rows;

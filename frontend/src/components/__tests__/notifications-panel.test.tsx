@@ -116,9 +116,13 @@ function stubDeps(over: Partial<NotificationsPanelDeps> = {}): NotificationsPane
   };
 }
 
-function renderPanel(over: Partial<NotificationsPanelDeps> = {}, canEdit = true) {
+function renderPanel(
+  over: Partial<NotificationsPanelDeps> = {},
+  canEdit = true,
+  locale: import("@/lib/locale").Locale = "en",
+) {
   const deps = stubDeps(over);
-  const result = renderApp(<NotificationsPanel canEdit={canEdit} deps={deps} />);
+  const result = renderApp(<NotificationsPanel canEdit={canEdit} deps={deps} />, { locale });
   return { ...result, deps };
 }
 
@@ -340,6 +344,17 @@ describe("NotificationsPanel", () => {
       await user.selectOptions(screen.getByRole("combobox"), "telegram");
 
       expect(screen.getByPlaceholderText("123456:ABC-DEF…")).toBeInTheDocument();
+    });
+
+    it("localizes explanatory configuration placeholders", async () => {
+      const user = userEvent.setup();
+      renderPanel({}, true, "es");
+
+      await user.click(await screen.findByRole("button", { name: "Añadir canal" }));
+
+      expect(
+        screen.getByPlaceholderText("se usa para firmar la carga útil con HMAC"),
+      ).toBeInTheDocument();
     });
 
     it("drops config typed for the previous target", async () => {
