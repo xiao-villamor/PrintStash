@@ -122,17 +122,20 @@ class TestBrowserDelivery:
 
             assert (result.status, b"".join(result.chunks)) == (200, PAYLOAD)
 
+    def test_preserves_inline_provider_disposition(self, tmp_path):
+        with browser_s3(tmp_path) as (backend, tls):
+            key = backend.thumbnail_key(313)
+            backend.write_bytes(PAYLOAD, key)
 
-def test_preserves_inline_provider_disposition(tmp_path):
-    with browser_s3(tmp_path) as (backend, tls):
-        key = backend.thumbnail_key(313)
-        backend.write_bytes(PAYLOAD, key)
+            target = backend.browser_download(
+                key,
+                "thumb.webp",
+                "image/webp",
+                origin="https://app.test",
+                inline=True,
+            )
+            assert target is not None
+            response = httpx.get(target.url, verify=tls.client_context())
 
-        target = backend.browser_download(
-            key, "thumb.webp", "image/webp", origin="https://app.test", inline=True
-        )
-        assert target is not None
-        response = httpx.get(target.url, verify=tls.client_context())
-
-        assert response.headers["content-disposition"].startswith("inline;")
-        assert response.headers["content-type"] == "image/webp"
+            assert response.headers["content-disposition"].startswith("inline;")
+            assert response.headers["content-type"] == "image/webp"

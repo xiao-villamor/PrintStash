@@ -181,9 +181,10 @@ class TestContentDisposition:
         )
 
 
-def test_removes_bare_url_contract():
-    from app.modules.storage import artifact_content
-    from app.modules.storage.storage_backend.contracts import StorageBackend
+class TestStorageDeliveryContract:
+    def test_removes_bare_url_contract(self):
+        from app.modules.storage import artifact_content
+        from app.modules.storage.storage_backend.contracts import StorageBackend
 
-    assert not hasattr(StorageBackend, "presigned_download_url")
-    assert not hasattr(artifact_content, "presigned_download_url")
+        assert not hasattr(StorageBackend, "presigned_download_url")
+        assert not hasattr(artifact_content, "presigned_download_url")

@@ -183,6 +183,18 @@ class TestAuthorizedDelivery:
             response.headers["cache-control"] == "private, max-age=0, must-revalidate"
         )
 
+    def test_preserves_inline_thumbnail_disposition(
+        self, client, auth_headers, stored_artifact
+    ):
+        backend = get_backend()
+        backend.write_bytes(b"thumbnail", backend.thumbnail_key(stored_artifact.id))
+
+        response = client.get(
+            f"/api/v1/files/{stored_artifact.id}/thumbnail", headers=auth_headers
+        )
+
+        assert response.headers["content-disposition"].startswith("inline;")
+
     def test_uses_a_separate_converted_validator(
         self, client, auth_headers, db_session
     ):
@@ -238,14 +250,3 @@ class TestDeliveryObservability:
             "native_candidate": False,
             "ranges": True,
         }
-
-
-def test_preserves_inline_thumbnail_disposition(client, auth_headers, stored_artifact):
-    backend = get_backend()
-    backend.write_bytes(b"thumbnail", backend.thumbnail_key(stored_artifact.id))
-
-    response = client.get(
-        f"/api/v1/files/{stored_artifact.id}/thumbnail", headers=auth_headers
-    )
-
-    assert response.headers["content-disposition"].startswith("inline;")
