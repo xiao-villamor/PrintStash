@@ -88,3 +88,4 @@ follow-up, including the additional inline-provider contract.
 |61|removes bare URL contract|Edge|Public content/backend interfaces|Only structured targets exposed|Unit|✅ `test_artifact_delivery.py::TestStorageDeliveryContract::test_removes_bare_url_contract`|
 |62|preserves inline thumbnail disposition|Happy|Authenticated thumbnail|Inline filename response|Integration|✅ `test_delivery.py::TestAuthorizedDelivery::test_preserves_inline_thumbnail_disposition`|
 |63|preserves inline provider disposition|Happy|Real S3 thumbnail target|Exact inline filename/media type|Contract|✅ `test_artifact_delivery.py::TestBrowserDelivery::test_preserves_inline_provider_disposition`|
+|64|refuses unparseable browser URL|Error|Malformed IPv6 authority from provider|Capability rejected without escaping validation|Unit|✅ `backend/tests/unit/modules/storage/test_artifact_delivery.py::TestSafeBrowserDownload::test_refuses_unparseable_url`|

@@ -94,6 +94,13 @@ class TestSafeBrowserDownload:
 
         assert accepted is False
 
+    def test_refuses_unparseable_url(self):
+        target = BrowserDownload("https://[invalid", NOW + timedelta(seconds=30), "key")
+
+        accepted = safe_browser_download(target, key="key", origin=None, now=NOW)
+
+        assert accepted is False
+
     def test_redacts_target_representation(self):
         target = BrowserDownload(
             "https://storage.test/object?secret=private", NOW, "private-key"
