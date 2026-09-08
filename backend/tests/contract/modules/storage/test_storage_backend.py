@@ -410,23 +410,6 @@ class TestListKeys:
         assert usage["total_size_bytes"] == 3
 
 
-class TestPresignedDownloadUrl:
-    def test_presigned_download_url_is_fetchable(self, s3_backend: S3StorageBackend):
-        import httpx
-
-        s3_backend.write_bytes(b"presigned content", "vault-data/models/presigned.txt")
-
-        url = s3_backend.presigned_download_url(
-            "vault-data/models/presigned.txt", "download.txt"
-        )
-
-        assert url is not None
-        resp = httpx.get(url)
-        assert resp.status_code == 200
-        assert resp.content == b"presigned content"
-        assert 'filename="download.txt"' in resp.headers.get("content-disposition", "")
-
-
 class TestHealthProbe:
     def test_health_probe_reports_ok_for_reachable_bucket(
         self, s3_backend: S3StorageBackend
@@ -625,7 +608,7 @@ class TestKeyDerivation:
                     expected_etag=None,
                 )
             with pytest.raises(StorageCollisionError):
-                first.presigned_download_url(second_key, "foreign.stl")
+                first.browser_download(second_key, "foreign.stl", "application/sla")
             with pytest.raises(StorageCollisionError):
                 list(first.walk_keys(second._prefix()))
             with pytest.raises(StorageCollisionError):

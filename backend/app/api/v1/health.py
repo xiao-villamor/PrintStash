@@ -103,6 +103,7 @@ def _storage_probe() -> dict:
     try:
         backend = get_backend()
         result = backend.health_probe()
+        result["delivery"] = backend.delivery_diagnostics()
         result["provider"] = settings.storage_provider or backend.backend_name
         result["tier"] = backend.capabilities.tier.value
         result["warnings"] = list(backend.capabilities.warnings)

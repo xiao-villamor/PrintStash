@@ -29,7 +29,7 @@ from fastapi import (
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
-from app.api.v1.files import _serve_file
+from app.api.artifact_responses import serve_stored_file
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_superuser, require_user
@@ -488,7 +488,7 @@ def get_document_file(
     key = backend.document_file_key(doc.id, doc.filename)
     if not backend.exists(key):
         raise HTTPException(status_code=404, detail="file_blob_missing")
-    return _serve_file(
+    return serve_stored_file(
         key,
         doc.filename,
         _BINARY_TYPES.get(ext, "application/octet-stream"),
@@ -569,7 +569,7 @@ def get_document_image(
     if not backend.exists(key):
         raise HTTPException(status_code=404, detail="image_not_found")
     media_type = _IMAGE_TYPES[f".{name.rsplit('.', 1)[-1]}"]
-    return _serve_file(
+    return serve_stored_file(
         key,
         name,
         media_type,

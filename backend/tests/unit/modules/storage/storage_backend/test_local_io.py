@@ -267,9 +267,12 @@ class TestUsage:
 
 
 class TestPresignedDownloadUrl:
-    def test_presigned_download_url_is_unsupported_locally(self) -> None:
+    def test_browser_download_is_unsupported_locally(self) -> None:
         assert (
-            LocalStorageBackend().presigned_download_url("any-key", "file.stl") is None
+            LocalStorageBackend().browser_download(
+                "any-key", "file.stl", "application/sla"
+            )
+            is None
         )
 
 

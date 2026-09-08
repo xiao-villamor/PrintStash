@@ -27,7 +27,7 @@ from printstash_core.files import slugify
 from sqlalchemy import func
 from sqlmodel import Session, delete, select
 
-from app.api.v1.files import _serve_file
+from app.api.artifact_responses import serve_stored_file
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_user
@@ -515,7 +515,7 @@ def get_collection_image(
     if not backend.exists(key):
         raise HTTPException(status_code=404, detail="image_not_found")
     media_type = _IMAGE_TYPES[f".{name.rsplit('.', 1)[-1]}"]
-    return _serve_file(
+    return serve_stored_file(
         key,
         name,
         media_type,

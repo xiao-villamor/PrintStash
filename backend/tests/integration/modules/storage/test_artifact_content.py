@@ -170,9 +170,6 @@ class TestManagedArtifactContent:
         def local_path(self, _key: str):
             yield self.path
 
-        def presigned_download_url(self, _key: str, _filename: str) -> str:
-            return "https://download.example.test/signed"
-
     def test_missing_managed_content_fails_before_stream_or_materialize(
         self, tmp_path: Path
     ) -> None:
@@ -210,34 +207,6 @@ class TestManagedArtifactContent:
         assert list(handle.stream()) == []
         with handle.materialize() as materialized:
             assert materialized == path
-
-    def test_presigning_is_never_exposed_for_external_content(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        external = detached_file(
-            model_id=1,
-            path="/mnt/models/external.stl",
-            original_filename="external.stl",
-            size_bytes=1,
-            sha256="0" * 64,
-            is_external=True,
-        )
-        managed = detached_file(
-            model_id=1,
-            path="vault/managed.stl",
-            original_filename="managed.stl",
-            size_bytes=1,
-            sha256="0" * 64,
-            is_external=False,
-        )
-        backend = self._Backend(Path("unused"))
-        monkeypatch.setattr(artifact_content, "get_backend", lambda: backend)
-
-        assert artifact_content.presigned_download_url(external, "external.stl") is None
-        assert (
-            artifact_content.presigned_download_url(managed, "managed.stl")
-            == "https://download.example.test/signed"
-        )
 
 
 class TestBoundedExternalContent:

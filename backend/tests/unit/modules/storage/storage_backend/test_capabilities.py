@@ -141,7 +141,7 @@ class TestUnavailableStorageBackend:
             ("delete", ("any-key",)),
             ("list_keys", ("prefix",)),
             ("usage", ("prefix",)),
-            ("presigned_download_url", ("any-key", "part.stl")),
+            ("browser_download", ("any-key", "part.stl", "application/sla")),
         ],
     )
     def test_rejects_storage_io(
@@ -248,9 +248,6 @@ class _ProbeBackend(StorageBackend):
 
     def usage(self, prefix: str = "") -> dict:
         return {"prefix": prefix}
-
-    def presigned_download_url(self, key: str, filename: str) -> str | None:
-        return f"{key}/{filename}"
 
     def health_probe(self) -> dict:
         return {"backend": self.backend_name, "ok": True}

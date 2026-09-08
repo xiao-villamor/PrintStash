@@ -64,3 +64,43 @@ constructs the response. A response lease is released in `finally`, including on
 disconnect. Storage adapters expose an optional structured browser target;
 routes do not branch on provider names. Thumbnail rebuilding and cache
 publication retain their existing ownership receipts and create-only behavior.
+
+## Operational diagnostics
+
+Detailed health reports the configured delivery mode and whether native delivery
+is a candidate, without signing an object URL. Browser CORS is still checked per
+request. `printstash_delivery_strategy_total` counts selected strategies and
+`printstash_delivery_proxied_bytes_total` counts consumed proxy bytes. Labels are
+restricted to bounded provider and purpose values; they contain no keys, user
+identities or signed destinations. Telemetry failure does not fail a download.
+Application and Uvicorn access/error logs redact URL queries, including SDK
+exception text. Deployment proxies must likewise avoid recording response
+`Location` headers.
+
+An already issued URL remains usable until its short expiry even if access is
+revoked immediately afterward. Every subsequent API request repeats authorization.
+Thumbnails retain inline disposition; ordinary downloads retain attachment
+disposition, with the same filename sanitization in API and signed responses.
+
+### Source requirements
+
+This implementation follows [issue101](https://github.com/xiao-villamor/PrintStash/issues/101)
+and its [attached implementation plan](https://github.com/user-attachments/files/31663922/printstash-native-asset-delivery-implementation-plan.md).
+The approved backend capability refactor replaces the attachment's old
+`services/` location: strategy lives in `modules/storage/artifact_delivery`,
+and HTTP rendering in `api/artifact_responses`.
+
+| Attached phase | Implementation and evidence |
+|---|---|
+|1 consumers|Authenticated downloads, slicer, shares, thumbnails, passthrough/conversion and external-source tests in the validation matrix|
+|2 seam|Structured browser target, framework-free plan, centralized TLS/TTL/key/header checks and sanitized disposition|
+|3 routes|Canonical routes only; bare presigning contract removed from content and every backend|
+|4 providers|S3 GetObject with response overrides, API fallback for OpenDAL and verified external sources, direct filesystem response|
+|5 security|Private307, at-most60second capabilities, fail-closed access/integrity, query-redacted logs, no signed URL persistence|
+|6 HTTP|Representation-specific validators, authorization before304, date precedence, Range/If-Range and fetch CORS|
+|7 verification|Real TLS S3 contracts, API E2E and actual browser filename/zero-API-body proof; named hosted-provider accounts remain external validation prerequisites|
+|8 operations|Delivery documentation, health capability, bounded strategy/proxy-byte metrics and proxy limitations|
+
+Real S3-compatible behavior is exercised against the repository's SeaweedFS
+service. This is not a claim of separately executed AWS/R2/B2/Wasabi account
+certification; those service-specific checks require their actual accounts.

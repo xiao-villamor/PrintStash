@@ -206,3 +206,46 @@ class TestAuthorizedDelivery:
 
         assert response.status_code == 200
         assert response.headers["etag"] != f'"{artifact.sha256}"'
+
+
+class TestDeliveryObservability:
+    def test_records_selected_delivery_strategy(
+        self, client, auth_headers, stored_artifact
+    ):
+        from app.core.metrics import registry
+
+        labels = {"provider": "local", "purpose": "download", "strategy": "local"}
+        before = (
+            registry.get_sample_value("printstash_delivery_strategy_total", labels) or 0
+        )
+
+        response = client.get(
+            f"/api/v1/files/{stored_artifact.id}/download", headers=auth_headers
+        )
+
+        assert response.content == PAYLOAD
+        assert (
+            registry.get_sample_value("printstash_delivery_strategy_total", labels)
+            == before + 1
+        )
+
+    def test_reports_delivery_capability_without_signing(self, client, auth_headers):
+        response = client.get("/api/v1/health/details", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["components"]["storage"]["delivery"] == {
+            "mode": "local",
+            "native_candidate": False,
+            "ranges": True,
+        }
+
+
+def test_preserves_inline_thumbnail_disposition(client, auth_headers, stored_artifact):
+    backend = get_backend()
+    backend.write_bytes(b"thumbnail", backend.thumbnail_key(stored_artifact.id))
+
+    response = client.get(
+        f"/api/v1/files/{stored_artifact.id}/thumbnail", headers=auth_headers
+    )
+
+    assert response.headers["content-disposition"].startswith("inline;")

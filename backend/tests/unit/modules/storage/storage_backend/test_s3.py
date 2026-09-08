@@ -460,7 +460,10 @@ class TestBrowserDownload:
         monkeypatch.setattr(client, "get_bucket_cors", unavailable, raising=False)
 
         result = backend.browser_download(
-            "vault-data/part.stl", "part.stl", "application/sla", origin="https://app.test"
+            "vault-data/part.stl",
+            "part.stl",
+            "application/sla",
+            origin="https://app.test",
         )
 
         assert result is None
@@ -475,14 +478,20 @@ class TestBrowserDownload:
             "AllowedHeaders": ["*"],
         }
         policy = {
-            "CORSRules": [blocked, {**blocked, "ExposeHeaders": ["Content-Disposition"]}]
+            "CORSRules": [
+                blocked,
+                {**blocked, "ExposeHeaders": ["Content-Disposition"]},
+            ]
         }
         monkeypatch.setattr(
             client, "get_bucket_cors", lambda **_kwargs: policy, raising=False
         )
 
         result = backend.browser_download(
-            "vault-data/part.stl", "part.stl", "application/sla", origin="https://app.test"
+            "vault-data/part.stl",
+            "part.stl",
+            "application/sla",
+            origin="https://app.test",
         )
 
         assert result is None
@@ -584,7 +593,6 @@ class TestS3CompatibilityCoverage:
             "object_count": 1,
             "total_size_bytes": 7,
         }
-        assert backend.presigned_download_url(key, "part.stl")
         assert client.objects[key][0] == b"payload"
 
     def test_replaces_versioned_object(self, monkeypatch: pytest.MonkeyPatch) -> None:

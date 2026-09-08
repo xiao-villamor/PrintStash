@@ -62,3 +62,29 @@ coordinated stable-network window, then reused it through the same delivery
 config. An isolated offline dependency installation resolved a changing shared
 Playwright installation before the passing run. Backend fixture lint, launcher
 syntax validation, frontend test lint and TypeScript all passed.
+
+## Attached-plan observability and contract follow-up
+
+80 focused delivery/thumbnail/telemetry tests passed and290 adapter regressions
+passed. The earlier CI run passed its functional suites; its delivery module
+coverage was88.57%, below90%. Coverage and full gates remain pending on this
+follow-up, including the additional inline-provider contract.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 48 | records selected delivery strategy | Happy | Authorized local download | Counter increases once | Integration | ✅ `backend/tests/integration/api/v1/files/test_delivery.py::TestDeliveryObservability::test_records_selected_delivery_strategy` |
+| 49 | counts consumed proxy bytes | Happy | Partially consumed stream | Only consumed byte count charged | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_counts_consumed_proxy_bytes` |
+| 50 | redacts unknown delivery labels | Error | URL-shaped telemetry labels | No bearer credential in exposition | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_redacts_unknown_delivery_labels` |
+| 51 | releases metered stream on disconnect | Error | Early and repeated close | Underlying stream closes once | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_releases_metered_stream_on_disconnect` |
+| 52 | reports delivery capability without signing | Happy | Local detailed health | Safe delivery capability object | Integration | ✅ `backend/tests/integration/api/v1/files/test_delivery.py::TestDeliveryObservability::test_reports_delivery_capability_without_signing` |
+| 53 | redacts signed queries in log records | Error | Message/access query credentials | Formatted output is redacted | Unit | ✅ `backend/tests/unit/core/test_logging.py::test_redacts_signed_queries_in_log_records` |
+| 54 | redacts exception query credentials | Error | SDK traceback contains signedURL | Formatted exception excludes credential | Unit | ✅ `backend/tests/unit/core/test_logging.py::test_redacts_exception_query_credentials` |
+| 55 | preserves Uvicorn access formatter arguments | Edge | Structured access log tuple | Valid redacted request line | Unit | ✅ `backend/tests/unit/core/test_logging.py::test_preserves_uvicorn_access_formatter_arguments` |
+| 56 | preserves nonsensitive mapping log arguments | Edge | Mapping with numeric status | Formatting preserves status and scrubs query | Unit | ✅ `backend/tests/unit/core/test_logging.py::test_preserves_nonsensitive_mapping_log_arguments` |
+| 57 | closed proxy stream stays closed | Edge | Read after close | No further bytes | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_closed_proxy_stream_stays_closed` |
+| 58 | propagates provider stream failure | Error | Provider raises mid-read | Error retained and stream closed | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_propagates_provider_stream_failure` |
+| 59 | keeps proxy bytes when metrics fail | Error | Metric backend fails | Original bytes preserved | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_keeps_proxy_bytes_when_metrics_fail` |
+| 60 | keeps delivery when strategy metrics fail | Error | Metric backend fails | Selection continues | Unit | ✅ `backend/tests/unit/modules/storage/test_delivery_observability.py::test_keeps_delivery_when_strategy_metrics_fail` |
+|61|removes bare URL contract|Edge|Public content/backend interfaces|Only structured targets exposed|Unit|✅ `test_artifact_delivery.py::test_removes_bare_url_contract`|
+|62|preserves inline thumbnail disposition|Happy|Authenticated thumbnail|Inline filename response|Integration|✅ `test_delivery.py::test_preserves_inline_thumbnail_disposition`|
+|63|preserves inline provider disposition|Happy|Real S3 thumbnail target|Exact inline filename/media type|Contract|✅ `test_artifact_delivery.py::test_preserves_inline_provider_disposition`|

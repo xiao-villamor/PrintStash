@@ -1187,8 +1187,8 @@ class LocalStorageBackend(StorageBackend):
             "total_size_bytes": total_size,
         }
 
-    def presigned_download_url(self, key: str, filename: str) -> str | None:
-        return None
+    def delivery_diagnostics(self) -> dict:
+        return {"mode": "local", "native_candidate": False, "ranges": True}
 
     def health_probe(self) -> dict:
         # Re-read both sentinels so a mount disappearing after startup is

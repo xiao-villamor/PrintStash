@@ -259,10 +259,6 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
                 total += info.size
         return {"bytes": total, "objects": count}
 
-    def presigned_download_url(self, key: str, filename: str) -> str | None:
-        del key, filename
-        return None
-
     def health_probe(self) -> dict:
         try:
             self._operator.check()

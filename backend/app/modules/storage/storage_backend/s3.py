@@ -817,20 +817,14 @@ class S3StorageBackend(StorageBackend):
             "total_size_bytes": total_size,
         }
 
-    def presigned_download_url(self, key: str, filename: str) -> str | None:
-        self._validate_managed_key(key)
-        return self._client.generate_presigned_url(
-            "get_object",
-            Params={
-                "Bucket": self._bucket,
-                "Key": key,
-                "ResponseContentDisposition": f'attachment; filename="{filename}"',
-            },
-            ExpiresIn=int(settings.s3_presigned_url_expire_seconds),
-        )
-
     def browser_download(
-        self, key: str, filename: str, media_type: str, *, origin: str | None = None
+        self,
+        key: str,
+        filename: str,
+        media_type: str,
+        *,
+        origin: str | None = None,
+        inline: bool = False,
     ) -> BrowserDownload | None:
         """Sign one managed GET; a browser fetch also needs measured CORS policy."""
         from urllib.parse import urlsplit
@@ -879,7 +873,7 @@ class S3StorageBackend(StorageBackend):
         params = {
             "Bucket": self._bucket,
             "Key": key,
-            "ResponseContentDisposition": content_disposition(filename),
+            "ResponseContentDisposition": content_disposition(filename, inline=inline),
             "ResponseContentType": media_type,
             "ResponseCacheControl": "private, no-store",
         }
@@ -924,6 +918,20 @@ class S3StorageBackend(StorageBackend):
             body.close()
             raise OperationError("storage_range_mismatch", kind=ErrorKind.UPSTREAM)
         return _RangeBody(body, end - start + 1)
+
+    def delivery_diagnostics(self) -> dict:
+        from urllib.parse import urlsplit
+
+        candidate = (
+            not self._endpoint_url or urlsplit(self._endpoint_url).scheme == "https"
+        )
+        return {
+            "mode": "native_when_verified" if candidate else "proxy",
+            "native_candidate": candidate,
+            "cors": "verified_per_request",
+            "maximum_url_seconds": 60,
+            "ranges": True,
+        }
 
     def health_probe(self) -> dict:
         try:

@@ -15,9 +15,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import (
-    FileResponse,
     PlainTextResponse,
-    StreamingResponse,
 )
 from sqlalchemy import func
 from sqlmodel import Session, col, select
@@ -85,32 +83,6 @@ def _accessible_file(session: Session, file_id: int, user: User) -> File:
         CollectionRole.VIEW,
     )
     return f
-
-
-def _serve_file(
-    key: str,
-    filename: str,
-    media_type: str = "application/octet-stream",
-    *,
-    headers: dict[str, str] | None = None,
-):
-    backend = get_backend()
-    direct = backend.direct_path(key)
-    if direct is not None:
-        if not direct.exists():
-            raise HTTPException(status_code=410, detail="file_blob_missing")
-        return FileResponse(
-            path=str(direct), filename=filename, media_type=media_type, headers=headers
-        )
-    chunks = backend.stream_chunks(key)
-    return StreamingResponse(
-        chunks,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            **(headers or {}),
-        },
-    )
 
 
 def serve_artifact(
@@ -446,7 +418,9 @@ def _run_thumbnail_rebuild(
             after_id = 0
             while True:
                 page_stmt = (
-                    stmt.where(col(Model.id) > after_id).order_by(col(Model.id)).limit(100)
+                    stmt.where(col(Model.id) > after_id)
+                    .order_by(col(Model.id))
+                    .limit(100)
                 )
                 models = session.exec(page_stmt).all()
                 if not models:

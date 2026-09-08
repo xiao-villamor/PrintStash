@@ -33,6 +33,7 @@ def delivery_request(
         filename=filename,
         media_type=media_type,
         purpose=purpose,
+        inline=purpose == DeliveryPurpose.THUMBNAIL,
         origin=origin,
         if_none_match=headers.get("if-none-match"),
         if_modified_since=headers.get("if-modified-since"),
@@ -78,3 +79,21 @@ class _LeasedResponse(Response):
 def render_delivery(plan: DeliveryPlan) -> Response:
     response = _render_delivery(plan)
     return _LeasedResponse(response, plan) if plan.close is not None else response
+
+
+def serve_stored_file(
+    key: str,
+    filename: str,
+    media_type: str = "application/octet-stream",
+    *,
+    headers: dict[str, str] | None = None,
+) -> Response:
+    """Render authorized non-Artifact resources through the delivery owner."""
+    from app.modules.storage.artifact_delivery import plan_stored_representation
+    from app.modules.storage.storage_backend.runtime import get_backend
+
+    plan = plan_stored_representation(
+        get_backend(), key, DeliveryRequest(filename, media_type, proxy_only=True)
+    )
+    plan.headers.update(headers or {})
+    return render_delivery(plan)

@@ -711,7 +711,7 @@ class TestOpenDALStorageBackend:
         backend = _backend(_spec(), operator=_MemoryOperator())
         key = backend.thumbnail_key(20)
 
-        assert backend.presigned_download_url(key, "thumb.webp") is None
+        assert backend.browser_download(key, "thumb.webp", "image/webp") is None
 
     def test_reclaims_a_missing_object(self) -> None:
         backend = _backend(_spec(), operator=_MemoryOperator())

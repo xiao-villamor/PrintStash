@@ -51,6 +51,7 @@ class DeliveryRequest:
     range_header: str | None = None
     if_range: str | None = None
     proxy_only: bool = False
+    inline: bool = False
 
 
 @dataclass
@@ -96,7 +97,9 @@ def representation_headers(
     headers = {
         "Cache-Control": cache_policy(request.purpose),
         "ETag": etag,
-        "Content-Disposition": content_disposition(request.filename),
+        "Content-Disposition": content_disposition(
+            request.filename, inline=request.inline
+        ),
         "Referrer-Policy": "no-referrer",
         "Vary": "Authorization, Cookie, Origin, Sec-Fetch-Mode",
     }
@@ -179,7 +182,7 @@ def safe_browser_download(
         return False
 
 
-def plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
+def _plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
     """Select the original Artifact representation after the caller's access check."""
     handle = resolve(artifact)
     backend = handle.backend
@@ -206,7 +209,11 @@ def plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
         and not request.range_header
     ):
         target = backend.browser_download(
-            artifact.path, request.filename, request.media_type, origin=request.origin
+            artifact.path,
+            request.filename,
+            request.media_type,
+            origin=request.origin,
+            inline=request.inline,
         )
         if target is not None and safe_browser_download(
             target, key=artifact.path, origin=request.origin, now=utcnow()
@@ -252,7 +259,7 @@ def plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
     )
 
 
-def plan_stored_representation(
+def _plan_stored_representation(
     backend: StorageBackend,
     key: str,
     request: DeliveryRequest,
@@ -283,7 +290,11 @@ def plan_stored_representation(
         and not request.range_header
     ):
         target = backend.browser_download(
-            key, request.filename, request.media_type, origin=request.origin
+            key,
+            request.filename,
+            request.media_type,
+            origin=request.origin,
+            inline=request.inline,
         )
         if target is not None and safe_browser_download(
             target, key=key, origin=request.origin, now=utcnow()
@@ -315,3 +326,56 @@ def bytes_response_headers(
     etag = f'"{hashlib.sha256(data).hexdigest()}"'
     headers = representation_headers(request, etag=etag, modified_at=None)
     return (304 if not_modified(request, etag=etag, modified_at=None) else 200), headers
+
+
+def _observe(
+    plan: DeliveryPlan, request: DeliveryRequest, provider: str
+) -> DeliveryPlan:
+    from app.modules.storage.delivery_observability import (
+        MeteredChunks,
+        record_strategy,
+    )
+
+    strategy = (
+        "redirect"
+        if plan.redirect is not None
+        else "local"
+        if plan.path is not None
+        else "proxy"
+        if plan.chunks is not None
+        else "not_modified"
+        if plan.status == 304
+        else "rejected"
+    )
+    record_strategy(provider, request.purpose.value, strategy)
+    if plan.chunks is not None:
+        chunks = MeteredChunks(plan.chunks, provider, request.purpose.value)
+        plan.chunks = chunks
+        plan.close = chunks.close
+    return plan
+
+
+def plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
+    from app.modules.storage.storage_backend.runtime import get_backend
+
+    plan = _plan_artifact(artifact, request)
+    provider = (
+        "external"
+        if artifact.is_external
+        else getattr(get_backend(), "backend_name", "unknown")
+    )
+    return _observe(plan, request, provider)
+
+
+def plan_stored_representation(
+    backend: StorageBackend,
+    key: str,
+    request: DeliveryRequest,
+    *,
+    info: StorageObjectInfo | None = None,
+) -> DeliveryPlan:
+    return _observe(
+        _plan_stored_representation(backend, key, request, info=info),
+        request,
+        getattr(backend, "backend_name", "unknown"),
+    )

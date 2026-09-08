@@ -17,6 +17,7 @@
   listing. Its connection settings and extension identity are unchanged.
 
 ### Added
+- Download strategy and proxied-byte diagnostics use bounded labels; signed query credentials are redacted from application and access logs.
 
 - Authorized Artifact downloads can offload managed S3 bodies through short-lived
   HTTPS redirects when browser CORS is supported. Local files retain range

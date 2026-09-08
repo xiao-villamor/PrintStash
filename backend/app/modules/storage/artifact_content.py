@@ -206,10 +206,3 @@ def resolve(file: File, *, backend: StorageBackend | None = None) -> ArtifactHan
             else (backend if backend is not None else get_backend())
         ),
     )
-
-
-def presigned_download_url(file: File, filename: str) -> str | None:
-    """Return a vault-native URL only for vault-managed Artifact content."""
-    if file.is_external:
-        return None
-    return get_backend().presigned_download_url(file.path, filename)

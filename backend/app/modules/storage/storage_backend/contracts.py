@@ -397,11 +397,21 @@ class StorageBackend(ABC):
     @abstractmethod
     def usage(self, prefix: str = "") -> dict: ...
 
-    @abstractmethod
-    def presigned_download_url(self, key: str, filename: str) -> str | None: ...
+    def delivery_diagnostics(self) -> dict:
+        return {
+            "mode": "proxy",
+            "native_candidate": False,
+            "ranges": self.supports_ranges,
+        }
 
     def browser_download(
-        self, key: str, filename: str, media_type: str, *, origin: str | None = None
+        self,
+        key: str,
+        filename: str,
+        media_type: str,
+        *,
+        origin: str | None = None,
+        inline: bool = False,
     ) -> BrowserDownload | None:
         """Return a short-lived, header-free object capability when supported."""
         return None
@@ -587,8 +597,15 @@ class UnavailableStorageBackend(StorageBackend):
         del prefix
         return self._fail()
 
-    def presigned_download_url(self, key: str, filename: str) -> str | None:
-        del key, filename
+    def browser_download(
+        self,
+        key: str,
+        filename: str,
+        media_type: str,
+        *,
+        origin: str | None = None,
+        inline: bool = False,
+    ) -> BrowserDownload | None:
         return self._fail()
 
     def health_probe(self) -> dict:
