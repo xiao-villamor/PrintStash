@@ -30,6 +30,8 @@ def mounted_directories(mountinfo: Path = Path("/proc/self/mountinfo")) -> list[
                         Path("/sys"),
                         Path("/dev"),
                         Path("/etc"),
+                        Path("/boot"),
+                        Path("/run"),
                     )
                 ):
                     continue

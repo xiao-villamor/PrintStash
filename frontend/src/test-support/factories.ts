@@ -37,6 +37,8 @@
 
 import type {
   CollectionRead,
+  ExternalLibrary,
+  IngestJobStatus,
   ModelListItem,
   PrinterAccess,
   PrinterCapabilities,
@@ -387,6 +389,46 @@ export function aMultipartModel(
     created_at: "2026-01-01T00:00:00Z",
     parts: [],
     guides: [],
+    ...override,
+  };
+}
+
+/** A mounted, read-only source with its root verified. */
+export function anExternalLibrary(override?: Partial<ExternalLibrary>): ExternalLibrary {
+  return {
+    id: 1,
+    name: "My models",
+    root_path: "/libraries/models",
+    source_kind: "mounted",
+    writeback_enabled: false,
+    enabled: true,
+    scan_interval_minutes: 60,
+    scan_schedule: "0 * * * *",
+    watch_mode: "auto",
+    fs_kind: "local",
+    watch_active: false,
+    binding_state: "bound",
+    binding_reason: null,
+    root_enrollable: false,
+    collection_mode: "mirror",
+    target_collection_id: null,
+    last_scanned_at: null,
+    last_scan_status: null,
+    last_scan_summary: null,
+    ...override,
+  };
+}
+
+/** A terminal ingestion job; callers supply distinct IDs to isolate the task cache. */
+export function anIngestJob(override?: Partial<IngestJobStatus>): IngestJobStatus {
+  return {
+    job_id: "test-job",
+    state: "completed",
+    model_id: 1,
+    file_id: 1,
+    error: null,
+    started_at: FROZEN_NOW,
+    finished_at: FROZEN_NOW,
     ...override,
   };
 }

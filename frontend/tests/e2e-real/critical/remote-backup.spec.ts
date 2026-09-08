@@ -10,7 +10,7 @@ test.describe("remote-only backup recovery", () => {
     await page.goto("/setup");
     await page.getByLabel("Username").fill("backup-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
-    await page.getByLabel("Confirm password").fill("playwright-password");
+    await page.getByLabel("Confirm password", { exact: true }).fill("playwright-password");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Check storage" }).click();
     await page.getByRole("button", { name: "Create my account and continue" }).click();

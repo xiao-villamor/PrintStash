@@ -67,6 +67,14 @@ Requires the backend dev venv (`backend/.venv`); falls back to `uv run`.
 
 ## Coverage
 
+First-run onboarding (`playwright.onboarding.config.ts`) checks centered desktop
+and mobile layouts in Spanish, inline password visibility, immediately visible
+server folders, keyboard step navigation, and the account → first Model flow.
+The activation route also exercises the language/theme menus, the simplified
+upload dialog, mounted-folder help, postponing/resuming, and connecting a folder
+with automatic scanning. Screenshots include the Spanish chooser and dialogs at
+mobile and desktop sizes.
+
 auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
 (create / nest / delete / recursive-delete non-empty from the sidebar) ·

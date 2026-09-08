@@ -1,5 +1,9 @@
 """Mount discovery lists directories without descending into model trees."""
 
+from pathlib import Path
+
+import pytest
+
 from app.modules.sources.library_locations import mounted_directories
 
 
@@ -41,4 +45,16 @@ class TestMountedDirectories:
         table.write_text(
             "incomplete\n" * 2048 + f"1 0 1:1 / {directory} ro - ext4 /dev/test rw\n"
         )
+        assert mounted_directories(table) == []
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/boot", "/boot/efi", "/run", "/run/lock"],
+        ids=["boot", "boot-child", "runtime", "runtime-child"],
+    )
+    def test_filters_runtime_system_mounts(self, tmp_path, monkeypatch, path):
+        table = tmp_path / "mountinfo"
+        table.write_text(f"1 0 1:1 / {path} ro - tmpfs tmpfs rw\n")
+        # Every candidate exists, regardless of the test host's directory layout.
+        monkeypatch.setattr(Path, "is_dir", lambda self: True)
         assert mounted_directories(table) == []

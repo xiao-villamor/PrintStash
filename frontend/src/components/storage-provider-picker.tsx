@@ -15,7 +15,7 @@ import { storageOperationMessage } from "@/lib/storage-operations";
 import type { ProviderCategory, StorageProvider, StorageProviderConfigValues } from "@/types";
 
 const CATEGORIES: Array<{
-  id: ProviderCategory;
+  id: Exclude<ProviderCategory, "consumer_cloud">;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
@@ -85,12 +85,16 @@ export function StorageProviderPicker(props: {
   onValueChange: (name: string, value: string | number) => void;
   disabled?: boolean;
   activeTier?: string;
+  onboarding?: boolean;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
   const selected = props.providers.find((provider) => provider.id === props.providerId);
   const [categoryOverride, setCategoryOverride] = useState<ProviderCategory | null>(null);
   const selectedCategory = categoryOverride ?? selected?.category ?? "this_machine";
+  const categoryProviders = props.providers.filter(
+    (provider) => provider.category === selectedCategory,
+  );
   const secretFieldsSet = new Set(
     Array.isArray(props.values.secret_fields_set) ? props.values.secret_fields_set : [],
   );
@@ -105,10 +109,16 @@ export function StorageProviderPicker(props: {
   return (
     <div className="space-y-5">
       <fieldset className="space-y-2">
-        <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-          {uiText("Storage category")}
+        <legend
+          className={
+            props.onboarding
+              ? "sr-only"
+              : "text-xs font-mono uppercase tracking-wider text-on-surface-variant"
+          }
+        >
+          {props.onboarding ? uiText("setup.storageChoice") : uiText("Storage category")}
         </legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className={props.onboarding ? "grid grid-cols-3 gap-2" : "grid gap-2 sm:grid-cols-2"}>
           {CATEGORIES.map((category) => {
             const Icon = category.icon;
             const hasProviders = props.providers.some(
@@ -119,31 +129,55 @@ export function StorageProviderPicker(props: {
               <Button
                 key={category.id}
                 type="button"
-                variant="outline"
+                variant={props.onboarding && category.id !== "this_machine" ? "ghost" : "outline"}
                 disabled={props.disabled || !hasProviders}
                 aria-pressed={active}
-                onClick={() => setCategoryOverride(category.id)}
+                aria-label={
+                  props.onboarding && category.id === "this_machine"
+                    ? uiText("setup.serverStorage")
+                    : category.label
+                }
+                onClick={() => {
+                  const choices = props.providers.filter(
+                    (provider) => provider.category === category.id,
+                  );
+                  const firstAvailable = choices.find((provider) => provider.selectable);
+                  if (props.onboarding && firstAvailable) {
+                    setCategoryOverride(null);
+                    if (selected?.category !== category.id) props.onProviderChange(firstAvailable);
+                  } else setCategoryOverride(category.id);
+                }}
                 className={cn(
                   "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
+                  props.onboarding &&
+                    (category.id === "this_machine"
+                      ? "col-span-3 min-h-12"
+                      : "min-h-11 flex-col justify-center px-1 py-2 text-center text-xs sm:flex-row"),
                   active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {category.label}
+                {props.onboarding ? uiText(`setup.category.${category.id}`) : category.label}
+                {props.onboarding && category.id === "this_machine" && (
+                  <span className="ml-auto text-xs font-normal">{uiText("setup.recommended")}</span>
+                )}
               </Button>
             );
           })}
         </div>
       </fieldset>
 
-      <fieldset className="space-y-2">
-        <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-          {uiText("Provider")}
-        </legend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {props.providers
-            .filter((provider) => provider.category === selectedCategory)
-            .map((provider) => (
+      {!(
+        props.onboarding &&
+        categoryProviders.length === 1 &&
+        categoryProviders[0].id === selected?.id
+      ) && (
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+            {uiText("Provider")}
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {categoryProviders.map((provider) => (
               <Button
                 key={provider.id}
                 type="button"
@@ -179,48 +213,61 @@ export function StorageProviderPicker(props: {
                 </span>
               </Button>
             ))}
-        </div>
-      </fieldset>
+          </div>
+        </fieldset>
+      )}
 
-      {selected && (
-        <section className="space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">
-                {i18n?.t("settings.storageSupport", {
-                  level: supportLabel(selected.support_level),
-                }) ??
-                  uiText("Support: {value1}", {
-                    value1: String(supportLabel(selected.support_level)),
-                  })}
-              </Badge>
-              <Badge variant="secondary">
-                {uiText("Expected: {value1}", {
-                  value1: String(tierLabel(selected.expected_tier) ?? ""),
-                })}
-              </Badge>
-              {props.activeTier && (
+      {selected && (!props.onboarding || selected.category === selectedCategory) && (
+        <section
+          className={
+            props.onboarding && selected.id === "local"
+              ? "space-y-3"
+              : "space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4"
+          }
+        >
+          {props.onboarding && selected.id === "local" ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {uiText("setup.serverPaths")}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">
-                  {uiText("Active: {value1}", {
-                    value1: String(tierLabel(props.activeTier) ?? ""),
+                  {i18n?.t("settings.storageSupport", {
+                    level: supportLabel(selected.support_level),
+                  }) ??
+                    uiText("Support: {value1}", {
+                      value1: String(supportLabel(selected.support_level)),
+                    })}
+                </Badge>
+                <Badge variant="secondary">
+                  {uiText("Expected: {value1}", {
+                    value1: String(tierLabel(selected.expected_tier) ?? ""),
                   })}
                 </Badge>
+                {props.activeTier && (
+                  <Badge variant="outline">
+                    {uiText("Active: {value1}", {
+                      value1: String(tierLabel(props.activeTier) ?? ""),
+                    })}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-on-surface">{knownUiText(selected.expected_tier_note)}</p>
+              {selected.expected_tier === "guarded" && (
+                <p className="text-xs font-medium text-on-surface">
+                  {uiText("Guarded storage consequences")}
+                </p>
+              )}
+              {consequences.length > 0 && (
+                <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
+                  {consequences.map((consequence) => (
+                    <li key={consequence}>{knownUiText(consequence)}</li>
+                  ))}
+                </ul>
               )}
             </div>
-            <p className="text-sm text-on-surface">{knownUiText(selected.expected_tier_note)}</p>
-            {selected.expected_tier === "guarded" && (
-              <p className="text-xs font-medium text-on-surface">
-                {uiText("Guarded storage consequences")}
-              </p>
-            )}
-            {consequences.length > 0 && (
-              <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
-                {consequences.map((consequence) => (
-                  <li key={consequence}>{knownUiText(consequence)}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+          )}
 
           <StorageProviderFields
             provider={selected}
@@ -228,6 +275,7 @@ export function StorageProviderPicker(props: {
             onChange={props.onValueChange}
             disabled={props.disabled}
             storedSecrets={[...secretFieldsSet]}
+            omitFields={props.onboarding && selected.id === "local" ? ["root"] : undefined}
           />
         </section>
       )}

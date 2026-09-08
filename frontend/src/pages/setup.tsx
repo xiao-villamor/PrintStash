@@ -2,6 +2,7 @@ import { storageOperationMessage } from "@/lib/storage-operations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import {
   beginSetup,
@@ -49,7 +50,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [step, setStep] = useState<1 | 2>(1);
   const [account, setAccount] = useState({ username: "", password: "", confirm: "", email: "" });
-  const [showPassword, setShowPassword] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState({ password: false, confirm: false });
   const [providers, setProviders] = useState<StorageProvider[]>([]);
   const [providerId, setProviderId] = useState("local");
   const [values, setValues] = useState<ProviderValues>({});
@@ -64,7 +65,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   const form = useRef<HTMLFormElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (step === 2) heading.current?.focus();
+    heading.current?.focus();
   }, [step]);
 
   function describeError(error: Error): string {
@@ -241,7 +242,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
         <form
           ref={form}
           noValidate
-          className="space-y-6"
+          className="space-y-5"
           onSubmit={(event) => {
             event.preventDefault();
             if (step === 1) next();
@@ -249,7 +250,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
           }}
         >
           <div>
-            <h2 ref={heading} tabIndex={-1} className="text-2xl font-semibold">
+            <h2 ref={heading} tabIndex={-1} className="text-2xl font-bold tracking-tight">
               {t(step === 1 ? "setup.account" : "setup.files")}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -257,37 +258,80 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
             </p>
           </div>
           {step === 1 ? (
-            <>
+            <div className="grid gap-5 sm:grid-cols-2">
               {(["username", "password", "confirm", "email"] as const).map((field) => (
-                <div key={field} className="space-y-2">
-                  <label htmlFor={`setup-${field}`} className="text-sm font-medium">
+                <div
+                  key={field}
+                  className={
+                    field === "username" || field === "email"
+                      ? "space-y-2 sm:col-span-2"
+                      : "space-y-2"
+                  }
+                >
+                  <label
+                    htmlFor={`setup-${field}`}
+                    className="block text-xs font-medium text-on-surface-variant"
+                  >
                     {t(`setup.${field}`)}
                   </label>
-                  <Input
-                    id={`setup-${field}`}
-                    value={account[field]}
-                    autoFocus={field === "username"}
-                    required={field !== "email"}
-                    maxLength={field === "username" ? 128 : 256}
-                    type={
-                      field === "password" || field === "confirm"
-                        ? showPassword
-                          ? "text"
-                          : "password"
-                        : field === "email"
-                          ? "email"
-                          : "text"
-                    }
-                    autoComplete={
-                      field === "password" || field === "confirm" ? "new-password" : field
-                    }
-                    aria-invalid={fieldError === field}
-                    aria-describedby={`setup-${field}-help`}
-                    onChange={(event) => {
-                      setAccount((current) => ({ ...current, [field]: event.target.value }));
-                      if (fieldError === field) setFieldError(null);
-                    }}
-                  />
+                  <div className="relative">
+                    <Input
+                      id={`setup-${field}`}
+                      value={account[field]}
+                      autoFocus={field === "username"}
+                      required={field !== "email"}
+                      maxLength={field === "username" ? 128 : 256}
+                      type={
+                        field === "password" || field === "confirm"
+                          ? visiblePasswords[field]
+                            ? "text"
+                            : "password"
+                          : field === "email"
+                            ? "email"
+                            : "text"
+                      }
+                      autoComplete={
+                        field === "password" || field === "confirm" ? "new-password" : field
+                      }
+                      aria-invalid={fieldError === field}
+                      aria-describedby={`setup-${field}-help`}
+                      className={
+                        field === "password" || field === "confirm"
+                          ? "h-11 bg-surface-container-lowest pr-12"
+                          : "h-11 bg-surface-container-lowest"
+                      }
+                      onChange={(event) => {
+                        setAccount((current) => ({ ...current, [field]: event.target.value }));
+                        if (fieldError === field) setFieldError(null);
+                      }}
+                    />
+                    {(field === "password" || field === "confirm") && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute inset-y-0 right-0 h-full w-11 text-muted-foreground"
+                        aria-label={t(
+                          visiblePasswords[field] ? "setup.hideField" : "setup.showField",
+                          { field: t(`setup.${field}`) },
+                        )}
+                        aria-controls={`setup-${field}`}
+                        aria-pressed={visiblePasswords[field]}
+                        onClick={() =>
+                          setVisiblePasswords((current) => ({
+                            ...current,
+                            [field]: !current[field],
+                          }))
+                        }
+                      >
+                        {visiblePasswords[field] ? (
+                          <EyeOff className="h-4 w-4" aria-hidden />
+                        ) : (
+                          <Eye className="h-4 w-4" aria-hidden />
+                        )}
+                      </Button>
+                    )}
+                  </div>
                   <p
                     id={`setup-${field}-help`}
                     role={fieldError === field ? "alert" : undefined}
@@ -307,49 +351,59 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
                   </p>
                 </div>
               ))}
-              <Button
-                type="button"
-                variant="ghost"
-                aria-pressed={showPassword}
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {t(showPassword ? "setup.hide" : "setup.show")}
-              </Button>
-            </>
+            </div>
           ) : (
             <>
-              <p className="font-medium">{t("setup.filesHelp")}</p>
-              <p className="text-sm text-muted-foreground">{t("setup.existingHelp")}</p>
-              <details className="rounded-lg border border-border p-4">
-                <summary className="cursor-pointer text-sm font-medium">
-                  {t("setup.advanced")}
-                </summary>
-                <div className="mt-4">
-                  <StorageProviderPicker
-                    providers={providers}
-                    providerId={providerId}
-                    values={values}
-                    onProviderChange={(provider) => {
-                      setProviderId(provider.id);
-                      setValues(defaultProviderValues(provider));
-                      setCheck(null);
-                    }}
-                    onValueChange={(name, value) => {
-                      setValues((current) => ({ ...current, [name]: value }));
-                      setCheck(null);
-                    }}
-                  />
+              <div className="space-y-4">
+                <StorageProviderPicker
+                  onboarding
+                  disabled={operation === "create"}
+                  providers={providers}
+                  providerId={providerId}
+                  values={values}
+                  onProviderChange={(provider) => {
+                    setProviderId(provider.id);
+                    const defaults = defaultProviderValues(provider);
+                    if (provider.id === "local") {
+                      defaults.data_dir = status.current_data_dir ?? status.default_data_dir ?? "";
+                      defaults.thumb_dir =
+                        status.current_thumb_dir ?? status.default_thumb_dir ?? "";
+                    }
+                    setValues(defaults);
+                    setCheck(null);
+                    setError("");
+                  }}
+                  onValueChange={(name, value) => {
+                    setValues((current) => ({ ...current, [name]: value }));
+                    setCheck(null);
+                    setError("");
+                  }}
+                />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {t("setup.existingHelp")}
+                </p>
+              </div>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {t("setup.checkFirst")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant={currentCheck?.ready ? "outline" : "default"}
+                    loading={operation === "check"}
+                    disabled={operation === "create"}
+                    className="shrink-0"
+                    onClick={() => void checkStorage()}
+                  >
+                    {t("setup.check")}
+                  </Button>
                 </div>
-              </details>
-              <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  loading={busy}
-                  onClick={() => void checkStorage()}
-                >
-                  {t("setup.check")}
-                </Button>
                 <div role="status" aria-live="polite">
                   {busy ? (
                     t(operation === "check" ? "setup.checking" : "setup.creating")
@@ -370,36 +424,48 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
                 </div>
                 <p className="text-xs text-muted-foreground">{t("setup.checkHelp")}</p>
               </div>
-              <section className="space-y-2 border-t border-border pt-4">
-                <h3 className="font-medium">{t("setup.summary")}</h3>
-                <p>
-                  {account.username.trim()}{" "}
-                  <Button type="button" variant="ghost" disabled={busy} onClick={() => setStep(1)}>
+              <section aria-label={t("setup.summary")}>
+                <p className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 break-all">
+                    <span className="text-muted-foreground">{t("setup.username")}: </span>
+                    {account.username.trim()}{" "}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setStep(1)}
+                  >
                     {t("setup.edit")}
                   </Button>
-                </p>
-                <p className="break-all text-sm text-muted-foreground">
-                  {providerId === "local"
-                    ? String(values.data_dir ?? "")
-                    : providers.find((p) => p.id === providerId)?.label}
                 </p>
               </section>
             </>
           )}
-          {error && (
+          {error && step === 1 && (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
-          <div className="flex justify-between gap-3 border-t border-border pt-5">
+          <div className="flex gap-3 border-t border-border pt-5">
             {step === 2 ? (
-              <Button type="button" variant="outline" disabled={busy} onClick={() => setStep(1)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11"
+                disabled={busy}
+                onClick={() => setStep(1)}
+              >
                 {t("setup.back")}
               </Button>
-            ) : (
-              <span />
-            )}
-            <Button type="submit" loading={busy} disabled={step === 2 && !currentCheck?.ready}>
+            ) : null}
+            <Button
+              type="submit"
+              className="h-auto min-h-11 flex-1 whitespace-normal py-2.5"
+              loading={busy}
+              disabled={step === 2 && !currentCheck?.ready}
+            >
               {t(step === 1 ? "setup.next" : "setup.create")}
             </Button>
           </div>

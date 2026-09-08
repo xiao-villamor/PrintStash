@@ -2,7 +2,7 @@
 
 import { uiMessage, type MessageDescriptor } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { useUiLocale } from "@/lib/i18n";
+import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -39,6 +39,7 @@ import {
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
+import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
@@ -124,6 +125,8 @@ export function UploadModal({
   preloadFiles,
   preloadItems,
   initialMode,
+  onboarding = false,
+  onTaskStarted,
 }: {
   open: boolean;
   onClose: () => void;
@@ -132,8 +135,11 @@ export function UploadModal({
   preloadFiles?: File[] | null;
   preloadItems?: BulkItem[] | null;
   initialMode?: UploadMode;
+  onboarding?: boolean;
+  onTaskStarted?: (taskId: string) => void;
 }) {
   useUiLocale();
+  const { t } = useI18n();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -700,6 +706,7 @@ export function UploadModal({
       expectedJobCount: meshFile && gcodeFile ? 2 : 1,
     });
     setSubmitting(true);
+    onTaskStarted?.(taskId);
     void runUploadTask({
       taskId,
       mesh: meshFile,
@@ -756,11 +763,20 @@ export function UploadModal({
       <>
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
           <div>
-            <h3 id="upload-modal-title" className="text-sm font-semibold text-on-surface">
-              {uiText("Upload model")}
+            <h3
+              id="upload-modal-title"
+              className={
+                onboarding
+                  ? "text-xl font-semibold tracking-tight text-on-surface"
+                  : "text-sm font-semibold text-on-surface"
+              }
+            >
+              {onboarding ? t("setup.firstUpload") : uiText("Upload model")}
             </h3>
             <p className="text-xs text-on-surface-variant mt-0.5">
-              {uiText("Drop a 3D model, a G-code, or both together")}
+              {onboarding
+                ? t("setup.firstUploadHelp")
+                : uiText("Drop a 3D model, a G-code, or both together")}
             </p>
           </div>
           <button
@@ -784,14 +800,14 @@ export function UploadModal({
 
         <form onSubmit={doSubmit} className="p-6 space-y-5">
           {/* Mode tabs */}
-          {!reviewing && (
+          {!reviewing && !onboarding && (
             <div className="flex gap-1 rounded border border-outline-variant p-1">
               {(
                 [
-                  ["files", "Files", Upload],
-                  ["bulk", "Bulk", Layers],
-                  ["url", "From URL", Link2],
-                  ["zip", "From ZIP", Package],
+                  ["files", "uploads.mode.files", Upload],
+                  ["bulk", "uploads.mode.bulk", Layers],
+                  ["url", "uploads.mode.url", Link2],
+                  ["zip", "uploads.mode.zip", Package],
                 ] as const
               ).map(([m, label, Icon]) => (
                 <button
@@ -804,14 +820,49 @@ export function UploadModal({
                       : "text-on-surface-variant hover:bg-surface-container-low"
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" /> {label}
+                  <Icon className="h-3.5 w-3.5" /> {t(label)}
                 </button>
               ))}
             </div>
           )}
 
           {/* Input area */}
-          {manifest ? (
+          {onboarding ? (
+            <div className="space-y-3">
+              <label htmlFor="setup-upload-file" className="block text-sm font-medium">
+                {t("setup.chooseFile")}
+              </label>
+              <label
+                htmlFor="setup-upload-file"
+                className="flex min-h-32 cursor-pointer flex-col items-center justify-center gap-3 rounded-md border border-dashed border-outline-variant bg-surface-container-low p-5 text-center hover:bg-surface-container focus-within:ring-2 focus-within:ring-ring"
+              >
+                <Upload className="h-6 w-6 text-muted-foreground" aria-hidden />
+                <span className="max-w-full break-all text-sm font-medium">
+                  {meshFile?.name || gcodeFile?.name || t("setup.chooseFileAction")}
+                </span>
+                <input
+                  id="setup-upload-file"
+                  type="file"
+                  accept={`${MESH_ACCEPT},${GCODE_ACCEPT}`}
+                  className="sr-only"
+                  aria-label={t("setup.chooseFile")}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setMeshFile(file && isMeshFile(file.name) ? file : null);
+                    setGcodeFile(file && isGcodeFile(file.name) ? file : null);
+                    if (file) autoName(file);
+                  }}
+                  aria-describedby="setup-upload-formats"
+                />
+              </label>
+              <p
+                id="setup-upload-formats"
+                className="text-xs leading-relaxed text-muted-foreground"
+              >
+                {t("setup.fileFormats")}
+              </p>
+            </div>
+          ) : manifest ? (
             <ManifestList
               manifest={manifest}
               selected={selectedEntries}
@@ -887,10 +938,14 @@ export function UploadModal({
                   name from the downloaded file/page) */}
           {!reviewing && mode === "files" && (
             <div>
-              <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
+              <label
+                htmlFor="upload-model-name"
+                className="block text-sm font-medium text-on-surface mb-2"
+              >
                 {uiText("Model name")}
               </label>
               <input
+                id="upload-model-name"
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -899,205 +954,207 @@ export function UploadModal({
             </div>
           )}
 
-          {/* Collection */}
-          <div>
-            <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-              {uiText("Collection")}
-            </label>
-            <DropdownMenu
-              open={catOpen}
-              onOpenChange={setCatOpen}
-              align="start"
-              role="listbox"
-              contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
-              trigger={
-                <button
-                  type="button"
-                  data-menu-trigger
-                  onClick={() => setCatOpen((v) => !v)}
-                  aria-haspopup="listbox"
-                  aria-expanded={catOpen}
-                  className="w-full h-10 flex items-center justify-between bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                >
-                  <span className={collectionPath ? "" : "text-on-surface-variant/60"}>
-                    {collectionPath ||
-                      (user?.is_superuser ? uiText("None") : uiText("Choose collection"))}
-                  </span>
-                  <ChevronDown className="h-4 w-4 text-on-surface-variant" />
-                </button>
-              }
-            >
-              {user?.is_superuser && (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={collectionPath === ""}
-                  onClick={() => {
-                    setPickedCollection("");
-                    setCatOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
-                >
-                  {uiText("None")}
-                </button>
-              )}
-              {writableCollections.length === 0 ? (
-                <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
-                  {uiText("No editable collections.")}
-                </div>
-              ) : (
-                writableCollections.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    role="option"
-                    aria-selected={collectionPath === c.path}
-                    onClick={() => {
-                      setPickedCollection(c.path);
-                      setCatOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                      collectionPath === c.path
-                        ? "text-primary bg-secondary-container"
-                        : "text-on-surface-variant hover:bg-surface-container-low"
-                    }`}
-                  >
-                    {c.path} <span className="opacity-50">({c.model_count})</span>
-                  </button>
-                ))
-              )}
-            </DropdownMenu>
-          </div>
-
-          {/* Destination (mounted-source write-back) — only when an eligible source exists */}
-          {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
-            <div>
-              <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                {uiText("Store in")}
-              </label>
-              <select
-                value={targetLibraryId}
-                onChange={(e) =>
-                  setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
-                }
-                className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              >
-                <option value="">{uiText("Vault storage")}</option>
-                {libraries.map((lib) => (
-                  <option key={lib.id} value={lib.id}>
-                    {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
-                {uiText(
-                  "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
-                )}
-              </p>
-            </div>
-          )}
-
-          {/* Tags */}
-          <div>
-            <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-              {uiText("Tags")}
-            </label>
-            <div className="relative">
-              <input
-                value={tagInput}
-                onChange={(e) => {
-                  setTagInput(e.target.value);
-                  tagNav.setActiveIndex(-1);
-                }}
-                {...tagNav.inputProps}
-                onKeyDown={(e) => {
-                  tagNav.inputProps.onKeyDown(e);
-                  if (e.defaultPrevented) return;
-                  if (e.key === "Backspace" && !tagInput && selectedTags.length) {
-                    setSelectedTags((p) => p.slice(0, -1));
-                  }
-                }}
-                placeholder={uiText("Search or create — press Enter")}
-                className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              />
-              {tagInput && (filteredTags.length > 0 || canCreateNewTag) && (
-                <div
-                  id={tagNav.listboxId}
+          {/* First uploads need no collection or tags; these remain in the library upload dialog. */}
+          {!onboarding && (
+            <>
+              {/* Collection */}
+              <div>
+                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
+                  {uiText("Collection")}
+                </label>
+                <DropdownMenu
+                  open={catOpen}
+                  onOpenChange={setCatOpen}
+                  align="start"
                   role="listbox"
-                  className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
-                >
-                  {shownTags.map((t, i) => (
+                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
+                  trigger={
                     <button
-                      key={t.id}
-                      id={tagNav.optionId(i)}
-                      role="option"
-                      aria-selected={i === tagNav.activeIndex}
                       type="button"
-                      onClick={() => {
-                        toggleTag(t.slug);
-                        setTagInput("");
-                      }}
-                      className={`w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low flex justify-between ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                      data-menu-trigger
+                      onClick={() => setCatOpen((v) => !v)}
+                      aria-haspopup="listbox"
+                      aria-expanded={catOpen}
+                      className="w-full h-10 flex items-center justify-between bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     >
-                      <span>{t.name}</span>
-                      <span className="opacity-50">({t.model_count})</span>
+                      <span className={collectionPath ? "" : "text-on-surface-variant/60"}>
+                        {collectionPath ||
+                          (user?.is_superuser ? uiText("None") : uiText("Choose collection"))}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-on-surface-variant" />
                     </button>
-                  ))}
-                  {canCreateNewTag && (
+                  }
+                >
+                  {user?.is_superuser && (
                     <button
                       type="button"
-                      id={tagNav.optionId(shownTags.length)}
                       role="option"
-                      aria-selected={shownTags.length === tagNav.activeIndex}
+                      aria-selected={collectionPath === ""}
                       onClick={() => {
-                        doCreateTag(tagInput);
-                        setTagInput("");
+                        setPickedCollection("");
+                        setCatOpen(false);
                       }}
-                      className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
                     >
-                      <Plus className="h-3 w-3" />
-                      {uiText(' Create "')}
-                      {tagInput.trim()}
-                      {uiText('"')}
+                      {uiText("None")}
                     </button>
                   )}
+                  {writableCollections.length === 0 ? (
+                    <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
+                      {uiText("No editable collections.")}
+                    </div>
+                  ) : (
+                    writableCollections.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="option"
+                        aria-selected={collectionPath === c.path}
+                        onClick={() => {
+                          setPickedCollection(c.path);
+                          setCatOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
+                          collectionPath === c.path
+                            ? "text-primary bg-secondary-container"
+                            : "text-on-surface-variant hover:bg-surface-container-low"
+                        }`}
+                      >
+                        {c.path} <span className="opacity-50">({c.model_count})</span>
+                      </button>
+                    ))
+                  )}
+                </DropdownMenu>
+              </div>
+
+              {/* Destination (mounted-source write-back) — only when an eligible source exists */}
+              {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
+                <div>
+                  <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
+                    {uiText("Store in")}
+                  </label>
+                  <select
+                    value={targetLibraryId}
+                    onChange={(e) =>
+                      setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
+                    }
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="">{uiText("Vault storage")}</option>
+                    {libraries.map((lib) => (
+                      <option key={lib.id} value={lib.id}>
+                        {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
+                    {uiText(
+                      "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
+                    )}
+                  </p>
                 </div>
               )}
-            </div>
-            {selectedTags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {selectedTags.map((slug) => {
-                  const t = tags.find((x) => x.slug === slug);
-                  return (
-                    <span
-                      key={slug}
-                      className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider"
-                    >
-                      {t?.name || slug}
-                      <button
-                        type="button"
-                        onClick={() => toggleTag(slug)}
-                        aria-label={uiText("Remove {value1}", { value1: String(t?.name || slug) })}
-                        className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
+              {/* Tags */}
+              <div>
+                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
+                  {uiText("Tags")}
+                </label>
+                <div className="relative">
+                  <input
+                    value={tagInput}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      tagNav.setActiveIndex(-1);
+                    }}
+                    {...tagNav.inputProps}
+                    onKeyDown={(e) => {
+                      tagNav.inputProps.onKeyDown(e);
+                      if (e.defaultPrevented) return;
+                      if (e.key === "Backspace" && !tagInput && selectedTags.length) {
+                        setSelectedTags((p) => p.slice(0, -1));
+                      }
+                    }}
+                    placeholder={uiText("Search or create — press Enter")}
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                  {tagInput && (filteredTags.length > 0 || canCreateNewTag) && (
+                    <div
+                      id={tagNav.listboxId}
+                      role="listbox"
+                      className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+                    >
+                      {shownTags.map((t, i) => (
+                        <button
+                          key={t.id}
+                          id={tagNav.optionId(i)}
+                          role="option"
+                          aria-selected={i === tagNav.activeIndex}
+                          type="button"
+                          onClick={() => {
+                            toggleTag(t.slug);
+                            setTagInput("");
+                          }}
+                          className={`w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low flex justify-between ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                        >
+                          <span>{t.name}</span>
+                          <span className="opacity-50">({t.model_count})</span>
+                        </button>
+                      ))}
+                      {canCreateNewTag && (
+                        <button
+                          type="button"
+                          id={tagNav.optionId(shownTags.length)}
+                          role="option"
+                          aria-selected={shownTags.length === tagNav.activeIndex}
+                          onClick={() => {
+                            doCreateTag(tagInput);
+                            setTagInput("");
+                          }}
+                          className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                        >
+                          <Plus className="h-3 w-3" />
+                          {uiText(' Create "')}
+                          {tagInput.trim()}
+                          {uiText('"')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {selectedTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {selectedTags.map((slug) => {
+                      const t = tags.find((x) => x.slug === slug);
+                      return (
+                        <span
+                          key={slug}
+                          className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider"
+                        >
+                          {t?.name || slug}
+                          <button
+                            type="button"
+                            onClick={() => toggleTag(slug)}
+                            aria-label={uiText("Remove {value1}", {
+                              value1: String(t?.name || slug),
+                            })}
+                            className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
           <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={close}
-              className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors"
-            >
+            <Button type="button" variant="outline" onClick={close} className="min-h-11">
               {uiText("Cancel")}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={
                 submitting ||
@@ -1112,7 +1169,7 @@ export function UploadModal({
                         ? !urlValue.trim()
                         : !zipFile)
               }
-              className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="min-h-11"
             >
               {submitting ? (
                 <>
@@ -1135,10 +1192,12 @@ export function UploadModal({
                 uiText("Review URL")
               ) : mode === "zip" ? (
                 uiText("Inspect archive")
+              ) : onboarding ? (
+                t("setup.addModel")
               ) : (
                 uiText("Upload to vault")
               )}
-            </button>
+            </Button>
           </div>
         </form>
       </>

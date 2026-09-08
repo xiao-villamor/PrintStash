@@ -15,6 +15,16 @@
 
 ### Changed
 
+- First-run setup uses a centered, responsive form with inline password visibility
+  controls. Storage choices and server folders are visible immediately, with a
+  clear access-check step before account creation and guidance in English and Spanish.
+  A compact branded frame, slim progress steps, and a prominent server-storage
+  choice bring the guide closer to the app's forms and reduce mobile scrolling.
+  The first-model guide now offers a focused file upload or a two-field folder
+  connection that starts scanning immediately. Upload progress, recoverable scan
+  errors, and verified Model links stay visible in the guide; backup and printer
+  shortcuts follow the first Model.
+
 - Artifact downloads use the canonical `/files/{id}/download` endpoint. The
   separate `download-url` and `download-direct` endpoints have been removed.
 

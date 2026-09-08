@@ -4,6 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Moon, Sun } from "lucide-react";
 
 const STORAGE_KEY = "printstash.theme";
@@ -42,15 +43,16 @@ export function ThemeToggle() {
   }
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={toggle}
       title={theme === "dark" ? uiText("Switch to light mode") : uiText("Switch to dark mode")}
       aria-label={uiText("Toggle theme")}
-      className="text-muted-foreground hover:text-primary transition-colors flex items-center justify-center font-mono"
     >
       <span key={theme} className="animate-theme-icon inline-flex">
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </span>
-    </button>
+    </Button>
   );
 }
