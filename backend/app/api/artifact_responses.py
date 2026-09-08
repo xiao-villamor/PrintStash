@@ -25,17 +25,18 @@ def delivery_request(
     purpose: DeliveryPurpose = DeliveryPurpose.DOWNLOAD,
 ) -> DeliveryRequest:
     headers = request.headers if request is not None else {}
+    base_url = getattr(request, "base_url", None)
     fetch = headers.get("sec-fetch-mode") in {"cors", "same-origin"}
     origin = headers.get("origin")
-    if origin is None and request is not None and fetch:
-        origin = str(request.base_url).rstrip("/")
+    if origin is None and base_url is not None and fetch:
+        origin = str(base_url).rstrip("/")
     return DeliveryRequest(
         filename=filename,
         media_type=media_type,
         purpose=purpose,
         inline=purpose == DeliveryPurpose.THUMBNAIL,
         origin=origin,
-        application_origin=(str(request.base_url).rstrip("/") if request else None),
+        application_origin=(str(base_url).rstrip("/") if base_url is not None else None),
         if_none_match=headers.get("if-none-match"),
         if_modified_since=headers.get("if-modified-since"),
         range_header=headers.get("range"),
