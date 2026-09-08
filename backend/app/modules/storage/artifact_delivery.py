@@ -46,6 +46,7 @@ class DeliveryRequest:
     media_type: str = "application/octet-stream"
     purpose: DeliveryPurpose = DeliveryPurpose.DOWNLOAD
     origin: str | None = None
+    application_origin: str | None = None
     if_none_match: str | None = None
     if_modified_since: str | None = None
     range_header: str | None = None
@@ -160,10 +161,22 @@ def byte_range(value: str | None, size: int) -> tuple[int, int] | None:
 
 
 def safe_browser_download(
-    target: BrowserDownload, *, key: str, origin: str | None, now: datetime
+    target: BrowserDownload,
+    *,
+    key: str,
+    origin: str | None,
+    application_origin: str | None = None,
+    now: datetime,
 ) -> bool:
     try:
         url = urlsplit(target.url)
+        app_url = urlsplit(application_origin) if application_origin else None
+        target_origin = (url.scheme.lower(), url.hostname, url.port or 443)
+        app_origin = (
+            (app_url.scheme.lower(), app_url.hostname, app_url.port or 443)
+            if app_url is not None
+            else None
+        )
         remaining = (ensure_utc(target.expires_at) - ensure_utc(now)).total_seconds()
         return (
             url.scheme == "https"
@@ -177,6 +190,11 @@ def safe_browser_download(
             and target.key == key
             and 0 < remaining <= MAX_REDIRECT_SECONDS
             and (origin is None or target.cors_origin == origin)
+            # Browsers and HTTP clients may retain Authorization across a
+            # same-origin redirect. Provider targets must never receive the
+            # PrintStash bearer credential, even when an S3 endpoint is reverse
+            # proxied below the application's own host.
+            and target_origin != app_origin
         )
     except (ValueError, TypeError, OverflowError):
         return False
@@ -216,7 +234,11 @@ def _plan_artifact(artifact: File, request: DeliveryRequest) -> DeliveryPlan:
             inline=request.inline,
         )
         if target is not None and safe_browser_download(
-            target, key=artifact.path, origin=request.origin, now=utcnow()
+            target,
+            key=artifact.path,
+            origin=request.origin,
+            application_origin=request.application_origin,
+            now=utcnow(),
         ):
             return DeliveryPlan(
                 307,
@@ -297,7 +319,11 @@ def _plan_stored_representation(
             inline=request.inline,
         )
         if target is not None and safe_browser_download(
-            target, key=key, origin=request.origin, now=utcnow()
+            target,
+            key=key,
+            origin=request.origin,
+            application_origin=request.application_origin,
+            now=utcnow(),
         ):
             return DeliveryPlan(
                 307,

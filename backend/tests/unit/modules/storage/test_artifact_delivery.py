@@ -26,10 +26,32 @@ class TestSafeBrowserDownload:
         )
 
         accepted = safe_browser_download(
-            target, key="key", origin="https://app.test", now=NOW
+            target,
+            key="key",
+            origin="https://app.test",
+            application_origin="https://app.test",
+            now=NOW,
         )
 
         assert accepted is True
+
+    def test_refuses_a_same_origin_target_that_could_receive_authorization(self):
+        target = BrowserDownload(
+            "https://app.test/storage/object?signature=test",
+            NOW + timedelta(seconds=30),
+            "key",
+            cors_origin="https://app.test",
+        )
+
+        accepted = safe_browser_download(
+            target,
+            key="key",
+            origin="https://app.test",
+            application_origin="https://app.test",
+            now=NOW,
+        )
+
+        assert accepted is False
 
     @pytest.mark.parametrize(
         "url",

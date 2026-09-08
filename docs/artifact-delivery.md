@@ -28,7 +28,9 @@ CORS configuration; without it, downloads safely fall back to API proxying.
 The app downloads with authenticated `fetch`. A provider redirect therefore needs
 CORS, even for the ordinary Download action. PrintStash reads the bucket's CORS
 configuration; absence of this capability or permission keeps delivery through
-the API. It does not change bucket configuration.
+the API. It does not change bucket configuration. The S3 endpoint must also use
+a different origin from PrintStash so an application `Authorization` header can
+never be retained across the redirect.
 
 Allow the actual PrintStash origin and expose `Content-Disposition`. For example:
 
