@@ -1,12 +1,13 @@
 # pyright: basic
 """A mock PrusaLink v1 service for client contract tests.
 
-Speaks the subset of the PrusaLink v1 REST API the client drives: status,
-job, file list/upload/delete under ``/api/v1/files/local``, the OctoPrint-
-compatible select+print start under ``/api/files/local``, and job
-pause/resume/cancel. Two credential modes, both exercised by the client's
-own tests: **digest** (401 challenge + ``WWW-Authenticate: Digest``, real
-nonce validation via RFC 2617 MD5) and legacy **``X-Api-Key``**.
+Speaks the subset of the PrusaLink v1 REST API the client drives: storage
+discovery, status, job, file list/upload/delete/start under a configurable
+storage root, and job pause/resume/cancel. ``/local`` represents Raspberry Pi
+PrusaLink and ``/usb`` represents Buddy firmware used by printers such as Core
+One. Two credential modes are exercised: **digest** (401 challenge +
+``WWW-Authenticate: Digest``, real nonce validation via RFC 2617 MD5) and legacy
+**``X-Api-Key``**.
 
 Run standalone::
 
@@ -60,7 +61,12 @@ def create_app(
     api_key: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
+    storage_path: str = "/local",
 ) -> tuple[FastAPI, PrintSim]:
+    storage_name = storage_path.strip("/")
+    if not storage_name or "/" in storage_name:
+        raise ValueError("storage_path must name one absolute storage root")
+    storage_root = f"/{storage_name}"
     sim = PrintSim(
         total_mm=total_mm, total_seconds=total_seconds, print_seconds=print_seconds
     )
@@ -169,6 +175,19 @@ def create_app(
             "nozzle_diameter": 0.4,
         }
 
+    @app.get("/api/v1/storage")
+    async def storage() -> dict:
+        return {
+            "storage_list": [
+                {
+                    "path": f"{storage_root}/",
+                    "name": storage_name,
+                    "available": True,
+                    "read_only": False,
+                }
+            ]
+        }
+
     @app.get("/api/v1/job")
     async def job() -> Any:
         progress = sim.progress()
@@ -179,11 +198,21 @@ def create_app(
             "state": sim.state,
             "progress": round(progress * 100, 2),
             "time_printing": round(sim.elapsed(), 2),
-            "file": {"name": sim.filename, "path": f"/local/{sim.filename}"},
+            "file": {
+                "name": sim.filename,
+                "path": f"{storage_root}/{sim.filename}",
+            },
         }
 
-    @app.get("/api/v1/files/local/{path:path}")
-    async def file_info(path: str) -> dict:
+    def _require_storage(storage: str) -> None:
+        if storage != storage_name:
+            # Buddy firmware rejects paths outside /usb as forbidden. This is
+            # distinct from authentication, which middleware checks first.
+            raise HTTPException(status_code=403, detail="storage forbidden")
+
+    @app.get("/api/v1/files/{storage}/{path:path}")
+    async def file_info(storage: str, path: str) -> dict:
+        _require_storage(storage)
         if path:
             for item in files:
                 if item["path"] == path:
@@ -199,8 +228,9 @@ def create_app(
             ],
         }
 
-    @app.put("/api/v1/files/local/{path:path}")
-    async def upload(path: str, request: Request) -> Response:
+    @app.put("/api/v1/files/{storage}/{path:path}")
+    async def upload(storage: str, path: str, request: Request) -> Response:
+        _require_storage(storage)
         body = await request.body()
         files[:] = [f for f in files if f["path"] != path]
         files.append(
@@ -213,13 +243,15 @@ def create_app(
         )
         return Response(status_code=201)
 
-    @app.delete("/api/v1/files/local/{path:path}")
-    async def delete_file(path: str) -> Response:
+    @app.delete("/api/v1/files/{storage}/{path:path}")
+    async def delete_file(storage: str, path: str) -> Response:
+        _require_storage(storage)
         files[:] = [f for f in files if f["path"] != path]
         return Response(status_code=204)
 
-    @app.post("/api/v1/files/local/{path:path}")
-    async def start_print(path: str) -> Response:
+    @app.post("/api/v1/files/{storage}/{path:path}")
+    async def start_print(storage: str, path: str) -> Response:
+        _require_storage(storage)
         if not any(item["path"] == path for item in files):
             raise HTTPException(status_code=404, detail="file not found")
         if sim.is_active():
@@ -260,6 +292,7 @@ def main() -> None:
     parser.add_argument("--api-key", default="secret")
     parser.add_argument("--username", default="maker")
     parser.add_argument("--password", default="secret")
+    parser.add_argument("--storage-path", choices=["/local", "/usb"], default="/local")
     args = parser.parse_args()
 
     import uvicorn
@@ -272,6 +305,7 @@ def main() -> None:
         api_key=args.api_key,
         username=args.username,
         password=args.password,
+        storage_path=args.storage_path,
     )
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 

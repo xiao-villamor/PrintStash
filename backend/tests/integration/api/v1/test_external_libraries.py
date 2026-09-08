@@ -15,6 +15,7 @@ overwrite it. A scan path is confined to the root for the same reason.
 
 from __future__ import annotations
 
+import errno
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -169,6 +170,65 @@ class TestCreateLibrary:
 
         assert response.status_code == 400
         assert response.json()["detail"] == "root_path_overlaps_managed_storage"
+        assert db_session.exec(select(ExternalLibrary)).all() == []
+
+    def test_conflicting_root_marker_does_not_persist_a_library(
+        self, tmp_path: Path, client, db_session: Session, auth_headers: dict
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        (root / root_markers.ROOT_MARKER_FILENAME).write_text(
+            json.dumps(
+                {
+                    "format": 1,
+                    "installation": "f" * 64,
+                    "role": "external-library",
+                    "library_id": 999,
+                    "root_identity": "e" * 64,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        response = client.post(
+            "/api/v1/libraries",
+            headers=auth_headers,
+            json={"name": "conflict", "root_path": str(root)},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "root_marker_conflict"
+        assert db_session.exec(select(ExternalLibrary)).all() == []
+
+    def test_marker_write_failure_does_not_persist_a_library(
+        self,
+        tmp_path: Path,
+        client,
+        db_session: Session,
+        auth_headers: dict,
+        monkeypatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+
+        def reject_marker(*_args: object, **_kwargs: object) -> bool:
+            raise OSError(errno.EROFS, "read-only file system")
+
+        monkeypatch.setattr(
+            "app.modules.sources.root_binding._create_marker", reject_marker
+        )
+
+        response = client.post(
+            "/api/v1/libraries",
+            headers=auth_headers,
+            json={"name": "read-only", "root_path": str(root)},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "root_marker_unwritable"
+        assert db_session.exec(select(ExternalLibrary)).all() == []
 
     def test_create_library_rejects_unreadable_root(
         self,

@@ -140,11 +140,13 @@ the `api` service:
 services:
   api:
     volumes:
-      - /mnt/printstash-library:/mnt/library:ro
+      - /mnt/printstash-library:/mnt/library:rw
 ```
 
-Enter `/mnt/library` in PrintStash. Use `:ro` unless mounted write-back is
-required. Before adding it, verify the mapping from inside the running API:
+Enter `/mnt/library` in PrintStash. The mount must be writable while the source
+is added so PrintStash can create its root-identity marker. After enrollment,
+you may remount it `:ro` unless write-back is required. Before adding it, verify
+the mapping from inside the running API:
 
 ```bash
 docker compose exec api sh -c 'test -r /mnt/library && find /mnt/library -maxdepth 1 -type f | head'
@@ -166,27 +168,30 @@ Create or choose a dedicated user share, then add a container volume mapping:
 ```text
 Host path:      /mnt/user/3d-library
 Container path: /mnt/library
-Access:         Read-only
+Access:         Read/Write for enrollment
 ```
 
-Use `/mnt/library` in PrintStash. Confirm the mapping again after stopping and
-starting the array. User shares are FUSE-backed, so rely on scheduled scans and
-the runtime-probed storage tier rather than assuming local filesystem behavior.
+Use `/mnt/library` in PrintStash. Once the source reports that its root is
+verified, it may be changed to Read-only unless write-back is required. Confirm
+the mapping again after stopping and starting the array. User shares are
+FUSE-backed, so rely on scheduled scans and the runtime-probed storage tier
+rather than assuming local filesystem behavior.
 
 ### Synology DSM
 
 In Container Manager, add the DSM shared folder as a volume and map it to
-`/mnt/library`. Prefer read-only permission. If PrintStash runs on another host,
-enable SMB or NFS in DSM, mount the share on that host, then use the mounted
-source template above. Verify the selected DSM account can read all subfolders.
+`/mnt/library`. Allow writes for enrollment, then prefer read-only permission.
+If PrintStash runs on another host, enable SMB or NFS in DSM, mount the share on
+that host, then use the mounted source template above. Verify the selected DSM
+account can read all subfolders.
 
 ### TrueNAS SCALE
 
 Create a dedicated dataset. In the PrintStash custom app, add a **Host Path**
 storage item, select that dataset, set the container mount path to
 `/mnt/library`, enable the ACL entries required by the container user and select
-**Read Only** unless write-back is needed. Snapshot and back up the dataset
-outside PrintStash.
+read/write access for enrollment. Once verified, select **Read Only** unless
+write-back is needed. Snapshot and back up the dataset outside PrintStash.
 
 ### OpenMediaVault
 
@@ -199,18 +204,20 @@ re-enrolling the source root.
 ### QNAP QTS And QuTS Hero
 
 In Container Station, add a host volume for a dedicated shared folder, normally
-under `/share/<SHARE_NAME>`, map it to `/mnt/library`, and select read-only
-access. The actual host path and Container Station availability vary by model;
-verify both in the QNAP UI instead of copying a path from another NAS.
+under `/share/<SHARE_NAME>`, map it to `/mnt/library`, and allow writes for
+enrollment. Once verified, select read-only access unless write-back is needed.
+The actual host path and Container Station availability vary by model; verify
+both in the QNAP UI instead of copying a path from another NAS.
 
 ### CasaOS And ZimaOS
 
 Edit/import the PrintStash Docker Compose definition with an explicit bind,
-for example `/DATA/3D:/mnt/library:ro`. For a remote SMB/NFS share, mount it on
-the host first and bind the resulting path. After CasaOS recreates or updates
-the app, inspect the effective Compose and re-run the in-container visibility
-check. Do not assume that a named Docker volume carrying CIFS options will be
-preserved by every CasaOS release.
+for example `/DATA/3D:/mnt/library:rw` during enrollment. For a remote SMB/NFS
+share, mount it on the host first and bind the resulting path. Once verified,
+the bind may be changed to `:ro` unless write-back is needed. After CasaOS
+recreates or updates the app, inspect the effective Compose and re-run the
+in-container visibility check. Do not assume that a named Docker volume carrying
+CIFS options will be preserved by every CasaOS release.
 
 ### Proxmox VE
 

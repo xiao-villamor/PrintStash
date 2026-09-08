@@ -104,6 +104,8 @@ send printer credentials or jobs through Prusa Connect cloud. Supported:
 
 - HTTP Digest username/password authentication on modern PrusaLink
 - legacy `X-Api-Key` authentication
+- storage discovery across Raspberry Pi (`/local` or `/sdcard`) and Buddy
+  firmware (`/usb`) layouts, including Core One
 - polled printer/job status and temperatures
 - streamed Vault upload and explicit start for plain-text G-code and validated
   PrusaSlicer binary G-code (`.bgcode`)

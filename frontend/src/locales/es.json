@@ -2786,6 +2786,7 @@
   "issuer_unreachable": "No se puede conectar con el proveedor de identidad.",
   "invalid_url": "La URL no es válida.",
   "root_marker_conflict": "La raíz de la biblioteca pertenece a otra instalación. Comprueba su ubicación antes de registrarla.",
+  "root_marker_unwritable": "La raíz de la biblioteca debe permitir escritura durante el registro para que PrintStash pueda crear su marcador de identidad. Después puede volver a montarse como de solo lectura.",
   "root_path_missing": "La carpeta de la biblioteca no está disponible. Comprueba la ruta y el montaje.",
   "restart_failed": "No se ha podido reiniciar el servidor. Consulta sus registros e inténtalo de nuevo.",
   "Use source title": "Usar el título de origen",

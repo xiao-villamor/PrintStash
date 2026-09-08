@@ -156,6 +156,53 @@ class PrusaLinkClient:
             raise PrusaLinkError("remote_filename_invalid", code="provider_error")
         return "/".join(quote(part, safe="") for part in path.parts)
 
+    @staticmethod
+    def _storage_name(path: object) -> str | None:
+        if not isinstance(path, str):
+            return None
+        storage = PurePosixPath(path)
+        if not storage.is_absolute() or len(storage.parts) != 2:
+            return None
+        name = storage.parts[1]
+        if name in {"", ".", ".."}:
+            return None
+        return quote(name, safe="")
+
+    async def _storage(
+        self, *, writable: bool = False, prefer_writable: bool = False
+    ) -> str:
+        """Resolve the printer's advertised media root.
+
+        Buddy firmware exposes ``/usb`` while Raspberry Pi PrusaLink commonly
+        exposes ``/local`` or ``/sdcard``. Older releases without storage
+        discovery keep the historical ``local`` fallback.
+        """
+        body = await self._request("GET", "/api/v1/storage", allow_not_found=True)
+        if not isinstance(body, dict) or "storage_list" not in body:
+            return "local"
+        storage_list = body.get("storage_list")
+        if not isinstance(storage_list, list):
+            raise PrusaLinkError(
+                "prusalink_storage_response_invalid",
+                code="provider_invalid_response",
+            )
+        available: list[tuple[str, bool]] = []
+        for item in storage_list:
+            if not isinstance(item, Mapping) or item.get("available") is not True:
+                continue
+            name = self._storage_name(item.get("path"))
+            if name is not None:
+                available.append((name, item.get("read_only") is not True))
+        if writable or prefer_writable:
+            for name, is_writable in available:
+                if is_writable:
+                    return name
+        if not writable and available:
+            return available[0][0]
+        raise PrusaLinkError(
+            "prusalink_storage_unavailable", code="provider_storage_unavailable"
+        )
+
     async def info(self) -> dict[str, Any]:
         status = await self._request("GET", "/api/v1/status")
         return {"result": {"provider": "prusalink", "status": status}}
@@ -258,7 +305,8 @@ class PrusaLinkClient:
         }
 
     async def list_files(self) -> list[Mapping[str, Any]]:
-        body = await self._request("GET", "/api/v1/files/local/")
+        storage = await self._storage(prefer_writable=True)
+        body = await self._request("GET", f"/api/v1/files/{storage}/")
         # The list case is tested first because `body.get` is evaluated before
         # any inline fallback: a bare array would otherwise raise AttributeError
         # out of the poll loop rather than listing nothing.
@@ -298,6 +346,7 @@ class PrusaLinkClient:
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
+        storage = await self._storage(writable=True)
         artifact_format = await asyncio.to_thread(
             classify_print_artifact,
             local_path,
@@ -305,7 +354,7 @@ class PrusaLinkClient:
         )
         body = await self._request(
             "PUT",
-            f"/api/v1/files/local/{target}",
+            f"/api/v1/files/{storage}/{target}",
             content=_ReplayableFileStream(local_path),
             headers={
                 "Content-Type": content_type_for_format(artifact_format),
@@ -317,14 +366,14 @@ class PrusaLinkClient:
         return body if isinstance(body, dict) else {"ok": True}
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        return await self._request(
-            "DELETE", f"/api/v1/files/local/{self._file_path(remote_filename)}"
-        )
+        target = self._file_path(remote_filename)
+        storage = await self._storage(writable=True)
+        return await self._request("DELETE", f"/api/v1/files/{storage}/{target}")
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
-        return await self._request(
-            "POST", f"/api/v1/files/local/{self._file_path(remote_filename)}"
-        )
+        target = self._file_path(remote_filename)
+        storage = await self._storage(prefer_writable=True)
+        return await self._request("POST", f"/api/v1/files/{storage}/{target}")
 
     async def _active_job_id(self) -> str:
         body = await self._request("GET", "/api/v1/job")

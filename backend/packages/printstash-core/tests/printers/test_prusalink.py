@@ -290,7 +290,10 @@ class TestFilePath:
 
         await client.delete_file("folder/cube.gcode")
 
-        assert seen == [("DELETE", "/api/v1/files/local/folder/cube.gcode")]
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("DELETE", "/api/v1/files/local/folder/cube.gcode"),
+        ]
 
     @pytest.mark.asyncio
     async def test_percent_encodes_a_name_with_a_space(self) -> None:
@@ -299,7 +302,10 @@ class TestFilePath:
 
         await client.delete_file("my part.gcode")
 
-        assert seen == ["/api/v1/files/local/my%20part.gcode"]
+        assert seen == [
+            "/api/v1/storage",
+            "/api/v1/files/local/my%20part.gcode",
+        ]
 
     @pytest.mark.asyncio
     async def test_normalizes_a_windows_separator(self) -> None:
@@ -308,7 +314,33 @@ class TestFilePath:
 
         await client.delete_file("folder\\cube.gcode")
 
-        assert seen == [("DELETE", "/api/v1/files/local/folder/cube.gcode")]
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("DELETE", "/api/v1/files/local/folder/cube.gcode"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_uses_the_available_storage_for_deletion(self) -> None:
+        seen: list[tuple[str, str]] = []
+        client = make_client(
+            recording(
+                seen,
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/usb", "available": True, "read_only": False}
+                        ]
+                    }
+                },
+            )
+        )
+
+        await client.delete_file("cube.gcode")
+
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("DELETE", "/api/v1/files/usb/cube.gcode"),
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -545,6 +577,136 @@ class TestQuerySnapshot:
 
 class TestListFiles:
     @pytest.mark.asyncio
+    async def test_uses_the_available_storage_reported_by_the_printer(self) -> None:
+        seen: list[tuple[str, str]] = []
+        client = make_client(
+            recording(
+                seen,
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {
+                                "path": "/sdcard/",
+                                "available": True,
+                                "read_only": True,
+                            },
+                            {
+                                "path": "/usb/",
+                                "available": True,
+                                "read_only": False,
+                            },
+                        ]
+                    },
+                    "/api/v1/files/usb/": {
+                        "children": [{"name": "core-one.gcode", "type": "PRINT_FILE"}]
+                    },
+                },
+            )
+        )
+
+        files = await client.list_files()
+
+        assert [item["path"] for item in files] == ["core-one.gcode"]
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("GET", "/api/v1/files/usb/"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_local_when_storage_discovery_is_unavailable(
+        self,
+    ) -> None:
+        seen: list[tuple[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append((request.method, request.url.path))
+            if request.url.path == "/api/v1/storage":
+                return httpx.Response(404)
+            return httpx.Response(200, json={"children": []})
+
+        assert await make_client(handler).list_files() == []
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("GET", "/api/v1/files/local/"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_reports_when_the_printer_has_no_available_storage(self) -> None:
+        client = make_client(
+            responding(
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/usb/", "available": False, "read_only": False}
+                        ]
+                    }
+                }
+            )
+        )
+
+        with pytest.raises(PrusaLinkError) as error:
+            await client.list_files()
+
+        assert error.value.code == "provider_storage_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_reports_a_malformed_storage_listing(self) -> None:
+        client = make_client(
+            responding(**{"/api/v1/storage": {"storage_list": "unavailable"}})
+        )
+
+        with pytest.raises(PrusaLinkError) as error:
+            await client.list_files()
+
+        assert error.value.code == "provider_invalid_response"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [None, "usb", "/nested/usb", "/"],
+        ids=["missing", "relative", "nested", "root"],
+    )
+    async def test_rejects_an_invalid_advertised_storage_path(
+        self, path: object
+    ) -> None:
+        client = make_client(
+            responding(
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": path, "available": True, "read_only": False}
+                        ]
+                    }
+                }
+            )
+        )
+
+        with pytest.raises(PrusaLinkError) as error:
+            await client.list_files()
+
+        assert error.value.code == "provider_storage_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_lists_the_only_available_read_only_storage(self) -> None:
+        seen: list[tuple[str, str]] = []
+        client = make_client(
+            recording(
+                seen,
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/sdcard", "available": True, "read_only": True}
+                        ]
+                    },
+                    "/api/v1/files/sdcard/": {"children": []},
+                },
+            )
+        )
+
+        assert await client.list_files() == []
+        assert seen[-1] == ("GET", "/api/v1/files/sdcard/")
+
+    @pytest.mark.asyncio
     async def test_flattens_a_folder_into_full_paths(self) -> None:
         client = make_client(
             responding(
@@ -695,12 +857,62 @@ class TestUpload:
         sent: list[tuple[str, str, bytes]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            sent.append((request.method, request.url.path, request.content))
+            if request.method == "PUT":
+                sent.append((request.method, request.url.path, request.content))
             return httpx.Response(204)
 
         await make_client(handler).upload(source, "folder/cube.gcode")
 
         assert sent == [("PUT", "/api/v1/files/local/folder/cube.gcode", b"G28\n")]
+
+    @pytest.mark.asyncio
+    async def test_uses_a_reported_writable_storage(self, tmp_path: Path) -> None:
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        seen: list[tuple[str, str]] = []
+        client = make_client(
+            recording(
+                seen,
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/sdcard", "available": True, "read_only": True},
+                            {"path": "/usb", "available": True, "read_only": False},
+                        ]
+                    }
+                },
+            )
+        )
+
+        await client.upload(source, "cube.gcode")
+
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("PUT", "/api/v1/files/usb/cube.gcode"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_refuses_upload_when_only_read_only_storage_is_available(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        client = make_client(
+            responding(
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/sdcard", "available": True, "read_only": True}
+                        ]
+                    }
+                }
+            )
+        )
+
+        with pytest.raises(PrusaLinkError) as error:
+            await client.upload(source, source.name)
+
+        assert error.value.code == "provider_storage_unavailable"
 
     @pytest.mark.asyncio
     async def test_uploads_gcode_without_asking_the_printer_to_start(
@@ -711,7 +923,8 @@ class TestUpload:
         headers: list[httpx.Headers] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            headers.append(request.headers)
+            if request.method == "PUT":
+                headers.append(request.headers)
             return httpx.Response(204)
 
         await make_client(handler).upload(source, "cube.gcode")
@@ -734,7 +947,8 @@ class TestUpload:
         received: list[tuple[httpx.Headers, bytes]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            received.append((request.headers, request.content))
+            if request.method == "PUT":
+                received.append((request.headers, request.content))
             return httpx.Response(201)
 
         await make_client(handler).upload(source, "jobs/plate.bgcode")
@@ -774,7 +988,33 @@ class TestStart:
 
         await make_client(recording(seen)).start("folder/cube.gcode")
 
-        assert seen == [("POST", "/api/v1/files/local/folder/cube.gcode")]
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("POST", "/api/v1/files/local/folder/cube.gcode"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_uses_the_available_storage_reported_by_the_printer(self) -> None:
+        seen: list[tuple[str, str]] = []
+        client = make_client(
+            recording(
+                seen,
+                **{
+                    "/api/v1/storage": {
+                        "storage_list": [
+                            {"path": "/usb", "available": True, "read_only": False}
+                        ]
+                    }
+                },
+            )
+        )
+
+        await client.start("cube.gcode")
+
+        assert seen == [
+            ("GET", "/api/v1/storage"),
+            ("POST", "/api/v1/files/usb/cube.gcode"),
+        ]
 
 
 class TestActiveJobId:

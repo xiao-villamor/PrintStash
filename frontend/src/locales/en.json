@@ -2786,6 +2786,7 @@
   "issuer_unreachable": "Issuer unreachable.",
   "invalid_url": "Invalid URL.",
   "root_marker_conflict": "The library root belongs to another installation. Verify its location before enrolling it.",
+  "root_marker_unwritable": "The library root must be writable during enrollment so PrintStash can create its identity marker. It may be remounted read-only afterward.",
   "root_path_missing": "The library folder is unavailable. Check its path and mount.",
   "restart_failed": "The server could not restart. Check the server logs and try again.",
   "Use source title": "Use source title",

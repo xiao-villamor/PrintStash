@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
 
 import pytest
+from printstash_core_testkit.print_sim import PrintSim
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
@@ -26,6 +28,7 @@ from app.db.models import (
 from app.db.session import get_session_factory
 from app.modules.printing.printer_hub import PrinterHub
 from app.modules.printing.printer_provider import (
+    PrinterProviderClient,
     ProviderError,
     build_provider_registry,
     get_provider_client,
@@ -55,6 +58,26 @@ API_KEY = "prusa-test-key"
 REGISTRY = build_provider_registry()
 USERNAME = "maker"
 PASSWORD = "s3cret"
+
+
+@pytest.fixture
+def buddy_prusalink() -> Iterator[tuple[PrinterProviderClient, PrintSim]]:
+    app, sim = create_app(auth_mode="api_key", api_key=API_KEY, storage_path="/usb")
+    running = start_server(app)
+    try:
+        provider = get_provider_client(
+            printer_config(
+                "Core One",
+                provider=PrinterProvider.PRUSALINK,
+                prusalink_url=running.base_url,
+                prusalink_auth_mode="api_key",
+                prusalink_api_key=API_KEY,
+            ),
+            registry=REGISTRY,
+        )
+        yield provider, sim
+    finally:
+        running.stop()
 
 
 def _seed(db_session: Session, base_url: str, *, auth_mode: str) -> tuple[int, int]:
@@ -212,6 +235,51 @@ class TestClientSetup:
             asyncio.run(_query())
         finally:
             running.stop()
+
+
+class TestBuddyStorage:
+    def test_lists_files_from_the_advertised_usb_root(
+        self, buddy_prusalink: tuple[PrinterProviderClient, PrintSim]
+    ) -> None:
+        provider, _sim = buddy_prusalink
+
+        files = asyncio.run(provider.list_files())
+
+        assert {item["path"] for item in files} == {"existing.gcode", "demo.gcode"}
+
+    def test_uploads_to_the_advertised_usb_root(
+        self,
+        buddy_prusalink: tuple[PrinterProviderClient, PrintSim],
+        tmp_path,
+    ) -> None:
+        provider, _sim = buddy_prusalink
+        source = tmp_path / "core-one.gcode"
+        source.write_bytes(b"G28\n")
+
+        asyncio.run(provider.upload(source, source.name))
+
+        files = asyncio.run(provider.list_files())
+        assert source.name in {item["path"] for item in files}
+
+    def test_starts_a_file_from_the_advertised_usb_root(
+        self, buddy_prusalink: tuple[PrinterProviderClient, PrintSim]
+    ) -> None:
+        provider, _sim = buddy_prusalink
+
+        asyncio.run(provider.start("existing.gcode"))
+
+        status = asyncio.run(provider.query_status())
+        assert status["result"]["status"]["print_stats"]["filename"] == "existing.gcode"
+
+    def test_deletes_a_file_from_the_advertised_usb_root(
+        self, buddy_prusalink: tuple[PrinterProviderClient, PrintSim]
+    ) -> None:
+        provider, _sim = buddy_prusalink
+
+        asyncio.run(provider.delete_file("existing.gcode"))
+
+        files = asyncio.run(provider.list_files())
+        assert "existing.gcode" not in {item["path"] for item in files}
 
 
 class TestCancel:

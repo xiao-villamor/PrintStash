@@ -223,13 +223,15 @@ def enroll_external_root(session: Session, library: ExternalLibrary) -> External
     identity = _installation_identity()
     if not identity:
         raise ExternalRootBindingError("invalid", "installation_identity_missing")
-    if library.id is None:
-        # Persist the row/ID first.  If marker creation or its directory fsync
-        # fails, the operator still has a visible unbound row to retry; a
-        # trusted marker can never outlive a nonexistent database row.
+    created_library_row = library.id is None
+    if created_library_row:
+        # Persist the row/ID first. If marker creation or its directory fsync
+        # has an uncertain outcome, the operator still has a visible unbound
+        # row to reconcile with the marker.
         session.add(library)
         session.flush()
         session.commit()
+    library_id = library.id
     existing_identity = library.root_identity
     if existing_identity:
         state, reason = _read_root_state(library)
@@ -270,15 +272,32 @@ def enroll_external_root(session: Session, library: ExternalLibrary) -> External
             library.root_identity = str(actual["root_identity"])
             payload = actual
         else:
-            created = _create_marker(root, payload)
+            try:
+                created = _create_marker(root, payload)
+            except OSError as exc:
+                if exc.errno in {errno.EACCES, errno.EPERM, errno.EROFS}:
+                    raise ExternalRootBindingError(
+                        "unreadable", "root_marker_unwritable"
+                    ) from exc
+                raise
             if not created:
                 raise ExternalRootBindingError("mismatch", "root_marker_conflict")
         session.add(library)
         session.commit()
         session.refresh(library)
         return library
-    except Exception:
+    except Exception as exc:
         session.rollback()
+        if (
+            created_library_row
+            and not created
+            and isinstance(exc, ExternalRootBindingError)
+            and library_id is not None
+        ):
+            persisted = session.get(ExternalLibrary, library_id)
+            if persisted is not None:
+                session.delete(persisted)
+                session.commit()
         if created:
             # A commit exception has an unknown outcome.  Preserve the marker
             # rather than unlinking by pathname: a concurrent remount or
