@@ -58,7 +58,7 @@ and all 10 coverage-floor checks pass.
 | 44 | does not retry a cancelled read | Edge | Aborted signal | Cancellation propagated | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::does not retry a cancelled read` |
 | 45 | does not retry an authorization denial | Error | 403 API response | Denial propagated once | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::does not retry an authorization denial` |
 | 46 | preserves cancellation while revalidating protected text | Edge | Text read with signal | Signal and no-cache mode retained | Frontend unit | ✅ `src/lib/api/__tests__/request.test.ts::preserves cancellation while revalidating protected text` |
-| 47 | downloads native S3 bytes through the authenticated frontend helper | Happy | Actual browser, authenticated API, HTTPS S3 with CORS, Unicode name | Exact bytes and Unicode filename; no provider app credentials or referrer; sole API response is private/no-store 307 with zero emitted body bytes | Playwright | ✅ `frontend/tests/e2e-real/delivery/native-download.spec.ts::downloads native S3 bytes through the authenticated frontend helper` |
+| 47 | downloads S3 bytes through the authenticated helper | Happy | Actual browser, authenticated API, HTTPS S3 with CORS, Unicode name | Exact bytes and Unicode filename; no provider app credentials or referrer; sole API response is private/no-store 307 with zero emitted body bytes | Playwright | ✅ `frontend/tests/e2e-real/delivery/native-download.spec.ts::native artifact delivery::downloads S3 bytes through the authenticated helper` |
 
 The browser run used the actual API/TLS provider fixture started once before a
 coordinated stable-network window, then reused it through the same delivery
