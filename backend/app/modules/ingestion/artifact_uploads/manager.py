@@ -41,6 +41,7 @@ _ACTIVE = {
     ArtifactUploadState.INGESTING,
 }
 _API_MODES = frozenset({"api_chunks", "simple"})
+_NATIVE_PURPOSES = frozenset({"model", "gcode", "revision", "slicer"})
 
 
 class SqlArtifactUploadManager:
@@ -103,7 +104,9 @@ class SqlArtifactUploadManager:
         native = self.native_adapter
         capability = native.capability if native is not None else None
         use_native = (
-            capability is not None and request.size_bytes > capability.part_size
+            request.purpose in _NATIVE_PURPOSES
+            and capability is not None
+            and request.size_bytes > capability.part_size
         )
         adapter_id = (
             "native_parts"

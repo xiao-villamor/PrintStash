@@ -15,6 +15,7 @@ from app.modules.ingestion.artifact_uploads import (
     SqlArtifactUploadManager,
     UploadRequest,
 )
+from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE
 from app.modules.storage.storage_backend.contracts import (
     NativeMultipartCapability,
     NativeMultipartHandle,
@@ -139,6 +140,31 @@ class TestSqlArtifactUploadManager:
         assert upload.protected_native_id is not None
         assert "provider-secret-id" not in upload.protected_native_id
         assert manager.plan(upload.id, owner).mode == "native_parts"
+
+    def test_external_writeback_uses_the_resumable_api_family(
+        self, db_session: Session, make_user, tmp_path
+    ) -> None:
+        manager = SqlArtifactUploadManager(
+            db_session,
+            staging_root=tmp_path,
+            backend=_NativeBackend(),  # type: ignore[arg-type]
+        )
+        owner = make_user("writeback-owner")
+        request = UploadRequest(
+            purpose="external_writeback",
+            target_role="external_library",
+            target_id="7",
+            filename="part.stl",
+            media_type="model/stl",
+            size_bytes=CHUNK_SIZE + 1,
+            client_sha256=None,
+            options={"target_library_id": 7},
+        )
+
+        upload = manager.create(request, owner)
+
+        assert upload.adapter_id == "api_chunks"
+        assert manager.plan(upload.id, owner).mode == "api_chunks"
 
     def test_falls_back_when_native_initiation_lacks_guarantees(
         self, db_session: Session, make_user, tmp_path
