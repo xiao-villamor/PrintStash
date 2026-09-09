@@ -8,6 +8,7 @@ export {
   invalidateApiCache,
 } from "@/lib/api/request";
 export * from "@/lib/api/auth";
+export * from "@/lib/api/artifact-uploads";
 export * from "@/lib/api/backup";
 export * from "@/lib/api/config";
 export * from "@/lib/api/documents";

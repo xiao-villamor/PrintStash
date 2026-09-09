@@ -22,8 +22,6 @@ import {
   getModel,
   getVaultConfig,
   inspectArchive,
-  ingestModel,
-  ingestOrca,
   listExternalLibraries,
   selectArchiveEntries,
 } from "@/lib/api";
@@ -65,6 +63,7 @@ import {
 } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
+import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
 
 // `webkitdirectory` enables folder selection on a file input but isn't in the
 // standard DOM typings — augment so the JSX attribute typechecks.
@@ -387,9 +386,34 @@ export function UploadModal({
     libraryId: number | "";
     refreshAfter?: boolean;
   }) {
-    const appendLibrary = (fd: FormData) => {
-      if (libraryId !== "") fd.append("target_library_id", String(libraryId));
+    const reportProgress = (progress: ArtifactUploadProgress) => {
+      const ratio = progress.totalBytes ? progress.transferredBytes / progress.totalBytes : 0;
+      const phase = {
+        hashing: { detail: uiText("Hashing file"), progress: 8 },
+        transferring: {
+          detail: uiText("Transferring file"),
+          progress: 10 + Math.round(ratio * 55),
+        },
+        verifying: { detail: uiText("Verifying upload"), progress: 72 },
+        ingesting: { detail: uiText("Processing upload"), progress: 80 },
+        completed: { detail: uiText("Upload processed"), progress: 100 },
+      }[progress.phase];
+      updateTask(taskId, { ...phase, status: phase.progress === 100 ? "completed" : "running" });
     };
+    const durableUpload = (file: File, purpose: "model" | "gcode", sourceHash?: string) =>
+      uploadArtifact(
+        file,
+        {
+          purpose,
+          target_role: "new_model",
+          model_name: name || file.name,
+          collection: collection || undefined,
+          tags: tagsForUpload.length ? tagsForUpload.join(",") : undefined,
+          source_hash: sourceHash,
+          target_library_id: libraryId === "" ? undefined : libraryId,
+        },
+        { onProgress: reportProgress },
+      );
     try {
       if (mesh) {
         updateTask(taskId, {
@@ -397,13 +421,8 @@ export function UploadModal({
           status: "running",
           progress: 15,
         });
-        const meshFd = new FormData();
-        meshFd.append("file", mesh);
-        meshFd.append("model_name", name || mesh.name);
-        if (collection) meshFd.append("collection", collection);
-        if (tagsForUpload.length) meshFd.append("tags", tagsForUpload.join(","));
-        appendLibrary(meshFd);
-        const meshRes = await ingestModel(meshFd);
+        const meshRes = await durableUpload(mesh, "model");
+        if (!meshRes.job_id) throw new Error("Upload completed without an ingestion job");
         linkTaskToJob(taskId, meshRes.job_id);
 
         updateTask(taskId, {
@@ -435,14 +454,8 @@ export function UploadModal({
           status: "running",
           progress: 60,
         });
-        const gcodeFd = new FormData();
-        gcodeFd.append("file", gcode);
-        gcodeFd.append("model_name", name || gcode.name);
-        if (collection) gcodeFd.append("collection", collection);
-        if (tagsForUpload.length) gcodeFd.append("tags", tagsForUpload.join(","));
-        gcodeFd.append("source_hash", full.hash);
-        appendLibrary(gcodeFd);
-        const gcodeRes = await ingestOrca(gcodeFd);
+        const gcodeRes = await durableUpload(gcode, "gcode", full.hash);
+        if (!gcodeRes.job_id) throw new Error("Upload completed without an ingestion job");
         linkTaskToJob(taskId, gcodeRes.job_id);
         await waitForJob(gcodeRes.job_id, taskId, {
           progressStart: 70,
@@ -462,13 +475,8 @@ export function UploadModal({
           status: "running",
           progress: 25,
         });
-        const fd = new FormData();
-        fd.append("file", gcode);
-        fd.append("model_name", name || gcode.name);
-        if (collection) fd.append("collection", collection);
-        if (tagsForUpload.length) fd.append("tags", tagsForUpload.join(","));
-        appendLibrary(fd);
-        const res = await ingestOrca(fd);
+        const res = await durableUpload(gcode, "gcode");
+        if (!res.job_id) throw new Error("Upload completed without an ingestion job");
         linkTaskToJob(taskId, res.job_id);
         await waitForJob(res.job_id, taskId, {
           progressStart: 45,
