@@ -3,7 +3,7 @@
  * A failure here can persist signed authority or restart already-received bytes.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelArtifactUpload,
@@ -60,6 +60,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("uploadArtifact", () => {
   it("persists only the opaque session id", async () => {
@@ -133,5 +135,52 @@ describe("uploadArtifact", () => {
 
     expect(result.state).toBe("aborted");
     expect(rememberedArtifactUploads()).toEqual([]);
+  });
+
+  it("sends native part bytes only to the short-lived signed URL", async () => {
+    const api = anApi();
+    vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ mode: "native_parts" }));
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "native_parts",
+      chunk_size: 8,
+      max_parallel: 1,
+      upload_path: "/opaque/parts/{part_number}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.signArtifactUploadPart).mockResolvedValue({
+      url: "https://objects.example.test/private-part?signature=temporary",
+      method: "PUT",
+      headers: { "x-checksum": "required" },
+      expires_at: NOW,
+    });
+    vi.mocked(api.recordArtifactUploadPart).mockResolvedValue({
+      session: aSession({ mode: "native_parts", received_bytes: 8 }),
+      part: { index: 0, offset: 0, size_bytes: 8, sha256: "a".repeat(64) },
+    });
+    vi.mocked(api.finalizeArtifactUpload).mockResolvedValue(
+      aSession({ mode: "native_parts", state: "ingesting", job_id: "job-1" }),
+    );
+    const directFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 200, headers: { etag: '"part-1"' } }));
+    vi.stubGlobal("fetch", directFetch);
+
+    await uploadArtifact(
+      new File(["12345678"], "part.stl", { type: "model/stl" }),
+      { purpose: "model", target_role: "new_model" },
+      { api, digest },
+    );
+
+    expect(directFetch).toHaveBeenCalledOnce();
+    expect(directFetch.mock.calls[0][0]).toContain("objects.example.test/private-part");
+    expect(api.putArtifactUploadChunk).not.toHaveBeenCalled();
+    expect(api.recordArtifactUploadPart).toHaveBeenCalledWith("session-1", 1, {
+      size_bytes: 8,
+      checksum_sha256: "a".repeat(64),
+      etag: '"part-1"',
+    });
+    expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
   });
 });

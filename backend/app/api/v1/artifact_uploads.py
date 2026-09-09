@@ -58,6 +58,7 @@ from app.schemas.artifact_uploads import (
 from .ingest import (
     _create_staged_job,
     _require_ingest_collection,
+    _require_staging_capacity,
     _validate_target_library,
 )
 
@@ -408,14 +409,37 @@ def finalize_artifact_upload(
     except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
     assert current_user.id is not None
-    job_id = _create_staged_job(
+    _require_staging_capacity(
         session,
-        kind=f"artifact_upload_{upload.purpose}",
-        staged=verified.materialize(),
         size=verified.size_bytes,
-        sha256=verified.sha256,
         owner_user_id=current_user.id,
     )
+    # This compare-and-set claim closes the small window between verification
+    # and job creation. A concurrent finalize loses here before it can create a
+    # second BackgroundJob or lease for the same immutable staged object.
+    try:
+        manager.transition(upload, ArtifactUploadState.INGESTING)
+    except ArtifactUploadError as exc:
+        raise _translate_error(exc) from exc
+    try:
+        job_id = _create_staged_job(
+            session,
+            kind=f"artifact_upload_{upload.purpose}",
+            staged=verified.materialize(),
+            size=verified.size_bytes,
+            sha256=verified.sha256,
+            owner_user_id=current_user.id,
+            check_capacity=False,
+            remove_staged_on_failure=False,
+        )
+    except Exception:
+        manager.transition(
+            upload,
+            ArtifactUploadState.FAILED,
+            error_code="artifact_upload_ingestion_claim_failed",
+            retryable=True,
+        )
+        raise
     manager.transition(
         upload,
         ArtifactUploadState.INGESTING,

@@ -603,6 +603,12 @@ Secrets are write-only: configuration reads expose only which secret fields are 
 
 PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.
 
+Large direct browser uploads also require bucket CORS for `PUT`, the
+`content-type` and `x-amz-checksum-sha256` request headers, and the exposed
+`ETag` response header. Use only the exact configured frontend origins. See
+[Resumable Artifact uploads](./artifact-uploads.md#s3-bucket-cors) for the rule
+and fallback behavior.
+
 New deployments should select and save a provider through Setup or Settings.
 Environment-only deployments use scalar fields: `VAULT_STORAGE_PROVIDER` and
 `VAULT_STORAGE_ROOT`, plus `VAULT_S3_*`, `VAULT_WEBDAV_*`, or `VAULT_SFTP_*`

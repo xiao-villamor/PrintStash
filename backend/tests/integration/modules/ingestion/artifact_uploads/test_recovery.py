@@ -123,3 +123,27 @@ class TestReconcileArtifactUploads:
         db_session.expire_all()
         assert result == result.__class__()
         assert upload.state == ArtifactUploadState.VERIFYING
+
+    def test_marks_an_active_verification_as_interrupted(
+        self,
+        db_session: Session,
+        make_user,
+        make_artifact_upload,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        upload = make_artifact_upload(
+            make_user("active-verification-owner"),
+            state=ArtifactUploadState.VERIFYING,
+            error_code="artifact_upload_verification_active",
+            retryable=False,
+            expires_at=utcnow() + timedelta(hours=1),
+        )
+
+        result = reconcile_artifact_uploads(SQLiteSessionFactory(db_session.get_bind()))
+
+        db_session.expire_all()
+        assert result.reconciled == 1
+        assert upload.state == ArtifactUploadState.VERIFYING
+        assert upload.error_code == "artifact_upload_verification_interrupted"
+        assert upload.retryable is True

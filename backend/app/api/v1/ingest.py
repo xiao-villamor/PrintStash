@@ -167,7 +167,47 @@ def _create_staged_job(
     size: int,
     sha256: str,
     owner_user_id: int,
+    check_capacity: bool = True,
+    remove_staged_on_failure: bool = True,
 ) -> str:
+    if check_capacity:
+        try:
+            _require_staging_capacity(session, size=size, owner_user_id=owner_user_id)
+        except HTTPException:
+            if remove_staged_on_failure:
+                staged.unlink(missing_ok=True)
+            raise
+    job_id = registry.create(owner_user_id=owner_user_id, kind=kind)
+    try:
+        _record_staging_lease(
+            session,
+            job_id=job_id,
+            staged=staged,
+            size=size,
+            sha256=sha256,
+            owner_user_id=owner_user_id,
+        )
+    except Exception:
+        if remove_staged_on_failure:
+            staged.unlink(missing_ok=True)
+        registry.finish(
+            job_id,
+            state="failed",
+            error="staging_lease_failed",
+            retryable=True,
+        )
+        raise
+    return job_id
+
+
+def _require_staging_capacity(
+    session: Session,
+    *,
+    size: int,
+    owner_user_id: int,
+) -> None:
+    """Reject work before claiming or deleting an already-verified object."""
+
     lease_count, staged_bytes = session.exec(
         select(
             func.count(StagingLease.id),
@@ -187,28 +227,7 @@ def _create_staged_job(
         or disk_free < settings.staging_min_free_gb * 1024**3
     )
     if capacity_exceeded:
-        staged.unlink(missing_ok=True)
         raise HTTPException(status_code=507, detail="staging_capacity_exceeded")
-    job_id = registry.create(owner_user_id=owner_user_id, kind=kind)
-    try:
-        _record_staging_lease(
-            session,
-            job_id=job_id,
-            staged=staged,
-            size=size,
-            sha256=sha256,
-            owner_user_id=owner_user_id,
-        )
-    except Exception:
-        staged.unlink(missing_ok=True)
-        registry.finish(
-            job_id,
-            state="failed",
-            error="staging_lease_failed",
-            retryable=True,
-        )
-        raise
-    return job_id
 
 
 def _resolve_name(model_name: Optional[str], original_filename: str) -> str:
