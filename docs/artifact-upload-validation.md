@@ -16,7 +16,7 @@ behaviour, not implementation details; status changes as each slice lands.
 | 8 | external-library write-back characterization | existing ingestion | mounted writable library | write-back preserves create-only Artifact publication | integration | ✅ |
 | 9 | upload state transitions | state machine | every source and destination state | legal/idempotent transitions pass and illegal transitions fail | unit | ✅ |
 | 10 | durable session and parts | persistence | session with several part receipts | owner, envelope, progress, receipts, verification, and result survive reload | integration | ✅ |
-| 11 | compare-and-set transition | concurrency | two writers share a version | only one state update succeeds | integration | ✅ |
+| 11 | compare-and-set transition | concurrency | two writers finalize or abort the same version | only one state update succeeds and the duplicate observes the winner | integration | ✅ |
 | 12 | interrupted-state recovery | recovery | process restarts in verifying/ingesting | recovery safely resumes or records a retryable failure | integration | ✅ |
 | 13 | fail-closed expiry | cleanup | expired upload without positive ownership | foreign/unproven bytes are retained and a safe failure is reported | integration | ✅ |
 | 14 | create and status authorization | RBAC | owner and unrelated user | only the owner or authorized administrator can observe the session | integration | ✅ |

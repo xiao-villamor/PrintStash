@@ -6,6 +6,7 @@ import base64
 import json
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal, cast
 
 from fastapi import (
     APIRouter,
@@ -55,6 +56,7 @@ from app.schemas.artifact_uploads import (
     ArtifactUploadPartRead,
     ArtifactUploadPlanRead,
     ArtifactUploadRead,
+    UploadPurpose,
 )
 
 from .ingest import (
@@ -129,6 +131,26 @@ def _translate_error(exc: Exception) -> HTTPException:
     if code in {"artifact_upload_size_invalid", "staging_capacity_exceeded"}:
         return HTTPException(status_code=507, detail=code)
     return HTTPException(status_code=422, detail=code)
+
+
+def _completed_idempotent_race(
+    *,
+    exc: ArtifactUploadError,
+    manager: SqlArtifactUploadManager,
+    session: Session,
+    session_id: str,
+    current_user: User,
+    accepted_states: set[ArtifactUploadState],
+) -> ArtifactUploadSession | None:
+    """Return the winner's state when a duplicate transition loses its CAS."""
+
+    if str(exc) != "artifact_upload_state_conflict":
+        return None
+    session.expire_all()
+    current = manager.get(session_id, current_user)
+    if current.state in accepted_states:
+        return current
+    return None
 
 
 def _validate_purpose_file(request: ArtifactUploadCreate) -> None:
@@ -267,7 +289,7 @@ def get_artifact_upload_plan(
         raise _translate_error(exc) from exc
     return ArtifactUploadPlanRead(
         session_id=upload.id,
-        mode=plan.mode,
+        mode=cast(Literal["api_chunks", "native_parts", "simple"], plan.mode),
         chunk_size=plan.chunk_size,
         max_parallel=plan.max_parallel,
         upload_path=plan.upload_path,
@@ -413,7 +435,7 @@ def finalize_artifact_upload(
             return _upload_read(manager, pending)
         options = json.loads(pending.request_json)
         pending_request = ArtifactUploadCreate(
-            purpose=pending.purpose,
+            purpose=cast(UploadPurpose, pending.purpose),
             target_role=pending.target_role,
             target_id=pending.target_id,
             filename=pending.filename,
@@ -445,6 +467,19 @@ def finalize_artifact_upload(
     try:
         manager.transition(upload, ArtifactUploadState.INGESTING)
     except ArtifactUploadError as exc:
+        current = _completed_idempotent_race(
+            exc=exc,
+            manager=manager,
+            session=session,
+            session_id=session_id,
+            current_user=current_user,
+            accepted_states={
+                ArtifactUploadState.INGESTING,
+                ArtifactUploadState.COMPLETED,
+            },
+        )
+        if current is not None:
+            return _upload_read(manager, current)
         raise _translate_error(exc) from exc
     try:
         job_id = _create_staged_job(
@@ -502,6 +537,17 @@ def abort_artifact_upload(
     try:
         upload = manager.abort(session_id, current_user)
     except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+        if isinstance(exc, ArtifactUploadError):
+            current = _completed_idempotent_race(
+                exc=exc,
+                manager=manager,
+                session=session,
+                session_id=session_id,
+                current_user=current_user,
+                accepted_states={ArtifactUploadState.ABORTED},
+            )
+            if current is not None:
+                return _upload_read(manager, current)
         raise _translate_error(exc) from exc
     audit.record(
         session,

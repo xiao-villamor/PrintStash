@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
+    ArtifactUploadState,
     AuditLog,
     CollectionPermission,
     CollectionRole,
@@ -21,6 +22,10 @@ from app.db.models import (
     FileRevisionStatus,
     FileType,
     Model,
+)
+from app.modules.ingestion.artifact_uploads import (
+    ArtifactUploadError,
+    SqlArtifactUploadManager,
 )
 from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE
 from app.modules.storage.storage_backend.contracts import (
@@ -123,8 +128,12 @@ class TestArtifactUploads:
         db_session: Session,
     ) -> None:
         headers = auth_headers | {"Idempotency-Key": "artifact-upload:test-key"}
-        first = client.post("/api/v1/artifact-uploads", json=_request(b"x"), headers=headers)
-        second = client.post("/api/v1/artifact-uploads", json=_request(b"x"), headers=headers)
+        first = client.post(
+            "/api/v1/artifact-uploads", json=_request(b"x"), headers=headers
+        )
+        second = client.post(
+            "/api/v1/artifact-uploads", json=_request(b"x"), headers=headers
+        )
 
         assert first.status_code == second.status_code == 201
         assert first.json()["id"] == second.json()["id"]
@@ -322,6 +331,43 @@ class TestArtifactUploads:
         }
         assert {"artifact_upload.create", "artifact_upload.finalize"} <= actions
 
+    def test_concurrent_duplicate_finalize_returns_the_winners_state(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        use_local_storage(tmp_path)
+        payload = content.binary_stl()
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        ).json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        transition = SqlArtifactUploadManager.transition
+        raced = False
+
+        def concurrent_claim(self, upload, target, **changes):
+            nonlocal raced
+            if target == ArtifactUploadState.INGESTING and not changes and not raced:
+                raced = True
+                upload.state = ArtifactUploadState.INGESTING
+                upload.version += 1
+                self.session.add(upload)
+                self.session.commit()
+                raise ArtifactUploadError("artifact_upload_state_conflict")
+            return transition(self, upload, target, **changes)
+
+        monkeypatch.setattr(SqlArtifactUploadManager, "transition", concurrent_claim)
+
+        response = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        assert response.json()["state"] == "ingesting"
+        assert response.json()["job_id"] is None
+
     def test_gcode_uses_the_normal_ingestion_pipeline(
         self,
         client: TestClient,
@@ -380,9 +426,12 @@ class TestArtifactUploads:
 
         assert finalized.status_code == 200
         assert finalized.json()["job_id"]
-        assert client.get(
-            f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
-        ).json()["state"] == "completed"
+        assert (
+            client.get(
+                f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+            ).json()["state"]
+            == "completed"
+        )
         assert db_session.exec(
             select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
         ).one()
@@ -600,3 +649,39 @@ class TestArtifactUploads:
         assert not db_session.exec(
             select(ArtifactUploadPart).where(ArtifactUploadPart.session_id == upload_id)
         ).all()
+
+    def test_concurrent_duplicate_abort_returns_the_winners_state(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        use_local_storage(tmp_path)
+        payload = b"cancel-race"
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        ).json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        transition = SqlArtifactUploadManager.transition
+        raced = False
+
+        def concurrent_abort(self, upload, target, **changes):
+            nonlocal raced
+            if target == ArtifactUploadState.ABORTED and not raced:
+                raced = True
+                upload.state = ArtifactUploadState.ABORTED
+                upload.version += 1
+                self.session.add(upload)
+                self.session.commit()
+                raise ArtifactUploadError("artifact_upload_state_conflict")
+            return transition(self, upload, target, **changes)
+
+        monkeypatch.setattr(SqlArtifactUploadManager, "transition", concurrent_abort)
+
+        response = client.delete(
+            f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        assert response.json()["state"] == "aborted"
