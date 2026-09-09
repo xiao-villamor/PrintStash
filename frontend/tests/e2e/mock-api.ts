@@ -215,6 +215,33 @@ const state = {
   gcPlanState: null as null | "preview" | "quarantined" | "aborted" | "completed",
 };
 
+function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting") {
+  return {
+    id: "mock-upload-1",
+    purpose: "gcode",
+    target_role: "new_model",
+    target_id: null,
+    filename: "cube.gcode",
+    media_type: "text/plain",
+    size_bytes: 20,
+    state: uploadState,
+    mode: "api_chunks",
+    received_bytes: uploadState === "created" ? 0 : 20,
+    verified_size: uploadState === "ingesting" ? 20 : null,
+    verified_sha256: uploadState === "ingesting" ? "a".repeat(64) : null,
+    job_id: uploadState === "ingesting" ? "gcode-job-1" : null,
+    retryable: false,
+    error_code: null,
+    created_at: now,
+    updated_at: now,
+    expires_at: now,
+    parts:
+      uploadState === "created"
+        ? []
+        : [{ index: 0, offset: 0, size_bytes: 20, sha256: "a".repeat(64) }],
+  };
+}
+
 export function resetMockApiState(): void {
   state.externalLibrariesEnabled = false;
   state.ingestJobQueued = false;
@@ -1380,6 +1407,40 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       "Content-Disposition": 'attachment; filename="benchy.gcode"',
     });
     res.end("G1 X1 Y1 E1\n");
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/v1/artifact-uploads") {
+    drainRequest(req, () => sendJson(res, artifactUploadStatus("created"), 201));
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/v1/artifact-uploads/mock-upload-1/plan") {
+    sendJson(res, {
+      session_id: "mock-upload-1",
+      mode: "api_chunks",
+      chunk_size: 8 * 1024 * 1024,
+      max_parallel: 1,
+      upload_path: "/api/v1/artifact-uploads/mock-upload-1/chunks/{index}",
+      uploaded_parts: [],
+      expires_at: now,
+    });
+    return;
+  }
+  if (req.method === "PUT" && url.pathname === "/api/v1/artifact-uploads/mock-upload-1/chunks/0") {
+    drainRequest(req, () =>
+      sendJson(res, {
+        session: artifactUploadStatus("uploading"),
+        part: { index: 0, offset: 0, size_bytes: 20, sha256: "a".repeat(64) },
+      }),
+    );
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/v1/artifact-uploads/mock-upload-1/finalize") {
+    state.ingestJobQueued = true;
+    sendJson(res, artifactUploadStatus("ingesting"));
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/v1/artifact-uploads/mock-upload-1") {
+    sendJson(res, artifactUploadStatus(state.ingestJobQueued ? "ingesting" : "uploading"));
     return;
   }
   if (req.method === "POST" && url.pathname === "/api/v1/ingest/orca") {

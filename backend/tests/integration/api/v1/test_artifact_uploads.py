@@ -334,6 +334,39 @@ class TestArtifactUploads:
         ).one()
         assert artifact.file_type == FileType.GCODE
 
+    def test_simple_slicer_client_needs_only_canonical_http_state(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        payload = content.gcode(marker="simple slicer client")
+        request = _request(payload) | {
+            "purpose": "slicer",
+            "filename": "slicer-output.gcode",
+        }
+        created = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+        upload_id = created.json()["id"]
+
+        assert created.status_code == 201
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        finalized = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+
+        assert finalized.status_code == 200
+        assert finalized.json()["job_id"]
+        assert client.get(
+            f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+        ).json()["state"] == "completed"
+        assert db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+
     def test_revision_attaches_to_the_authorized_model(
         self,
         client: TestClient,
