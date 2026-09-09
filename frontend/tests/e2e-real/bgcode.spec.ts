@@ -27,7 +27,7 @@ test.describe("BGCODE toolpath", () => {
         response.request().method() === "POST",
     );
     await dialog.getByRole("button", { name: /upload to vault/i }).click();
-    expect((await accepted).status()).toBe(202);
+    expect((await accepted).status()).toBe(200);
     await expect(dialog).toHaveCount(0);
     await expect(async () => {
       await page.reload();

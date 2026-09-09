@@ -413,7 +413,7 @@ class TestIngestModel:
         use_local_storage(tmp_path)
         monkeypatch.setattr(
             'app.modules.media.mesh_operations.analyze_mesh',
-            lambda _path, report=None, output_format="PNG": (
+            lambda _path, report=None, output_format="PNG", file_type=None: (
                 {"bbox_x_mm": 1.0},
                 None,
             ),

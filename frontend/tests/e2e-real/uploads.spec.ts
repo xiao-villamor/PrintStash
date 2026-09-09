@@ -61,7 +61,7 @@ test.describe("uploads", () => {
       .locator('input[type="file"]')
       .setInputFiles(file);
 
-    const taskHeader = page.getByText(`Upload ${file.name}`, { exact: true }).locator("..");
+    const taskHeader = page.getByText(`Upload ${name}`, { exact: true }).locator("..");
     await expect(taskHeader.getByText("completed", { exact: true })).toBeVisible({
       timeout: 120_000,
     });
