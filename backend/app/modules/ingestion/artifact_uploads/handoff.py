@@ -11,10 +11,17 @@ from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     ArtifactUploadSession,
     ArtifactUploadState,
+    FileRevisionStatus,
+    Model,
     StagingLease,
 )
+from app.db.scopes import live
 from app.db.session import SessionFactory
-from app.modules.ingestion.ingestion import ingest_mesh, ingest_orca_gcode
+from app.modules.ingestion.ingestion import (
+    add_gcode_revision_to_model,
+    ingest_mesh,
+    ingest_orca_gcode,
+)
 from app.runtime.jobs import registry
 
 from .api_chunks import ApiChunkUploadAdapter
@@ -52,7 +59,44 @@ def run_verified_upload_ingestion(
         "session_factory": session_factory,
         "target_library_id": options.get("target_library_id"),
     }
-    if purpose in {"gcode", "slicer"}:
+    if purpose == "revision":
+        registry.update(job_id, state="running", label="Attaching revision")
+        try:
+            with session_factory.scoped_session() as session:
+                model = session.exec(
+                    select(Model).where(
+                        Model.id == int(upload.target_id or ""), live(Model)
+                    )
+                ).first()
+                if model is None:
+                    raise ValueError("model_not_found")
+                file_row = add_gcode_revision_to_model(
+                    session=session,
+                    model=model,
+                    staged_path=staged_path,
+                    original_filename=filename,
+                    revision_label=options.get("revision_label"),
+                    revision_status=FileRevisionStatus(
+                        options.get("revision_status") or FileRevisionStatus.NEEDS_TEST
+                    ),
+                    revision_notes=options.get("revision_notes"),
+                    is_recommended=bool(options.get("is_recommended", False)),
+                )
+                registry.finish(
+                    job_id,
+                    state="completed",
+                    model_id=model.id,
+                    file_id=file_row.id,
+                    progress=100.0,
+                )
+        except Exception:
+            registry.finish(
+                job_id,
+                state="failed",
+                error="artifact_revision_ingestion_failed",
+                retryable=True,
+            )
+    elif purpose in {"gcode", "slicer"}:
         ingest_orca_gcode(**common)
     elif purpose in {"model", "external_writeback"} and suffix in SUFFIX_TO_FILE_TYPE:
         ingest_mesh(file_type=SUFFIX_TO_FILE_TYPE[suffix], **common)

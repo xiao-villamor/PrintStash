@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.db.models import FileRevisionStatus
+
 UploadPurpose = Literal[
     "model",
     "gcode",
@@ -30,6 +32,10 @@ class ArtifactUploadCreate(BaseModel):
     tags: str | None = Field(default=None, max_length=2048)
     source_hash: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
     target_library_id: int | None = Field(default=None, ge=1)
+    revision_label: str | None = Field(default=None, max_length=128)
+    revision_status: FileRevisionStatus | None = FileRevisionStatus.NEEDS_TEST
+    revision_notes: str | None = Field(default=None, max_length=4096)
+    is_recommended: bool = False
 
     @field_validator("filename")
     @classmethod

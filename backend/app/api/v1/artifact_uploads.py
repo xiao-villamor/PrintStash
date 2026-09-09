@@ -15,7 +15,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
@@ -24,9 +24,13 @@ from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
     ArtifactUploadState,
+    CollectionRole,
+    Model,
     User,
 )
+from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
+from app.modules.identity import rbac
 from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion.artifact_uploads import (
     ArtifactUploadError,
@@ -128,6 +132,25 @@ def _validate_purpose_file(request: ArtifactUploadCreate) -> None:
         raise HTTPException(status_code=400, detail="unsupported_file_type")
 
 
+def _require_revision_target(
+    session: Session, user: User, request: ArtifactUploadCreate
+) -> None:
+    if request.purpose != "revision":
+        return
+    if request.target_role != "model_revision" or request.target_id is None:
+        raise HTTPException(status_code=422, detail="revision_target_required")
+    try:
+        model_id = int(request.target_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="revision_target_invalid") from exc
+    model = session.exec(select(Model).where(Model.id == model_id, live(Model))).first()
+    if model is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    rbac.require_model_collection_role(
+        session, user, model.collection_id, CollectionRole.EDIT
+    )
+
+
 @router.post(
     "",
     response_model=ArtifactUploadRead,
@@ -142,6 +165,7 @@ async def create_artifact_upload(
     if request.size_bytes > settings.max_upload_bytes:
         raise HTTPException(status_code=413, detail="upload_too_large")
     _validate_purpose_file(request)
+    _require_revision_target(session, current_user, request)
     _require_ingest_collection(session, current_user, request.collection)
     _validate_target_library(session, request.target_library_id)
     manager = _manager(session)
@@ -161,6 +185,12 @@ async def create_artifact_upload(
                     "tags": request.tags,
                     "source_hash": request.source_hash,
                     "target_library_id": request.target_library_id,
+                    "revision_label": request.revision_label,
+                    "revision_status": request.revision_status.value
+                    if request.revision_status
+                    else None,
+                    "revision_notes": request.revision_notes,
+                    "is_recommended": request.is_recommended,
                 },
             ),
             current_user,
@@ -282,6 +312,20 @@ def finalize_artifact_upload(
     try:
         pending = manager.get(session_id, current_user)
         options = json.loads(pending.request_json)
+        _require_revision_target(
+            session,
+            current_user,
+            ArtifactUploadCreate(
+                purpose=pending.purpose,
+                target_role=pending.target_role,
+                target_id=pending.target_id,
+                filename=pending.filename,
+                media_type=pending.media_type,
+                size_bytes=pending.declared_size,
+                sha256=pending.client_sha256,
+                **options,
+            ),
+        )
         _require_ingest_collection(session, current_user, options.get("collection"))
         _validate_target_library(session, options.get("target_library_id"))
         upload, verified = manager.finalize(session_id, current_user)

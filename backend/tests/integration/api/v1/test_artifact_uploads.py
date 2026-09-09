@@ -10,7 +10,14 @@ import hashlib
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.db.models import ArtifactUploadPart, ArtifactUploadSession, File, Model
+from app.db.models import (
+    ArtifactUploadPart,
+    ArtifactUploadSession,
+    File,
+    FileRevisionStatus,
+    FileType,
+    Model,
+)
 from tests._env import use_local_storage
 from tests.factories import content
 
@@ -111,6 +118,98 @@ class TestArtifactUploads:
             select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
         ).one()
         assert db_session.get(Model, artifact.model_id) is not None
+
+    def test_gcode_uses_the_normal_ingestion_pipeline(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        payload = content.gcode()
+        request = _request(payload) | {
+            "purpose": "gcode",
+            "filename": "calibration.gcode",
+        }
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        ).json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+
+        response = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        completed = client.get(
+            f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+        ).json()
+        assert completed["state"] == "completed"
+        artifact = db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+        assert artifact.file_type == FileType.GCODE
+
+    def test_revision_attaches_to_the_authorized_model(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        make_model,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        model = make_model(name="Revision target")
+        payload = content.gcode(marker="resumable revision")
+        request = _request(payload) | {
+            "purpose": "revision",
+            "target_role": "model_revision",
+            "target_id": str(model.id),
+            "filename": "revision.gcode",
+            "revision_label": "Resumable",
+            "revision_status": "needs_test",
+        }
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        ).json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+
+        response = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        completed = client.get(
+            f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+        ).json()
+        assert completed["state"] == "completed"
+        artifact = db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+        assert artifact.model_id == model.id
+        assert artifact.revision_label == "Resumable"
+        assert artifact.revision_status == FileRevisionStatus.NEEDS_TEST
+
+    def test_revision_requires_an_existing_target(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        payload = content.gcode()
+        request = _request(payload) | {
+            "purpose": "revision",
+            "target_role": "model_revision",
+            "target_id": "999999",
+            "filename": "revision.gcode",
+        }
+
+        response = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "model_not_found"
 
     def test_unrelated_user_cannot_access_an_upload(
         self,
