@@ -11,6 +11,66 @@ import { test, expect } from "./helpers";
 import { bgcodeFor, createCollectionViaVault, modelCard, uploadModel } from "./util";
 
 test.describe("uploads", () => {
+  test("@critical resumes a multipart upload after a browser reload", async ({ page }) => {
+    const name = `e2e-resume-${Date.now()}`;
+    const file = {
+      name: `${name}.stl`,
+      mimeType: "model/stl",
+      // Keep the mesh valid while forcing two canonical 8 MiB API chunks.
+      buffer: Buffer.concat([
+        Buffer.from(
+          `solid ${name}\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid ${name}\n`,
+        ),
+        Buffer.alloc(8 * 1024 * 1024, 0x20),
+      ]),
+    };
+    let releaseSecondChunk!: () => void;
+    const holdSecondChunk = new Promise<void>((resolve) => {
+      releaseSecondChunk = resolve;
+    });
+    let observeSecondChunk!: () => void;
+    const secondChunkSeen = new Promise<void>((resolve) => {
+      observeSecondChunk = resolve;
+    });
+    const secondChunk = /\/api\/v1\/artifact-uploads\/[^/]+\/chunks\/1\?/;
+    await page.route(secondChunk, async (route) => {
+      observeSecondChunk();
+      await holdSecondChunk;
+      await route.abort("aborted");
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Upload model" });
+    await dialog.locator('input[accept=".stl,.3mf,.obj,.step,.stp"]').setInputFiles(file);
+    await page.getByPlaceholder("e.g. Bracket v2").fill(name);
+    await page.getByRole("button", { name: /upload to vault/i }).click();
+    await expect(dialog).toHaveCount(0);
+    await secondChunkSeen;
+
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await page.getByRole("button", { name: "Pause upload" }).click();
+    releaseSecondChunk();
+    await expect(page.getByText("Paused", { exact: true })).toBeVisible();
+
+    await page.unroute(secondChunk);
+    await page.reload();
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await page
+      .getByText("Resume upload", { exact: true })
+      .locator('input[type="file"]')
+      .setInputFiles(file);
+
+    const taskHeader = page.getByText(`Upload ${file.name}`, { exact: true }).locator("..");
+    await expect(taskHeader.getByText("completed", { exact: true })).toBeVisible({
+      timeout: 120_000,
+    });
+    await page.goto("/");
+    await expect(modelCard(page, name)).toBeVisible({ timeout: 60_000 });
+    await modelCard(page, name).click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  });
+
   test("renders an asymmetric preview with a downloadable screenshot", async ({ page }) => {
     const name = `e2e-preview-${Date.now()}`;
     const facets = [

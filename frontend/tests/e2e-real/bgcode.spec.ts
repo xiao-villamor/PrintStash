@@ -22,7 +22,9 @@ test.describe("BGCODE toolpath", () => {
     await dialog.getByPlaceholder("e.g. Bracket v2").fill(name);
     const accepted = page.waitForResponse(
       (response) =>
-        response.url().endsWith("/api/v1/ingest/orca") && response.request().method() === "POST",
+        response.url().includes("/api/v1/artifact-uploads/") &&
+        response.url().endsWith("/finalize") &&
+        response.request().method() === "POST",
     );
     await dialog.getByRole("button", { name: /upload to vault/i }).click();
     expect((await accepted).status()).toBe(202);
