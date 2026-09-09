@@ -10,6 +10,8 @@ storage backend's proven capabilities:
 - `api_chunks` sends fixed-size resumable chunks through PrintStash. It is the
   fallback for local storage, WebDAV, SFTP, and S3-compatible endpoints that do
   not prove the required checksum, listing, signing, and cleanup behavior.
+- `simple` uses the same bounded, verified API path as chunk mode but needs one
+  request for a file no larger than the canonical chunk size.
 
 Clients should create a session, request its current plan, transfer only the
 missing parts, and finalize it. After an interruption, retain only the opaque
@@ -17,9 +19,10 @@ PrintStash session ID and request a fresh status and plan. Do not persist signed
 URLs or native upload receipts. `DELETE /api/v1/artifact-uploads/{id}` cancels a
 session and is idempotent.
 
-Simple integrations such as slicer hooks can use `api_chunks` serially: upload
-each part in index order with its byte offset, length, and SHA-256, then call
-`finalize`. They do not need browser storage or provider-specific knowledge.
+Simple integrations such as slicer hooks follow the returned plan serially:
+upload each part in index order with its byte offset, length, and SHA-256, then
+call `finalize`. Small files receive a one-part `simple` plan. Clients do not
+need browser storage or provider-specific knowledge.
 
 ## Limits and recovery
 

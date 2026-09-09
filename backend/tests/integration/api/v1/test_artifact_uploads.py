@@ -244,14 +244,14 @@ class TestArtifactUploads:
         )
         assert created.status_code == 201
         upload_id = created.json()["id"]
-        assert created.json()["mode"] == "api_chunks"
+        assert created.json()["mode"] == "simple"
 
         plan = client.get(
             f"/api/v1/artifact-uploads/{upload_id}/plan", headers=auth_headers
         )
         assert plan.status_code == 200
         assert plan.headers["cache-control"] == "no-store"
-        assert plan.json()["mode"] == "api_chunks"
+        assert plan.json()["mode"] == "simple"
         assert "provider" not in str(plan.json()).lower()
 
         first = _put_chunk(client, auth_headers, upload_id, payload)

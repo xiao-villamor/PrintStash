@@ -133,8 +133,8 @@ class TestSqlArtifactUploadManager:
 
         upload = manager.create(_upload_request(), owner)
 
-        assert upload.adapter_id == "api_chunks"
-        assert manager.plan(upload.id, owner).mode == "api_chunks"
+        assert upload.adapter_id == "simple"
+        assert manager.plan(upload.id, owner).mode == "simple"
 
     def test_refuses_native_completion_when_provider_receipts_disagree(
         self, db_session: Session, make_user, tmp_path

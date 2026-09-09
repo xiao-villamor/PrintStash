@@ -225,7 +225,7 @@ function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting"
     media_type: "text/plain",
     size_bytes: 20,
     state: uploadState,
-    mode: "api_chunks",
+    mode: "simple",
     received_bytes: uploadState === "created" ? 0 : 20,
     verified_size: uploadState === "ingesting" ? 20 : null,
     verified_sha256: uploadState === "ingesting" ? "a".repeat(64) : null,
@@ -1416,7 +1416,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (req.method === "GET" && url.pathname === "/api/v1/artifact-uploads/mock-upload-1/plan") {
     sendJson(res, {
       session_id: "mock-upload-1",
-      mode: "api_chunks",
+      mode: "simple",
       chunk_size: 8 * 1024 * 1024,
       max_parallel: 1,
       upload_path: "/api/v1/artifact-uploads/mock-upload-1/chunks/{index}",

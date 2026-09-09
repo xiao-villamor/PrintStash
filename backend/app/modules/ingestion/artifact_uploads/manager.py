@@ -40,6 +40,7 @@ _ACTIVE = {
     ArtifactUploadState.VERIFYING,
     ArtifactUploadState.INGESTING,
 }
+_API_MODES = frozenset({"api_chunks", "simple"})
 
 
 class SqlArtifactUploadManager:
@@ -77,10 +78,17 @@ class SqlArtifactUploadManager:
         use_native = (
             capability is not None and request.size_bytes > capability.part_size
         )
+        adapter_id = (
+            "native_parts"
+            if use_native
+            else "simple"
+            if request.size_bytes <= CHUNK_SIZE
+            else self.api_adapter.adapter_id
+        )
         self._require_capacity(
             actor.id,
             size_bytes=request.size_bytes,
-            adapter_id="native_parts" if use_native else self.api_adapter.adapter_id,
+            adapter_id=adapter_id,
         )
         upload = ArtifactUploadSession(
             id=upload_id,
@@ -98,9 +106,7 @@ class SqlArtifactUploadManager:
             if request.client_sha256
             else None,
             state=ArtifactUploadState.CREATED,
-            adapter_id=native.adapter_id
-            if use_native and native
-            else self.api_adapter.adapter_id,
+            adapter_id=adapter_id,
             destination_ref=(
                 native.backend.storage_target.target_ref
                 if use_native and native and native.backend.storage_target
@@ -114,12 +120,17 @@ class SqlArtifactUploadManager:
             except Exception:
                 # A backend that cannot initiate the required checksum-scoped
                 # operation is not native-capable for this session.
+                fallback_id = (
+                    "simple"
+                    if request.size_bytes <= CHUNK_SIZE
+                    else self.api_adapter.adapter_id
+                )
                 self._require_capacity(
                     actor.id,
                     size_bytes=request.size_bytes,
-                    adapter_id=self.api_adapter.adapter_id,
+                    adapter_id=fallback_id,
                 )
-                upload.adapter_id = self.api_adapter.adapter_id
+                upload.adapter_id = fallback_id
                 upload.destination_ref = None
                 self.api_adapter.session_directory(upload.id, create=True)
         else:
@@ -154,7 +165,7 @@ class SqlArtifactUploadManager:
         ingesting_api = self.session.exec(
             select(ArtifactUploadSession).where(
                 ArtifactUploadSession.state == ArtifactUploadState.INGESTING,
-                ArtifactUploadSession.adapter_id == self.api_adapter.adapter_id,
+                ArtifactUploadSession.adapter_id.in_(_API_MODES),
             )
         ).all()
         lease_count, leased_bytes = self.session.exec(
@@ -175,7 +186,7 @@ class SqlArtifactUploadManager:
         )
 
         def reserved(upload: ArtifactUploadSession) -> int:
-            multiplier = 2 if upload.adapter_id == self.api_adapter.adapter_id else 1
+            multiplier = 2 if upload.adapter_id in _API_MODES else 1
             return upload.declared_size * multiplier
 
         reserved_bytes = (
@@ -184,7 +195,7 @@ class SqlArtifactUploadManager:
             + sum(upload.declared_size for upload in ingesting_api)
         )
         required_bytes = size_bytes * (
-            2 if adapter_id == self.api_adapter.adapter_id else 1
+            2 if adapter_id in _API_MODES else 1
         )
         outstanding_bytes = sum(
             max(0, reserved(upload) - upload.received_bytes)
@@ -237,7 +248,7 @@ class SqlArtifactUploadManager:
                 upload_path=f"/api/v1/artifact-uploads/{upload.id}/parts/{{part_number}}",
             )
         return UploadPlan(
-            mode="api_chunks",
+            mode=upload.adapter_id,
             chunk_size=CHUNK_SIZE,
             max_parallel=3,
             upload_path=f"/api/v1/artifact-uploads/{upload.id}/chunks/{{index}}",
@@ -252,7 +263,7 @@ class SqlArtifactUploadManager:
     ) -> ArtifactUploadPart:
         upload = self.get(session_id, actor)
         self._require_active(upload)
-        if upload.adapter_id != self.api_adapter.adapter_id:
+        if upload.adapter_id not in _API_MODES:
             raise ArtifactUploadError("artifact_upload_mode_conflict")
         if upload.state not in {
             ArtifactUploadState.CREATED,
@@ -473,7 +484,7 @@ class SqlArtifactUploadManager:
     def adapter_for(
         self, upload: ArtifactUploadSession
     ) -> ApiChunkUploadAdapter | NativeMultipartUploadAdapter:
-        if upload.adapter_id == self.api_adapter.adapter_id:
+        if upload.adapter_id in _API_MODES:
             return self.api_adapter
         return self._native_for(upload)
 
