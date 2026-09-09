@@ -834,6 +834,35 @@ def _silence_fleet_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestGcLoop:
     @pytest.mark.asyncio
+    async def test_gc_loop_defers_destruction_during_migration_maintenance(
+        self, monkeypatch
+    ):
+        from unittest.mock import Mock
+
+        from app.runtime.maintenance import (
+            end_restore_maintenance,
+            hold_restore_maintenance,
+        )
+
+        gc = Mock()
+        delays = []
+
+        async def stop_at_retry(seconds):
+            delays.append(seconds)
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(lifecycle, "run_scheduled_gc", gc)
+        monkeypatch.setattr(lifecycle.asyncio, "sleep", stop_at_retry)
+        hold_restore_maintenance()
+        try:
+            with pytest.raises(asyncio.CancelledError):
+                await lifecycle._gc_loop()
+        finally:
+            end_restore_maintenance()
+        gc.assert_not_called()
+        assert delays == [1]
+
+    @pytest.mark.asyncio
     async def test_gc_loop_runs_every_step_even_when_each_one_fails(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:

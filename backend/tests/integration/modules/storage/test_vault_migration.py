@@ -180,6 +180,32 @@ class TestLocalStorageBackend:
 
 
 class TestBuildConfiguredBackend:
+    @pytest.mark.parametrize("provider", ["synology_webdav", "hetzner_storage_box"])
+    def test_remote_candidate_does_not_rebind_active_storage(
+        self, db_session, provider
+    ):
+        from app.modules.storage.storage_backend.factory import build_configured_backend
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.storage.storage_opendal import OpenDALStorageBackend
+        from app.modules.storage.storage_providers import (
+            parse_provider_config,
+            resolve_transport,
+        )
+        from tests.fixtures.storage_presets import preset_configuration
+
+        source = get_backend()
+        before = dict(_overlay)
+        config = parse_provider_config(preset_configuration(provider, root="candidate"))
+        candidate = build_configured_backend(config)
+
+        assert isinstance(candidate, OpenDALStorageBackend)
+        assert candidate.backend_name == provider
+        key = candidate.blob_key("part", 1, "part.stl")
+        assert candidate.namespace_for(key) == resolve_transport(config).namespace
+        assert key.endswith("/files/part/v1/part.stl")
+        assert get_backend() is source
+        assert _overlay == before
+
     def test_candidate_local_backend_never_changes_active_settings(
         self, tmp_path: Path
     ):

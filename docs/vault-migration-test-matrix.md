@@ -114,8 +114,34 @@ explicitly omitted. No row is inferred from coverage percentages.
 | 97 | `test_external_path_is_not_adopted` | Error | Unowned external path | No destination key invented | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestRemapOwnedKey::test_external_path_is_not_adopted` |
 | 98 | `test_missing_terminal_native_staging_is_not_recreated` | Edge | Completed upload staging already consumed | No missing-upload error or recreated object | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestCensus::test_missing_terminal_native_staging_is_not_recreated` |
 | 99 | `test_preserves_populated_postgres_audits` | Regression | Released PostgreSQL database upgraded through #104 and downgraded through earlier audit revisions | Audit rows retained; notification column remains the native enum | Integration | ✅ `integration/db/migrations/test_audit_policies.py::TestAuditPolicyMigrations::test_preserves_populated_postgres_audits` |
+| 100 | `test_missing_run_controls_return_safe_conflict` | Error | Administrator controls reference an absent run | HTTP 409 with migration_not_found | Integration | ✅ `integration/api/v1/test_vault_migration.py::TestMigrationControls` |
+| 101 | `test_empty_history_is_readable` | Happy | Administrator with no migration history | HTTP 200 and empty history | Integration | ✅ `integration/api/v1/test_vault_migration.py::TestMigrationControls` |
+| 102 | `test_unsafe_owner_error_is_replaced` | Error | Owner raises an unsafe configuration error | Safe generic HTTP 409 detail | Unit | ✅ `unit/api/v1/test_vault_migration.py::TestInvoke` |
+| 103 | `test_reader_timeout_has_safe_conflict` | Error | Read drain times out | Safe migration_readers_busy conflict | Unit | ✅ `unit/api/v1/test_vault_migration.py::TestInvoke` |
+| 104 | `test_migration_mutations_are_refused_during_recovery` | Error | Recovery maintenance and migration POST | HTTP 503 with Retry-After; handler not called | Integration | ✅ `integration/api/test_vault_generation.py::TestVaultGenerationMiddleware` |
+| 105 | `test_cancelled_admission_releases_its_late_generation` | Edge | Request cancelled before threaded admission completes | Late read generation closed; no reader remains | Integration | ✅ `integration/api/test_vault_generation.py::TestVaultGenerationMiddleware` |
+| 106 | `test_unexpected_admission_failure_is_not_swallowed` | Error | Generation pin raises an unrelated runtime failure | Failure propagates without serving unpinned data | Integration | ✅ `integration/api/test_vault_generation.py::TestVaultGenerationMiddleware` |
+| 107 | `test_remote_candidate_does_not_rebind_active_storage` | Happy | WebDAV/SFTP candidate construction | Isolated remote adapter and unchanged active backend | Integration | ✅ `integration/modules/storage/test_vault_migration.py::TestBuildConfiguredBackend` |
+| 108 | `test_recovery_maintenance_defers_copy_work` | Edge | Durable recovery gate held | Scheduler waits without advancing migration | Integration | ✅ `integration/runtime/test_vault_migrations.py::TestRunMigrations` |
+| 109 | `test_worker_failure_is_logged_without_provider_details` | Error | Provider work fails with sensitive diagnostic text | Safe warning; scheduler continues to next tick | Integration | ✅ `integration/runtime/test_vault_migrations.py::TestRunMigrations` |
+| 110 | `test_gc_loop_defers_destruction_during_migration_maintenance` | Edge | Mutation gate held | GC work is not admitted; short retry | Integration | ✅ `integration/bootstrap/test_lifecycle.py::TestGcLoop` |
 
 ## Execution evidence
+
+- CI run 34394516277 passed all **9,957 backend functional tests**, the
+  Python 3.13 compatibility lane, all frontend/browser suites and all eight
+  container builds. The remaining failure was the backend per-module coverage
+  gate: five composition modules needed additional behaviour assertions.
+- Added real HTTP error/history checks, cancelled read-admission cleanup,
+  recovery maintenance admission, isolated WebDAV/SFTP candidate construction,
+  and scheduler/GC recovery checks (rows 100–110). Focused composition plus real
+  HTTP/Local/S3 workflows now measure routes 100%, read-generation middleware
+  91.55%, lifecycle 90.27%, adapter factory 90.48%, scheduler 100% with branches
+  enabled. No coverage floor was lowered and no debt exception was added.
+- Test-hygiene checks and isolated candidate construction: **2,542 passed**.
+  Real HTTP and Local/S3 migration workflows: **5 passed**.
+- Focused composition, migration owner and lifecycle regression rerun:
+  **119 passed** after correcting the candidate test's transport namespace.
 
 - The complete resource lane exposed conversion of PostgreSQL's notification
   enum to VARCHAR in the new migration. The focused #104 upgrade assertion was
@@ -127,11 +153,14 @@ explicitly omitted. No row is inferred from coverage percentages.
 - CI run 34390353141 found an order-dependent assertion that required an empty
   global audit table. Reproduced with real audit listeners, then corrected to
   assert unchanged audit history across the rejected transition. Migration
-  progress and audit-listener tests: **7 passed**. The next full CI run is pending.
+  progress and audit-listener tests: **7 passed**. The subsequent full functional CI lane passed.
 - A local aggregate run was interrupted after disk capacity fell below the
   configured headroom (**5,830 passed, 112 failed**); its failures are preserved
   and are not counted as a green gate. Only that run's generated temporary files
-  were removed. CI's sole backend failure was the audit assertion above.
+  were removed. This host also exhausted SeaweedFS's default test-volume slots; 100-bucket
+  reproduction confirmed the test-server capacity limit independently of the
+  application. The complete local resource lane passed **195 tests** with a
+  smaller local-only volume size; no application or CI configuration was changed.
 
 - Fresh focused migration measurement on the current implementation: **129 passed**;
   owner 90.85%, census 95.65%, transfer 93.94%, backup/identity/journal/progress/
@@ -152,5 +181,5 @@ explicitly omitted. No row is inferred from coverage percentages.
 - Expanded copy/recovery/provider/HTTP workflows: **71 passed**. Error-path,
   census and upload-fencing checks: **72 passed**. Provider-limit tests: **12 passed**.
   Latest configuration and census checks: **11 passed**.
-- Full backend/frontend coverage gates are still in progress. This matrix
-  does not claim the aggregate gates or remote CI have passed.
+- CI's frontend coverage gate passed. A fresh full backend coverage gate and
+  remote CI rerun are pending for the added composition assertions above.
