@@ -127,7 +127,7 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
-    def test_validates_archive_and_provider_managed_file_types(self) -> None:
+    def test_validates_file_types_for_each_upload_purpose(self) -> None:
         upload_api._validate_purpose_file(
             ArtifactUploadCreate(
                 purpose="archive",
