@@ -3,7 +3,7 @@
  * It translates controlled task state, recovery copy, and message descriptors while
  * preserving filenames and other user-owned values exactly as they were supplied.
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -126,5 +126,22 @@ describe("TaskList", () => {
     expect(screen.getByText("Resume upload")).toBeVisible();
     expect(screen.getByRole("button", { name: "Cancel upload" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Review and retry" })).toBeNull();
+  });
+
+  it("clears an empty resume selection", () => {
+    renderTaskList([
+      task({
+        status: "running",
+        progress: 40,
+        retryable: true,
+        uploadSessionId: "opaque-session-id",
+        uploadPaused: true,
+      }),
+    ]);
+    const input = screen.getByLabelText("Resume upload");
+
+    fireEvent.change(input, { target: { files: [] } });
+
+    expect(input).toHaveValue("");
   });
 });

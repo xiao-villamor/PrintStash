@@ -82,15 +82,24 @@ describe("uploadArtifact", () => {
       aSession({ state: "ingesting", job_id: "job-1" }),
     );
     const phases: string[] = [];
+    const sessions: string[] = [];
+    const controller = new AbortController();
 
     await uploadArtifact(
       new File(["12345678"], "part.stl", { type: "model/stl" }),
       { purpose: "model", target_role: "new_model" },
-      { api, digest, onProgress: ({ phase }) => phases.push(phase) },
+      {
+        api,
+        digest,
+        signal: controller.signal,
+        onSession: (id) => sessions.push(id),
+        onProgress: ({ phase }) => phases.push(phase),
+      },
     );
 
     expect(rememberedArtifactUploads()).toEqual(["session-1"]);
     expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
+    expect(sessions).toEqual(["session-1"]);
     expect(phases).toEqual(["hashing", "transferring", "transferring", "verifying", "ingesting"]);
   });
 
