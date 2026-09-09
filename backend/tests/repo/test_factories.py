@@ -91,6 +91,20 @@ class TestBuildSystemConfig:
         assert config.s3_root == "vault-data"
 
 
+class TestBuildArtifactUpload:
+    def test_builds_unique_owner_bound_sessions_and_receipts(
+        self, db_session: Session
+    ) -> None:
+        owner = factories.build_user(db_session)
+        first = factories.build_artifact_upload(db_session, owner)
+        second = factories.build_artifact_upload(db_session, owner)
+        receipt = factories.build_artifact_upload_part(db_session, first)
+
+        assert first.id != second.id
+        assert first.owner_user_id == owner.id
+        assert receipt.session_id == first.id
+
+
 class TestBuildStorageConnection:
     def test_defaults_to_both_backup_modes(self, db_session: Session) -> None:
         connection = factories.build_storage_connection(db_session)
@@ -616,6 +630,7 @@ class TestAuditFactories:
         factories.build_audit_event(db_session, run)
         factories.build_audit_event(db_session, run)
         assert len(db_session.exec(select(VaultAuditEvent)).all()) == 2
+
 
 class TestCapacityFactories:
     def test_expired_capacity_claim_reconciles(self, db_session):

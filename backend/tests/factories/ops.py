@@ -20,6 +20,9 @@ from sqlmodel import Session
 
 from app.core.time import utcnow
 from app.db.models import (
+    ArtifactUploadPart,
+    ArtifactUploadSession,
+    ArtifactUploadState,
     BackgroundJob,
     BackupDestinationResult,
     BackupRetryAttempt,
@@ -236,6 +239,55 @@ def build_background_job(
     if owner is not None:
         overrides.setdefault("owner_user_id", owner.id)
     return save(session, BackgroundJob(kind=kind, state=state, **overrides))
+
+
+def build_artifact_upload(
+    session: Session,
+    owner: User,
+    *,
+    state: ArtifactUploadState = ArtifactUploadState.CREATED,
+    **overrides: Any,
+) -> ArtifactUploadSession:
+    """One owner-bound resumable upload with a future expiry by default."""
+
+    overrides.setdefault("id", f"upload-{nth('artifact_upload')}")
+    overrides.setdefault("purpose", "model")
+    overrides.setdefault("target_role", "new_model")
+    overrides.setdefault("filename", "part.stl")
+    overrides.setdefault("media_type", "model/stl")
+    overrides.setdefault("declared_size", 4)
+    overrides.setdefault("adapter_id", "api_chunks")
+    overrides.setdefault("expires_at", utcnow() + timedelta(hours=24))
+    return save(
+        session,
+        ArtifactUploadSession(
+            owner_user_id=owner.id,
+            state=state,
+            **overrides,
+        ),
+    )
+
+
+def build_artifact_upload_part(
+    session: Session,
+    upload: ArtifactUploadSession,
+    *,
+    part_number: int = 1,
+    **overrides: Any,
+) -> ArtifactUploadPart:
+    """A durable receipt for one chunk or provider-native part."""
+
+    overrides.setdefault("byte_offset", (part_number - 1) * upload.declared_size)
+    overrides.setdefault("size_bytes", upload.declared_size)
+    overrides.setdefault("sha256", unique_hash("artifact_upload_part"))
+    return save(
+        session,
+        ArtifactUploadPart(
+            session_id=upload.id,
+            part_number=part_number,
+            **overrides,
+        ),
+    )
 
 
 def build_audit_run(

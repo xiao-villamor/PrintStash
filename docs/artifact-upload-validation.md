@@ -14,8 +14,8 @@ behaviour, not implementation details; status changes as each slice lands.
 | 6 | URL import characterization | existing ingestion | remote import stream | the download is bounded and its staged representation is hashed | integration | ❌ |
 | 7 | slicer hook characterization | existing ingestion | simple authenticated client | upload completes without browser-only protocol state | integration | ❌ |
 | 8 | external-library write-back characterization | existing ingestion | mounted writable library | write-back preserves create-only Artifact publication | integration | ❌ |
-| 9 | upload state transitions | state machine | every source and destination state | legal/idempotent transitions pass and illegal transitions fail | unit | ❌ |
-| 10 | durable session and parts | persistence | session with several part receipts | owner, envelope, progress, receipts, verification, and result survive reload | integration | ❌ |
+| 9 | upload state transitions | state machine | every source and destination state | legal/idempotent transitions pass and illegal transitions fail | unit | ✅ |
+| 10 | durable session and parts | persistence | session with several part receipts | owner, envelope, progress, receipts, verification, and result survive reload | integration | ✅ |
 | 11 | compare-and-set transition | concurrency | two writers share a version | only one state update succeeds | integration | ❌ |
 | 12 | interrupted-state recovery | recovery | process restarts in verifying/ingesting | recovery safely resumes or records a retryable failure | integration | ❌ |
 | 13 | fail-closed expiry | cleanup | expired upload without positive ownership | foreign/unproven bytes are retained and a safe failure is reported | integration | ❌ |
@@ -50,4 +50,3 @@ behaviour, not implementation details; status changes as each slice lands.
 | 42 | stuck-session health | operations | stale active session or cleanup failure | health reports a credential-free actionable finding | integration | ❌ |
 | 43 | canonical API contract | OpenAPI | generated schema | only provider-neutral `/artifact-uploads` routes and safe schemas appear | repo | ❌ |
 | 44 | documented compatibility | documentation | operator selects a storage transport | modes, limits, CORS, recovery, and fallback behaviour are documented | repo | ❌ |
-
