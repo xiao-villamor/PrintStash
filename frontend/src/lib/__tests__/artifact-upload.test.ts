@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelArtifactUpload,
+  pauseArtifactUpload,
   rememberedArtifactUploads,
   resumeArtifactUpload,
   uploadArtifact,
@@ -121,7 +122,7 @@ describe("uploadArtifact", () => {
       4,
       expect.any(Blob),
       "b".repeat(64),
-      undefined,
+      expect.any(AbortSignal),
     );
     expect(rememberedArtifactUploads()).toEqual([]);
   });
@@ -182,5 +183,40 @@ describe("uploadArtifact", () => {
       etag: '"part-1"',
     });
     expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
+  });
+
+  it("pauses an active transfer without aborting its durable server session", async () => {
+    const api = anApi();
+    vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession());
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "api_chunks",
+      chunk_size: 8,
+      max_parallel: 1,
+      upload_path: "/opaque/chunks/{index}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.putArtifactUploadChunk).mockImplementation(
+      (_id, _index, _offset, _bytes, _checksum, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(signal.reason ?? new DOMException("Upload paused", "AbortError")),
+          );
+        }),
+    );
+    let sessionId: string | undefined;
+    const transfer = uploadArtifact(
+      new File(["12345678"], "part.stl", { type: "model/stl" }),
+      { purpose: "model", target_role: "new_model" },
+      { api, digest, onSession: (id) => (sessionId = id) },
+    );
+    await vi.waitFor(() => expect(sessionId).toBe("session-1"));
+
+    expect(pauseArtifactUpload("session-1")).toBe(true);
+
+    await expect(transfer).rejects.toMatchObject({ name: "AbortError" });
+    expect(api.abortArtifactUpload).not.toHaveBeenCalled();
+    expect(rememberedArtifactUploads()).toEqual(["session-1"]);
   });
 });

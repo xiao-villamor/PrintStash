@@ -56,11 +56,41 @@ export async function sha256Blob(blob: Blob): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()));
 }
 
-interface UploadOptions {
+export interface UploadOptions {
   signal?: AbortSignal;
   onProgress?: (progress: ArtifactUploadProgress) => void;
+  onSession?: (id: string) => void;
   digest?: (blob: Blob) => Promise<string>;
   api?: ArtifactUploadApi;
+}
+
+const activeControllers = new Map<string, AbortController>();
+
+function controlledOptions(id: string, options: UploadOptions): UploadOptions {
+  if (options.signal) {
+    options.onSession?.(id);
+    return options;
+  }
+  const controller = new AbortController();
+  activeControllers.set(id, controller);
+  options.onSession?.(id);
+  return { ...options, signal: controller.signal };
+}
+
+function releaseController(id: string, signal: AbortSignal | undefined): void {
+  if (activeControllers.get(id)?.signal === signal) activeControllers.delete(id);
+}
+
+export function pauseArtifactUpload(id: string): boolean {
+  const controller = activeControllers.get(id);
+  if (!controller) return false;
+  controller.abort(new DOMException("Upload paused", "AbortError"));
+  activeControllers.delete(id);
+  return true;
+}
+
+export function isArtifactUploadActive(id: string): boolean {
+  return activeControllers.has(id);
 }
 
 export interface ArtifactUploadApi {
@@ -169,7 +199,12 @@ export async function uploadArtifact(
     sha256,
   });
   rememberArtifactUpload(session.id);
-  return transfer(session, file, { ...options, digest });
+  const controlled = controlledOptions(session.id, { ...options, digest });
+  try {
+    return await transfer(session, file, controlled);
+  } finally {
+    releaseController(session.id, controlled.signal);
+  }
 }
 
 export async function resumeArtifactUpload(
@@ -183,13 +218,19 @@ export async function resumeArtifactUpload(
     throw new Error("artifact_upload_file_mismatch");
   }
   rememberArtifactUpload(id);
-  return transfer(session, file, options);
+  const controlled = controlledOptions(id, options);
+  try {
+    return await transfer(session, file, controlled);
+  } finally {
+    releaseController(id, controlled.signal);
+  }
 }
 
 export async function cancelArtifactUpload(
   id: string,
   api: ArtifactUploadApi = defaultArtifactUploadApi,
 ): Promise<ArtifactUploadStatus> {
+  pauseArtifactUpload(id);
   const session = await api.abortArtifactUpload(id);
   forgetArtifactUpload(id);
   return session;

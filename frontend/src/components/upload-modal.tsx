@@ -412,7 +412,15 @@ export function UploadModal({
           source_hash: sourceHash,
           target_library_id: libraryId === "" ? undefined : libraryId,
         },
-        { onProgress: reportProgress },
+        {
+          onProgress: reportProgress,
+          onSession: (uploadSessionId) =>
+            updateTask(taskId, {
+              uploadSessionId,
+              uploadPaused: false,
+              retryable: true,
+            }),
+        },
       );
     try {
       if (mesh) {
@@ -489,6 +497,15 @@ export function UploadModal({
         if (refreshAfter) await onUploaded();
       }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        updateTask(taskId, {
+          status: "running",
+          uploadPaused: true,
+          retryable: true,
+          detail: uiText("Paused"),
+        });
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       updateTask(taskId, {
         status: "failed",

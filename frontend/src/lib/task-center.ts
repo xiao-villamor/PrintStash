@@ -49,6 +49,8 @@ export interface TaskItem {
   error?: string | null;
   serverUpdatedAt?: string | null;
   retryable?: boolean;
+  uploadSessionId?: string;
+  uploadPaused?: boolean;
   failedItems?: Array<{ name: string; reason: string; retryable: boolean }>;
 }
 

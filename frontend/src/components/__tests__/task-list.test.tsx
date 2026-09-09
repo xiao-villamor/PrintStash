@@ -110,4 +110,21 @@ describe("TaskList", () => {
       screen.getByText("Calculando el total… Puedes cerrar esta vista sin problema."),
     ).toBeVisible();
   });
+
+  it("offers resume and cancel for a paused durable upload", () => {
+    renderTaskList([
+      task({
+        status: "running",
+        progress: 40,
+        retryable: true,
+        uploadSessionId: "opaque-session-id",
+        uploadPaused: true,
+      }),
+    ]);
+
+    expect(screen.getByText("Paused")).toBeVisible();
+    expect(screen.getByText("Resume upload")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel upload" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review and retry" })).toBeNull();
+  });
 });
