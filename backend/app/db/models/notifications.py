@@ -7,9 +7,6 @@ from sqlalchemy import (
     Column,
     Text,
 )
-from sqlalchemy import (
-    Enum as SAEnum,
-)
 from sqlmodel import Field
 
 from app.core.time import utcnow
@@ -78,13 +75,7 @@ class NotificationDelivery(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     channel_id: int = Field(foreign_key="notification_channels.id", index=True)
-    event_type: NotificationEventType = Field(
-        sa_column=Column(
-            SAEnum(NotificationEventType, native_enum=False, length=32),
-            nullable=False,
-            index=True,
-        )
-    )
+    event_type: NotificationEventType = Field(index=True)
     printer_id: Optional[int] = Field(
         default=None, foreign_key="printers.id", index=True
     )

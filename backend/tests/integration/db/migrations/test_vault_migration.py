@@ -53,6 +53,17 @@ def exercise_upgrade(url: str, *, released_postgres: bool = False) -> None:
             else:
                 command.upgrade(config, target)
             with engine.connect() as connection:
+                if released_postgres:
+                    assert (
+                        connection.execute(
+                            text(
+                                "SELECT udt_name FROM information_schema.columns "
+                                "WHERE table_name='notification_deliveries' "
+                                "AND column_name='event_type'"
+                            )
+                        ).scalar_one()
+                        == "notificationeventtype"
+                    )
                 assert (
                     connection.execute(
                         text("SELECT name FROM models WHERE id=104")

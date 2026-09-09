@@ -114,7 +114,16 @@ explicitly omitted. No row is inferred from coverage percentages.
 | 97 | `test_external_path_is_not_adopted` | Error | Unowned external path | No destination key invented | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestRemapOwnedKey::test_external_path_is_not_adopted` |
 | 98 | `test_missing_terminal_native_staging_is_not_recreated` | Edge | Completed upload staging already consumed | No missing-upload error or recreated object | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestCensus::test_missing_terminal_native_staging_is_not_recreated` |
 
+| 99 | `test_preserves_populated_postgres_audits` | Regression | Released PostgreSQL database upgraded through #104 and downgraded through earlier audit revisions | Audit rows retained; notification column remains the native enum | Integration | ✅ `integration/db/migrations/test_audit_policies.py::TestAuditPolicyMigrations::test_preserves_populated_postgres_audits` |
+
 ## Execution evidence
+
+- The complete resource lane exposed conversion of PostgreSQL's notification
+  enum to VARCHAR in the new migration. The focused #104 upgrade assertion was
+  observed red before correcting the unmerged migration to add only the enum
+  label. SQLite/PostgreSQL roundtrips, earlier audit downgrades, schema convergence
+  and migration rules: **121 passed**. Offline PostgreSQL and SQLite DDL rendering
+  passed. The full S3 adapter contract file also passed: **57 passed**.
 
 - CI run 34390353141 found an order-dependent assertion that required an empty
   global audit table. Reproduced with real audit listeners, then corrected to
