@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -17,6 +18,7 @@ from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
     ArtifactUploadState,
+    StagingLease,
     User,
 )
 from app.modules.storage.storage_backend.contracts import StorageBackend
@@ -69,20 +71,16 @@ class SqlArtifactUploadManager:
             raise ArtifactUploadError("artifact_upload_actor_invalid")
         if request.size_bytes <= 0 or request.size_bytes > settings.max_upload_bytes:
             raise ArtifactUploadError("artifact_upload_size_invalid")
-        active = self.session.exec(
-            select(func.count(ArtifactUploadSession.id)).where(
-                ArtifactUploadSession.owner_user_id == actor.id,
-                ArtifactUploadSession.state.in_(_ACTIVE),
-            )
-        ).one()
-        if int(active) >= settings.staging_max_active_per_user:
-            raise ArtifactUploadError("staging_capacity_exceeded")
-
         upload_id = uuid.uuid4().hex
         native = self.native_adapter
         capability = native.capability if native is not None else None
         use_native = (
             capability is not None and request.size_bytes > capability.part_size
+        )
+        self._require_capacity(
+            actor.id,
+            size_bytes=request.size_bytes,
+            adapter_id="native_parts" if use_native else self.api_adapter.adapter_id,
         )
         upload = ArtifactUploadSession(
             id=upload_id,
@@ -116,6 +114,11 @@ class SqlArtifactUploadManager:
             except Exception:
                 # A backend that cannot initiate the required checksum-scoped
                 # operation is not native-capable for this session.
+                self._require_capacity(
+                    actor.id,
+                    size_bytes=request.size_bytes,
+                    adapter_id=self.api_adapter.adapter_id,
+                )
                 upload.adapter_id = self.api_adapter.adapter_id
                 upload.destination_ref = None
                 self.api_adapter.session_directory(upload.id, create=True)
@@ -131,6 +134,74 @@ class SqlArtifactUploadManager:
             self.adapter_for(upload).abort_owned(upload)
             raise
         return upload
+
+    def _require_capacity(
+        self, owner_user_id: int, *, size_bytes: int, adapter_id: str
+    ) -> None:
+        """Reserve the worst-case local footprint before a session accepts bytes."""
+
+        pre_ingestion = self.session.exec(
+            select(ArtifactUploadSession).where(
+                ArtifactUploadSession.state.in_(
+                    {
+                        ArtifactUploadState.CREATED,
+                        ArtifactUploadState.UPLOADING,
+                        ArtifactUploadState.VERIFYING,
+                    }
+                )
+            )
+        ).all()
+        ingesting_api = self.session.exec(
+            select(ArtifactUploadSession).where(
+                ArtifactUploadSession.state == ArtifactUploadState.INGESTING,
+                ArtifactUploadSession.adapter_id == self.api_adapter.adapter_id,
+            )
+        ).all()
+        lease_count, leased_bytes = self.session.exec(
+            select(
+                func.count(StagingLease.id),
+                func.coalesce(func.sum(StagingLease.size_bytes), 0),
+            )
+        ).one()
+        owner_leases = self.session.exec(
+            select(func.count(StagingLease.id)).where(
+                StagingLease.owner_user_id == owner_user_id
+            )
+        ).one()
+        pending_count = len(pre_ingestion) + int(lease_count)
+        owner_count = (
+            sum(item.owner_user_id == owner_user_id for item in pre_ingestion)
+            + int(owner_leases)
+        )
+
+        def reserved(upload: ArtifactUploadSession) -> int:
+            multiplier = 2 if upload.adapter_id == self.api_adapter.adapter_id else 1
+            return upload.declared_size * multiplier
+
+        reserved_bytes = (
+            int(leased_bytes)
+            + sum(reserved(upload) for upload in pre_ingestion)
+            + sum(upload.declared_size for upload in ingesting_api)
+        )
+        required_bytes = size_bytes * (
+            2 if adapter_id == self.api_adapter.adapter_id else 1
+        )
+        outstanding_bytes = sum(
+            max(0, reserved(upload) - upload.received_bytes)
+            for upload in pre_ingestion
+        )
+        self.api_adapter.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        free_bytes = shutil.disk_usage(self.api_adapter.root).free
+        if (
+            pending_count >= settings.staging_max_pending
+            or owner_count >= settings.staging_max_active_per_user
+            or reserved_bytes + required_bytes > settings.staging_max_gb * 1024**3
+            or free_bytes
+            < settings.staging_min_free_gb * 1024**3
+            + outstanding_bytes
+            + required_bytes
+        ):
+            raise ArtifactUploadError("staging_capacity_exceeded")
 
     def get(self, session_id: str, actor: User) -> ArtifactUploadSession:
         upload = self.session.get(ArtifactUploadSession, session_id)
