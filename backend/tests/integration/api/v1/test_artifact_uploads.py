@@ -39,6 +39,7 @@ from app.modules.storage.storage_backend.contracts import (
     NativeMultipartHandle,
     NativeMultipartPart,
 )
+from app.schemas.artifact_uploads import ArtifactUploadCreate
 from tests._env import use_local_storage
 from tests.factories import content
 
@@ -126,6 +127,37 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_validates_archive_and_provider_managed_file_types(self) -> None:
+        upload_api._validate_purpose_file(
+            ArtifactUploadCreate(
+                purpose="archive",
+                target_role="new_model",
+                filename="bundle.zip",
+                size_bytes=1,
+            )
+        )
+        upload_api._validate_purpose_file(
+            ArtifactUploadCreate(
+                purpose="browser_capture",
+                target_role="new_model",
+                filename="capture.bin",
+                size_bytes=1,
+            )
+        )
+
+        with pytest.raises(HTTPException) as raised:
+            upload_api._validate_purpose_file(
+                ArtifactUploadCreate(
+                    purpose="archive",
+                    target_role="new_model",
+                    filename="bundle.stl",
+                    size_bytes=1,
+                )
+            )
+
+        assert raised.value.status_code == 400
+        assert raised.value.detail == "unsupported_file_type"
+
     @pytest.mark.parametrize(
         ("error", "status_code"),
         [
@@ -217,6 +249,57 @@ class TestArtifactUploads:
 
         assert raised.value.status_code == 400
         assert raised.value.detail == "content_length_invalid"
+
+    def test_rejects_an_oversized_declared_content_length(self) -> None:
+        request = Request(
+            {
+                "type": "http",
+                "headers": [(b"content-length", str(CHUNK_SIZE + 1).encode())],
+            }
+        )
+
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                upload_api.put_artifact_upload_chunk(
+                    "upload-1",
+                    0,
+                    request,
+                    offset=0,
+                    length=1,
+                    sha256="a" * 64,
+                    current_user=None,  # type: ignore[arg-type]
+                    session=None,  # type: ignore[arg-type]
+                )
+            )
+
+        assert raised.value.status_code == 413
+        assert raised.value.detail == "upload_chunk_too_large"
+
+    def test_rejects_a_stream_that_exceeds_the_chunk_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def receive() -> dict[str, object]:
+            return {"type": "http.request", "body": b"too-large", "more_body": False}
+
+        monkeypatch.setattr(upload_api, "CHUNK_SIZE", 1)
+        request = Request({"type": "http", "headers": []}, receive)
+
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                upload_api.put_artifact_upload_chunk(
+                    "upload-1",
+                    0,
+                    request,
+                    offset=0,
+                    length=1,
+                    sha256="a" * 64,
+                    current_user=None,  # type: ignore[arg-type]
+                    session=None,  # type: ignore[arg-type]
+                )
+            )
+
+        assert raised.value.status_code == 413
+        assert raised.value.detail == "upload_chunk_too_large"
 
     def test_create_is_idempotent_for_the_same_client_key(
         self,
