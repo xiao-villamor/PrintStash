@@ -113,7 +113,6 @@ explicitly omitted. No row is inferred from coverage percentages.
 | 96 | `test_missing_derived_thumbnail_is_regenerable` | Edge | Missing derived thumbnail, intact primary | Primary retained in census; missing cache excluded | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestCensus::test_missing_derived_thumbnail_is_regenerable` |
 | 97 | `test_external_path_is_not_adopted` | Error | Unowned external path | No destination key invented | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestRemapOwnedKey::test_external_path_is_not_adopted` |
 | 98 | `test_missing_terminal_native_staging_is_not_recreated` | Edge | Completed upload staging already consumed | No missing-upload error or recreated object | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestCensus::test_missing_terminal_native_staging_is_not_recreated` |
-
 | 99 | `test_preserves_populated_postgres_audits` | Regression | Released PostgreSQL database upgraded through #104 and downgraded through earlier audit revisions | Audit rows retained; notification column remains the native enum | Integration | ✅ `integration/db/migrations/test_audit_policies.py::TestAuditPolicyMigrations::test_preserves_populated_postgres_audits` |
 
 ## Execution evidence
