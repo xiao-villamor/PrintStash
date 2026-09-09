@@ -87,8 +87,23 @@ provider-contract and failpoint matrices are maintained with the migration owner
 | 53 | hides the migration entry without an administrator session | Edge | No administrator session | No dead migration control | Frontend unit | ✅ src/components/__tests__/storage-config-card.test.tsx::hides the migration entry without an administrator session |
 | 54 | sends fresh candidate credentials without displaying them in the checked plan | Happy | Remote candidate with fresh secret | Secret request; safe destination summary without secret | Frontend unit | ✅ panel::sends fresh candidate credentials without displaying them in the checked plan |
 | 55 | blocks destinations unavailable for Vault use | Edge | Unavailable provider | Preflight disabled | Frontend unit | ✅ panel::blocks destinations unavailable for Vault use |
+| 56 | links the slice to the mesh it came from | Edge | Mesh plus G-code; earlier test upload fully drained before fetch replacement | G-code request carries the mesh hash without cross-test background work | Frontend unit | ✅ src/components/__tests__/upload-modal/uploading.test.tsx::links the slice to the mesh it came from |
 
 ## Execution evidence
+
+PR #164's initial CI app coverage run passed **2,066 tests**; domain and UI
+coverage runs also passed. The two-sided gate required raising app statements
+from 82.0 to 82.4 (measured 82.67%) and component branches from 74.3 to 74.7
+(measured 74.91%). No floor was lowered. The rerun verifies these new floors.
+
+The instrumented full app run reported **2,065 passed, 1 failed**: a previous
+test's background upload could reach the next test's request recorder. Upload
+tests now drain their task-centre work before replacing fetch. The complete
+upload file passed under coverage after this correction: **18 passed**. The
+same file also passed shuffled with seed 104: **18 passed**. Frontend lint,
+format and type checks passed after the lifecycle correction. The
+full corrected gate remains pending; isolated success is not reported as a
+full-suite pass.
 
 Real Chromium migration against an isolated supervised backend: **1 passed**,
 including an actual process restart, online delta ingestion, exact downloads,

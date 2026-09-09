@@ -116,6 +116,11 @@ explicitly omitted. No row is inferred from coverage percentages.
 
 ## Execution evidence
 
+- Fresh focused migration measurement on the current implementation: **129 passed**;
+  owner 90.85%, census 95.65%, transfer 93.94%, backup/identity/journal/progress/
+  upload fencing 100% combined statement/branch coverage. This is a focused
+  diagnostic, not the whole-application coverage gate.
+
 - Focused migration, recovery, journal and transfer tests: **50 passed**.
 - Real Local/S3 provider pairs: **3 passed**.
 - Real HTTP workflows (successful migration/cleanup and failed candidate): **2 passed**.

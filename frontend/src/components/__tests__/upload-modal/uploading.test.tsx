@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UploadModal } from "@/components/upload-modal";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
-import { setIngestJobSource } from "@/lib/task-center";
+import { listTasks, setIngestJobSource } from "@/lib/task-center";
 import { aCollection, aTag } from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ExternalLibrary, IngestJobStatus, ModelRead } from "@/types";
@@ -226,7 +226,16 @@ beforeEach(() => {
   setIngestJobSource(async () => [aJob()]);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Uploads intentionally outlive the modal. Finish this test's work before
+  // replacing fetch: a queued slice must not enter the next test's recorder.
+  await waitFor(
+    () => {
+      const unfinished = listTasks().filter((task) => ["pending", "running"].includes(task.status));
+      if (unfinished.length) throw new Error("Upload test left background tasks running");
+    },
+    { timeout: 5000 },
+  );
   setIngestJobSource(async () => []);
   vi.unstubAllGlobals();
 });
