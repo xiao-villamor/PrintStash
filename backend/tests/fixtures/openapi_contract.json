@@ -325,6 +325,378 @@
         "title": "ArtifactRequirementRead",
         "type": "object"
       },
+      "ArtifactUploadChunkRead": {
+        "properties": {
+          "part": {
+            "$ref": "#/components/schemas/ArtifactUploadPartRead"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ArtifactUploadRead"
+          }
+        },
+        "required": [
+          "session",
+          "part"
+        ],
+        "title": "ArtifactUploadChunkRead",
+        "type": "object"
+      },
+      "ArtifactUploadCreate": {
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "filename": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "media_type": {
+            "default": "application/octet-stream",
+            "maxLength": 128,
+            "title": "Media Type",
+            "type": "string"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "purpose": {
+            "enum": [
+              "model",
+              "gcode",
+              "revision",
+              "archive",
+              "browser_capture",
+              "url_import",
+              "slicer",
+              "external_writeback"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_library_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Library Id"
+          },
+          "target_role": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Target Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "target_role",
+          "filename",
+          "size_bytes"
+        ],
+        "title": "ArtifactUploadCreate",
+        "type": "object"
+      },
+      "ArtifactUploadPartRead": {
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "offset",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "ArtifactUploadPartRead",
+        "type": "object"
+      },
+      "ArtifactUploadPlanRead": {
+        "properties": {
+          "chunk_size": {
+            "title": "Chunk Size",
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "max_parallel": {
+            "title": "Max Parallel",
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "api_chunks",
+              "native_parts",
+              "simple"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "upload_path": {
+            "title": "Upload Path",
+            "type": "string"
+          },
+          "uploaded_parts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactUploadPartRead"
+            },
+            "title": "Uploaded Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session_id",
+          "mode",
+          "chunk_size",
+          "max_parallel",
+          "upload_path",
+          "uploaded_parts",
+          "expires_at"
+        ],
+        "title": "ArtifactUploadPlanRead",
+        "type": "object"
+      },
+      "ArtifactUploadRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactUploadPartRead"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "received_bytes": {
+            "title": "Received Bytes",
+            "type": "integer"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          },
+          "target_role": {
+            "title": "Target Role",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verified_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Sha256"
+          },
+          "verified_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Size"
+          }
+        },
+        "required": [
+          "id",
+          "purpose",
+          "target_role",
+          "target_id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "state",
+          "mode",
+          "received_bytes",
+          "verified_size",
+          "verified_sha256",
+          "job_id",
+          "retryable",
+          "error_code",
+          "created_at",
+          "updated_at",
+          "expires_at"
+        ],
+        "title": "ArtifactUploadRead",
+        "type": "object"
+      },
       "AuditObservation": {
         "properties": {
           "completed_at": {
@@ -16458,6 +16830,325 @@
         "summary": "Restore Resource",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads": {
+      "post": {
+        "operationId": "create_artifact_upload_api_v1_artifact_uploads_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactUploadCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Artifact Upload",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}": {
+      "delete": {
+        "operationId": "abort_artifact_upload_api_v1_artifact_uploads__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Abort Artifact Upload",
+        "tags": [
+          "artifact-uploads"
+        ]
+      },
+      "get": {
+        "operationId": "get_artifact_upload_api_v1_artifact_uploads__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Artifact Upload",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}/chunks/{index}": {
+      "put": {
+        "operationId": "put_artifact_upload_chunk_api_v1_artifact_uploads__session_id__chunks__index__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "length",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "maximum": 8388608,
+              "title": "Length",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadChunkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Artifact Upload Chunk",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}/finalize": {
+      "post": {
+        "operationId": "finalize_artifact_upload_api_v1_artifact_uploads__session_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finalize Artifact Upload",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}/plan": {
+      "get": {
+        "operationId": "get_artifact_upload_plan_api_v1_artifact_uploads__session_id__plan_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadPlanRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Artifact Upload Plan",
+        "tags": [
+          "artifact-uploads"
         ]
       }
     },

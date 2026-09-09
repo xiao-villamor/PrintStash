@@ -92,9 +92,7 @@ class TestBuildSystemConfig:
 
 
 class TestBuildArtifactUpload:
-    def test_builds_unique_owner_bound_sessions_and_receipts(
-        self, db_session: Session
-    ) -> None:
+    def test_builds_unique_owner_bound_uploads(self, db_session: Session) -> None:
         owner = factories.build_user(db_session)
         first = factories.build_artifact_upload(db_session, owner)
         second = factories.build_artifact_upload(db_session, owner)
