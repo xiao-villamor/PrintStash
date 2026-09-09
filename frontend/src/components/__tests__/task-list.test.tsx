@@ -111,7 +111,7 @@ describe("TaskList", () => {
     ).toBeVisible();
   });
 
-  it("offers resume and cancel for a paused durable upload", () => {
+  it("offers paused durable upload controls", () => {
     renderTaskList([
       task({
         status: "running",

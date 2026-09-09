@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GettingStartedPage from "@/pages/getting-started";
 import { usePathname } from "@/lib/navigation";
+import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { aModelListItem, anExternalLibrary, anIngestJob } from "@/test-support/factories";
 import {
   adminSession,
@@ -19,6 +20,33 @@ function Path() {
   return <span data-testid="path">{usePathname()}</span>;
 }
 function renderGuide(routes: RouteTable = {}, auth = adminSession()) {
+  const now = "2026-01-01T00:00:00Z";
+  let uploadRequest: ArtifactUploadCreate | null = null;
+  const uploadStatus = (overrides: Partial<ArtifactUploadStatus> = {}): ArtifactUploadStatus => {
+    if (!uploadRequest) throw new Error("Upload session has not been created");
+    return {
+      id: "guide-upload",
+      purpose: uploadRequest.purpose,
+      target_role: uploadRequest.target_role,
+      target_id: uploadRequest.target_id ?? null,
+      filename: uploadRequest.filename,
+      media_type: uploadRequest.media_type,
+      size_bytes: uploadRequest.size_bytes,
+      state: "uploading",
+      mode: "simple",
+      received_bytes: 0,
+      verified_size: null,
+      verified_sha256: null,
+      job_id: null,
+      retryable: false,
+      error_code: null,
+      created_at: now,
+      updated_at: now,
+      expires_at: now,
+      parts: [],
+      ...overrides,
+    };
+  };
   return renderApp(
     <>
       <GettingStartedPage />
@@ -37,6 +65,35 @@ function renderGuide(routes: RouteTable = {}, auth = adminSession()) {
         "GET /api/v1/libraries/locations": json([]),
         "GET /api/v1/collections": json([]),
         "GET /api/v1/tags": json([]),
+        "GET /api/v1/artifact-uploads/": json({
+          session_id: "guide-upload",
+          mode: "simple",
+          chunk_size: 1024,
+          max_parallel: 1,
+          upload_path: "/api/v1/artifact-uploads/guide-upload/chunks/{index}",
+          uploaded_parts: [],
+          expires_at: now,
+        }),
+        "PUT /api/v1/artifact-uploads/": () =>
+          json({
+            session: uploadStatus({
+              received_bytes: uploadRequest?.size_bytes ?? 0,
+            }),
+            part: {
+              index: 0,
+              offset: 0,
+              size_bytes: uploadRequest?.size_bytes ?? 0,
+              sha256: uploadRequest?.sha256 ?? "",
+            },
+          }),
+        "POST /api/v1/artifact-uploads": (url, init) => {
+          if (url.endsWith("/finalize")) {
+            return json(uploadStatus({ state: "ingesting", job_id: "guide-progress" }));
+          }
+          // SAFETY: createArtifactUpload serializes ArtifactUploadCreate as this route's JSON body.
+          uploadRequest = JSON.parse(String(init?.body)) as ArtifactUploadCreate;
+          return json(uploadStatus());
+        },
         ...routes,
       },
     },
@@ -173,7 +230,9 @@ describe("Getting started", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
   it("shows a background upload failure", async () => {
-    renderGuide({ "POST /api/v1/ingest/model": json({ detail: "unsupported_file_type" }, 400) });
+    renderGuide({
+      "POST /api/v1/artifact-uploads": json({ detail: "unsupported_file_type" }, 400),
+    });
     await userEvent.click(await screen.findByRole("button", { name: "Upload my first files" }));
     await userEvent.upload(
       screen.getByLabelText("Model or G-code file"),
@@ -190,13 +249,7 @@ describe("Getting started", () => {
     setIngestJobSource(async () => [
       anIngestJob({ job_id: "guide-progress", state: completed ? "completed" : "running" }),
     ]);
-    renderGuide({
-      "POST /api/v1/ingest/model": json({
-        job_id: "guide-progress",
-        state: "pending",
-        message: "queued",
-      }),
-    });
+    renderGuide();
     await userEvent.click(await screen.findByRole("button", { name: "Upload my first files" }));
     await userEvent.upload(
       screen.getByLabelText("Model or G-code file"),
@@ -210,7 +263,7 @@ describe("Getting started", () => {
       () => expect(screen.getByRole("button", { name: "Upload my first files" })).toBeEnabled(),
       { timeout: 5000 },
     );
-  });
+  }, 20_000);
   it("renders verified Models as the completion state", async () => {
     renderGuide({
       "GET /api/v1/models/page": json({

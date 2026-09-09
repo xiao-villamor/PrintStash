@@ -127,7 +127,7 @@ describe("uploadArtifact", () => {
     expect(rememberedArtifactUploads()).toEqual([]);
   });
 
-  it("cancels server state and forgets resume state", async () => {
+  it("forgets resume state after cancelling on the server", async () => {
     const api = anApi();
     localStorage.setItem("printstash.artifact-upload-session-ids", "session-1");
     vi.mocked(api.abortArtifactUpload).mockResolvedValue(aSession({ state: "aborted" }));
