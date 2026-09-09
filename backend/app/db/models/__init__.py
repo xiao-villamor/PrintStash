@@ -14,6 +14,8 @@ from .administration import VaultAuditPolicy as VaultAuditPolicy
 from .administration import (
     VaultAuditRun as VaultAuditRun,
 )
+from .artifact_uploads import ArtifactUploadPart as ArtifactUploadPart
+from .artifact_uploads import ArtifactUploadSession as ArtifactUploadSession
 from .backups import (
     BackupDestinationResult as BackupDestinationResult,
 )
@@ -252,6 +254,7 @@ from .types import (
 from .types import (
     SUFFIX_TO_FILE_TYPE as SUFFIX_TO_FILE_TYPE,
 )
+from .types import ArtifactUploadState as ArtifactUploadState
 from .types import (
     CaptureProvider as CaptureProvider,
 )

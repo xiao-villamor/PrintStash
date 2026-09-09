@@ -130,6 +130,17 @@ class CaptureUploadSlotState(str, Enum):
     UPLOADED = "uploaded"
 
 
+class ArtifactUploadState(str, Enum):
+    CREATED = "created"
+    UPLOADING = "uploading"
+    VERIFYING = "verifying"
+    INGESTING = "ingesting"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ABORTED = "aborted"
+    EXPIRED = "expired"
+
+
 class StorageObjectState(str, Enum):
     PENDING = "pending"
     COMMITTED = "committed"
