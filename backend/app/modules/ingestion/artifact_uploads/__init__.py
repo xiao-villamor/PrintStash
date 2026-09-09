@@ -8,6 +8,7 @@ from .contracts import (
     VerifiedStagedArtifact,
 )
 from .manager import ArtifactUploadError, SqlArtifactUploadManager
+from .native_parts import NativeMultipartError, NativeMultipartUploadAdapter
 from .recovery import ArtifactUploadRecoveryResult, reconcile_artifact_uploads
 from .state import ArtifactUploadTransitionError, require_transition
 
@@ -17,6 +18,8 @@ __all__ = [
     "ArtifactUploadManager",
     "ArtifactUploadTransitionError",
     "ChunkReceipt",
+    "NativeMultipartError",
+    "NativeMultipartUploadAdapter",
     "SqlArtifactUploadManager",
     "UploadPlan",
     "UploadRequest",

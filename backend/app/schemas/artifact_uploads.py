@@ -84,6 +84,23 @@ class ArtifactUploadPlanRead(BaseModel):
     expires_at: datetime
 
 
+class ArtifactUploadNativePartSign(BaseModel):
+    checksum_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+
+
+class ArtifactUploadNativePartInstruction(BaseModel):
+    url: str
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str]
+    expires_at: datetime
+
+
+class ArtifactUploadNativePartReceipt(BaseModel):
+    size_bytes: int = Field(gt=0)
+    checksum_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    etag: str = Field(min_length=1, max_length=256)
+
+
 class ArtifactUploadChunkRead(BaseModel):
     session: ArtifactUploadRead
     part: ArtifactUploadPartRead

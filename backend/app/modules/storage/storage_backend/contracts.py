@@ -87,6 +87,8 @@ class StorageCapabilities:
     conditional_replace: bool
     namespace_ownership: bool
     direct_path: bool
+    browser_multipart_upload: bool = False
+    multipart_sha256_checksums: bool = False
 
     @property
     def tier(self) -> StorageTier:
@@ -129,6 +131,8 @@ class StorageCapabilities:
             "conditional_replace": self.conditional_replace,
             "namespace_ownership": self.namespace_ownership,
             "direct_path": self.direct_path,
+            "browser_multipart_upload": self.browser_multipart_upload,
+            "multipart_sha256_checksums": self.multipart_sha256_checksums,
             "tier": self.tier.value,
             "warnings": list(self.warnings),
         }
@@ -195,6 +199,32 @@ class CreationReceipt:
     provider_ref: str | None = None
 
 
+@dataclass(frozen=True)
+class NativeMultipartCapability:
+    """Provider-neutral guarantees required for direct browser parts."""
+
+    part_size: int
+    max_parts: int
+    checksum_algorithm: str = "sha256"
+
+
+@dataclass(frozen=True)
+class NativeMultipartHandle:
+    """Private operation identity; callers must persist this encrypted."""
+
+    key: str
+    upload_id: str
+    ownership_token: str
+
+
+@dataclass(frozen=True)
+class NativeMultipartPart:
+    part_number: int
+    size_bytes: int
+    checksum_sha256: str
+    etag: str
+
+
 class StorageBackend(ABC):
     """Abstract interface for vault file operations.
 
@@ -242,6 +272,61 @@ class StorageBackend(ABC):
     def destructive_lifecycle_findings(self) -> list[dict[str, object]]:
         """Read-only operator policy findings that may expire managed bytes."""
         return []
+
+    @property
+    def native_multipart_capability(self) -> NativeMultipartCapability | None:
+        """Return browser-upload guarantees, or ``None`` for API fallback."""
+
+        return None
+
+    def begin_native_multipart(
+        self,
+        *,
+        session_id: str,
+        filename: str,
+        media_type: str,
+    ) -> NativeMultipartHandle:
+        del session_id, filename, media_type
+        raise NotImplementedError("native_multipart_not_supported")
+
+    def sign_native_multipart_part(
+        self,
+        handle: NativeMultipartHandle,
+        *,
+        part_number: int,
+        checksum_sha256: str,
+        expires_seconds: int,
+    ) -> str:
+        del handle, part_number, checksum_sha256, expires_seconds
+        raise NotImplementedError("native_multipart_not_supported")
+
+    def list_native_multipart_parts(
+        self, handle: NativeMultipartHandle
+    ) -> list[NativeMultipartPart]:
+        del handle
+        raise NotImplementedError("native_multipart_not_supported")
+
+    def complete_native_multipart(
+        self,
+        handle: NativeMultipartHandle,
+        parts: list[NativeMultipartPart],
+    ) -> CreationReceipt:
+        del handle, parts
+        raise NotImplementedError("native_multipart_not_supported")
+
+    def abort_native_multipart(self, handle: NativeMultipartHandle) -> None:
+        del handle
+        raise NotImplementedError("native_multipart_not_supported")
+
+    def recover_native_multipart_completion(
+        self,
+        handle: NativeMultipartHandle,
+        *,
+        expected_size: int,
+        expected_sha256: str | None,
+    ) -> CreationReceipt | None:
+        del handle, expected_size, expected_sha256
+        return None
 
     def namespace_for(self, key: str) -> str:
         """Return the owned namespace that contains an opaque storage key."""

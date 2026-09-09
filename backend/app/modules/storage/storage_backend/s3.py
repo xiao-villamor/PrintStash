@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 import shutil
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
 
 from .contracts import (
     CreationReceipt,
+    NativeMultipartCapability,
+    NativeMultipartHandle,
+    NativeMultipartPart,
     ObjectIdentity,
     StorageBackend,
     StorageCapabilities,
@@ -148,6 +152,8 @@ class S3StorageBackend(StorageBackend):
             conditional_replace=True,
             namespace_ownership=True,
             direct_path=False,
+            browser_multipart_upload=True,
+            multipart_sha256_checksums=True,
         )
         self._probe_diagnostics: dict[str, object] = {
             "probed": False,
@@ -160,6 +166,199 @@ class S3StorageBackend(StorageBackend):
         # available and the restore path performs its own operation checks.
         if check_bucket:
             self._ensure_bucket()
+
+    @property
+    def native_multipart_capability(self) -> NativeMultipartCapability | None:
+        if self._read_only or not self.capabilities.browser_multipart_upload:
+            return None
+        if not self.capabilities.multipart_sha256_checksums:
+            return None
+        return NativeMultipartCapability(part_size=8 * 1024 * 1024, max_parts=10_000)
+
+    def _native_staging_key(self, session_id: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id):
+            raise ValueError("native_upload_session_invalid")
+        return f"{self._prefix()}staging/artifact-uploads/{session_id}"
+
+    @staticmethod
+    def _native_checksum(value: str) -> str:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+            raise ValueError("native_upload_checksum_invalid")
+        return base64.b64encode(bytes.fromhex(value)).decode()
+
+    def _validate_native_handle(self, handle: NativeMultipartHandle) -> None:
+        self._validate_managed_key(handle.key)
+        expected_prefix = f"{self._prefix()}staging/artifact-uploads/"
+        if not handle.key.startswith(expected_prefix) or not handle.upload_id:
+            raise ValueError("native_upload_scope_invalid")
+
+    def begin_native_multipart(
+        self,
+        *,
+        session_id: str,
+        filename: str,
+        media_type: str,
+    ) -> NativeMultipartHandle:
+        del filename
+        key = self._native_staging_key(session_id)
+        token = uuid.uuid4().hex
+        created = self._client.create_multipart_upload(
+            Bucket=self._bucket,
+            Key=key,
+            ContentType=media_type,
+            ChecksumAlgorithm="SHA256",
+            Metadata={"printstash-create-token": token},
+        )
+        return NativeMultipartHandle(
+            key=key,
+            upload_id=str(created["UploadId"]),
+            ownership_token=token,
+        )
+
+    def sign_native_multipart_part(
+        self,
+        handle: NativeMultipartHandle,
+        *,
+        part_number: int,
+        checksum_sha256: str,
+        expires_seconds: int,
+    ) -> str:
+        self._validate_native_handle(handle)
+        capability = self.native_multipart_capability
+        if capability is None or not 1 <= part_number <= capability.max_parts:
+            raise ValueError("native_upload_part_invalid")
+        checksum = self._native_checksum(checksum_sha256)
+        return str(
+            self._client.generate_presigned_url(
+                "upload_part",
+                Params={
+                    "Bucket": self._bucket,
+                    "Key": handle.key,
+                    "UploadId": handle.upload_id,
+                    "PartNumber": part_number,
+                    "ChecksumSHA256": checksum,
+                },
+                ExpiresIn=max(1, min(300, expires_seconds)),
+                HttpMethod="PUT",
+            )
+        )
+
+    def list_native_multipart_parts(
+        self, handle: NativeMultipartHandle
+    ) -> list[NativeMultipartPart]:
+        self._validate_native_handle(handle)
+        parts: list[NativeMultipartPart] = []
+        marker: int | None = None
+        while True:
+            kwargs: dict[str, object] = {
+                "Bucket": self._bucket,
+                "Key": handle.key,
+                "UploadId": handle.upload_id,
+            }
+            if marker is not None:
+                kwargs["PartNumberMarker"] = marker
+            response = self._client.list_parts(**kwargs)
+            for item in response.get("Parts", []):
+                encoded = item.get("ChecksumSHA256")
+                if not encoded:
+                    raise RuntimeError("native_upload_checksum_unavailable")
+                checksum = base64.b64decode(str(encoded), validate=True).hex()
+                parts.append(
+                    NativeMultipartPart(
+                        part_number=int(item["PartNumber"]),
+                        size_bytes=int(item["Size"]),
+                        checksum_sha256=checksum,
+                        etag=str(item["ETag"]),
+                    )
+                )
+            if not response.get("IsTruncated"):
+                return parts
+            marker = int(response["NextPartNumberMarker"])
+
+    def complete_native_multipart(
+        self,
+        handle: NativeMultipartHandle,
+        parts: list[NativeMultipartPart],
+    ) -> CreationReceipt:
+        self._validate_native_handle(handle)
+        response = self._client.complete_multipart_upload(
+            Bucket=self._bucket,
+            Key=handle.key,
+            UploadId=handle.upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {
+                        "PartNumber": part.part_number,
+                        "ETag": part.etag,
+                        "ChecksumSHA256": self._native_checksum(part.checksum_sha256),
+                    }
+                    for part in parts
+                ]
+            },
+        )
+        info = self.object_info(handle.key)
+        if info is None:
+            raise RuntimeError("native_upload_completion_unverified")
+        return CreationReceipt(
+            key=handle.key,
+            size=info.size,
+            token=handle.ownership_token,
+            backend=self.backend_name,
+            namespace=f"{self._bucket}/{self._prefix()}",
+            etag=str(response.get("ETag") or info.etag or "") or None,
+            version_id=str(response["VersionId"])
+            if response.get("VersionId")
+            else None,
+            provider_ref=self.storage_target.ref,
+        )
+
+    def abort_native_multipart(self, handle: NativeMultipartHandle) -> None:
+        self._validate_native_handle(handle)
+        self._client.abort_multipart_upload(
+            Bucket=self._bucket,
+            Key=handle.key,
+            UploadId=handle.upload_id,
+        )
+
+    def recover_native_multipart_completion(
+        self,
+        handle: NativeMultipartHandle,
+        *,
+        expected_size: int,
+        expected_sha256: str | None,
+    ) -> CreationReceipt | None:
+        """Adopt only the exact token-bound object after an uncertain completion."""
+
+        self._validate_native_handle(handle)
+        try:
+            response = self._client.head_object(Bucket=self._bucket, Key=handle.key)
+        except Exception:
+            return None
+        metadata = response.get("Metadata", {})
+        if metadata.get("printstash-create-token") != handle.ownership_token:
+            return None
+        size = int(response.get("ContentLength", -1))
+        if size != expected_size:
+            return None
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            for chunk in self.stream_chunks(handle.key):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256.lower():
+                return None
+        etag = response.get("ETag")
+        return CreationReceipt(
+            key=handle.key,
+            size=size,
+            token=handle.ownership_token,
+            backend=self.backend_name,
+            namespace=f"{self._bucket}/{self._prefix()}",
+            etag=str(etag) if etag else None,
+            version_id=str(response["VersionId"])
+            if response.get("VersionId")
+            else None,
+            provider_ref=self.storage_target.ref,
+        )
 
     def _probe_capabilities(self) -> None:
         status = "unknown"
@@ -180,6 +379,7 @@ class S3StorageBackend(StorageBackend):
             }
         versioned = status == "enabled"
         conditional = self._probe_conditional_create()
+        native_multipart = conditional and self._probe_native_multipart()
         self._capabilities = StorageCapabilities(
             conditional_create=conditional,
             object_identity=(
@@ -189,11 +389,56 @@ class S3StorageBackend(StorageBackend):
             conditional_replace=True,
             namespace_ownership=True,
             direct_path=False,
+            browser_multipart_upload=native_multipart,
+            multipart_sha256_checksums=native_multipart,
         )
         self._read_only = not conditional
         self._probe_diagnostics["conditional_create"] = conditional
+        self._probe_diagnostics["browser_multipart_upload"] = native_multipart
         if not conditional:
             self._probe_diagnostics["read_only"] = True
+
+    def _probe_native_multipart(self) -> bool:
+        """Prove checksum-carrying create, upload, list, and exact abort semantics."""
+
+        key = f"{self._prefix()}.printstash-probe/{uuid.uuid4().hex}"
+        payload = b"printstash-native-multipart-proof"
+        checksum = base64.b64encode(hashlib.sha256(payload).digest()).decode()
+        upload_id: str | None = None
+        try:
+            created = self._client.create_multipart_upload(
+                Bucket=self._bucket,
+                Key=key,
+                ChecksumAlgorithm="SHA256",
+                Metadata={"printstash-create-token": uuid.uuid4().hex},
+            )
+            upload_id = str(created["UploadId"])
+            self._client.upload_part(
+                Bucket=self._bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=1,
+                Body=payload,
+                ChecksumSHA256=checksum,
+            )
+            listed = self._client.list_parts(
+                Bucket=self._bucket, Key=key, UploadId=upload_id
+            )
+            parts = listed.get("Parts", [])
+            return bool(parts and parts[0].get("ChecksumSHA256") == checksum)
+        except Exception:
+            logger.warning("S3 native multipart checksum probe failed", exc_info=True)
+            return False
+        finally:
+            if upload_id is not None:
+                try:
+                    self._client.abort_multipart_upload(
+                        Bucket=self._bucket, Key=key, UploadId=upload_id
+                    )
+                except Exception:
+                    logger.warning(
+                        "S3 native multipart probe cleanup failed", exc_info=True
+                    )
 
     def _probe_conditional_create(self) -> bool:
         """Prove native S3 no-replace semantics with a disposable object."""

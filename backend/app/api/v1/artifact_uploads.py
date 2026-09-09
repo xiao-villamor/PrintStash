@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import (
@@ -20,6 +22,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
 from app.core.security import require_user
+from app.core.time import utcnow
 from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
@@ -35,6 +38,7 @@ from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion.artifact_uploads import (
     ArtifactUploadError,
     ChunkReceipt,
+    NativeMultipartError,
     SqlArtifactUploadManager,
     UploadRequest,
 )
@@ -43,6 +47,9 @@ from app.modules.ingestion.artifact_uploads.handoff import run_verified_upload_i
 from app.schemas.artifact_uploads import (
     ArtifactUploadChunkRead,
     ArtifactUploadCreate,
+    ArtifactUploadNativePartInstruction,
+    ArtifactUploadNativePartReceipt,
+    ArtifactUploadNativePartSign,
     ArtifactUploadPartRead,
     ArtifactUploadPlanRead,
     ArtifactUploadRead,
@@ -60,6 +67,7 @@ _create_limit = rate_limit(30, 60.0)
 _plan_limit = rate_limit(180, 60.0)
 _chunk_limit = rate_limit(600, 60.0)
 _finalize_limit = rate_limit(60, 60.0)
+_native_part_limit = rate_limit(600, 60.0)
 
 
 def _manager(session: Session) -> SqlArtifactUploadManager:
@@ -87,7 +95,7 @@ def _upload_read(
         media_type=upload.media_type,
         size_bytes=upload.declared_size,
         state=str(getattr(upload.state, "value", upload.state)),
-        mode="api_chunks",
+        mode=upload.adapter_id,
         received_bytes=upload.received_bytes,
         verified_size=upload.verified_size,
         verified_sha256=upload.verified_sha256,
@@ -109,6 +117,8 @@ def _translate_error(exc: Exception) -> HTTPException:
         "artifact_upload_state_conflict",
         "artifact_upload_chunk_conflict",
         "artifact_upload_assembly_conflict",
+        "artifact_upload_mode_conflict",
+        "native_upload_receipts_mismatch",
     }:
         return HTTPException(status_code=409, detail=code)
     if code == "artifact_upload_expired":
@@ -166,8 +176,9 @@ async def create_artifact_upload(
         raise HTTPException(status_code=413, detail="upload_too_large")
     _validate_purpose_file(request)
     _require_revision_target(session, current_user, request)
-    _require_ingest_collection(session, current_user, request.collection)
-    _validate_target_library(session, request.target_library_id)
+    if request.purpose != "revision":
+        _require_ingest_collection(session, current_user, request.collection)
+        _validate_target_library(session, request.target_library_id)
     manager = _manager(session)
     try:
         upload = manager.create(
@@ -195,7 +206,7 @@ async def create_artifact_upload(
             ),
             current_user,
         )
-    except (ArtifactUploadError, ApiChunkError) as exc:
+    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
     return _upload_read(manager, upload)
 
@@ -211,7 +222,7 @@ def get_artifact_upload(
     manager = _manager(session)
     try:
         return _upload_read(manager, manager.get(session_id, current_user))
-    except ArtifactUploadError as exc:
+    except (ArtifactUploadError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
 
 
@@ -241,6 +252,69 @@ def get_artifact_upload_plan(
         upload_path=plan.upload_path,
         uploaded_parts=[_part_read(part) for part in manager.parts(upload)],
         expires_at=upload.expires_at,
+    )
+
+
+@router.post(
+    "/{session_id}/parts/{part_number}/sign",
+    response_model=ArtifactUploadNativePartInstruction,
+    dependencies=[Depends(_native_part_limit)],
+)
+def sign_artifact_upload_part(
+    session_id: str,
+    part_number: int,
+    body: ArtifactUploadNativePartSign,
+    response: Response,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ArtifactUploadNativePartInstruction:
+    response.headers["Cache-Control"] = "no-store"
+    manager = _manager(session)
+    try:
+        url = manager.sign_native_part(
+            session_id,
+            part_number=part_number,
+            checksum_sha256=body.checksum_sha256,
+            actor=current_user,
+        )
+    except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
+        raise _translate_error(exc) from exc
+    checksum = base64.b64encode(bytes.fromhex(body.checksum_sha256)).decode()
+    return ArtifactUploadNativePartInstruction(
+        url=url,
+        headers={"x-amz-checksum-sha256": checksum},
+        expires_at=utcnow() + timedelta(seconds=60),
+    )
+
+
+@router.post(
+    "/{session_id}/parts/{part_number}",
+    response_model=ArtifactUploadChunkRead,
+    dependencies=[Depends(_native_part_limit)],
+)
+def record_artifact_upload_part(
+    session_id: str,
+    part_number: int,
+    body: ArtifactUploadNativePartReceipt,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ArtifactUploadChunkRead:
+    manager = _manager(session)
+    try:
+        part = manager.record_native_part(
+            session_id,
+            part_number=part_number,
+            size_bytes=body.size_bytes,
+            checksum_sha256=body.checksum_sha256,
+            etag=body.etag,
+            actor=current_user,
+        )
+        upload = manager.get(session_id, current_user)
+    except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
+        raise _translate_error(exc) from exc
+    return ArtifactUploadChunkRead(
+        session=_upload_read(manager, upload),
+        part=_part_read(part),
     )
 
 
@@ -288,7 +362,7 @@ async def put_artifact_upload_chunk(
             current_user,
         )
         upload = manager.get(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError) as exc:
+    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
     return ArtifactUploadChunkRead(
         session=_upload_read(manager, upload),
@@ -312,24 +386,26 @@ def finalize_artifact_upload(
     try:
         pending = manager.get(session_id, current_user)
         options = json.loads(pending.request_json)
+        pending_request = ArtifactUploadCreate(
+            purpose=pending.purpose,
+            target_role=pending.target_role,
+            target_id=pending.target_id,
+            filename=pending.filename,
+            media_type=pending.media_type,
+            size_bytes=pending.declared_size,
+            sha256=pending.client_sha256,
+            **options,
+        )
         _require_revision_target(
             session,
             current_user,
-            ArtifactUploadCreate(
-                purpose=pending.purpose,
-                target_role=pending.target_role,
-                target_id=pending.target_id,
-                filename=pending.filename,
-                media_type=pending.media_type,
-                size_bytes=pending.declared_size,
-                sha256=pending.client_sha256,
-                **options,
-            ),
+            pending_request,
         )
-        _require_ingest_collection(session, current_user, options.get("collection"))
-        _validate_target_library(session, options.get("target_library_id"))
+        if pending.purpose != "revision":
+            _require_ingest_collection(session, current_user, options.get("collection"))
+            _validate_target_library(session, options.get("target_library_id"))
         upload, verified = manager.finalize(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError) as exc:
+    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
     assert current_user.id is not None
     job_id = _create_staged_job(
@@ -364,6 +440,6 @@ def abort_artifact_upload(
     manager = _manager(session)
     try:
         upload = manager.abort(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError) as exc:
+    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
     return _upload_read(manager, upload)

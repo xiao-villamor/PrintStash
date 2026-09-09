@@ -32,7 +32,9 @@ def _expire_one(
 ) -> bool:
     """Remove only adapter-proven owned bytes before terminalizing expiry."""
 
-    if upload.adapter_id != manager.adapter.adapter_id:
+    try:
+        adapter = manager.adapter_for(upload)
+    except ValueError:
         manager.transition(
             upload,
             ArtifactUploadState.FAILED,
@@ -41,8 +43,8 @@ def _expire_one(
         )
         return False
     try:
-        manager.adapter.abort_owned(upload)
-    except OSError:
+        adapter.abort_owned(upload)
+    except (OSError, RuntimeError, ValueError):
         manager.transition(
             upload,
             ArtifactUploadState.FAILED,
@@ -75,6 +77,23 @@ def reconcile_artifact_uploads(
     reconciled = expired = retained = 0
     with factory.scoped_session() as session:
         manager = SqlArtifactUploadManager(session)
+        verifying = list(
+            session.exec(
+                select(ArtifactUploadSession).where(
+                    ArtifactUploadSession.state == ArtifactUploadState.VERIFYING,
+                    ArtifactUploadSession.error_code
+                    == "artifact_upload_verification_active",
+                )
+            )
+        )
+        for upload in verifying:
+            manager.transition(
+                upload,
+                ArtifactUploadState.VERIFYING,
+                error_code="artifact_upload_verification_interrupted",
+                retryable=True,
+            )
+            reconciled += 1
         ingesting = list(
             session.exec(
                 select(ArtifactUploadSession).where(
@@ -96,8 +115,8 @@ def reconcile_artifact_uploads(
                     retryable=False,
                 )
                 try:
-                    manager.adapter.abort_owned(upload)
-                except OSError:
+                    manager.adapter_for(upload).abort_owned(upload)
+                except (OSError, RuntimeError, ValueError):
                     # The canonical Artifact is already committed. Retain the
                     # private staging directory for a later exact cleanup pass.
                     pass

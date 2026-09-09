@@ -12,6 +12,7 @@ this file runs everywhere or the session stops saying why. See
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 import boto3
+import botocore.exceptions
 import pytest
 from PIL import Image
 from sqlmodel import Session
@@ -32,6 +34,7 @@ from app.modules.media.thumbnail_engine import ThumbnailStrategy
 from app.modules.media.thumbnail_generations import publish_precomputed_thumbnail
 from app.modules.sources.library_source import source_from_connection
 from app.modules.storage.storage_backend.contracts import (
+    NativeMultipartPart,
     StorageCollisionError,
     StorageConfigurationError,
 )
@@ -107,6 +110,76 @@ class TestCaptureUploadSlotKey:
         assert s3_backend.capture_upload_slot_key("slot-1").endswith(
             "capture-slots/slot-1"
         )
+
+
+class TestNativeMultipartCompatibility:
+    def test_advertises_native_mode_only_after_checksum_probe(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        s3_backend._probe_capabilities()
+
+        assert (s3_backend.native_multipart_capability is not None) is bool(
+            s3_backend.probe_diagnostics["browser_multipart_upload"]
+        )
+
+    def test_round_trips_native_parts_when_supported(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        s3_backend._probe_capabilities()
+        capability = s3_backend.native_multipart_capability
+        assert capability is not None
+        payloads = [b"a" * (5 * 1024 * 1024), b"last native part"]
+        handle = s3_backend.begin_native_multipart(
+            session_id=uuid.uuid4().hex,
+            filename="artifact.stl",
+            media_type="model/stl",
+        )
+        expected: list[NativeMultipartPart] = []
+        for part_number, payload in enumerate(payloads, start=1):
+            checksum = hashlib.sha256(payload).hexdigest()
+            uploaded = s3_backend._client.upload_part(
+                Bucket=s3_backend._bucket,
+                Key=handle.key,
+                UploadId=handle.upload_id,
+                PartNumber=part_number,
+                Body=payload,
+                ChecksumSHA256=base64.b64encode(bytes.fromhex(checksum)).decode(),
+            )
+            expected.append(
+                NativeMultipartPart(
+                    part_number=part_number,
+                    size_bytes=len(payload),
+                    checksum_sha256=checksum,
+                    etag=str(uploaded["ETag"]),
+                )
+            )
+
+        listed = s3_backend.list_native_multipart_parts(handle)
+        receipt = s3_backend.complete_native_multipart(handle, listed)
+
+        assert listed == expected
+        assert receipt.size == sum(map(len, payloads))
+        assert s3_backend.read_bytes(receipt.key) == b"".join(payloads)
+
+    def test_aborts_the_exact_native_operation(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        s3_backend._probe_capabilities()
+        assert s3_backend.native_multipart_capability is not None
+        handle = s3_backend.begin_native_multipart(
+            session_id=uuid.uuid4().hex,
+            filename="artifact.stl",
+            media_type="model/stl",
+        )
+
+        s3_backend.abort_native_multipart(handle)
+
+        with pytest.raises(botocore.exceptions.ClientError):
+            s3_backend._client.list_parts(
+                Bucket=s3_backend._bucket,
+                Key=handle.key,
+                UploadId=handle.upload_id,
+            )
 
 
 class TestExists:

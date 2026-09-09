@@ -16,6 +16,9 @@ import pytest
 
 import app.modules.storage.storage_backend.s3 as storage_s3
 from app.modules.storage.storage_backend.contracts import (
+    NativeMultipartHandle,
+    ObjectIdentity,
+    StorageCapabilities,
     StorageCollisionError,
     StorageConfigurationError,
     StorageTier,
@@ -168,6 +171,74 @@ class TestS3Namespace:
             )
 
 
+class TestS3NativeMultipart:
+    def test_signs_only_the_scoped_part(self) -> None:
+        class _Client:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def generate_presigned_url(self, operation: str, **kwargs: object) -> str:
+                self.calls.append((operation, kwargs))
+                return "https://upload.example.test/signed"
+
+        client = _Client()
+        backend = _bare_s3_backend(client)  # type: ignore[arg-type]
+        backend._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.VERSION,
+            verified_delete=True,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=False,
+            browser_multipart_upload=True,
+            multipart_sha256_checksums=True,
+        )
+        backend._read_only = False
+        handle = NativeMultipartHandle(
+            key="vault-data/staging/artifact-uploads/session-1",
+            upload_id="native-id",
+            ownership_token="token",
+        )
+
+        url = backend.sign_native_multipart_part(
+            handle,
+            part_number=2,
+            checksum_sha256="a" * 64,
+            expires_seconds=60,
+        )
+
+        assert url == "https://upload.example.test/signed"
+        operation, kwargs = client.calls[0]
+        assert operation == "upload_part"
+        assert kwargs["Params"] == {
+            "Bucket": "vault",
+            "Key": handle.key,
+            "UploadId": "native-id",
+            "PartNumber": 2,
+            "ChecksumSHA256": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo=",
+        }
+
+    def test_rejects_a_handle_outside_staging_scope(self) -> None:
+        backend = _bare_s3_backend(_MemoryS3Client())
+        backend._capabilities = StorageCapabilities(
+            True, ObjectIdentity.VERSION, True, True, True, False, True, True
+        )
+        backend._read_only = False
+        handle = NativeMultipartHandle(
+            key="vault-data/files/not-staging.stl",
+            upload_id="native-id",
+            ownership_token="token",
+        )
+
+        with pytest.raises(ValueError, match="native_upload_scope_invalid"):
+            backend.sign_native_multipart_part(
+                handle,
+                part_number=1,
+                checksum_sha256="a" * 64,
+                expires_seconds=60,
+            )
+
+
 class TestS3ObjectInfo:
     def test_normalizes_an_unquoted_etag(self) -> None:
         class _Client:
@@ -300,6 +371,7 @@ class TestS3CapabilityProbe:
             "bucket_versioning": "unknown",
             "versioning_error": "OSError",
             "conditional_create": True,
+            "browser_multipart_upload": False,
         }
 
 

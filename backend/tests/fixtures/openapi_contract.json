@@ -361,6 +361,11 @@
             "title": "Filename",
             "type": "string"
           },
+          "is_recommended": {
+            "default": false,
+            "title": "Is Recommended",
+            "type": "boolean"
+          },
           "media_type": {
             "default": "application/octet-stream",
             "maxLength": 128,
@@ -392,6 +397,41 @@
             ],
             "title": "Purpose",
             "type": "string"
+          },
+          "revision_label": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Label"
+          },
+          "revision_notes": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Notes"
+          },
+          "revision_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileRevisionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "needs_test"
           },
           "sha256": {
             "anyOf": [
@@ -472,6 +512,80 @@
           "size_bytes"
         ],
         "title": "ArtifactUploadCreate",
+        "type": "object"
+      },
+      "ArtifactUploadNativePartInstruction": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object"
+          },
+          "method": {
+            "const": "PUT",
+            "default": "PUT",
+            "title": "Method",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "headers",
+          "expires_at"
+        ],
+        "title": "ArtifactUploadNativePartInstruction",
+        "type": "object"
+      },
+      "ArtifactUploadNativePartReceipt": {
+        "properties": {
+          "checksum_sha256": {
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Checksum Sha256",
+            "type": "string"
+          },
+          "etag": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Etag",
+            "type": "string"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "size_bytes",
+          "checksum_sha256",
+          "etag"
+        ],
+        "title": "ArtifactUploadNativePartReceipt",
+        "type": "object"
+      },
+      "ArtifactUploadNativePartSign": {
+        "properties": {
+          "checksum_sha256": {
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "title": "Checksum Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "checksum_sha256"
+        ],
+        "title": "ArtifactUploadNativePartSign",
         "type": "object"
       },
       "ArtifactUploadPartRead": {
@@ -17100,6 +17214,138 @@
           }
         ],
         "summary": "Finalize Artifact Upload",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}/parts/{part_number}": {
+      "post": {
+        "operationId": "record_artifact_upload_part_api_v1_artifact_uploads__session_id__parts__part_number__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "part_number",
+            "required": true,
+            "schema": {
+              "title": "Part Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactUploadNativePartReceipt"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadChunkRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Record Artifact Upload Part",
+        "tags": [
+          "artifact-uploads"
+        ]
+      }
+    },
+    "/api/v1/artifact-uploads/{session_id}/parts/{part_number}/sign": {
+      "post": {
+        "operationId": "sign_artifact_upload_part_api_v1_artifact_uploads__session_id__parts__part_number__sign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "part_number",
+            "required": true,
+            "schema": {
+              "title": "Part Number",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactUploadNativePartSign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactUploadNativePartInstruction"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Sign Artifact Upload Part",
         "tags": [
           "artifact-uploads"
         ]

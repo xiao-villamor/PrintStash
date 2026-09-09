@@ -24,7 +24,6 @@ from app.modules.ingestion.ingestion import (
 )
 from app.runtime.jobs import registry
 
-from .api_chunks import ApiChunkUploadAdapter
 from .manager import SqlArtifactUploadManager
 
 
@@ -117,7 +116,8 @@ def run_verified_upload_ingestion(
         target = (
             ArtifactUploadState.COMPLETED if completed else ArtifactUploadState.FAILED
         )
-        SqlArtifactUploadManager(session).transition(
+        manager = SqlArtifactUploadManager(session, staging_root=staged_path.parents[1])
+        manager.transition(
             upload,
             target,
             error_code=None if completed else "artifact_ingestion_failed",
@@ -130,4 +130,4 @@ def run_verified_upload_ingestion(
             if lease is not None:
                 session.delete(lease)
                 session.commit()
-            ApiChunkUploadAdapter(staged_path.parents[1]).abort_owned(upload)
+            manager.adapter_for(upload).abort_owned(upload)

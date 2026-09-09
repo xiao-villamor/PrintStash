@@ -71,6 +71,8 @@ class TestStorageCapabilities:
             "conditional_replace": True,
             "namespace_ownership": False,
             "direct_path": False,
+            "browser_multipart_upload": False,
+            "multipart_sha256_checksums": False,
             "tier": "guarded",
             "warnings": [
                 "Interrupted uploads can leave retained bytes requiring storage-specific cleanup.",

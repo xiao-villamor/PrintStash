@@ -18,9 +18,12 @@ from app.db.models import (
     ArtifactUploadState,
     User,
 )
+from app.modules.storage.storage_backend.contracts import StorageBackend
+from app.modules.storage.storage_backend.runtime import get_backend
 
 from .api_chunks import CHUNK_SIZE, ApiChunkUploadAdapter
 from .contracts import ChunkReceipt, UploadPlan, UploadRequest, VerifiedStagedArtifact
+from .native_parts import NativeMultipartUploadAdapter
 from .state import require_transition
 
 
@@ -37,10 +40,27 @@ _ACTIVE = {
 
 
 class SqlArtifactUploadManager:
-    def __init__(self, session: Session, *, staging_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        staging_root: Path | None = None,
+        backend: StorageBackend | None = None,
+    ) -> None:
         self.session = session
-        self.adapter = ApiChunkUploadAdapter(
+        self.api_adapter = ApiChunkUploadAdapter(
             staging_root or settings.incoming_dir / "artifact-uploads"
+        )
+        self.adapter = self.api_adapter
+        if backend is None:
+            try:
+                backend = get_backend()
+            except RuntimeError:
+                backend = None
+        self.native_adapter = (
+            NativeMultipartUploadAdapter(backend, self.api_adapter.root)
+            if backend is not None
+            else None
         )
 
     def create(self, request: UploadRequest, actor: User) -> ArtifactUploadSession:
@@ -57,8 +77,14 @@ class SqlArtifactUploadManager:
         if int(active) >= settings.staging_max_active_per_user:
             raise ArtifactUploadError("staging_capacity_exceeded")
 
+        upload_id = uuid.uuid4().hex
+        native = self.native_adapter
+        capability = native.capability if native is not None else None
+        use_native = (
+            capability is not None and request.size_bytes > capability.part_size
+        )
         upload = ArtifactUploadSession(
-            id=uuid.uuid4().hex,
+            id=upload_id,
             owner_user_id=actor.id,
             purpose=request.purpose,
             target_role=request.target_role,
@@ -73,17 +99,34 @@ class SqlArtifactUploadManager:
             if request.client_sha256
             else None,
             state=ArtifactUploadState.CREATED,
-            adapter_id=self.adapter.adapter_id,
+            adapter_id=native.adapter_id
+            if use_native and native
+            else self.api_adapter.adapter_id,
+            destination_ref=(
+                native.backend.storage_target.ref
+                if use_native and native and native.backend.storage_target
+                else None
+            ),
             expires_at=utcnow() + timedelta(hours=settings.staging_import_lease_hours),
         )
-        self.adapter.session_directory(upload.id, create=True)
+        if use_native and native is not None:
+            try:
+                upload.protected_native_id = native.begin(upload)
+            except Exception:
+                # A backend that cannot initiate the required checksum-scoped
+                # operation is not native-capable for this session.
+                upload.adapter_id = self.api_adapter.adapter_id
+                upload.destination_ref = None
+                self.api_adapter.session_directory(upload.id, create=True)
+        else:
+            self.api_adapter.session_directory(upload.id, create=True)
         try:
             self.session.add(upload)
             self.session.commit()
             self.session.refresh(upload)
         except Exception:
             self.session.rollback()
-            self.adapter.abort_owned(upload)
+            self.adapter_for(upload).abort_owned(upload)
             raise
         return upload
 
@@ -107,6 +150,17 @@ class SqlArtifactUploadManager:
     def plan(self, session_id: str, actor: User) -> UploadPlan:
         upload = self.get(session_id, actor)
         self._require_active(upload)
+        if upload.adapter_id == "native_parts":
+            adapter = self._native_for(upload)
+            capability = adapter.capability
+            if capability is None:
+                raise ArtifactUploadError("native_upload_capability_unavailable")
+            return UploadPlan(
+                mode="native_parts",
+                chunk_size=capability.part_size,
+                max_parallel=3,
+                upload_path=f"/api/v1/artifact-uploads/{upload.id}/parts/{{part_number}}",
+            )
         return UploadPlan(
             mode="api_chunks",
             chunk_size=CHUNK_SIZE,
@@ -123,6 +177,8 @@ class SqlArtifactUploadManager:
     ) -> ArtifactUploadPart:
         upload = self.get(session_id, actor)
         self._require_active(upload)
+        if upload.adapter_id != self.api_adapter.adapter_id:
+            raise ArtifactUploadError("artifact_upload_mode_conflict")
         if upload.state not in {
             ArtifactUploadState.CREATED,
             ArtifactUploadState.UPLOADING,
@@ -141,11 +197,11 @@ class SqlArtifactUploadManager:
                 existing.sha256,
             ) != (receipt.offset, receipt.size_bytes, receipt.sha256.lower()):
                 raise ArtifactUploadError("artifact_upload_chunk_conflict")
-            self.adapter.write_chunk(upload, receipt, payload)
+            self.api_adapter.write_chunk(upload, receipt, payload)
             return existing
 
         previous_received = sum(item.size_bytes for item in self.parts(upload))
-        self.adapter.write_chunk(upload, receipt, payload)
+        self.api_adapter.write_chunk(upload, receipt, payload)
         part = ArtifactUploadPart(
             session_id=upload.id,
             part_number=receipt.index + 1,
@@ -162,19 +218,147 @@ class SqlArtifactUploadManager:
         self.session.refresh(part)
         return part
 
+    def sign_native_part(
+        self,
+        session_id: str,
+        *,
+        part_number: int,
+        checksum_sha256: str,
+        actor: User,
+    ) -> str:
+        upload = self.get(session_id, actor)
+        self._require_active(upload)
+        if upload.state not in {
+            ArtifactUploadState.CREATED,
+            ArtifactUploadState.UPLOADING,
+        }:
+            raise ArtifactUploadError("artifact_upload_state_conflict")
+        return self._native_for(upload).sign_part(
+            upload, part_number=part_number, checksum_sha256=checksum_sha256
+        )
+
+    def record_native_part(
+        self,
+        session_id: str,
+        *,
+        part_number: int,
+        size_bytes: int,
+        checksum_sha256: str,
+        etag: str,
+        actor: User,
+    ) -> ArtifactUploadPart:
+        upload = self.get(session_id, actor)
+        self._require_active(upload)
+        if upload.state not in {
+            ArtifactUploadState.CREATED,
+            ArtifactUploadState.UPLOADING,
+        }:
+            raise ArtifactUploadError("artifact_upload_state_conflict")
+        adapter = self._native_for(upload)
+        adapter.validate_receipt(
+            upload,
+            part_number=part_number,
+            size_bytes=size_bytes,
+            checksum_sha256=checksum_sha256,
+            etag=etag,
+        )
+        existing = self.session.exec(
+            select(ArtifactUploadPart).where(
+                ArtifactUploadPart.session_id == upload.id,
+                ArtifactUploadPart.part_number == part_number,
+            )
+        ).first()
+        receipt_json = json.dumps({"etag": etag}, separators=(",", ":"))
+        capability = adapter.capability
+        assert capability is not None
+        offset = (part_number - 1) * capability.part_size
+        if existing is not None:
+            if (
+                existing.byte_offset,
+                existing.size_bytes,
+                existing.sha256,
+                existing.provider_receipt_json,
+            ) != (offset, size_bytes, checksum_sha256.lower(), receipt_json):
+                raise ArtifactUploadError("artifact_upload_chunk_conflict")
+            return existing
+        previous_received = sum(item.size_bytes for item in self.parts(upload))
+        part = ArtifactUploadPart(
+            session_id=upload.id,
+            part_number=part_number,
+            byte_offset=offset,
+            size_bytes=size_bytes,
+            sha256=checksum_sha256.lower(),
+            provider_receipt_json=receipt_json,
+        )
+        self.session.add(part)
+        self.transition(
+            upload,
+            ArtifactUploadState.UPLOADING,
+            received_bytes=previous_received + size_bytes,
+        )
+        self.session.refresh(part)
+        return part
+
     def finalize(
         self, session_id: str, actor: User
     ) -> tuple[ArtifactUploadSession, VerifiedStagedArtifact]:
         upload = self.get(session_id, actor)
         self._require_active(upload)
+        adapter = self.adapter_for(upload)
         if upload.state == ArtifactUploadState.VERIFYING and upload.verified_sha256:
-            verified = self.adapter._verified_existing(
-                self.adapter.session_directory(upload.id) / "assembled.upload", upload
+            verified = self.api_adapter._verified_existing(
+                self.api_adapter.session_directory(upload.id) / "assembled.upload",
+                upload,
             )
             return upload, verified
-        if upload.state != ArtifactUploadState.UPLOADING:
+        if upload.state == ArtifactUploadState.UPLOADING:
+            self.transition(
+                upload,
+                ArtifactUploadState.VERIFYING,
+                error_code="artifact_upload_verification_active",
+                retryable=False,
+            )
+        elif (
+            upload.state == ArtifactUploadState.VERIFYING
+            and upload.error_code == "artifact_upload_verification_interrupted"
+            and upload.retryable
+        ):
+            self.transition(
+                upload,
+                ArtifactUploadState.VERIFYING,
+                error_code="artifact_upload_verification_active",
+                retryable=False,
+            )
+        else:
             raise ArtifactUploadError("artifact_upload_state_conflict")
-        verified = self.adapter.assemble(upload)
+        try:
+            if isinstance(adapter, NativeMultipartUploadAdapter):
+
+                def persist_completion(protected: str) -> None:
+                    self.transition(
+                        upload,
+                        ArtifactUploadState.VERIFYING,
+                        protected_native_id=protected,
+                    )
+
+                verified = adapter.complete(
+                    upload,
+                    self.parts(upload),
+                    persist_completion=persist_completion,
+                )
+            else:
+                verified = self.api_adapter.assemble(upload)
+        except Exception as exc:
+            code = (
+                str(exc).split(":", 1)[0][:128] or "artifact_upload_verification_failed"
+            )
+            self.transition(
+                upload,
+                ArtifactUploadState.FAILED,
+                error_code=code,
+                retryable=False,
+            )
+            raise
         self.transition(
             upload,
             ArtifactUploadState.VERIFYING,
@@ -188,6 +372,8 @@ class SqlArtifactUploadManager:
                 },
                 sort_keys=True,
             ),
+            error_code=None,
+            retryable=False,
         )
         return upload, verified
 
@@ -197,11 +383,25 @@ class SqlArtifactUploadManager:
             return upload
         if upload.state in {ArtifactUploadState.COMPLETED, ArtifactUploadState.EXPIRED}:
             raise ArtifactUploadError("artifact_upload_state_conflict")
-        self.adapter.abort_owned(upload)
+        self.adapter_for(upload).abort_owned(upload)
         for part in self.parts(upload):
             self.session.delete(part)
         self.transition(upload, ArtifactUploadState.ABORTED)
         return upload
+
+    def adapter_for(
+        self, upload: ArtifactUploadSession
+    ) -> ApiChunkUploadAdapter | NativeMultipartUploadAdapter:
+        if upload.adapter_id == self.api_adapter.adapter_id:
+            return self.api_adapter
+        return self._native_for(upload)
+
+    def _native_for(
+        self, upload: ArtifactUploadSession
+    ) -> NativeMultipartUploadAdapter:
+        if upload.adapter_id != "native_parts" or self.native_adapter is None:
+            raise ArtifactUploadError("native_upload_capability_unavailable")
+        return self.native_adapter
 
     def transition(
         self,
