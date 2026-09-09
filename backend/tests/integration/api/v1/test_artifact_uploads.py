@@ -116,6 +116,20 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_create_is_idempotent_for_the_same_client_key(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        headers = auth_headers | {"Idempotency-Key": "artifact-upload:test-key"}
+        first = client.post("/api/v1/artifact-uploads", json=_request(b"x"), headers=headers)
+        second = client.post("/api/v1/artifact-uploads", json=_request(b"x"), headers=headers)
+
+        assert first.status_code == second.status_code == 201
+        assert first.json()["id"] == second.json()["id"]
+        assert len(db_session.exec(select(ArtifactUploadSession)).all()) == 1
+
     def test_rejects_an_oversized_session_before_accepting_bytes(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
@@ -290,6 +304,12 @@ class TestArtifactUploads:
             f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
         )
         assert completed.json()["state"] == "completed"
+        repeated = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["state"] == "completed"
+        assert repeated.json()["job_id"] == finalized.json()["job_id"]
         artifact = db_session.exec(
             select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
         ).one()

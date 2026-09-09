@@ -11,6 +11,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -171,6 +172,12 @@ def _require_revision_target(
 )
 async def create_artifact_upload(
     request: ArtifactUploadCreate,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ArtifactUploadRead:
@@ -204,6 +211,7 @@ async def create_artifact_upload(
                     else None,
                     "revision_notes": request.revision_notes,
                     "is_recommended": request.is_recommended,
+                    "_idempotency_key": idempotency_key,
                 },
             ),
             current_user,
@@ -398,6 +406,11 @@ def finalize_artifact_upload(
     manager = _manager(session)
     try:
         pending = manager.get(session_id, current_user)
+        if pending.state in {
+            ArtifactUploadState.INGESTING,
+            ArtifactUploadState.COMPLETED,
+        }:
+            return _upload_read(manager, pending)
         options = json.loads(pending.request_json)
         pending_request = ArtifactUploadCreate(
             purpose=pending.purpose,

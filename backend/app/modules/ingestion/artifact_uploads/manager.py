@@ -72,6 +72,33 @@ class SqlArtifactUploadManager:
             raise ArtifactUploadError("artifact_upload_actor_invalid")
         if request.size_bytes <= 0 or request.size_bytes > settings.max_upload_bytes:
             raise ArtifactUploadError("artifact_upload_size_invalid")
+        request_json = json.dumps(
+            request.options, sort_keys=True, separators=(",", ":")
+        )
+        if request.options.get("_idempotency_key"):
+            existing = self.session.exec(
+                select(ArtifactUploadSession)
+                .where(
+                    ArtifactUploadSession.owner_user_id == actor.id,
+                    ArtifactUploadSession.purpose == request.purpose,
+                    ArtifactUploadSession.target_role == request.target_role,
+                    ArtifactUploadSession.target_id == request.target_id,
+                    ArtifactUploadSession.filename == request.filename,
+                    ArtifactUploadSession.media_type == request.media_type,
+                    ArtifactUploadSession.declared_size == request.size_bytes,
+                    ArtifactUploadSession.client_sha256
+                    == (
+                        request.client_sha256.lower()
+                        if request.client_sha256
+                        else None
+                    ),
+                    ArtifactUploadSession.request_json == request_json,
+                    ArtifactUploadSession.state.in_(_ACTIVE),
+                )
+                .order_by(ArtifactUploadSession.created_at.desc())
+            ).first()
+            if existing is not None:
+                return existing
         upload_id = uuid.uuid4().hex
         native = self.native_adapter
         capability = native.capability if native is not None else None
@@ -96,9 +123,7 @@ class SqlArtifactUploadManager:
             purpose=request.purpose,
             target_role=request.target_role,
             target_id=request.target_id,
-            request_json=json.dumps(
-                request.options, sort_keys=True, separators=(",", ":")
-            ),
+            request_json=request_json,
             filename=request.filename,
             media_type=request.media_type,
             declared_size=request.size_bytes,
@@ -233,7 +258,14 @@ class SqlArtifactUploadManager:
 
     def plan(self, session_id: str, actor: User) -> UploadPlan:
         upload = self.get(session_id, actor)
-        self._require_active(upload)
+        if (
+            upload.state == ArtifactUploadState.FAILED
+            and upload.retryable
+            and ensure_utc(upload.expires_at) > utcnow()
+        ):
+            self.transition(upload, ArtifactUploadState.UPLOADING)
+        else:
+            self._require_active(upload)
         if upload.received_bytes > 0:
             record_artifact_upload_event("resumed", upload.adapter_id)
         if upload.adapter_id == "native_parts":

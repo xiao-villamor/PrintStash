@@ -67,6 +67,25 @@ def _upload_request() -> UploadRequest:
 
 
 class TestSqlArtifactUploadManager:
+    def test_a_retryable_failure_can_request_a_fresh_plan(
+        self, db_session: Session, make_user, make_artifact_upload, tmp_path
+    ) -> None:
+        owner = make_user("retry-owner")
+        upload = make_artifact_upload(
+            owner,
+            state=ArtifactUploadState.FAILED,
+            retryable=True,
+            adapter_id="api_chunks",
+        )
+
+        plan = SqlArtifactUploadManager(
+            db_session, staging_root=tmp_path
+        ).plan(upload.id, owner)
+
+        db_session.refresh(upload)
+        assert plan.mode == "api_chunks"
+        assert upload.state == ArtifactUploadState.UPLOADING
+
     def test_reserves_chunks_and_assembly_before_accepting_api_bytes(
         self, db_session: Session, make_user, tmp_path, monkeypatch
     ) -> None:

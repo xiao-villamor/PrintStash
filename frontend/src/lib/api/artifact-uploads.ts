@@ -85,7 +85,15 @@ async function jsonRequest<T>(
 }
 
 export function createArtifactUpload(body: ArtifactUploadCreate): Promise<ArtifactUploadStatus> {
-  return jsonRequest("/api/v1/artifact-uploads", "POST", body);
+  return fetch(getUrl("/api/v1/artifact-uploads"), {
+    method: "POST",
+    headers: {
+      ...jsonHeaders(),
+      "Idempotency-Key": `artifact-upload:${body.sha256}`,
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  }).then(handleResponse<ArtifactUploadStatus>);
 }
 
 export async function getArtifactUpload(id: string): Promise<ArtifactUploadStatus> {
