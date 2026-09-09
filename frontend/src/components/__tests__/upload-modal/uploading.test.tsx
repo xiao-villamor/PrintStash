@@ -27,6 +27,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UploadModal } from "@/components/upload-modal";
+import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
 import { setIngestJobSource } from "@/lib/task-center";
 import { aCollection, aTag } from "@/test-support/factories";
@@ -112,10 +113,45 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
   // The multipart bodies never survive `String(init.body)`, so the fields are
   // read off the FormData here, at the route, in the order they were sent.
   const forms: FormData[] = [];
+  const uploadRequests: ArtifactUploadCreate[] = [];
+  let uploadSequence = 0;
   const capture = (answer: Response) => (_url: string, init?: RequestInit) => {
     const body = init?.body;
     if (body instanceof FormData) forms.push(body);
     return answer;
+  };
+  const status = (
+    id: string,
+    request: ArtifactUploadCreate,
+    overrides: Partial<ArtifactUploadStatus> = {},
+  ): ArtifactUploadStatus => ({
+    id,
+    purpose: request.purpose,
+    target_role: request.target_role,
+    target_id: request.target_id ?? null,
+    filename: request.filename,
+    media_type: request.media_type,
+    size_bytes: request.size_bytes,
+    state: "uploading",
+    mode: "api_chunks",
+    received_bytes: 0,
+    verified_size: null,
+    verified_sha256: null,
+    job_id: null,
+    retryable: false,
+    error_code: null,
+    created_at: FROZEN_NOW,
+    updated_at: FROZEN_NOW,
+    expires_at: FROZEN_NOW,
+    parts: [],
+    ...overrides,
+  });
+  const requestForUrl = (url: string) => {
+    const id = url.match(/artifact-uploads\/(session-\d+)/)?.[1];
+    const index = id ? Number(id.slice("session-".length)) - 1 : -1;
+    const request = uploadRequests[index];
+    if (!id || !request) throw new Error(`Unknown upload session in ${url}`);
+    return { id, request };
   };
   const result = renderApp(
     <UploadModal open onClose={onClose} onUploaded={onUploaded} defaultCollection={null} />,
@@ -130,12 +166,51 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
         "POST /api/v1/ingest/model": capture(json(queued())),
         "POST /api/v1/ingest/orca": capture(json(queued())),
         "POST /api/v1/ingest/archive/inspect": capture(json(queued())),
+        "GET /api/v1/artifact-uploads/": (url) => {
+          const { id } = requestForUrl(url);
+          return json({
+            session_id: id,
+            mode: "api_chunks",
+            chunk_size: 1024,
+            max_parallel: 1,
+            upload_path: `/api/v1/artifact-uploads/${id}/chunks/{index}`,
+            uploaded_parts: [],
+            expires_at: FROZEN_NOW,
+          });
+        },
+        "PUT /api/v1/artifact-uploads/": (url) => {
+          const { id, request } = requestForUrl(url);
+          return json({
+            session: status(id, request, {
+              received_bytes: request.size_bytes,
+              state: "uploading",
+            }),
+            part: { index: 0, offset: 0, size_bytes: request.size_bytes, sha256: request.sha256 },
+          });
+        },
+        "POST /api/v1/artifact-uploads": (url, init) => {
+          if (!url.includes("/finalize")) {
+            // SAFETY: this route receives JSON serialized by createArtifactUpload.
+            const request = JSON.parse(String(init?.body)) as ArtifactUploadCreate;
+            uploadRequests.push(request);
+            uploadSequence += 1;
+            return json(status(`session-${uploadSequence}`, request));
+          }
+          const { id, request } = requestForUrl(url);
+          return json(status(id, request, { state: "ingesting", job_id: jobId() }));
+        },
         ...routes,
       },
       ...rest,
     },
   );
-  return { ...result, onClose, onUploaded, forms: () => [...forms] };
+  return {
+    ...result,
+    onClose,
+    onUploaded,
+    forms: () => [...forms],
+    uploadRequests: () => [...uploadRequests],
+  };
 }
 
 /** The mesh and G-code slots, in the order the dialog renders them. */
@@ -254,19 +329,19 @@ describe("UploadModal ingestion", () => {
   describe("a mesh on its own", () => {
     it("uploads the file the user chose", async () => {
       const user = userEvent.setup();
-      const { container, forms } = renderUpload();
+      const { container, uploadRequests } = renderUpload();
       await screen.findByText(".stl .3mf .obj .step");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
 
-      await waitFor(() => expect(forms()).not.toHaveLength(0), { timeout: 5000 });
-      expect(forms()[0].get("model_name")).toBe("cube");
+      await waitFor(() => expect(uploadRequests()).not.toHaveLength(0), { timeout: 5000 });
+      expect(uploadRequests()[0].model_name).toBe("cube");
     });
 
     it("files it in the collection the user chose", async () => {
       const user = userEvent.setup();
-      const { container, forms } = renderUpload();
+      const { container, uploadRequests } = renderUpload();
       await screen.findByText(".stl .3mf .obj .step");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
       await user.click(await screen.findByRole("button", { name: "None" }));
@@ -274,7 +349,7 @@ describe("UploadModal ingestion", () => {
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
 
-      await waitFor(() => expect(forms()[0]?.get("collection")).toBe("parts"), { timeout: 5000 });
+      await waitFor(() => expect(uploadRequests()[0]?.collection).toBe("parts"), { timeout: 5000 });
     });
 
     it("refreshes the vault once the job lands", async () => {
@@ -317,9 +392,9 @@ describe("UploadModal ingestion", () => {
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
 
       await waitFor(() =>
-        expect(requestsWithMethod("POST").some((call) => call.url.endsWith("/ingest/orca"))).toBe(
-          true,
-        ),
+        expect(
+          requestsWithMethod("POST").some((call) => call.url.endsWith("/artifact-uploads")),
+        ).toBe(true),
       );
     });
   });
@@ -334,29 +409,31 @@ describe("UploadModal ingestion", () => {
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
 
-      await waitFor(() => expect(requestsWithMethod("POST").at(0)?.url).toContain("/ingest/model"));
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("POST").at(0)?.body ?? "{}").purpose).toBe("model"),
+      );
     });
 
     it("links the slice to the mesh it came from", async () => {
       // Without the source hash the revision lands as a separate model with no
       // mesh beside it — which is exactly what uploading them together avoids.
       const user = userEvent.setup();
-      const { container, forms } = renderUpload();
+      const { container, uploadRequests } = renderUpload();
       await screen.findByText(".stl .3mf .obj .step");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
       await user.upload(fileInputs(container)[1], new File(["x"], "cube.gcode"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
 
-      await waitFor(() => expect(forms()).toHaveLength(2), { timeout: 5000 });
-      expect(forms()[1].get("source_hash")).toBe("a".repeat(64));
+      await waitFor(() => expect(uploadRequests()).toHaveLength(2), { timeout: 5000 });
+      expect(uploadRequests()[1].source_hash).toBe("a".repeat(64));
     });
   });
 
   describe("a bulk drop", () => {
     it("queues one job per file", async () => {
       const user = userEvent.setup();
-      const { container, forms } = renderUpload();
+      const { container, uploadRequests } = renderUpload();
       await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], [
         new File(["x"], "a.stl"),
@@ -365,7 +442,7 @@ describe("UploadModal ingestion", () => {
 
       await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
 
-      await waitFor(() => expect(forms()).toHaveLength(2), { timeout: 5000 });
+      await waitFor(() => expect(uploadRequests()).toHaveLength(2), { timeout: 5000 });
     });
 
     it("keeps going after a file the vault refused", async () => {
@@ -373,7 +450,7 @@ describe("UploadModal ingestion", () => {
       // model and losing a hundred.
       setIngestJobSource(async () => [aJob({ state: "failed", error: "unsupported_file_type" })]);
       const user = userEvent.setup();
-      const { container, forms } = renderUpload();
+      const { container, uploadRequests } = renderUpload();
       await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], [
         new File(["x"], "a.stl"),
@@ -382,7 +459,7 @@ describe("UploadModal ingestion", () => {
 
       await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
 
-      await waitFor(() => expect(forms()).toHaveLength(2), { timeout: 5000 });
+      await waitFor(() => expect(uploadRequests()).toHaveLength(2), { timeout: 5000 });
     });
 
     it("refreshes the vault once, after the whole queue", async () => {
