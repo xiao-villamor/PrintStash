@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     admin,
     artifact_cache,
+    artifact_uploads,
     auth,
     backup,
     config,
@@ -60,6 +61,7 @@ api_router.include_router(printers.router)
 api_router.include_router(backup.router)
 api_router.include_router(config.router)
 api_router.include_router(artifact_cache.router)
+api_router.include_router(artifact_uploads.router)
 api_router.include_router(external_libraries.router)
 api_router.include_router(fleet.router)
 api_router.include_router(notifications.router)

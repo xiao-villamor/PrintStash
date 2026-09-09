@@ -60,6 +60,7 @@ class ArtifactUploadSession(SQLModel, table=True):
     purpose: str = Field(max_length=32, index=True)
     target_role: str = Field(max_length=32, index=True)
     target_id: Optional[str] = Field(default=None, max_length=128, index=True)
+    request_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     filename: str = Field(max_length=512)
     media_type: str = Field(max_length=128)
     declared_size: int = Field(sa_column=Column(BigInteger, nullable=False))

@@ -19,25 +19,25 @@ behaviour, not implementation details; status changes as each slice lands.
 | 11 | compare-and-set transition | concurrency | two writers share a version | only one state update succeeds | integration | ❌ |
 | 12 | interrupted-state recovery | recovery | process restarts in verifying/ingesting | recovery safely resumes or records a retryable failure | integration | ❌ |
 | 13 | fail-closed expiry | cleanup | expired upload without positive ownership | foreign/unproven bytes are retained and a safe failure is reported | integration | ❌ |
-| 14 | create and status authorization | RBAC | owner and unrelated user | only the owner or authorized administrator can observe the session | integration | ❌ |
+| 14 | create and status authorization | RBAC | owner and unrelated user | only the owner or authorized administrator can observe the session | integration | ✅ |
 | 15 | target authorization is rechecked | RBAC | Collection access revoked mid-upload | finalize is refused without publishing an Artifact | integration | ❌ |
-| 16 | safe status projection | information safety | persisted native identifiers and receipts | response omits paths, credentials, provider ids, and protected values | integration | ❌ |
-| 17 | plan response is ephemeral | HTTP caching | request transfer plan | response carries `Cache-Control: no-store` | integration | ❌ |
+| 16 | safe status projection | information safety | persisted native identifiers and receipts | response omits paths, credentials, provider ids, and protected values | integration | ✅ |
+| 17 | plan response is ephemeral | HTTP caching | request transfer plan | response carries `Cache-Control: no-store` | integration | ✅ |
 | 18 | capability-driven plan | adapter selection | native-capable and fallback backends | plan selects by guarantees, never a provider name | unit | ❌ |
-| 19 | chunk envelope validation | API chunks | wrong index/offset/length/hash | bytes are rejected before durable progress changes | unit | ❌ |
-| 20 | create-only chunk publication | API chunks | valid bounded chunk | temp file is synced and atomically published in the owned directory | integration | ❌ |
-| 21 | identical duplicate chunk | API chunks | same chunk uploaded twice | second write succeeds without double-counting bytes | integration | ❌ |
-| 22 | conflicting duplicate chunk | API chunks | same index with different bytes | conflict is returned and original receipt remains | integration | ❌ |
+| 19 | chunk envelope validation | API chunks | wrong index/offset/length/hash | bytes are rejected before durable progress changes | unit | ✅ |
+| 20 | create-only chunk publication | API chunks | valid bounded chunk | temp file is synced and atomically published in the owned directory | integration | ✅ |
+| 21 | identical duplicate chunk | API chunks | same chunk uploaded twice | second write succeeds without double-counting bytes | integration | ✅ |
+| 22 | conflicting duplicate chunk | API chunks | same index with different bytes | conflict is returned and original receipt remains | integration | ✅ |
 | 23 | chunk interruption and restart | API chunks | partial upload then new process/session | status reports receipts and missing chunks can resume | e2e | ❌ |
 | 24 | finalize serialization | concurrency | chunk write races finalize | only a complete immutable assembly can enter verification | integration | ❌ |
-| 25 | ordered assembly hash | API chunks | complete set of chunks | assembled size and SHA-256 equal the original representation | integration | ❌ |
+| 25 | ordered assembly hash | API chunks | complete set of chunks | assembled size and SHA-256 equal the original representation | integration | ✅ |
 | 26 | staging capacity admission | limits | pending/byte/free-space limit exceeded | session or chunk is rejected before bytes are accepted | integration | ❌ |
 | 27 | scoped native signing | native multipart | allowed and disallowed part requests | only the owned staging key/upload and permitted part range are signed | unit | ❌ |
 | 28 | native receipt reconciliation | native multipart | durable receipts differ from remote ListParts | finalize fails safely without trusting client claims | contract | ❌ |
 | 29 | native checksum policy | native multipart | target cannot prove required checksum semantics | plan falls back to API chunks | contract | ❌ |
 | 30 | exact native abort | cleanup | owned and foreign multipart/object identities | only the positively owned operation is removed | contract | ❌ |
 | 31 | native bytes bypass API | transfer accounting | direct multipart browser upload | object bytes do not cross the upload API process | e2e | ❌ |
-| 32 | verified staged Artifact | verification | complete staged representation | exact size, SHA-256, immutable identity, and safe materialization are exposed | unit | ❌ |
+| 32 | verified staged Artifact | verification | complete staged representation | exact size, SHA-256, immutable identity, and safe materialization are exposed | unit | ✅ |
 | 33 | mismatch before ingestion | verification | size/hash/type mismatch | no background job or readable Artifact is created | integration | ❌ |
 | 34 | exact ingestion handoff | ingestion | verified model/G-code/revision | normal ingestion receives the verified representation exactly once | integration | ❌ |
 | 35 | no partial readability | integrity | upload is created or incomplete | library and download routes expose no Artifact | integration | ❌ |

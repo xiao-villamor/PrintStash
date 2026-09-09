@@ -1,8 +1,8 @@
 """add resumable artifact uploads
 
-Revision ID: 473bbe38f03c
+Revision ID: 7d07ebda70ef
 Revises: 00cb0e8975d1
-Create Date: 2026-09-09 05:41:17.434622
+Create Date: 2026-09-09 05:48:06.659148
 
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "473bbe38f03c"
+revision: str = "7d07ebda70ef"
 down_revision: Union[str, Sequence[str], None] = "00cb0e8975d1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("purpose", sa.String(length=32), nullable=False),
         sa.Column("target_role", sa.String(length=32), nullable=False),
         sa.Column("target_id", sa.String(length=128), nullable=True),
+        sa.Column("request_json", sa.Text(), nullable=False),
         sa.Column("filename", sa.String(length=512), nullable=False),
         sa.Column("media_type", sa.String(length=128), nullable=False),
         sa.Column("declared_size", sa.BigInteger(), nullable=False),

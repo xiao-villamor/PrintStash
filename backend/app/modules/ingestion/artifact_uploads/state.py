@@ -55,6 +55,8 @@ def require_transition(
 ) -> None:
     """Accept idempotency and legal edges; reject resurrection of terminal rows."""
 
+    current = ArtifactUploadState(current)
+    target = ArtifactUploadState(target)
     if current is target:
         return
     if (
