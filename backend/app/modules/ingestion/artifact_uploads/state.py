@@ -29,6 +29,7 @@ _TRANSITIONS: dict[ArtifactUploadState, frozenset[ArtifactUploadState]] = {
             ArtifactUploadState.INGESTING,
             ArtifactUploadState.FAILED,
             ArtifactUploadState.ABORTED,
+            ArtifactUploadState.EXPIRED,
         }
     ),
     ArtifactUploadState.INGESTING: frozenset(

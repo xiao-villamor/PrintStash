@@ -285,6 +285,16 @@ async def lifespan(app: FastAPI):
     interrupted_jobs = reconcile_interrupted_jobs() if not restore_maintenance else 0
     if interrupted_jobs:
         logger.warning("reconciled %d interrupted background job(s)", interrupted_jobs)
+    if not restore_maintenance:
+        from app.modules.ingestion.artifact_uploads import reconcile_artifact_uploads
+
+        upload_recovery = reconcile_artifact_uploads()
+        if upload_recovery.reconciled or upload_recovery.expired:
+            logger.warning(
+                "reconciled %d and expired %d artifact upload session(s)",
+                upload_recovery.reconciled,
+                upload_recovery.expired,
+            )
     from app.modules.administration.vault_audit import reconcile_interrupted_runs
 
     interrupted_audits = reconcile_interrupted_runs() if not restore_maintenance else 0
@@ -403,6 +413,14 @@ async def _gc_loop(*, storage_maintenance_enabled: bool = True) -> None:
                 await asyncio.to_thread(prune_expired_refresh_tokens)
             except Exception:
                 logger.exception("expired refresh-token pruning failed")
+            try:
+                from app.modules.ingestion.artifact_uploads import (
+                    reconcile_artifact_uploads,
+                )
+
+                await asyncio.to_thread(reconcile_artifact_uploads)
+            except Exception:
+                logger.exception("artifact upload reconciliation failed")
         finally:
             end_mutating_operation()
         await asyncio.sleep(3600)

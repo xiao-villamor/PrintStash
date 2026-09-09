@@ -8,10 +8,12 @@ from .contracts import (
     VerifiedStagedArtifact,
 )
 from .manager import ArtifactUploadError, SqlArtifactUploadManager
+from .recovery import ArtifactUploadRecoveryResult, reconcile_artifact_uploads
 from .state import ArtifactUploadTransitionError, require_transition
 
 __all__ = [
     "ArtifactUploadError",
+    "ArtifactUploadRecoveryResult",
     "ArtifactUploadManager",
     "ArtifactUploadTransitionError",
     "ChunkReceipt",
@@ -20,4 +22,5 @@ __all__ = [
     "UploadRequest",
     "VerifiedStagedArtifact",
     "require_transition",
+    "reconcile_artifact_uploads",
 ]
