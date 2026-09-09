@@ -57,10 +57,19 @@ class TestApiChunkUploadAdapter:
         adapter.write_chunk(session, _receipt(0, 0, b"abcd"), b"abcd")
         adapter.write_chunk(session, _receipt(1, 4, b"efg"), b"efg")
         verified = adapter.assemble(session)
+        repeated = adapter.assemble(session)
 
         assert verified.materialize().read_bytes() == payload
+        assert repeated.inode == verified.inode
         assert verified.size_bytes == len(payload)
         assert verified.sha256 == hashlib.sha256(payload).hexdigest()
+
+    def test_rejects_invalid_session_plus_out_of_range_chunk(self, tmp_path) -> None:
+        adapter = ApiChunkUploadAdapter(tmp_path)
+        with pytest.raises(ApiChunkError, match="artifact_upload_id_invalid"):
+            adapter.session_directory("../outside")
+        with pytest.raises(ApiChunkError, match="chunk_index_invalid"):
+            adapter.expected_chunk(_session(b"abcd"), 1)
 
     @pytest.mark.parametrize(
         ("receipt", "payload", "code"),
@@ -147,3 +156,15 @@ class TestApiChunkUploadAdapter:
             adapter.abort_owned(session)
 
         assert foreign.read_bytes() == b"preserve"
+
+    def test_abort_removes_only_owned_temporary_names(self, tmp_path) -> None:
+        session = _session(b"owned")
+        adapter = ApiChunkUploadAdapter(tmp_path)
+        adapter.abort_owned(session)
+        directory = adapter.session_directory(session.id, create=True)
+        (directory / ".chunk-stale").write_bytes(b"chunk")
+        (directory / ".assembly-stale").write_bytes(b"assembly")
+
+        adapter.abort_owned(session)
+
+        assert not directory.exists()

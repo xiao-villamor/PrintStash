@@ -16,6 +16,30 @@ from tests._env import use_local_storage
 
 
 class TestReconcileArtifactUploads:
+    def test_expiry_retains_state_when_the_adapter_is_unknown(
+        self,
+        db_session: Session,
+        make_user,
+        make_artifact_upload,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        upload = make_artifact_upload(
+            make_user("unknown-adapter-owner"),
+            state=ArtifactUploadState.UPLOADING,
+            adapter_id="removed-adapter",
+            expires_at=utcnow() - timedelta(seconds=1),
+        )
+
+        result = reconcile_artifact_uploads(
+            SQLiteSessionFactory(db_session.get_bind()), now=utcnow()
+        )
+
+        db_session.expire_all()
+        assert result.retained == 1
+        assert upload.state == ArtifactUploadState.FAILED
+        assert upload.error_code == "artifact_upload_cleanup_unproven"
+
     def test_expires_owned_staging(
         self,
         db_session: Session,
@@ -103,6 +127,38 @@ class TestReconcileArtifactUploads:
         assert upload.state == ArtifactUploadState.FAILED
         assert upload.error_code == "artifact_upload_ingestion_interrupted"
         assert upload.retryable is True
+
+    def test_completed_ingestion_retains_unproven_staging_for_cleanup(
+        self,
+        db_session: Session,
+        make_user,
+        make_background_job,
+        make_artifact_upload,
+        tmp_path,
+    ) -> None:
+        use_local_storage(tmp_path)
+        owner = make_user("completed-upload-owner")
+        job = make_background_job(
+            kind="artifact_upload_model",
+            state="completed",
+            owner=owner,
+        )
+        upload = make_artifact_upload(
+            owner,
+            state=ArtifactUploadState.INGESTING,
+            background_job_id=job.id,
+        )
+        directory = settings.incoming_dir / "artifact-uploads" / upload.id
+        directory.mkdir(parents=True)
+        foreign = directory / "unproven-entry"
+        foreign.write_bytes(b"preserve")
+
+        result = reconcile_artifact_uploads(SQLiteSessionFactory(db_session.get_bind()))
+
+        db_session.expire_all()
+        assert result.reconciled == 1
+        assert upload.state == ArtifactUploadState.COMPLETED
+        assert foreign.read_bytes() == b"preserve"
 
     def test_preserves_replayable_verification(
         self,

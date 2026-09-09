@@ -5,12 +5,17 @@ A failure here means clients may lose resumability, isolation, or ingestion hand
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
+from starlette.requests import Request
 
+from app.api.v1 import artifact_uploads as upload_api
 from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
@@ -27,7 +32,7 @@ from app.modules.ingestion.artifact_uploads import (
     ArtifactUploadError,
     SqlArtifactUploadManager,
 )
-from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE
+from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE, ApiChunkError
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
     NativeMultipartCapability,
@@ -121,6 +126,98 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    @pytest.mark.parametrize(
+        ("error", "status_code"),
+        [
+            (ArtifactUploadError("artifact_upload_expired"), 410),
+            (ArtifactUploadError("staging_capacity_exceeded"), 507),
+            (ApiChunkError("artifact_upload_chunk_length_invalid"), 422),
+        ],
+    )
+    def test_maps_protocol_errors_to_stable_http_statuses(
+        self, error: Exception, status_code: int
+    ) -> None:
+        assert upload_api._translate_error(error).status_code == status_code
+
+    def test_rejects_missing_plus_malformed_revision_targets(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        payload = content.gcode()
+        base = _request(payload) | {
+            "purpose": "revision",
+            "filename": "revision.gcode",
+        }
+
+        missing = client.post(
+            "/api/v1/artifact-uploads",
+            json=base,
+            headers=auth_headers,
+        )
+        malformed = client.post(
+            "/api/v1/artifact-uploads",
+            json=base | {"target_role": "model_revision", "target_id": "not-an-id"},
+            headers=auth_headers,
+        )
+
+        assert missing.status_code == 422
+        assert missing.json()["detail"] == "revision_target_required"
+        assert malformed.status_code == 422
+        assert malformed.json()["detail"] == "revision_target_invalid"
+
+    def test_missing_plan_plus_native_operations_return_protocol_errors(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert (
+            client.get(
+                "/api/v1/artifact-uploads/missing/plan", headers=auth_headers
+            ).status_code
+            == 404
+        )
+        payload = b"proxy-only"
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        ).json()["id"]
+        signed = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/parts/1/sign",
+            json={"checksum_sha256": "a" * 64},
+            headers=auth_headers,
+        )
+        recorded = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/parts/1",
+            json={
+                "size_bytes": len(payload),
+                "checksum_sha256": "a" * 64,
+                "etag": '"part-1"',
+            },
+            headers=auth_headers,
+        )
+
+        assert signed.status_code == 422
+        assert recorded.status_code == 422
+
+    def test_rejects_a_non_numeric_content_length(
+        self,
+    ) -> None:
+        request = Request(
+            {"type": "http", "headers": [(b"content-length", b"invalid")]}
+        )
+        with pytest.raises(HTTPException) as raised:
+            asyncio.run(
+                upload_api.put_artifact_upload_chunk(
+                    "upload-1",
+                    0,
+                    request,
+                    offset=0,
+                    length=1,
+                    sha256="a" * 64,
+                    current_user=None,  # type: ignore[arg-type]
+                    session=None,  # type: ignore[arg-type]
+                )
+            )
+
+        assert raised.value.status_code == 400
+        assert raised.value.detail == "content_length_invalid"
+
     def test_create_is_idempotent_for_the_same_client_key(
         self,
         client: TestClient,

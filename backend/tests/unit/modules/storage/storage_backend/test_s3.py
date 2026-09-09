@@ -17,6 +17,7 @@ import pytest
 import app.modules.storage.storage_backend.s3 as storage_s3
 from app.modules.storage.storage_backend.contracts import (
     NativeMultipartHandle,
+    NativeMultipartPart,
     ObjectIdentity,
     StorageCapabilities,
     StorageCollisionError,
@@ -235,6 +236,71 @@ class TestS3NativeMultipart:
                 handle,
                 part_number=1,
                 checksum_sha256="a" * 64,
+                expires_seconds=60,
+            )
+
+    def test_round_trips_native_protocol_with_completion_recovery(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _NativeCoverageS3Client()
+        backend, _client = _memory_s3_backend(monkeypatch, client)
+        handle = backend.begin_native_multipart(
+            session_id="session-1",
+            filename="part.stl",
+            media_type="model/stl",
+        )
+        payloads = (b"abcd", b"efgh")
+        client.parts = [
+            {
+                "PartNumber": number,
+                "Size": len(payload),
+                "ChecksumSHA256": client.encoded(payload),
+                "ETag": f'"part-{number}"',
+            }
+            for number, payload in enumerate(payloads, start=1)
+        ]
+        client.completed_payload = b"".join(payloads)
+
+        listed = backend.list_native_multipart_parts(handle)
+        receipt = backend.complete_native_multipart(handle, listed)
+        monkeypatch.setattr(
+            backend, "stream_chunks", lambda _key: iter([client.completed_payload])
+        )
+        recovered = backend.recover_native_multipart_completion(
+            handle,
+            expected_size=len(client.completed_payload),
+            expected_sha256=hashlib.sha256(client.completed_payload).hexdigest(),
+        )
+        backend.abort_native_multipart(handle)
+
+        assert listed == [
+            NativeMultipartPart(
+                number,
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
+                f'"part-{number}"',
+            )
+            for number, payload in enumerate(payloads, start=1)
+        ]
+        assert receipt.size == len(client.completed_payload)
+        assert recovered is not None and recovered.token == handle.ownership_token
+        assert client.aborted == [handle.upload_id]
+
+    def test_rejects_invalid_native_envelopes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, _client = _memory_s3_backend(monkeypatch, _NativeCoverageS3Client())
+        with pytest.raises(ValueError, match="session_invalid"):
+            backend.begin_native_multipart(
+                session_id="../outside", filename="part.stl", media_type="model/stl"
+            )
+        with pytest.raises(ValueError, match="checksum_invalid"):
+            backend.sign_native_multipart_part(
+                NativeMultipartHandle(
+                    "vault-data/staging/artifact-uploads/session-1", "upload-1", "token"
+                ),
+                part_number=1,
+                checksum_sha256="invalid",
                 expires_seconds=60,
             )
 
@@ -457,6 +523,47 @@ class _CoverageMemoryS3Client:
 
     def generate_presigned_url(self, *_args: object, **_kwargs: object) -> str:
         return "https://example.test/download"
+
+
+class _NativeCoverageS3Client(_CoverageMemoryS3Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[dict[str, object]] = []
+        self.completed_payload = b""
+        self.multipart_metadata: dict[str, str] = {}
+        self.aborted: list[str] = []
+
+    @staticmethod
+    def encoded(payload: bytes) -> str:
+        import base64
+
+        return base64.b64encode(hashlib.sha256(payload).digest()).decode()
+
+    def create_multipart_upload(self, **kwargs: object) -> dict[str, str]:
+        self.multipart_metadata = dict(kwargs.get("Metadata", {}))  # type: ignore[arg-type]
+        return {"UploadId": "upload-1"}
+
+    def list_parts(self, **kwargs: object) -> dict[str, object]:
+        marker = kwargs.get("PartNumberMarker")
+        if marker is None and len(self.parts) > 1:
+            return {
+                "Parts": self.parts[:1],
+                "IsTruncated": True,
+                "NextPartNumberMarker": 1,
+            }
+        return {"Parts": self.parts[1:] if marker is not None else self.parts}
+
+    def complete_multipart_upload(self, **kwargs: object) -> dict[str, str]:
+        key = str(kwargs["Key"])
+        self.objects[key] = (
+            self.completed_payload,
+            self.multipart_metadata,
+            '"completed"',
+        )
+        return {"ETag": '"completed"', "VersionId": "native-v1"}
+
+    def abort_multipart_upload(self, **kwargs: object) -> None:
+        self.aborted.append(str(kwargs["UploadId"]))
 
 
 def _memory_s3_backend(
