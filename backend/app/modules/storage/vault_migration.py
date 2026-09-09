@@ -44,6 +44,7 @@ from app.modules.storage.migration_backup import verify_migration_backup as _bac
 from app.modules.storage.migration_census import census
 from app.modules.storage.migration_identity import namespace_ref, validate_isolation
 from app.modules.storage.migration_progress import transition
+from app.modules.storage.migration_transfer import validate_destination_limits
 from app.modules.storage.storage_backend import generations
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
@@ -352,14 +353,13 @@ class VaultMigrations:
                 raise ValueError("migration_source_size_mismatch")
             if blob.expected_sha256 and actual_hash != blob.expected_sha256:
                 raise ValueError("migration_source_hash_mismatch")
-            if len(blob.destination_key.encode("utf-8")) > 2048:
-                raise ValueError("migration_destination_key_too_long")
-            if candidate.storage_target and candidate.storage_target.transport == "s3":
-                if (
-                    len(blob.destination_key.encode("utf-8")) > 1024
-                    or actual_size > 5 * 1024**4
-                ):
-                    raise ValueError("migration_destination_limits_exceeded")
+            validate_destination_limits(
+                candidate.storage_target.transport
+                if candidate.storage_target
+                else None,
+                blob.destination_key,
+                actual_size,
+            )
             receipt = matching_creation_receipt(session, source, blob.source_key)
             if receipt is None and blob.resource_type == "artifact_upload_staging":
                 upload = session.get(ArtifactUploadSession, blob.resource_id)

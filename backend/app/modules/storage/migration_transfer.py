@@ -9,6 +9,17 @@ from collections.abc import Callable, Iterator
 from typing import BinaryIO
 
 
+def validate_destination_limits(transport: str | None, key: str, size: int) -> None:
+    """Reject keys and objects the configured create-only transfer cannot publish."""
+    key_bytes = len(key.encode("utf-8"))
+    if key_bytes > 2048:
+        raise ValueError("migration_destination_key_too_long")
+    # The S3 create-only writer uses fixed 8-MiB parts, with at most 10,000
+    # parts. Its effective ceiling is lower than S3's theoretical object limit.
+    if transport == "s3" and (key_bytes > 1024 or size > 8 * 1024**2 * 10_000):
+        raise ValueError("migration_destination_limits_exceeded")
+
+
 class ChunkReader(io.RawIOBase):
     """Adapt one provider stream without materializing a complete Artifact."""
 

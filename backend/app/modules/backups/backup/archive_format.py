@@ -130,6 +130,13 @@ def _restore_key_map(tar: tarfile.TarFile) -> dict[str, str]:
     return result
 
 
+def read_archive_manifest(archive_path: Path) -> dict:
+    """Read a validated restore manifest for recovery-prerequisite consumers."""
+    with tarfile.open(archive_path, "r:gz") as archive:
+        manifest, _entries = _restore_manifest_entries(archive)
+    return manifest
+
+
 def _restore_manifest_entries(tar: tarfile.TarFile) -> tuple[dict, dict[str, dict]]:
     """Read and validate manifest metadata before any destination is written."""
     if not _has_member(tar, "manifest.json"):

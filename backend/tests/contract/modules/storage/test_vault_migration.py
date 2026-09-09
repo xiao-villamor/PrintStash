@@ -76,71 +76,76 @@ def remote_config():
     }
 
 
-@pytest.mark.parametrize(
-    "source_kind,destination_kind", [("local", "s3"), ("s3", "local"), ("s3", "s3")]
-)
-def test_provider_pair_preserves_large_unicode_artifact_ranges(
-    migration_database, tmp_path, source_kind, destination_kind
-):
-    session = migration_database
-    config = (
-        remote_config()
-        if source_kind == "s3"
-        else {
-            "provider": "local",
-            "data_dir": str(settings.data_dir),
-            "thumb_dir": str(settings.thumb_dir),
-        }
+class TestVaultProviderMigration:
+    @pytest.mark.parametrize(
+        "source_kind,destination_kind", [("local", "s3"), ("s3", "local"), ("s3", "s3")]
     )
-    update_storage_provider(session, provider=config["provider"], raw_config=config)
-    source = build_configured_backend(parse_provider_config(config))
-    source.ensure_setup()
-    bind_backend(source)
-    actor = build_user(session, superuser=True)
-    payload = b"large-artifact\x00" * (512 * 1024)
-    artifact = build_stored_file(
-        session, source, build_model(session), data=payload, filename="pieza-ñ-機械.stl"
-    )
-    artifact_id, original_key = artifact.id, artifact.path
-    backup = create_backup()
-    if destination_kind == "s3":
-        destination = remote_config()
-    else:
-        data, thumbs = tmp_path / "destination", tmp_path / "destination-thumbs"
-        data.mkdir()
-        thumbs.mkdir()
-        destination = {
-            "provider": "local",
-            "data_dir": str(data),
-            "thumb_dir": str(thumbs),
-        }
-    owner = vault_migration.VaultMigrations(get_session_factory())
-    plan = owner.preflight(
-        destination,
-        actor_id=actor.id,
-        backup_id=backup.id,
-        backup_source_ref=backup.source_ref,
-    )
-    owner.start(plan["id"], plan["plan_digest"])
-    assert owner.advance(plan["id"])["state"] == "ready"
-    assert get_backend() is source
-    assert source.read_bytes(original_key) == payload
-    assert owner.cutover(plan["id"])["state"] == "active"
-    session.expire_all()
-    key = session.get(File, artifact_id).path
-    active = get_backend()
-    assert active.read_bytes(key) == payload
-    from fastapi.testclient import TestClient
+    def test_provider_pair_preserves_large_unicode_artifact_ranges(
+        self, migration_database, tmp_path, source_kind, destination_kind
+    ):
+        session = migration_database
+        config = (
+            remote_config()
+            if source_kind == "s3"
+            else {
+                "provider": "local",
+                "data_dir": str(settings.data_dir),
+                "thumb_dir": str(settings.thumb_dir),
+            }
+        )
+        update_storage_provider(session, provider=config["provider"], raw_config=config)
+        source = build_configured_backend(parse_provider_config(config))
+        source.ensure_setup()
+        bind_backend(source)
+        actor = build_user(session, superuser=True)
+        payload = b"large-artifact\x00" * (512 * 1024)
+        artifact = build_stored_file(
+            session,
+            source,
+            build_model(session),
+            data=payload,
+            filename="pieza-ñ-機械.stl",
+        )
+        artifact_id, original_key = artifact.id, artifact.path
+        backup = create_backup()
+        if destination_kind == "s3":
+            destination = remote_config()
+        else:
+            data, thumbs = tmp_path / "destination", tmp_path / "destination-thumbs"
+            data.mkdir()
+            thumbs.mkdir()
+            destination = {
+                "provider": "local",
+                "data_dir": str(data),
+                "thumb_dir": str(thumbs),
+            }
+        owner = vault_migration.VaultMigrations(get_session_factory())
+        plan = owner.preflight(
+            destination,
+            actor_id=actor.id,
+            backup_id=backup.id,
+            backup_source_ref=backup.source_ref,
+        )
+        owner.start(plan["id"], plan["plan_digest"])
+        assert owner.advance(plan["id"])["state"] == "ready"
+        assert get_backend() is source
+        assert source.read_bytes(original_key) == payload
+        assert owner.cutover(plan["id"])["state"] == "active"
+        session.expire_all()
+        key = session.get(File, artifact_id).path
+        active = get_backend()
+        assert active.read_bytes(key) == payload
+        from fastapi.testclient import TestClient
 
-    from app.main import app
-    from tests.factories import bearer
+        from app.main import app
+        from tests.factories import bearer
 
-    response = TestClient(app).get(
-        f"/api/v1/files/{artifact_id}/download",
-        headers={**bearer(actor), "Range": "bytes=1024-2047"},
-        follow_redirects=False,
-    )
-    assert response.status_code == 206, response.text
-    assert response.content == payload[1024:2048]
-    assert source.read_bytes(original_key) == payload
-    assert owner.full_audit(plan["id"])["full_audit"]["critical_count"] == 0
+        response = TestClient(app).get(
+            f"/api/v1/files/{artifact_id}/download",
+            headers={**bearer(actor), "Range": "bytes=1024-2047"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 206, response.text
+        assert response.content == payload[1024:2048]
+        assert source.read_bytes(original_key) == payload
+        assert owner.full_audit(plan["id"])["full_audit"]["critical_count"] == 0

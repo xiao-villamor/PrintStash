@@ -1,11 +1,10 @@
 """Bind migration's recovery prerequisite to one verified archive and Vault."""
 
 import hashlib
-import tarfile
 from datetime import datetime, timedelta
 
 from app.core.time import ensure_utc, utcnow
-from app.modules.backups.backup.archive_format import _restore_manifest_entries
+from app.modules.backups.backup.archive_format import read_archive_manifest
 from app.modules.backups.backup.catalogue import get_backup, get_backup_archive_path
 from app.modules.backups.backup.verification import verify_backup
 from app.modules.storage.migration_identity import namespace_ref
@@ -37,8 +36,7 @@ def verify_migration_backup(
     if not proof.valid or not proof.app_compatible:
         raise ValueError("migration_verified_compatible_backup_required")
     try:
-        with tarfile.open(archive, "r:gz") as tar:
-            manifest, _entries = _restore_manifest_entries(tar)
+        manifest = read_archive_manifest(archive)
         target = get_bound_backend().storage_target
         if target is None or manifest.get("vault_target_ref") != namespace_ref(
             get_bound_backend()

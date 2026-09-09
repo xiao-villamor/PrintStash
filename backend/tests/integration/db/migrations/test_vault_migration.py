@@ -91,25 +91,27 @@ def exercise_upgrade(url: str, *, released_postgres: bool = False) -> None:
         engine.dispose()
 
 
-def test_vault_workflow_upgrade_preserves_sqlite_data(tmp_path):
-    exercise_upgrade(f"sqlite:///{tmp_path / 'upgrade.sqlite'}")
+class TestVaultMigrationUpgrade:
+    def test_vault_workflow_upgrade_preserves_sqlite_data(self, tmp_path):
+        exercise_upgrade(f"sqlite:///{tmp_path / 'upgrade.sqlite'}")
 
+    @pytest.mark.postgres
+    def test_vault_workflow_upgrade_preserves_postgres_data(self):
+        from tests.containers import postgres_url
 
-@pytest.mark.postgres
-def test_vault_workflow_upgrade_preserves_postgres_data():
-    from tests.containers import postgres_url
-
-    root_url = normalize_database_url(postgres_url())
-    database = f"vault_migration_upgrade_{uuid4().hex}"
-    admin = create_engine(root_url, isolation_level="AUTOCOMMIT")
-    with admin.connect() as connection:
-        connection.exec_driver_sql(f'CREATE DATABASE "{database}"')
-    isolated_url = (
-        make_url(root_url).set(database=database).render_as_string(hide_password=False)
-    )
-    try:
-        exercise_upgrade(isolated_url, released_postgres=True)
-    finally:
+        root_url = normalize_database_url(postgres_url())
+        database = f"vault_migration_upgrade_{uuid4().hex}"
+        admin = create_engine(root_url, isolation_level="AUTOCOMMIT")
         with admin.connect() as connection:
-            connection.exec_driver_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
-        admin.dispose()
+            connection.exec_driver_sql(f'CREATE DATABASE "{database}"')
+        isolated_url = (
+            make_url(root_url)
+            .set(database=database)
+            .render_as_string(hide_password=False)
+        )
+        try:
+            exercise_upgrade(isolated_url, released_postgres=True)
+        finally:
+            with admin.connect() as connection:
+                connection.exec_driver_sql(f'DROP DATABASE "{database}" WITH (FORCE)')
+            admin.dispose()

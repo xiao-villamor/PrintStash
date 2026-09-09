@@ -204,6 +204,7 @@ class TestHealthDetails:
             "external_libraries",
             "spoolman",
             "vault_audits",
+            "vault_migration",
         }
 
     def test_reports_bounded_capacity_health(

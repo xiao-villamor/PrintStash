@@ -60,6 +60,11 @@ object and byte counts, skipped objects, delta size, recent errors, throughput
 and activity. HTTP and provider timeouts may leave a durable operation running;
 refresh its state before attempting another action.
 
+S3 preflight caps each object at 83,886,080,000 bytes (10,000 fixed 8-MiB
+parts), the limit of the current create-only writer. Keys are limited to
+1,024 UTF-8 bytes for S3 and 2,048 bytes for other adapters; filesystem or
+provider-specific path restrictions can be stricter.
+
 ## Restart and recovery
 
 The external activation journal is stored under

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import time
 from contextlib import contextmanager
-from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Condition
 from typing import Iterator
@@ -21,7 +20,6 @@ _planning = 0
 _readers: dict[str, int] = {}
 _activating = False
 _epoch = "0"
-_current: ContextVar[StorageBackend | None] = ContextVar("vault_backend", default=None)
 
 
 @dataclass
@@ -55,10 +53,6 @@ def has_readers(epoch: str) -> bool:
         return _readers.get(epoch, 0) > 0
 
 
-def current_backend() -> StorageBackend | None:
-    return _current.get()
-
-
 def current_epoch() -> str:
     with _gate:
         return _epoch
@@ -78,11 +72,12 @@ def pin() -> ReadGeneration:
 
 @contextmanager
 def use(pinned: ReadGeneration) -> Iterator[None]:
-    token = _current.set(pinned.backend)
+    from .runtime import use_read_backend
+
     try:
-        yield
+        with use_read_backend(pinned.backend):
+            yield
     finally:
-        _current.reset(token)
         pinned.close()
 
 
