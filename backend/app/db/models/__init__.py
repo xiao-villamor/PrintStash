@@ -360,3 +360,6 @@ from .types import (
 from .types import (
     VaultAuditSeverity as VaultAuditSeverity,
 )
+from .vault_migration import VaultGeneration as VaultGeneration
+from .vault_migration import VaultMigrationObject as VaultMigrationObject
+from .vault_migration import VaultMigrationRun as VaultMigrationRun

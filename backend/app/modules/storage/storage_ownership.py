@@ -826,6 +826,19 @@ def _receipt(row: OwnedStorageObject) -> CreationReceipt:
     )
 
 
+def matching_creation_receipt(
+    session: Session, backend: StorageBackend, key: str
+) -> CreationReceipt | None:
+    """Return existing exact ownership proof without adopting or changing bytes."""
+    for row in _locator_rows(
+        session, backend, key, states=(StorageObjectState.COMMITTED,)
+    ):
+        receipt = _receipt(row)
+        if backend.creation_matches(receipt):
+            return receipt
+    return None
+
+
 def require_owned_key(session: Session, backend: StorageBackend, key: str) -> None:
     candidates = _locator_rows(
         session, backend, key, states=(StorageObjectState.COMMITTED,)

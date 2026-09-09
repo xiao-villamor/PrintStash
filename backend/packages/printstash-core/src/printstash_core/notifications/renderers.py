@@ -36,6 +36,7 @@ _EVENT_LABELS: dict[NotificationEventType, str] = {
     NotificationEventType.STORAGE_AUDIT_CANCELLED: "Scheduled Vault audit cancelled",
     NotificationEventType.STORAGE_AUDIT_OVERDUE: "Scheduled Vault audit overdue",
     NotificationEventType.STORAGE_REPAIR_FAILED: "Vault audit repair failed",
+    NotificationEventType.VAULT_MIGRATION: "Vault migration",
 }
 _EVENT_COLORS: dict[NotificationEventType, int] = {
     NotificationEventType.PRINT_COMPLETED: 0x2ECC71,
@@ -107,6 +108,12 @@ def summary_lines(context: NotificationContext) -> list[str]:
                 f"{key.title()}: {summary.get(key, 0)}"
                 for key in ("new", "worsened", "resolved", "improved")
             ],
+        ]
+    if context.get("event") == NotificationEventType.VAULT_MIGRATION.value:
+        phase = str(context.get("migration_phase", "updated")).replace("_", " ")
+        return [
+            f"Phase: {phase}",
+            f"Verified objects: {context.get('verified_objects', 0)}",
         ]
     printer = context.get("printer_name") or context.get("printer_id")
     if printer:

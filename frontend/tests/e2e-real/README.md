@@ -127,3 +127,5 @@ bytes, actual provider CORS, omitted app credentials, and zero API body bytes.
 Only the test certificate's trust check is relaxed; browser CORS remains enabled.
 
 - `artifact-cache.spec.ts`: persist cache limits in Settings, explicitly clear idle cache files, then reset to environment defaults.
+
+- `migration/vault-migration.spec.ts` (isolated `playwright.migration.config.ts`): real backup, preflight, online delta ingestion, API restart, recovery/resume, explicit cutover, byte-exact Artifact downloads, Full audit and JSON report. Source cleanup remains disabled during grace. Included in `pnpm test:e2e:real`.

@@ -21,6 +21,7 @@ from app.db.models import (
     StagingLease,
     User,
 )
+from app.modules.storage.migration_identity import namespace_ref
 from app.modules.storage.storage_backend.contracts import StorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 
@@ -89,9 +90,7 @@ class SqlArtifactUploadManager:
                     ArtifactUploadSession.declared_size == request.size_bytes,
                     ArtifactUploadSession.client_sha256
                     == (
-                        request.client_sha256.lower()
-                        if request.client_sha256
-                        else None
+                        request.client_sha256.lower() if request.client_sha256 else None
                     ),
                     ArtifactUploadSession.request_json == request_json,
                     ArtifactUploadSession.state.in_(_ACTIVE),
@@ -136,7 +135,7 @@ class SqlArtifactUploadManager:
             state=ArtifactUploadState.CREATED,
             adapter_id=adapter_id,
             destination_ref=(
-                native.backend.storage_target.target_ref
+                namespace_ref(native.backend)
                 if use_native and native and native.backend.storage_target
                 else None
             ),
@@ -208,10 +207,9 @@ class SqlArtifactUploadManager:
             )
         ).one()
         pending_count = len(pre_ingestion) + int(lease_count)
-        owner_count = (
-            sum(item.owner_user_id == owner_user_id for item in pre_ingestion)
-            + int(owner_leases)
-        )
+        owner_count = sum(
+            item.owner_user_id == owner_user_id for item in pre_ingestion
+        ) + int(owner_leases)
 
         def reserved(upload: ArtifactUploadSession) -> int:
             multiplier = 2 if upload.adapter_id in _API_MODES else 1
@@ -222,12 +220,9 @@ class SqlArtifactUploadManager:
             + sum(reserved(upload) for upload in pre_ingestion)
             + sum(upload.declared_size for upload in ingesting_api)
         )
-        required_bytes = size_bytes * (
-            2 if adapter_id in _API_MODES else 1
-        )
+        required_bytes = size_bytes * (2 if adapter_id in _API_MODES else 1)
         outstanding_bytes = sum(
-            max(0, reserved(upload) - upload.received_bytes)
-            for upload in pre_ingestion
+            max(0, reserved(upload) - upload.received_bytes) for upload in pre_ingestion
         )
         self.api_adapter.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         free_bytes = shutil.disk_usage(self.api_adapter.root).free
@@ -528,6 +523,20 @@ class SqlArtifactUploadManager:
     ) -> NativeMultipartUploadAdapter:
         if upload.adapter_id != "native_parts" or self.native_adapter is None:
             raise ArtifactUploadError("native_upload_capability_unavailable")
+        target = self.native_adapter.backend.storage_target
+        current_refs = (
+            {target.target_ref, namespace_ref(self.native_adapter.backend)}
+            if target
+            else set()
+        )
+        if upload.destination_ref and (
+            upload.destination_ref not in current_refs
+            or upload.error_code == "artifact_upload_vault_generation_changed"
+        ):
+            from app.modules.storage.migration_uploads import retained_upload_backend
+
+            backend = retained_upload_backend(self.session, upload.destination_ref)
+            return NativeMultipartUploadAdapter(backend, self.native_adapter.local_root)
         return self.native_adapter
 
     def transition(

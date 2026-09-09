@@ -11,26 +11,19 @@ for the next one.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from app.core.config import _overlay
 from app.modules.storage.storage_backend.runtime import get_backend
+from tests._env import use_local_storage
 
 
 @pytest.fixture
 def storage(tmp_path: Path):
     _overlay["storage_backend"] = "local"
-    _overlay["data_dir"] = tmp_path / "files"
-    _overlay["thumb_dir"] = tmp_path / "thumbs"
-    for role, root in (("data", tmp_path / "files"), ("thumb", tmp_path / "thumbs")):
-        root.mkdir()
-        (root / ".printstash-storage-root.json").write_text(
-            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
-            encoding="utf-8",
-        )
+    use_local_storage(tmp_path)
     yield get_backend()
-    for key in ("storage_backend", "data_dir", "thumb_dir"):
+    for key in ("storage_backend", "data_dir", "thumb_dir", "staging_dir"):
         _overlay.pop(key, None)

@@ -126,11 +126,16 @@ def _create_selected_backup(
         manifest_namespaces = sorted(
             {str(entry["namespace"]) for entry in file_entries}
         )
+        from app.modules.storage.migration_identity import namespace_ref
+
         manifest = {
             "version": _contracts_module.MANIFEST_VERSION,
             "created_at": ts,
             "app_version": settings.app_version,
             "storage_backend": backend_name,
+            "vault_target_ref": namespace_ref(get_backend())
+            if get_backend().storage_target is not None
+            else None,
             "provider_id": str(
                 getattr(get_backend(), "provider_id", get_backend().backend_name)
             ),

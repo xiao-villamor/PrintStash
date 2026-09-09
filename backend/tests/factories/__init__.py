@@ -153,8 +153,16 @@ from tests.factories.storage import (
     build_unowned_file,
     store_owned_bytes,
 )
+from tests.factories.vault_migrations import (
+    build_vault_generation,
+    build_vault_migration,
+    build_vault_migration_object,
+)
 
 __all__ = [
+    "build_vault_generation",
+    "build_vault_migration",
+    "build_vault_migration_object",
     "build_multipart_part",
     "build_multipart_build",
     "build_multipart_build_part",

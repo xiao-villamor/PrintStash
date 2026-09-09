@@ -224,19 +224,26 @@ function anS3Config(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
 }
 
 function renderCard(
-  options: RenderAppOptions & { config?: VaultConfigRead; storageHealth?: StorageHealthRead } = {},
+  options: RenderAppOptions & {
+    config?: VaultConfigRead;
+    storageHealth?: StorageHealthRead;
+    migrationManaged?: boolean;
+  } = {},
 ) {
-  const { config = aConfig(), storageHealth, routes = {}, ...rest } = options;
-  return renderApp(<StorageConfigCard storageHealth={storageHealth} />, {
-    routes: {
-      "GET /api/v1/config": json(config),
-      "GET /api/v1/storage/providers": json(PROVIDERS),
-      "GET /api/v1/storage-connections": json([]),
-      "PUT /api/v1/config": json(config),
-      ...routes,
+  const { config = aConfig(), storageHealth, migrationManaged, routes = {}, ...rest } = options;
+  return renderApp(
+    <StorageConfigCard storageHealth={storageHealth} migrationManaged={migrationManaged} />,
+    {
+      routes: {
+        "GET /api/v1/config": json(config),
+        "GET /api/v1/storage/providers": json(PROVIDERS),
+        "GET /api/v1/storage-connections": json([]),
+        "PUT /api/v1/config": json(config),
+        ...routes,
+      },
+      ...rest,
     },
-    ...rest,
-  });
+  );
 }
 
 beforeEach(() => {
@@ -569,5 +576,30 @@ describe("StorageConfigCard", () => {
       expect(screen.queryByText("Legacy S3 backup destination")).toBeNull();
       expect(screen.queryByPlaceholderText("my-backup-bucket")).toBeNull();
     });
+  });
+});
+
+describe("Configured Vault migration entry", () => {
+  it("routes location changes through the verified migration flow", async () => {
+    renderCard({ migrationManaged: true });
+    expect(
+      await screen.findByRole("button", { name: "Move storage with a verified migration" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save configuration" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Data directory")).not.toBeInTheDocument();
+  });
+  it("hides the migration entry without an administrator session", async () => {
+    renderCard({ migrationManaged: true, auth: adminSession({ user: null }) });
+    await screen.findByText(/Changing locations requires/);
+    expect(
+      screen.queryByRole("button", { name: "Move storage with a verified migration" }),
+    ).not.toBeInTheDocument();
+  });
+  it("keeps current credentials editable without exposing location fields", async () => {
+    renderCard({ migrationManaged: true, config: anS3Config() });
+    expect(await screen.findByLabelText(/Access key/)).toBeVisible();
+    expect(screen.queryByLabelText("Bucket")).not.toBeInTheDocument();
+    expect(screen.getByText("Bucket", { selector: "dt" })).toBeVisible();
+    expect(screen.queryByText("/data/files")).not.toBeInTheDocument();
   });
 });

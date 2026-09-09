@@ -120,6 +120,28 @@ def spoolman_server(monkeypatch: pytest.MonkeyPatch):
 
 
 class TestHealth:
+    def test_migration_health_contains_only_safe_progress(
+        self, client, auth_headers, make_vault_migration
+    ):
+        make_vault_migration(
+            state="paused",
+            retryable=True,
+            source_config='{"secret":"never-expose-this"}',
+        )
+        response = client.get("/api/v1/health/details", headers=auth_headers)
+        assert response.status_code == 200
+        migration = response.json()["components"]["vault_migration"]
+        assert migration["state"] == "paused"
+        assert migration["retryable"] is True
+        assert set(migration) == {
+            "ok",
+            "state",
+            "maintenance",
+            "retryable",
+            "last_activity_at",
+        }
+        assert "never-expose-this" not in response.text
+
     def test_reports_ok_with_the_configured_app_name(self, client: TestClient) -> None:
         response = client.get("/api/v1/health")
 

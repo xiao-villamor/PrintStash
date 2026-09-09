@@ -14,7 +14,6 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, col, select
 
-from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
@@ -216,7 +215,10 @@ def storage_generation(session: Session) -> str:
     markers = session.exec(select(RestoreMarker).order_by(col(RestoreMarker.id))).all()
     payload = [
         config.storage_identity if config else None,
-        get_backend().namespace_for(str(settings.data_dir)),
+        get_backend().namespace_for(
+            get_backend().blob_key("audit-generation", 1, "probe")
+        ),
+        get_backend().namespace_for(get_backend().thumbnail_key(0)),
         target.target_ref if target else get_backend().backend_name,
         [
             (row.id, row.operation_nonce, row.state, row.updated_at.isoformat())

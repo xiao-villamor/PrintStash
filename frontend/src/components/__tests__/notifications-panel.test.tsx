@@ -638,3 +638,11 @@ describe("NotificationsPanel", () => {
     });
   });
 });
+
+describe("Migration notifications", () => {
+  it("offers Vault migration events on configured channels", async () => {
+    renderPanel();
+    await openDraft(userEvent.setup());
+    expect(await screen.findByRole("checkbox", { name: "Vault migration" })).toBeVisible();
+  });
+});

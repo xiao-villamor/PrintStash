@@ -484,3 +484,108 @@ export function anIngestJob(override?: Partial<IngestJobStatus>): IngestJobStatu
     ...override,
   };
 }
+
+export function aVaultMigration(
+  override?: Partial<import("@/lib/api/vault-migration").VaultMigrationRun>,
+): import("@/lib/api/vault-migration").VaultMigrationRun {
+  return {
+    source_provider_ref: "source-identity",
+    destination_provider_ref: "destination-identity",
+    capacity_resources: [{ role: "destination", required_bytes: 100, available_bytes: 1000 }],
+    policy: { retention_days: 7, concurrency: 1, bandwidth_bytes_per_second: null },
+    copied_objects: 0,
+    copied_bytes: 0,
+    verified_bytes: 0,
+    skipped_objects: 0,
+    skipped_bytes: 0,
+    failed_objects: 0,
+    failed_bytes: 0,
+    delta_objects: 0,
+    throughput_bytes_per_second: null,
+    last_activity_at: FROZEN_NOW,
+    retryable: false,
+    phase_history: [{ phase: "planned", at: FROZEN_NOW }],
+    pre_audit: null,
+    post_audit: null,
+    full_audit: null,
+    cleanup_outcome: null,
+    notification_events: 0,
+    id: "migration-1",
+    state: "planned",
+    backup_summary: {
+      backup_id: "backup-1",
+      source_ref: "exact-backup-source",
+      verified_at: FROZEN_NOW,
+    },
+    plan_digest: "plan-digest",
+    objects: 10,
+    verified_objects: 0,
+    bytes: 100,
+    error_code: null,
+    cleanup_after: null,
+    cleanup_findings: [],
+    source_retained: true,
+    expires_at: "2099-01-01T00:00:00Z",
+    source: { provider: "local", data_dir: "/source/files", thumb_dir: "/source/thumbs" },
+    destination: {
+      provider: "local",
+      data_dir: "/destination/files",
+      thumb_dir: "/destination/thumbs",
+    },
+    capacity_warnings: [],
+    recovery_required: false,
+    ...override,
+  };
+}
+
+export function aMigrationBackup(
+  override?: Partial<import("@/lib/api/backup").BackupMeta>,
+): import("@/lib/api/backup").BackupMeta {
+  return {
+    backup_id: "backup-1",
+    created_at: FROZEN_NOW,
+    size_bytes: 100,
+    file_count: 1,
+    storage_backend: "local",
+    app_version: "0.13.0",
+    location: "local",
+    source_ref: "exact-backup-source",
+    ...override,
+  };
+}
+
+export function aMigrationProvider(
+  override?: Partial<import("@/types").StorageProvider>,
+): import("@/types").StorageProvider {
+  return {
+    id: "local",
+    label: "Local storage",
+    category: "this_machine",
+    description: "Mounted filesystem",
+    expected_tier: "verified",
+    expected_tier_note: "Requires verification",
+    consequences: [],
+    documentation_url: "/docs/storage-providers",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "data_dir",
+        label: "Data directory",
+        help: "Existing empty directory",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "thumb_dir",
+        label: "Thumbnail directory",
+        help: "Existing empty directory",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+    ],
+    ...override,
+  };
+}

@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.modules.storage.filesystem import detect_fs_kind
 from app.modules.storage.storage_identity import StorageTargetIdentity
+from app.runtime.maintenance import guarded_storage_destruction
 
 from .contracts import (
     _DIRECT_ADAPTER_IDENTITY,
@@ -375,6 +376,7 @@ class LocalStorageBackend(StorageBackend):
         if not any(target != root and target.is_relative_to(root) for root in roots):
             raise StorageConfigurationError("backup_restore_key_outside_storage")
 
+    @guarded_storage_destruction
     def reclaim_unverified(
         self,
         key: str,
@@ -884,6 +886,7 @@ class LocalStorageBackend(StorageBackend):
             if not moved:
                 quarantine.unlink(missing_ok=True)
 
+    @guarded_storage_destruction
     def rollback_create(self, receipt: CreationReceipt) -> bool:
         if not self.capabilities.verified_delete:
             logger.warning(
@@ -908,6 +911,7 @@ class LocalStorageBackend(StorageBackend):
         quarantine.unlink()
         return True
 
+    @guarded_storage_destruction
     def replace_stream(
         self, src: BinaryIO, receipt: CreationReceipt
     ) -> CreationReceipt:
@@ -1058,6 +1062,7 @@ class LocalStorageBackend(StorageBackend):
             os.close(fd)
             Path(probe_name).unlink()
 
+    @guarded_storage_destruction
     def move(self, src_key: str, dest_key: str) -> None:
         del src_key, dest_key
         raise RuntimeError("unchecked_storage_move_disabled")
@@ -1156,6 +1161,7 @@ class LocalStorageBackend(StorageBackend):
             "roots": [root.as_dict() for root in roots],
         }
 
+    @guarded_storage_destruction
     def delete(self, key: str) -> None:
         del key
         raise RuntimeError("unchecked_storage_delete_disabled")

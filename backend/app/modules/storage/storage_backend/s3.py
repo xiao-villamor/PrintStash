@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.modules.storage.delivery_contracts import BrowserDownload, content_disposition
 from app.modules.storage.storage_identity import StorageTargetIdentity
+from app.runtime.maintenance import guarded_storage_destruction
 
 if TYPE_CHECKING:
     from app.modules.storage.storage_providers import TransportSpec
@@ -513,6 +514,7 @@ class S3StorageBackend(StorageBackend):
             raise StorageCollisionError("storage_key_outside_managed_root")
         return full_prefix
 
+    @guarded_storage_destruction
     def reclaim_unverified(
         self,
         key: str,
@@ -717,10 +719,10 @@ class S3StorageBackend(StorageBackend):
         token = uuid.uuid4().hex
         threshold = int(settings.s3_multipart_threshold_mb) * 1024 * 1024
         spool = tempfile.SpooledTemporaryFile(max_size=threshold)
-        shutil.copyfileobj(src, spool, length=1024 * 1024)
-        size = spool.tell()
-        spool.seek(0)
         try:
+            shutil.copyfileobj(src, spool, length=1024 * 1024)
+            size = spool.tell()
+            spool.seek(0)
             if size > threshold:
                 try:
                     response = self._multipart_create(spool, key=key, token=token)
@@ -812,6 +814,7 @@ class S3StorageBackend(StorageBackend):
                 logger.exception("S3 multipart abort failed", extra={"key": key})
             raise
 
+    @guarded_storage_destruction
     def rollback_create(self, receipt: CreationReceipt) -> bool:
         # Validate the opaque key before inspecting receipt metadata or making
         # any remote request.  A forged receipt from another typed root must
@@ -852,6 +855,7 @@ class S3StorageBackend(StorageBackend):
         self._client.delete_object(**kwargs)
         return True
 
+    @guarded_storage_destruction
     def replace_stream(
         self, src: BinaryIO, receipt: CreationReceipt
     ) -> CreationReceipt:
@@ -975,6 +979,7 @@ class S3StorageBackend(StorageBackend):
         if not self.rollback_create(receipt):
             raise RuntimeError("storage_delete_probe_cleanup_unverified")
 
+    @guarded_storage_destruction
     def move(self, src_key: str, dest_key: str) -> None:
         del src_key, dest_key
         raise RuntimeError("unchecked_storage_move_disabled")
@@ -1025,6 +1030,7 @@ class S3StorageBackend(StorageBackend):
         self._ensure_bucket()
         self._probe_capabilities()
 
+    @guarded_storage_destruction
     def delete(self, key: str) -> None:
         del key
         raise RuntimeError("unchecked_storage_delete_disabled")

@@ -17,6 +17,7 @@ from app.modules.storage.storage_backend.contracts import (
     StorageConfigurationError,
 )
 from app.modules.storage.storage_providers import TransportKind, TransportSpec
+from app.runtime.maintenance import guarded_storage_destruction
 
 
 class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
@@ -75,6 +76,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return self._key(f"multipart-covers/{multipart_model_id}/{name}")
 
+    @guarded_storage_destruction
     def move(self, src_key: str, dest_key: str) -> None:
         source = self._relative(src_key)
         destination = self._relative(dest_key)
@@ -239,6 +241,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
                 "remote_destructive_access_unavailable"
             ) from exc
 
+    @guarded_storage_destruction
     def delete(self, key: str) -> None:
         del key
         raise RuntimeError("unchecked_storage_delete_disabled")
@@ -287,6 +290,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
         self._relative(key)
         return None
 
+    @guarded_storage_destruction
     def reclaim_unverified(
         self,
         key: str,
@@ -322,6 +326,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
             raise StorageConfigurationError("atomic_create_not_supported")
         return extension.create_stream(src, key)
 
+    @guarded_storage_destruction
     def delete_versioned(self, key: str, version_id: str) -> None:
         extension = self.exact_deletion
         if extension is None:

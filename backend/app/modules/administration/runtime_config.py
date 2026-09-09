@@ -29,6 +29,7 @@ from app.modules.storage.storage_providers import (
     sanitized_provider_config,
     split_provider_config,
 )
+from app.runtime.maintenance import guarded_storage_configuration
 
 from .config_repository import get_or_create
 
@@ -466,6 +467,7 @@ def _project_provider_overlay(config: StorageProviderConfig) -> None:
         _overlay["storage_backend"] = config.provider
 
 
+@guarded_storage_configuration
 def update_storage_provider(
     session: Session,
     *,
@@ -685,6 +687,7 @@ def ensure_jwt_secret(session: Session) -> None:
     )
 
 
+@guarded_storage_configuration
 def update_storage(
     session: Session,
     *,
@@ -728,6 +731,7 @@ def _env_or_default(field_name: str) -> object:
     return ""
 
 
+@guarded_storage_configuration
 def update_config(
     session: Session,
     *,

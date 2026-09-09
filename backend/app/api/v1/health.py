@@ -400,12 +400,18 @@ def _spoolman_probe() -> dict:
 )
 def health_details() -> dict:
     from app.modules.administration.vault_audit_policy import health as audit_health
+    from app.modules.storage.migration_progress import health as migration_health
 
     try:
         with get_session_factory().scoped_session() as session:
             audits = audit_health(session)
     except Exception:
         audits = {"ok": False, "error": "audit_health_unavailable"}
+    try:
+        with get_session_factory().scoped_session() as session:
+            migrations = migration_health(session)
+    except Exception:
+        migrations = {"ok": False, "error": "migration_health_unavailable"}
     out = {
         "status": "ok",
         "name": settings.app_name,
@@ -419,6 +425,7 @@ def health_details() -> dict:
     }
     components = {
         "vault_audits": audits,
+        "vault_migration": migrations,
         "database": _database_probe(),
         "storage": _storage_probe(),
         "capacity": _capacity_probe(),

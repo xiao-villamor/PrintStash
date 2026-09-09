@@ -20,6 +20,7 @@ class NotificationEventType(str, Enum):
     STORAGE_AUDIT_CANCELLED = "storage_audit_cancelled"
     STORAGE_AUDIT_OVERDUE = "storage_audit_overdue"
     STORAGE_REPAIR_FAILED = "storage_repair_failed"
+    VAULT_MIGRATION = "vault_migration"
 
 
 class NotificationTarget(str, Enum):

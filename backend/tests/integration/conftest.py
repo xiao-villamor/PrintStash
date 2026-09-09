@@ -57,6 +57,9 @@ from tests.factories.protocols import (
     MakeStorageConnection,
     MakeSystemConfig,
     MakeUser,
+    MakeVaultGeneration,
+    MakeVaultMigration,
+    MakeVaultMigrationObject,
     TagCollection,
     TagFile,
     UserHeaders,
@@ -307,6 +310,21 @@ def make_artifact_upload(db_session: Session) -> Any:
 
 
 @pytest.fixture
+def make_vault_migration(db_session: Session) -> MakeVaultMigration:
+    return _bound(factories.build_vault_migration, db_session)
+
+
+@pytest.fixture
+def make_vault_migration_object(db_session: Session) -> MakeVaultMigrationObject:
+    return _bound(factories.build_vault_migration_object, db_session)
+
+
+@pytest.fixture
+def make_vault_generation(db_session: Session) -> MakeVaultGeneration:
+    return _bound(factories.build_vault_generation, db_session)
+
+
+@pytest.fixture
 def make_artifact_upload_part(db_session: Session) -> Any:
     return _bound(factories.build_artifact_upload_part, db_session)
 
@@ -408,6 +426,9 @@ __all__ = [
     "MakeSystemConfig",
     "MakeStorageConnection",
     "MakeUser",
+    "MakeVaultMigration",
+    "MakeVaultMigrationObject",
+    "MakeVaultGeneration",
     "UserHeaders",
     "a_member_who_can_see_one_collection",
     "a_gcode_artifact",
@@ -449,6 +470,9 @@ __all__ = [
     "make_storage_connection",
     "make_tag",
     "make_user",
+    "make_vault_migration",
+    "make_vault_migration_object",
+    "make_vault_generation",
     "tag_model",
     "tag_collection",
     "tag_file",

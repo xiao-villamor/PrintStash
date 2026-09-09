@@ -27,6 +27,14 @@ backup_operation_lock = threading.RLock()
 _mutation_condition = threading.Condition()
 
 _active_mutations = 0
+_mutation_observer: Callable[[], None] | None = None
+
+
+def observe_mutations(observer: Callable[[], None] | None) -> None:
+    """Composition hook for a durable activation owner's first-write marker."""
+    global _mutation_observer
+    _mutation_observer = observer
+
 
 _P = ParamSpec("_P")
 
@@ -48,7 +56,13 @@ def begin_mutating_operation() -> bool:
         if _restore_gate.is_set():
             return False
         _active_mutations += 1
-        return True
+    try:
+        if _mutation_observer is not None:
+            _mutation_observer()
+    except Exception:
+        end_mutating_operation()
+        raise
+    return True
 
 
 def end_mutating_operation() -> None:
@@ -105,6 +119,9 @@ def hold_restore_maintenance() -> None:
 _retention_condition = threading.Condition(threading.RLock())
 _storage_retentions = 0
 _active_destructive = 0
+_activating_configuration: ContextVar[bool] = ContextVar(
+    "vault_configuration_activation", default=False
+)
 _database_connections_fenced = threading.Event()
 
 
@@ -180,6 +197,52 @@ def guarded_storage_destruction(func: Callable[_P, _R]) -> Callable[_P, _R]:
     @wraps(func)
     def guarded(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with destructive_operation(_backend=args[0] if args else None):
+            return func(*args, **kwargs)
+
+    return guarded
+
+
+def guarded_destructive_operation(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Exclude the logical transaction too, before claims or rows are changed."""
+
+    @wraps(func)
+    def guarded(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with destructive_operation():
+            return func(*args, **kwargs)
+
+    return guarded
+
+
+@contextmanager
+def activating_storage_configuration() -> Iterator[None]:
+    """Internal atomic-activation scope; never exposed by configuration routes."""
+    token = _activating_configuration.set(True)
+    try:
+        yield
+    finally:
+        _activating_configuration.reset(token)
+
+
+def guarded_storage_configuration(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    fields = {
+        "provider",
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_region",
+        "s3_access_key",
+        "s3_secret_key",
+    }
+
+    @wraps(func)
+    def guarded(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if _activating_configuration.get() or not any(
+            kwargs.get(field) is not None for field in fields
+        ):
+            return func(*args, **kwargs)
+        with destructive_operation():
             return func(*args, **kwargs)
 
     return guarded

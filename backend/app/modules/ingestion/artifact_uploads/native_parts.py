@@ -70,6 +70,27 @@ class NativeMultipartUploadAdapter:
         except KeyError as exc:
             raise NativeMultipartError("native_upload_identity_invalid") from exc
 
+    @classmethod
+    def completion_receipt(
+        cls, upload: ArtifactUploadSession
+    ) -> CreationReceipt | None:
+        """Read the protected, positively acknowledged native object identity."""
+        if not upload.protected_native_id:
+            return None
+        completion = cls._decode(upload).get("completion_receipt")
+        return CreationReceipt(**completion) if isinstance(completion, dict) else None
+
+    @classmethod
+    def relocate_completion(
+        cls, upload: ArtifactUploadSession, receipt: CreationReceipt
+    ) -> None:
+        """Move an already completed staging object in an atomic Vault activation."""
+        protected = cls._decode(upload)
+        protected["completion_receipt"] = asdict(receipt)
+        upload.protected_native_id = encrypt_secret(
+            json.dumps(protected, separators=(",", ":"))
+        )
+
     def sign_part(
         self,
         upload: ArtifactUploadSession,
@@ -176,6 +197,10 @@ class NativeMultipartUploadAdapter:
         fd, temporary_name = tempfile.mkstemp(prefix=".native-", dir=directory)
         os.close(fd)
         temporary = Path(temporary_name)
+        # A relocated native completion can now be backed by Local storage,
+        # whose download contract is create-only. Reserve a unique private
+        # name, then remove only our empty placeholder before materialization.
+        temporary.unlink()
         destination = directory / "assembled.upload"
         try:
             self.backend.download_to_path(receipt.key, temporary)

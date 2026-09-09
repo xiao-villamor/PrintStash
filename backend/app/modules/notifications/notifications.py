@@ -191,6 +191,7 @@ def enqueue_for_event(
     *,
     printer_id: Optional[int] = None,
     job: Optional[PrintJob] = None,
+    event_context: dict[str, object] | None = None,
 ) -> int:
     """Add a delivery row per matching channel to ``session`` (no commit).
 
@@ -209,6 +210,8 @@ def enqueue_for_event(
         return 0
 
     context = build_context(session, event_type, printer_id=printer_id, job=job)
+    if event_context:
+        context.update(event_context)
     context_json = json.dumps(context)
     now = utcnow()
     for channel in matching:

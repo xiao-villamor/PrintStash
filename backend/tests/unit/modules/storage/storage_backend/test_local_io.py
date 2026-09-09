@@ -25,6 +25,10 @@ class FakeSettings:
     thumb_dir: Path
     storage_identity: str = "a" * 64
 
+    @property
+    def backup_dir(self) -> Path:
+        return self.data_dir.parent / "backups"
+
 
 class TestStatSize:
     def test_reports_the_size_of_the_object(self, tmp_path: Path) -> None:

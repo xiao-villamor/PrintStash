@@ -131,6 +131,12 @@ const EVENTS: { value: NotificationEvent; label: string }[] = [
       return uiText("Vault repair failed");
     },
   },
+  {
+    value: "vault_migration",
+    get label() {
+      return uiText("Vault migration");
+    },
+  },
 ];
 
 /** One editable entry of a channel's `config` map. */

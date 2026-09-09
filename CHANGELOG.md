@@ -55,6 +55,10 @@
 
 ### Added
 
+- Verified, resumable Vault migration with create-only destination copies,
+  online ingestion deltas, journal-backed cutover recovery, generation-pinned
+  reads, and explicit receipt-scoped source retention and cleanup (#104).
+
 - Multipart model selection now browses thumbnail cards and nested collections,
   pages through large libraries, and keeps multiple selections across searches
   and pages. Add selected Models as separate parts or as variants of one part.

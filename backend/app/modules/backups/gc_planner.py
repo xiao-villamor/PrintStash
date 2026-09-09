@@ -44,6 +44,7 @@ from app.modules.storage.storage_backend.contracts import StorageTier
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_identity import independent_evidence
 from app.modules.storage.storage_ownership import provider_ref_for_backend
+from app.runtime.maintenance import guarded_destructive_operation
 
 _DOCUMENT_IMAGE_RE = re.compile(
     r"/api/v1/documents/(\d+)/images/([0-9a-f]{64}\.(?:png|jpe?g|gif|webp))"
@@ -543,6 +544,7 @@ def _require_unchanged_identity(run: GcRun, source) -> None:
         raise GcSafetyError("gc_identity_evidence_changed")
 
 
+@guarded_destructive_operation
 def finalize_plan(session: Session, run_id: int) -> GcRun:
     """Finalize one quarantined plan after all evidence is revalidated."""
     from app.modules.library.trash import (

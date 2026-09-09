@@ -18,6 +18,7 @@ from starlette import status
 from app.api.errors import operation_error_response
 from app.api.session_cookie import extract_access_token
 from app.api.v1 import api_router
+from app.api.vault_generation import VaultGenerationMiddleware
 from app.bootstrap.lifecycle import (
     lifespan,
 )
@@ -41,11 +42,6 @@ from app.db.session import get_session_factory
 from app.modules.administration.audit import (
     clear_audit_context,
     set_audit_context,
-)
-from app.runtime.maintenance import (
-    begin_mutating_operation,
-    end_mutating_operation,
-    restore_in_progress,
 )
 
 logger = get_logger(__name__)
@@ -93,6 +89,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(VaultGenerationMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -128,37 +125,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "internal_server_error"},
     )
-
-
-@app.middleware("http")
-async def quiesce_writes_during_restore(request: Request, call_next):
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
-        return await call_next(request)
-
-    path = request.url.path.rstrip("/")
-    is_restore_request = (
-        request.method == "POST"
-        and path.startswith("/api/v1/backups/")
-        and path.endswith("/restore")
-    )
-    if is_restore_request:
-        return await call_next(request)
-    is_login_request = request.method == "POST" and path == "/api/v1/auth/login"
-    if is_login_request and restore_in_progress():
-        # An interrupted restore may outlive the browser session. Permit the
-        # router's access-only recovery login without admitting a database
-        # mutation; every other POST remains quiesced.
-        request.state.restore_recovery_login = True
-        return await call_next(request)
-    if not begin_mutating_operation():
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "restore_in_progress"},
-        )
-    try:
-        return await call_next(request)
-    finally:
-        end_mutating_operation()
 
 
 @app.middleware("http")

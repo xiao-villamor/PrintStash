@@ -208,10 +208,14 @@ async def lifespan(app: FastAPI):
     # Inspect the filesystem journal before opening or migrating the database.
     # A crash marker is the recovery authority; startup must not run normal
     # schema/identity/storage repairs before deciding whether it is present.
-    restore_maintenance = inspect_restore_recovery()
+    from app.modules.storage.migration_journal import inspect_before_writes
+
+    migration_maintenance = inspect_before_writes()
+    restore_maintenance = inspect_restore_recovery() or migration_maintenance
     # DB must still exist before we can read the runtime overlay. The journal
     # decision above gates every application-owned repair after initialization.
-    init_db()
+    if not migration_maintenance:
+        init_db()
     with get_session_factory().scoped_session() as session:
         apply_overlay(session)
         from app.modules.administration.runtime_config import (
@@ -265,21 +269,39 @@ async def lifespan(app: FastAPI):
     from app.modules.storage.materializer_runtime import bind_materializer
 
     try:
-        capacity = CapacityManager(get_session_factory())
-        bind_materializer(
-            ArtifactMaterializer(
-                validate_cache_root(settings.artifact_cache_root),
-                live_policy,
-                reserve=lambda token, root, size: capacity.hold(
-                    f"cache:{token}",
-                    [CapacityResource.for_path(root, size, role="cache")],
-                ),
-                recover_reservation=lambda token: capacity.release(f"cache:{token}"),
+        if restore_maintenance:
+            bind_materializer(None, configured_root=Path(settings.artifact_cache_root))
+        else:
+            capacity = CapacityManager(get_session_factory())
+            bind_materializer(
+                ArtifactMaterializer(
+                    validate_cache_root(settings.artifact_cache_root),
+                    live_policy,
+                    reserve=lambda token, root, size: capacity.hold(
+                        f"cache:{token}",
+                        [CapacityResource.for_path(root, size, role="cache")],
+                    ),
+                    recover_reservation=lambda token: capacity.release(
+                        f"cache:{token}"
+                    ),
+                )
             )
-        )
     except (OSError, RuntimeError, ValueError, sqlite3.Error):
         logger.exception("artifact cache unavailable; source reads remain enabled")
         bind_materializer(None, configured_root=Path(settings.artifact_cache_root))
+
+    from app.db.models import VaultGeneration
+    from app.modules.storage.storage_backend import generations
+
+    with get_session_factory().scoped_session() as session:
+        generation = session.get(VaultGeneration, 1)
+        if generation is not None:
+            with generations.activation():
+                generations.publish(_backend, generation.epoch)
+    from app.modules.storage.vault_migration import record_first_destination_write
+    from app.runtime.maintenance import observe_mutations
+
+    observe_mutations(record_first_destination_write)
     from app.runtime.jobs import reconcile_interrupted_jobs
 
     interrupted_jobs = reconcile_interrupted_jobs() if not restore_maintenance else 0
@@ -337,6 +359,9 @@ async def lifespan(app: FastAPI):
 
     app.state.audit_scheduler_task = asyncio.create_task(run_audit_scheduler())
     app.state.notification_task = asyncio.create_task(run_dispatcher_loop())
+    from app.runtime.vault_migrations import run_migrations as run_vault_migrations
+
+    app.state.vault_migration_task = asyncio.create_task(run_vault_migrations())
     app.state.fleet_scheduler_task = asyncio.create_task(
         run_fleet_scheduler(work_wakeup, provider_builder)
     )
@@ -355,6 +380,7 @@ async def lifespan(app: FastAPI):
         app.state.automatic_backup_task,
         app.state.audit_scheduler_task,
         app.state.notification_task,
+        app.state.vault_migration_task,
         app.state.fleet_scheduler_task,
     )
     await watcher.stop_all()

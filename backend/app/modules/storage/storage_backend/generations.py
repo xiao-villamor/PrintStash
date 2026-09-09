@@ -18,6 +18,7 @@ from .contracts import StorageBackend
 
 _gate = Condition()
 _planning = 0
+_readers: dict[str, int] = {}
 _activating = False
 _epoch = "0"
 _current: ContextVar[StorageBackend | None] = ContextVar("vault_backend", default=None)
@@ -28,6 +29,7 @@ class ReadGeneration:
     backend: StorageBackend
     epoch: str
     _planning: bool = True
+    _closed: bool = False
 
     def planned(self) -> None:
         global _planning
@@ -36,6 +38,21 @@ class ReadGeneration:
                 self._planning = False
                 _planning -= 1
                 _gate.notify_all()
+
+    def close(self) -> None:
+        self.planned()
+        with _gate:
+            if not self._closed:
+                _readers[self.epoch] -= 1
+                if not _readers[self.epoch]:
+                    del _readers[self.epoch]
+                self._closed = True
+                _gate.notify_all()
+
+
+def has_readers(epoch: str) -> bool:
+    with _gate:
+        return _readers.get(epoch, 0) > 0
 
 
 def current_backend() -> StorageBackend | None:
@@ -55,6 +72,7 @@ def pin() -> ReadGeneration:
         _gate.wait_for(lambda: not _activating)
         result = ReadGeneration(get_bound_backend(), _epoch)
         _planning += 1
+        _readers[_epoch] = _readers.get(_epoch, 0) + 1
         return result
 
 
@@ -65,7 +83,7 @@ def use(pinned: ReadGeneration) -> Iterator[None]:
         yield
     finally:
         _current.reset(token)
-        pinned.planned()
+        pinned.close()
 
 
 @contextmanager

@@ -1671,6 +1671,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
+  if (url.pathname === "/api/v1/storage/migrations") {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/storage/providers") {
     sendJson(res, storageProviders());
     return;

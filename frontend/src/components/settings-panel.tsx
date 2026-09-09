@@ -62,6 +62,7 @@ import { ExternalLibrariesPanel } from "@/components/external-libraries-panel";
 import { StorageInventoryPanel } from "@/components/storage-inventory-panel";
 import { ArtifactCacheCard } from "@/components/artifact-cache-card";
 import { StorageConfigCard } from "@/components/storage-config-card";
+import { VaultMigrationPanel } from "@/components/vault-migration-panel";
 import { RemoteStorageConnections } from "@/components/remote-storage-connections";
 import { MakerWorldConnectCard } from "@/components/makerworld-connect-card";
 import { ProviderConnectionsPanel } from "@/components/provider-connections-panel";
@@ -2698,9 +2699,10 @@ export function SettingsPanel() {
 
             {activeSection === "storage" && (
               <div className="space-y-6 animate-panel-in">
-                <StorageConfigCard storageHealth={storageHealth} />
+                <StorageConfigCard storageHealth={storageHealth} migrationManaged />
                 {user?.is_superuser && <StorageInventoryPanel />}
                 {user?.is_superuser && <ArtifactCacheCard />}
+                {user?.is_superuser && <VaultMigrationPanel />}
               </div>
             )}
 

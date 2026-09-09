@@ -21,6 +21,7 @@ export default defineConfig({
     "critical/**/*.spec.ts",
     "onboarding/**/*.spec.ts",
     "delivery/**/*.spec.ts",
+    "migration/**/*.spec.ts",
   ],
   // Generous: some specs upload a file and wait on real async ingestion.
   timeout: 120_000,

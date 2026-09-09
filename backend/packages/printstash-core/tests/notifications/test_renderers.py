@@ -103,7 +103,24 @@ class TestNotificationEventType:
             "storage_audit_cancelled",
             "storage_audit_overdue",
             "storage_repair_failed",
+            "vault_migration",
         }
+
+    def test_migration_summary_uses_only_public_progress(self) -> None:
+        context = {
+            "event": "vault_migration",
+            "migration_phase": "delta_copy",
+            "verified_objects": 12,
+            "source_config": "private",
+        }
+        assert event_label(context) == "Vault migration"
+        assert summary_lines(context) == ["Phase: delta copy", "Verified objects: 12"]
+
+    def test_migration_summary_supplies_missing_progress(self) -> None:
+        assert summary_lines({"event": "vault_migration"}) == [
+            "Phase: updated",
+            "Verified objects: 0",
+        ]
 
 
 class TestNotificationTarget:

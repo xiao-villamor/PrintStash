@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from app.core.config import settings
 from app.db.models import (
     SENTINEL_FILE_HASH,
     Collection,
@@ -24,6 +23,7 @@ from app.db.models import (
     MultipartModel,
     ThumbnailGeneration,
 )
+from app.modules.storage.storage_backend.contracts import StorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 
 _COLLECTION_IMAGE_RE = re.compile(r"/collections/(\d+)/images/([^\s)\]?#]+)")
@@ -58,10 +58,10 @@ class StorageOwnershipSnapshot:
 
 
 def ownership_snapshot(
-    session: Session, *, discover: bool = True
+    session: Session, *, discover: bool = True, backend: StorageBackend | None = None
 ) -> StorageOwnershipSnapshot:
     """Typed census for audit/backup; never used to widen trash deletion."""
-    backend = get_backend()
+    backend = backend or get_backend()
     result = StorageOwnershipSnapshot()
 
     files = list(session.exec(select(File)).all())
@@ -207,7 +207,10 @@ def ownership_snapshot(
         # Local storage keeps derived objects under a separate root. S3's
         # default walk already covers every vault-data prefix.
         if backend.direct_path(backend.thumbnail_key(0)) is not None:
-            result.discovered_keys.update(backend.walk_keys(str(settings.thumb_dir)))
+            from pathlib import Path
+            result.discovered_keys.update(
+                backend.walk_keys(str(Path(backend.thumbnail_key(0)).parent))
+            )
     return result
 
 

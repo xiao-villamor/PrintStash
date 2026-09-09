@@ -52,6 +52,13 @@ def use_local_storage(tmp_path: Path) -> Path:
             json.dumps({"format": 1, "installation": installation, "role": role}),
             encoding="utf-8",
         )
+    # Configuring a test Vault is a composition operation. Local adapters now
+    # pin their roots for coherent reads across migrations, so settings changes
+    # alone must not silently retarget an already-bound adapter.
+    from app.modules.storage.storage_backend.local import LocalStorageBackend
+    from app.modules.storage.storage_backend.runtime import bind_backend
+
+    bind_backend(LocalStorageBackend())
     return tmp_path
 
 

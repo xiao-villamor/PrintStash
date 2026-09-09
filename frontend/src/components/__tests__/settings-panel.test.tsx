@@ -785,7 +785,9 @@ describe("SettingsPanel", () => {
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
-      expect(await screen.findByRole("button", { name: "Save configuration" })).toBeVisible();
+      expect(
+        await screen.findByRole("button", { name: "Move storage with a verified migration" }),
+      ).toBeVisible();
       expect(screen.queryByRole("button", { name: /Backup now/ })).toBeNull();
     });
 

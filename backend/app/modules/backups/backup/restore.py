@@ -41,6 +41,7 @@ from app.runtime.maintenance import (
     begin_restore_maintenance,
     end_restore_maintenance,
     exclusive_backup_operation,
+    guarded_destructive_operation,
     restore_in_progress,
 )
 
@@ -50,6 +51,7 @@ _RESTORE_GRACE_PERIOD_S = 2.0
 
 
 @exclusive_backup_operation
+@guarded_destructive_operation
 def restore_backup(backup_id: str, *, source_ref: str | None = None) -> dict:
     """Restore a backup with staged blobs and SQLite's online backup API.
 

@@ -33,7 +33,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import (
     ArtifactProvenanceLink,
@@ -66,6 +65,7 @@ from app.modules.library.model_views import exports as models_exports
 from app.schemas.models import PartGroupWrite, PartOptionWrite
 from app.schemas.multipart_models import MultipartPartWrite
 from app.schemas.provenance import CaptureManifestV2
+from tests._env import use_local_storage
 from tests.factories import (
     build_collection,
     build_file,
@@ -83,18 +83,7 @@ from tests.factories import (
 
 
 def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
-    _overlay["data_dir"] = tmp_path / "files"
-    _overlay["thumb_dir"] = tmp_path / "thumbs"
-    installation = str(_overlay.get("storage_identity") or "a" * 64)
-    for role, root in (
-        ("data", _overlay["data_dir"]),
-        ("thumb", _overlay["thumb_dir"]),
-    ):
-        root.mkdir(parents=True, exist_ok=True)
-        (root / ".printstash-storage-root.json").write_text(
-            json.dumps({"format": 1, "installation": installation, "role": role}),
-            encoding="utf-8",
-        )
+    use_local_storage(tmp_path)
     user = db.exec(select(User)).first()
     assert user is not None
     model = build_model(
@@ -2911,9 +2900,7 @@ class TestCreateArchive:
         def _unexpected_export(*_args, **_kwargs):
             raise AssertionError("portable export must not materialize export_payload")
 
-        monkeypatch.setattr(
-            models_exports, "export_payload", _unexpected_export
-        )
+        monkeypatch.setattr(models_exports, "export_payload", _unexpected_export)
         archive_path = library_transfer.create_archive(db_session, user)
         try:
             with zipfile.ZipFile(archive_path) as archive:

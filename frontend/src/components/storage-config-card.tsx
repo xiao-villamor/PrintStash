@@ -12,6 +12,9 @@ import {
   getVaultConfig,
   updateVaultConfig,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { StorageProviderFields } from "@/components/storage-provider-fields";
+import { providerFields } from "@/lib/storage-provider-form";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import type {
   StorageHealthRead,
@@ -20,6 +23,7 @@ import type {
   VaultConfigRead,
   VaultConfigUpdate,
 } from "@/types";
+import { useAuth } from "@/lib/auth-context";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useI18n } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
@@ -32,9 +36,16 @@ import {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHealthRead | null }) {
+export function StorageConfigCard({
+  storageHealth,
+  migrationManaged = false,
+}: {
+  storageHealth?: StorageHealthRead | null;
+  migrationManaged?: boolean;
+}) {
   useUiLocale();
   const { isAuthenticated } = useRequireAuth();
+  const { user } = useAuth();
   const { t } = useI18n();
   const [cfg, setCfg] = useState<VaultConfigRead | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,6 +144,19 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
     ([role, path]) =>
       path && ["binding_mismatch", "binding_invalid", "missing"].includes(rootBindings[role] ?? ""),
   );
+
+  const currentProvider = providers.find((provider) => provider.id === providerId);
+  const locationFields = currentProvider
+    ? providerFields(currentProvider).filter(
+        (field) =>
+          !field.secret &&
+          providerValues[field.name] !== undefined &&
+          providerValues[field.name] !== "",
+      )
+    : [];
+  const credentialFields = currentProvider
+    ? providerFields(currentProvider).filter((field) => field.secret)
+    : [];
 
   async function confirmEnrollRoot() {
     if (!enrollRole) return;
@@ -241,28 +265,73 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
               </div>
             </div>
           )}
-          <StorageProviderPicker
-            providers={providers}
-            providerId={providerId}
-            values={providerValues}
-            activeTier={cfg?.storage_tier}
-            disabled={!canEdit}
-            onProviderChange={(provider) => {
-              setProviderId(provider.id);
-              setProviderValues(defaultProviderValues(provider));
-            }}
-            onValueChange={(name, value) =>
-              setProviderValues((current) => ({ ...current, [name]: value }))
-            }
-          />
-          <p className="text-3xs text-muted-foreground">
-            {uiText(
-              "Provider changes require an application restart. Storage risk acknowledgement remains environment-only.",
-            )}
-          </p>
+          {migrationManaged ? (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">{t("migration.changeHelp")}</p>
+              <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                {locationFields.map((field) => (
+                  <div key={field.name}>
+                    <dt className="text-muted-foreground">{field.label}</dt>
+                    <dd className="break-all">{String(providerValues[field.name])}</dd>
+                  </div>
+                ))}
+              </dl>
+              {user?.is_superuser && (
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    document.getElementById("vault-migration")?.scrollIntoView({ block: "start" })
+                  }
+                >
+                  {t("migration.changeEntry")}
+                </Button>
+              )}
+              {currentProvider && credentialFields.length > 0 && (
+                <StorageProviderFields
+                  provider={{
+                    ...currentProvider,
+                    fields: credentialFields,
+                    fields_by_use: { vault: credentialFields },
+                  }}
+                  values={providerValues}
+                  disabled={!canEdit}
+                  storedSecrets={
+                    Array.isArray(providerValues.secret_fields_set)
+                      ? providerValues.secret_fields_set
+                      : []
+                  }
+                  onChange={(name, value) =>
+                    setProviderValues((current) => ({ ...current, [name]: value }))
+                  }
+                />
+              )}
+            </div>
+          ) : (
+            <>
+              <StorageProviderPicker
+                providers={providers}
+                providerId={providerId}
+                values={providerValues}
+                activeTier={cfg?.storage_tier}
+                disabled={!canEdit}
+                onProviderChange={(provider) => {
+                  setProviderId(provider.id);
+                  setProviderValues(defaultProviderValues(provider));
+                }}
+                onValueChange={(name, value) =>
+                  setProviderValues((current) => ({ ...current, [name]: value }))
+                }
+              />
+              <p className="text-3xs text-muted-foreground">
+                {uiText(
+                  "Provider changes require an application restart. Storage risk acknowledgement remains environment-only.",
+                )}
+              </p>
+            </>
+          )}
 
           {/* Save row */}
-          {canEdit && (
+          {canEdit && (!migrationManaged || credentialFields.length > 0) && (
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"

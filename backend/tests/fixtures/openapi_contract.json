@@ -3070,6 +3070,46 @@
         "title": "ChannelUpdate",
         "type": "object"
       },
+      "CleanupRequest": {
+        "properties": {
+          "backup_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Id"
+          },
+          "backup_source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Source Ref"
+          },
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "source": {
+            "default": true,
+            "title": "Source",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmation"
+        ],
+        "title": "CleanupRequest",
+        "type": "object"
+      },
       "CollectionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -7227,6 +7267,405 @@
         "title": "MetadataRead",
         "type": "object"
       },
+      "MigrationBackupSummary": {
+        "properties": {
+          "archive_sha256": {
+            "title": "Archive Sha256",
+            "type": "string"
+          },
+          "backup_id": {
+            "title": "Backup Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          },
+          "vault_target_ref": {
+            "title": "Vault Target Ref",
+            "type": "string"
+          },
+          "verified_at": {
+            "format": "date-time",
+            "title": "Verified At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backup_id",
+          "source_ref",
+          "archive_sha256",
+          "vault_target_ref",
+          "created_at",
+          "verified_at"
+        ],
+        "title": "MigrationBackupSummary",
+        "type": "object"
+      },
+      "MigrationCleanupFinding": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "code"
+        ],
+        "title": "MigrationCleanupFinding",
+        "type": "object"
+      },
+      "MigrationPolicy": {
+        "properties": {
+          "bandwidth_bytes_per_second": {
+            "anyOf": [
+              {
+                "minimum": 1024.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bandwidth Bytes Per Second"
+          },
+          "concurrency": {
+            "default": 1,
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
+          "retention_days": {
+            "default": 7,
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Retention Days",
+            "type": "integer"
+          }
+        },
+        "title": "MigrationPolicy",
+        "type": "object"
+      },
+      "MigrationRunRead": {
+        "properties": {
+          "backup_summary": {
+            "$ref": "#/components/schemas/MigrationBackupSummary"
+          },
+          "bytes": {
+            "minimum": 0.0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "capacity_resources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Capacity Resources",
+            "type": "array"
+          },
+          "capacity_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capacity Warnings",
+            "type": "array"
+          },
+          "cleanup_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup After"
+          },
+          "cleanup_findings": {
+            "items": {
+              "$ref": "#/components/schemas/MigrationCleanupFinding"
+            },
+            "title": "Cleanup Findings",
+            "type": "array"
+          },
+          "cleanup_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Outcome"
+          },
+          "copied_bytes": {
+            "title": "Copied Bytes",
+            "type": "integer"
+          },
+          "copied_objects": {
+            "title": "Copied Objects",
+            "type": "integer"
+          },
+          "delta_objects": {
+            "title": "Delta Objects",
+            "type": "integer"
+          },
+          "destination": {
+            "additionalProperties": true,
+            "title": "Destination",
+            "type": "object"
+          },
+          "destination_provider_ref": {
+            "title": "Destination Provider Ref",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "failed_bytes": {
+            "title": "Failed Bytes",
+            "type": "integer"
+          },
+          "failed_objects": {
+            "title": "Failed Objects",
+            "type": "integer"
+          },
+          "full_audit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Audit"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_activity_at": {
+            "format": "date-time",
+            "title": "Last Activity At",
+            "type": "string"
+          },
+          "notification_events": {
+            "title": "Notification Events",
+            "type": "integer"
+          },
+          "objects": {
+            "minimum": 0.0,
+            "title": "Objects",
+            "type": "integer"
+          },
+          "phase_history": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Phase History",
+            "type": "array"
+          },
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/MigrationPolicy"
+          },
+          "post_audit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Audit"
+          },
+          "pre_audit": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Audit"
+          },
+          "recent_failures": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Recent Failures",
+            "type": "array"
+          },
+          "recovery_required": {
+            "title": "Recovery Required",
+            "type": "boolean"
+          },
+          "resource_kind_totals": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Resource Kind Totals",
+            "type": "array"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "skipped_bytes": {
+            "title": "Skipped Bytes",
+            "type": "integer"
+          },
+          "skipped_objects": {
+            "title": "Skipped Objects",
+            "type": "integer"
+          },
+          "source": {
+            "additionalProperties": true,
+            "title": "Source",
+            "type": "object"
+          },
+          "source_provider_ref": {
+            "title": "Source Provider Ref",
+            "type": "string"
+          },
+          "source_retained": {
+            "title": "Source Retained",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "copying",
+              "ready",
+              "paused",
+              "cutover_pending",
+              "draining",
+              "delta_copy",
+              "verifying",
+              "activating",
+              "active",
+              "cleaned",
+              "discarded",
+              "failed",
+              "recovery_required",
+              "complete"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "throughput_bytes_per_second": {
+            "title": "Throughput Bytes Per Second",
+            "type": "number"
+          },
+          "verified_bytes": {
+            "title": "Verified Bytes",
+            "type": "integer"
+          },
+          "verified_objects": {
+            "minimum": 0.0,
+            "title": "Verified Objects",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "plan_digest",
+          "backup_summary",
+          "source",
+          "destination",
+          "source_provider_ref",
+          "destination_provider_ref",
+          "objects",
+          "verified_objects",
+          "bytes",
+          "copied_objects",
+          "copied_bytes",
+          "verified_bytes",
+          "skipped_objects",
+          "skipped_bytes",
+          "failed_objects",
+          "failed_bytes",
+          "delta_objects",
+          "throughput_bytes_per_second",
+          "last_activity_at",
+          "retryable",
+          "policy",
+          "phase_history",
+          "pre_audit",
+          "post_audit",
+          "full_audit",
+          "notification_events",
+          "error_code",
+          "expires_at",
+          "cleanup_after",
+          "cleanup_findings",
+          "cleanup_outcome",
+          "source_retained",
+          "recovery_required",
+          "capacity_warnings",
+          "capacity_resources",
+          "resource_kind_totals",
+          "recent_failures"
+        ],
+        "title": "MigrationRunRead",
+        "type": "object"
+      },
       "ModelBatchDelete": {
         "additionalProperties": false,
         "properties": {
@@ -9181,6 +9620,56 @@
           "name"
         ],
         "title": "OutlinerModelRead",
+        "type": "object"
+      },
+      "PlanRequest": {
+        "properties": {
+          "plan_digest": {
+            "title": "Plan Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest"
+        ],
+        "title": "PlanRequest",
+        "type": "object"
+      },
+      "PreflightRequest": {
+        "properties": {
+          "backup_id": {
+            "title": "Backup Id",
+            "type": "string"
+          },
+          "backup_source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Source Ref"
+          },
+          "destination": {
+            "additionalProperties": true,
+            "title": "Destination",
+            "type": "object"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/MigrationPolicy",
+            "default": {
+              "concurrency": 1,
+              "retention_days": 7
+            }
+          }
+        },
+        "required": [
+          "destination",
+          "backup_id"
+        ],
+        "title": "PreflightRequest",
         "type": "object"
       },
       "PrintArtifactFormat": {
@@ -12296,6 +12785,17 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "RetainRequest": {
+        "properties": {
+          "remove_credentials": {
+            "default": false,
+            "title": "Remove Credentials",
+            "type": "boolean"
+          }
+        },
+        "title": "RetainRequest",
         "type": "object"
       },
       "RevisionBatchLabels": {
@@ -32402,6 +32902,676 @@
           }
         ],
         "summary": "Sample Storage Inventory",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations": {
+      "get": {
+        "operationId": "list_runs_api_v1_storage_migrations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MigrationRunRead"
+                  },
+                  "title": "Response List Runs Api V1 Storage Migrations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Runs",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/preflight": {
+      "post": {
+        "operationId": "preflight_api_v1_storage_migrations_preflight_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preflight",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}": {
+      "get": {
+        "operationId": "status_api_v1_storage_migrations__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Status",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/advance": {
+      "post": {
+        "operationId": "advance_api_v1_storage_migrations__run_id__advance_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Advance",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/cleanup": {
+      "post": {
+        "operationId": "cleanup_api_v1_storage_migrations__run_id__cleanup_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cleanup",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/cutover": {
+      "post": {
+        "operationId": "cutover_api_v1_storage_migrations__run_id__cutover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cutover",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/full-audit": {
+      "post": {
+        "operationId": "full_audit_api_v1_storage_migrations__run_id__full_audit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Full Audit",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/pause": {
+      "post": {
+        "operationId": "pause_api_v1_storage_migrations__run_id__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Pause",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/recover": {
+      "post": {
+        "operationId": "recover_api_v1_storage_migrations__run_id__recover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recover",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/report": {
+      "get": {
+        "operationId": "report_api_v1_storage_migrations__run_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Report",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/resume": {
+      "post": {
+        "operationId": "resume_api_v1_storage_migrations__run_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Resume",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/retain": {
+      "post": {
+        "operationId": "retain_api_v1_storage_migrations__run_id__retain_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retain",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/retry": {
+      "post": {
+        "operationId": "retry_api_v1_storage_migrations__run_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retry",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/storage/migrations/{run_id}/start": {
+      "post": {
+        "operationId": "start_api_v1_storage_migrations__run_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MigrationRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start",
         "tags": [
           "storage"
         ]

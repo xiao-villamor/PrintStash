@@ -11,10 +11,10 @@ from sqlmodel import Session, col, select
 
 import app.modules.backups.backup.targets as backup_targets
 import app.modules.backups.backup.verification as backup_verification
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
+    SENTINEL_MODEL_HASH,
     BackgroundJob,
     Collection,
     Document,
@@ -453,6 +453,11 @@ def _check_database(session: Session, run: VaultAuditRun) -> None:
         )
     models = session.exec(select(Model).where(live(Model))).all()
     for model in models:
+        # The reserved external-job placeholder is database compatibility
+        # state, not a Vault model. It owns no managed storage and must not
+        # make every otherwise-healthy migration preflight fail.
+        if model.hash == SENTINEL_MODEL_HASH:
+            continue
         if _cancelled(session, run):
             return
         files = session.exec(
@@ -503,12 +508,15 @@ def _check_database(session: Session, run: VaultAuditRun) -> None:
         for item in files:
             if not item.is_external:
                 direct = backend.direct_path(item.path)
+                primary_prefix = backend.blob_key(
+                    "audit-namespace", 1, "probe"
+                ).removesuffix("audit-namespace/v1/probe")
                 outside_managed = (
                     direct is not None
                     and not direct.resolve(strict=False).is_relative_to(
-                        Path(settings.data_dir).resolve(strict=False)
+                        Path(primary_prefix).resolve(strict=False)
                     )
-                ) or (direct is None and not item.path.startswith("vault-data/files/"))
+                ) or (direct is None and not item.path.startswith(primary_prefix))
                 if outside_managed:
                     _add(
                         session,

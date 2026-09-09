@@ -132,16 +132,15 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   await page.getByRole("button", { name: /upload to vault/i }).click();
   await expect(dialog).toHaveCount(0);
 
-  if (mesh && gcode) {
-    // The paired upload is a browser-owned two-step task: mesh ingestion must
-    // finish before the client can submit the G-code with its source hash.
-    // Navigating before Task Center reports completion destroys that client
-    // context and leaves a mesh-only Model behind.
+  if (mesh || gcode) {
+    // Every resumable upload has browser-owned transfer/finalization steps.
+    // Wait for Task Center completion before navigating away from that owner.
     await page.getByRole("button", { name: "Notifications" }).click();
     const taskHeader = page.getByText(`Upload ${name}`, { exact: true }).locator("..");
     await expect(taskHeader.getByText("completed", { exact: true })).toBeVisible({
       timeout: 120_000,
     });
+    await page.getByRole("button", { name: "Notifications" }).click();
   }
 
   const view = collection ? `/?c=${encodeURIComponent(collection)}` : "/";

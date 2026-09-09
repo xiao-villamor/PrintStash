@@ -32,6 +32,7 @@ class _RecordingRemoteBackend(LocalStorageBackend):
     backend so the keys are realistic; only the filesystem semantics change."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.deleted: list[str] = []
 
     def direct_path(self, key: str) -> Path | None:
@@ -78,7 +79,9 @@ class TestHardDeleteModel:
         self, monkeypatch: pytest.MonkeyPatch, db_session: Session
     ) -> None:
         backend = _RecordingRemoteBackend()
-        monkeypatch.setattr('app.modules.storage.storage_backend.runtime._backend', backend)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.runtime._backend", backend
+        )
 
         model = _add_model(db_session, "mixed")
         vault_key = "vault-data/files/mixed/v1/part.gcode"
@@ -117,7 +120,9 @@ class TestCleanupOrphanBlobs:
         _add_file(db_session, model, keep_key, sha256="a" * 64)
 
         backend = _WalkRecordingBackend([keep_key, orphan_key])
-        monkeypatch.setattr('app.modules.storage.storage_backend.runtime._backend', backend)
+        monkeypatch.setattr(
+            "app.modules.storage.storage_backend.runtime._backend", backend
+        )
 
         removed = trash._cleanup_orphan_blobs(db_session)
 

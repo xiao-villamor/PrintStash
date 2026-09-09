@@ -63,6 +63,9 @@ from app.db.models import (
     VaultAuditEvent,
     VaultAuditPolicy,
     VaultAuditRun,
+    VaultGeneration,
+    VaultMigrationObject,
+    VaultMigrationRun,
 )
 
 
@@ -428,3 +431,17 @@ class MakeStorageInventorySample(Protocol):
 
 class MakeCapacityLock(Protocol):
     def __call__(self, **overrides: Any) -> Any: ...
+
+
+class MakeVaultMigration(Protocol):
+    def __call__(self, **overrides: Any) -> VaultMigrationRun: ...
+
+
+class MakeVaultMigrationObject(Protocol):
+    def __call__(
+        self, run: VaultMigrationRun, **overrides: Any
+    ) -> VaultMigrationObject: ...
+
+
+class MakeVaultGeneration(Protocol):
+    def __call__(self, run: VaultMigrationRun, **overrides: Any) -> VaultGeneration: ...

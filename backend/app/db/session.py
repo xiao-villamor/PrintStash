@@ -18,6 +18,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.url import normalize_async_database_url, normalize_database_url
+from app.runtime.maintenance import require_database_connection_admission
 
 logger = get_logger(__name__)
 
@@ -98,6 +99,7 @@ class SQLAlchemyAsyncSessionFactory:
         )
 
     def async_session(self) -> AsyncSession:
+        require_database_connection_admission()
         return self._session_maker()
 
     async def dispose(self) -> None:
@@ -158,6 +160,7 @@ class SQLiteSessionFactory:
         self._engine = engine
 
     def session(self) -> Session:
+        require_database_connection_admission()
         return Session(self._engine)
 
     def dispose(self) -> None:
@@ -166,7 +169,7 @@ class SQLiteSessionFactory:
 
     @contextmanager
     def scoped_session(self) -> Generator[Session, None, None]:
-        session = Session(self._engine)
+        session = self.session()
         try:
             yield session
         finally:

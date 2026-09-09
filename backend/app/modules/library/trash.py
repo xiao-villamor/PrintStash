@@ -63,6 +63,7 @@ from app.modules.storage.storage_ownership import (
     require_owned_key,
     sweep_orphaned_publications,
 )
+from app.runtime.maintenance import guarded_destructive_operation
 
 logger = get_logger(__name__)
 _DOCUMENT_IMAGE_RE = re.compile(
@@ -307,6 +308,7 @@ def restore_model(session: Session, model: Model) -> None:
     restore_resource(session, model)
 
 
+@guarded_destructive_operation
 def hard_delete_file(
     session: Session,
     file_row: File,
@@ -473,6 +475,7 @@ def hard_delete_file(
     session.delete(file_row)
 
 
+@guarded_destructive_operation
 def hard_delete_document(
     session: Session,
     document: Document,
@@ -528,6 +531,7 @@ def restore_document(session: Session, document: Document) -> None:
     restore_resource(session, document, commit=False)
 
 
+@guarded_destructive_operation
 def hard_delete_collection(
     session: Session, collection: Collection, *, confirm_storage_risk: bool = False
 ) -> None:
@@ -560,6 +564,7 @@ def hard_delete_collection(
     session.delete(collection)
 
 
+@guarded_destructive_operation
 def hard_delete_model(
     session: Session,
     model: Model,

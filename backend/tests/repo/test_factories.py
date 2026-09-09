@@ -47,6 +47,23 @@ from tests import factories
 
 
 class TestGeneratedIdentities:
+    def test_migration_builders_preserve_workflow_ownership(
+        self, db_session: Session
+    ) -> None:
+        from app.db.models import VaultGeneration, VaultMigrationObject
+
+        first = factories.build_vault_migration(db_session)
+        second = factories.build_vault_migration(db_session)
+        obj = factories.build_vault_migration_object(db_session, first)
+        marker = factories.build_vault_generation(db_session, first)
+        assert first.id != second.id
+        assert first.destination_epoch != second.destination_epoch
+        assert first.journal_nonce != second.journal_nonce
+        assert db_session.get(VaultMigrationObject, obj.id).run_id == first.id
+        assert (
+            db_session.get(VaultGeneration, marker.id).epoch == first.destination_epoch
+        )
+
     def test_two_models_never_collide_on_slug_or_hash(
         self, db_session: Session
     ) -> None:

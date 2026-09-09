@@ -10,7 +10,8 @@ export type NotificationEvent =
   | "storage_audit_failed"
   | "storage_audit_cancelled"
   | "storage_audit_overdue"
-  | "storage_repair_failed";
+  | "storage_repair_failed"
+  | "vault_migration";
 
 export interface NotificationChannel {
   id: number;
