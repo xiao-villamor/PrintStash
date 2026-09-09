@@ -39,7 +39,7 @@ behaviour, not implementation details; status changes as each slice lands.
 | 31 | native bytes bypass API | transfer accounting | direct multipart browser upload | object bytes do not cross the upload API process | e2e | ❌ |
 | 32 | verified staged Artifact | verification | complete staged representation | exact size, SHA-256, immutable identity, and safe materialization are exposed | unit | ✅ |
 | 33 | mismatch before ingestion | verification | size/hash/type mismatch | no background job or readable Artifact is created | integration | ❌ |
-| 34 | exact ingestion handoff | ingestion | verified model/G-code/revision | normal ingestion receives the verified representation exactly once | integration | ❌ |
+| 34 | exact Model ingestion handoff | ingestion | verified Model upload | normal ingestion receives the verified representation and persists its original SHA-256 | integration | ✅ |
 | 35 | no partial readability | integrity | upload is created or incomplete | library and download routes expose no Artifact | integration | ❌ |
 | 36 | frontend session persistence | frontend resume | page refresh during transfer | only the opaque session id is stored and a fresh plan is fetched | frontend | ❌ |
 | 37 | frontend phase reporting | frontend UX | hashing/transfer/verification/ingestion | phases and retryability are shown separately | frontend | ❌ |
@@ -50,3 +50,4 @@ behaviour, not implementation details; status changes as each slice lands.
 | 42 | stuck-session health | operations | stale active session or cleanup failure | health reports a credential-free actionable finding | integration | ❌ |
 | 43 | canonical API contract | OpenAPI | generated schema | only provider-neutral `/artifact-uploads` routes and safe schemas appear | repo | ❌ |
 | 44 | documented compatibility | documentation | operator selects a storage transport | modes, limits, CORS, recovery, and fallback behaviour are documented | repo | ❌ |
+| 45 | exact G-code and revision handoff | ingestion | verified G-code/new revision | normal ingestion receives the verified representation exactly once | integration | ❌ |

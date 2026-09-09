@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+import json
+from pathlib import Path
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
 from app.core.security import require_user
-from app.db.models import ArtifactUploadPart, ArtifactUploadSession, User
-from app.db.session import get_session
+from app.db.models import (
+    ArtifactUploadPart,
+    ArtifactUploadSession,
+    ArtifactUploadState,
+    User,
+)
+from app.db.session import SessionFactory, get_session, get_session_factory
+from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion.artifact_uploads import (
     ArtifactUploadError,
     ChunkReceipt,
@@ -17,6 +35,7 @@ from app.modules.ingestion.artifact_uploads import (
     UploadRequest,
 )
 from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE, ApiChunkError
+from app.modules.ingestion.artifact_uploads.handoff import run_verified_upload_ingestion
 from app.schemas.artifact_uploads import (
     ArtifactUploadChunkRead,
     ArtifactUploadCreate,
@@ -25,7 +44,11 @@ from app.schemas.artifact_uploads import (
     ArtifactUploadRead,
 )
 
-from .ingest import _require_ingest_collection, _validate_target_library
+from .ingest import (
+    _create_staged_job,
+    _require_ingest_collection,
+    _validate_target_library,
+)
 
 router = APIRouter(prefix="/artifact-uploads", tags=["artifact-uploads"])
 
@@ -91,6 +114,20 @@ def _translate_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=422, detail=code)
 
 
+def _validate_purpose_file(request: ArtifactUploadCreate) -> None:
+    suffix = Path(request.filename).suffix.lower()
+    if request.purpose in {"gcode", "slicer", "revision"}:
+        allowed = suffix in ingest_background.GCODE_SUFFIXES
+    elif request.purpose in {"model", "external_writeback"}:
+        allowed = suffix in ingest_background.MESH_SUFFIXES
+    elif request.purpose == "archive":
+        allowed = suffix == ".zip"
+    else:
+        allowed = True
+    if not allowed:
+        raise HTTPException(status_code=400, detail="unsupported_file_type")
+
+
 @router.post(
     "",
     response_model=ArtifactUploadRead,
@@ -104,6 +141,7 @@ async def create_artifact_upload(
 ) -> ArtifactUploadRead:
     if request.size_bytes > settings.max_upload_bytes:
         raise HTTPException(status_code=413, detail="upload_too_large")
+    _validate_purpose_file(request)
     _require_ingest_collection(session, current_user, request.collection)
     _validate_target_library(session, request.target_library_id)
     manager = _manager(session)
@@ -235,14 +273,42 @@ async def put_artifact_upload_chunk(
 )
 def finalize_artifact_upload(
     session_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    session_factory: SessionFactory = Depends(get_session_factory),
 ) -> ArtifactUploadRead:
     manager = _manager(session)
     try:
-        upload, _verified = manager.finalize(session_id, current_user)
+        pending = manager.get(session_id, current_user)
+        options = json.loads(pending.request_json)
+        _require_ingest_collection(session, current_user, options.get("collection"))
+        _validate_target_library(session, options.get("target_library_id"))
+        upload, verified = manager.finalize(session_id, current_user)
     except (ArtifactUploadError, ApiChunkError) as exc:
         raise _translate_error(exc) from exc
+    assert current_user.id is not None
+    job_id = _create_staged_job(
+        session,
+        kind=f"artifact_upload_{upload.purpose}",
+        staged=verified.materialize(),
+        size=verified.size_bytes,
+        sha256=verified.sha256,
+        owner_user_id=current_user.id,
+    )
+    upload.state = ArtifactUploadState.INGESTING
+    upload.background_job_id = job_id
+    upload.version += 1
+    session.add(upload)
+    session.commit()
+    session.refresh(upload)
+    background_tasks.add_task(
+        run_verified_upload_ingestion,
+        upload_id=upload.id,
+        job_id=job_id,
+        staged_path=verified.path,
+        session_factory=session_factory,
+    )
     return _upload_read(manager, upload)
 
 
