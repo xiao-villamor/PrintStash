@@ -51,7 +51,7 @@ test.describe("uploads", () => {
     await page.getByRole("button", { name: "Notifications" }).click();
     await page.getByRole("button", { name: "Pause upload" }).click();
     releaseSecondChunk();
-    await expect(page.getByText("Paused", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Resume upload" })).toBeVisible();
 
     await page.unroute(secondChunk);
     await page.reload();

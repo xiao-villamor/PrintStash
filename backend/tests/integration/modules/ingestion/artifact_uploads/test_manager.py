@@ -79,15 +79,15 @@ class TestSqlArtifactUploadManager:
             adapter_id="api_chunks",
         )
 
-        plan = SqlArtifactUploadManager(
-            db_session, staging_root=tmp_path
-        ).plan(upload.id, owner)
+        plan = SqlArtifactUploadManager(db_session, staging_root=tmp_path).plan(
+            upload.id, owner
+        )
 
         db_session.refresh(upload)
         assert plan.mode == "api_chunks"
         assert upload.state == ArtifactUploadState.UPLOADING
 
-    def test_reserves_chunks_and_assembly_before_accepting_api_bytes(
+    def test_reserves_worst_case_api_staging_before_accepting_bytes(
         self, db_session: Session, make_user, tmp_path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "staging_max_gb", 1)
@@ -206,7 +206,9 @@ class TestSqlArtifactUploadManager:
             NativeMultipartPart(2, 4, "2" * 64, '"durable-2"'),
         ]
 
-        with pytest.raises(NativeMultipartError, match="native_upload_receipts_mismatch"):
+        with pytest.raises(
+            NativeMultipartError, match="native_upload_receipts_mismatch"
+        ):
             manager.finalize(upload.id, owner)
 
         assert backend.completed is False

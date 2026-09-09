@@ -193,7 +193,7 @@ class TestRecordCaptureOperation:
 
 
 class TestRecordArtifactUpload:
-    def test_records_bounded_session_events_and_transfer_paths(self) -> None:
+    def test_records_bounded_upload_telemetry(self) -> None:
         event_labels = {"event": "created", "mode": "native_parts"}
         byte_labels = {"mode": "native_parts", "path": "direct"}
         event_before = _sample(

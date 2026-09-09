@@ -469,9 +469,7 @@ def persist_artifact(
             if is_external
             else vault_allocation(staged_path.stat().st_size)
         )
-        reservation = CapacityManager(
-            session_factory or get_session_factory()
-        ).reserve(
+        reservation = CapacityManager(session_factory or get_session_factory()).reserve(
             f"artifact:{model_id}:{version}", [allocation]
         )
     blob_receipt = None
@@ -1148,7 +1146,12 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
         # Single mesh load for both geometry and thumbnail.
-        return mesh_operations.analyze_mesh(path, report=report, output_format="WEBP")
+        return mesh_operations.analyze_mesh(
+            path,
+            report=report,
+            file_type=file_type.value,
+            output_format="WEBP",
+        )
 
     return IngestionStrategy(
         file_type=file_type,

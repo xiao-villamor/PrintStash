@@ -174,6 +174,7 @@ class TestHealthDetails:
             "storage",
             "capacity",
             "artifact_cache",
+            "artifact_uploads",
             "backup",
             "printer_providers",
             "jobs",
@@ -336,7 +337,7 @@ class TestDatabaseProbe:
 
 
 class TestArtifactUploadProbe:
-    def test_reports_stuck_and_cleanup_findings_without_session_ids(
+    def test_reports_bounded_upload_findings_without_session_ids(
         self, make_user, make_artifact_upload
     ) -> None:
         owner = make_user("upload-health-owner")

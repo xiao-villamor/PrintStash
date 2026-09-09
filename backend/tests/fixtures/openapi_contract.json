@@ -16950,6 +16950,26 @@
     "/api/v1/artifact-uploads": {
       "post": {
         "operationId": "create_artifact_upload_api_v1_artifact_uploads_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9._:-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

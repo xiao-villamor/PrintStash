@@ -1036,6 +1036,8 @@ def render_storage_provider_docs() -> str:
             "",
             "PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.",
             "",
+            "Large direct browser uploads also require bucket CORS for `PUT`, the\n`content-type` and `x-amz-checksum-sha256` request headers, and the exposed\n`ETag` response header. Use only the exact configured frontend origins. See\n[Resumable Artifact uploads](./artifact-uploads.md#s3-bucket-cors) for the rule\nand fallback behavior.",
+            "",
             "New deployments should select and save a provider through Setup or Settings.\nEnvironment-only deployments use scalar fields: `VAULT_STORAGE_PROVIDER` and\n`VAULT_STORAGE_ROOT`, plus `VAULT_S3_*`, `VAULT_WEBDAV_*`, or `VAULT_SFTP_*`\nfor the selected transport. `VAULT_STORAGE_PROVIDER_CONFIG` and\n`VAULT_STORAGE_PROVIDER_SECRETS` remain compatibility inputs but are deprecated.",
             "",
             "The checked-in Compose files forward the legacy/local and `VAULT_S3_*` fields,\nbut do not automatically forward `VAULT_STORAGE_PROVIDER`,\n`VAULT_STORAGE_ROOT`, `VAULT_WEBDAV_*`, `VAULT_SFTP_*`, or\n`VAULT_STORAGE_ALLOW_UNVERIFIED` from `.env`. When configuring those fields\nentirely through environment variables, add them explicitly under the API\nservice's `environment` in a Compose override. Configuration saved through the\nSetup or Settings UI does not need that override.",

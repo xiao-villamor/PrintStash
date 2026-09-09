@@ -340,6 +340,8 @@ class TestBrowserCapture:
                     "conditional_replace": True,
                     "namespace_ownership": True,
                     "direct_path": True,
+                    "browser_multipart_upload": False,
+                    "multipart_sha256_checksums": False,
                     "tier": "verified",
                     "warnings": [],
                 },
