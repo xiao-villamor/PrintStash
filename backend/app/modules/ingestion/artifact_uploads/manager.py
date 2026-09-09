@@ -104,7 +104,7 @@ class SqlArtifactUploadManager:
             if use_native and native
             else self.api_adapter.adapter_id,
             destination_ref=(
-                native.backend.storage_target.ref
+                native.backend.storage_target.target_ref
                 if use_native and native and native.backend.storage_target
                 else None
             ),

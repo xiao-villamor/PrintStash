@@ -309,7 +309,7 @@ class S3StorageBackend(StorageBackend):
             version_id=str(response["VersionId"])
             if response.get("VersionId")
             else None,
-            provider_ref=self.storage_target.ref,
+            provider_ref=self.storage_target.target_ref,
         )
 
     def abort_native_multipart(self, handle: NativeMultipartHandle) -> None:
@@ -357,7 +357,7 @@ class S3StorageBackend(StorageBackend):
             version_id=str(response["VersionId"])
             if response.get("VersionId")
             else None,
-            provider_ref=self.storage_target.ref,
+            provider_ref=self.storage_target.target_ref,
         )
 
     def _probe_capabilities(self) -> None:
