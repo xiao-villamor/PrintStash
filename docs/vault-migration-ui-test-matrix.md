@@ -88,8 +88,18 @@ provider-contract and failpoint matrices are maintained with the migration owner
 | 54 | sends fresh candidate credentials without displaying them in the checked plan | Happy | Remote candidate with fresh secret | Secret request; safe destination summary without secret | Frontend unit | ✅ panel::sends fresh candidate credentials without displaying them in the checked plan |
 | 55 | blocks destinations unavailable for Vault use | Edge | Unavailable provider | Preflight disabled | Frontend unit | ✅ panel::blocks destinations unavailable for Vault use |
 | 56 | links the slice to the mesh it came from | Edge | Mesh plus G-code; earlier test upload fully drained before fetch replacement | G-code request carries the mesh hash without cross-test background work | Frontend unit | ✅ src/components/__tests__/upload-modal/uploading.test.tsx::links the slice to the mesh it came from |
+| 57 | keeps the active provider tier visible when location changes require migration | Regression | Configured guarded Vault with migration-managed location | Support, expected tier and actual active tier remain visible | Frontend unit | ✅ src/components/__tests__/storage-config-card.test.tsx |
+| 58 | keeps guarded deletion consequences visible when location changes require migration | Regression | Configured guarded Vault with an empty catalogue consequences list | Tier note, catalog retention and unavailable physical deletion remain visible | Frontend unit | ✅ src/components/__tests__/storage-config-card.test.tsx |
 
 ## Execution evidence
+
+CI run 34390353141 passed the complete **Frontend** job, including the corrected
+two-sided coverage gate. Its real-browser WebDAV workflow found missing provider
+status in migration-managed Settings. The shared summary is now restored without
+exposing location editing: **38 component tests passed**, including two new
+regressions observed red before the fix. The original real WebDAV/restart/GC
+preview scenario passed (**1 passed, 43.1 seconds**); format, lint and types passed.
+The full CI rerun after this final correction is pending.
 
 PR #164's initial CI app coverage run passed **2,066 tests**; domain and UI
 coverage runs also passed. The two-sided gate required raising app statements
@@ -102,8 +112,7 @@ tests now drain their task-centre work before replacing fetch. The complete
 upload file passed under coverage after this correction: **18 passed**. The
 same file also passed shuffled with seed 104: **18 passed**. Frontend lint,
 format and type checks passed after the lifecycle correction. The
-full corrected gate remains pending; isolated success is not reported as a
-full-suite pass.
+full corrected gate subsequently passed in CI run 34390353141.
 
 Real Chromium migration against an isolated supervised backend: **1 passed**,
 including an actual process restart, online delta ingestion, exact downloads,
@@ -111,7 +120,7 @@ Full audit and report download. Full frontend tests initially reported
 **2,064 passed / 2 failed**; the affected Settings expectation was updated and
 both failing files were rerun successfully (**137 passed**). Shared UI and domain
 suites passed (**198** and **60** tests). Format, lint and type checking passed.
-The final aggregate coverage gate remains in progress.
+The aggregate frontend coverage gate subsequently passed in CI run 34390353141.
 
 Earlier focused UI/API run: 115 passed; one existing storage-configuration case exceeded
 its five-second timeout while the host was contended. Its full focused file was

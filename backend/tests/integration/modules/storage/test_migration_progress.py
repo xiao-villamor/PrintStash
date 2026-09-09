@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from app.db.models import AuditLog, NotificationDelivery
 from app.db.session import get_session_factory
+from app.modules.administration.audit import install_audit_listeners
 from app.modules.administration.runtime_config import set_notifications_enabled
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.migration_progress import health, project, transition
@@ -46,13 +47,19 @@ class TestTransition:
     def test_illegal_activation_records_no_transition(
         self, db_session, make_vault_migration
     ):
+        install_audit_listeners()
         run = make_vault_migration()
+        # The real listeners audit fixture creation too. Rejecting a transition
+        # must preserve that history, not require an empty global audit table.
+        audit_query = select(AuditLog).order_by(AuditLog.id)
+        before = [row.model_dump() for row in db_session.exec(audit_query).all()]
+        assert before
 
         with pytest.raises(ValueError, match="migration_phase_transition_forbidden"):
             transition(db_session, run, "active")
 
         assert run.state == "planned"
-        assert db_session.exec(select(AuditLog)).all() == []
+        assert [row.model_dump() for row in db_session.exec(audit_query).all()] == before
 
 
 class TestProject:

@@ -31,6 +31,7 @@ import { Localized } from "@/components/ui/localized";
 import {
   defaultProviderValues,
   StorageProviderPicker,
+  StorageProviderSummary,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
 
@@ -267,6 +268,9 @@ export function StorageConfigCard({
           )}
           {migrationManaged ? (
             <div className="space-y-4">
+              {currentProvider && (
+                <StorageProviderSummary provider={currentProvider} activeTier={cfg?.storage_tier} />
+              )}
               <p className="text-xs text-muted-foreground">{t("migration.changeHelp")}</p>
               <dl className="grid gap-2 text-xs sm:grid-cols-2">
                 {locationFields.map((field) => (

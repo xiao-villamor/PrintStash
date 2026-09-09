@@ -78,6 +78,62 @@ function providerConsequences(
   );
 }
 
+export function StorageProviderSummary({
+  provider,
+  activeTier,
+}: {
+  provider: StorageProvider;
+  activeTier?: string;
+}) {
+  useUiLocale();
+  const i18n = useOptionalI18n();
+  const consequences = providerConsequences(
+    provider,
+    i18n?.t("storage.guardedCatalog") ?? uiText("storage.guardedCatalog"),
+    i18n?.t("storage.guardedRetention") ?? uiText("storage.guardedRetention"),
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline">
+          {i18n?.t("settings.storageSupport", {
+            level: supportLabel(provider.support_level),
+          }) ??
+            uiText("Support: {value1}", {
+              value1: String(supportLabel(provider.support_level)),
+            })}
+        </Badge>
+        <Badge variant="secondary">
+          {uiText("Expected: {value1}", {
+            value1: String(tierLabel(provider.expected_tier) ?? ""),
+          })}
+        </Badge>
+        {activeTier && (
+          <Badge variant="outline">
+            {uiText("Active: {value1}", {
+              value1: String(tierLabel(activeTier) ?? ""),
+            })}
+          </Badge>
+        )}
+      </div>
+      <p className="text-sm text-on-surface">{knownUiText(provider.expected_tier_note)}</p>
+      {provider.expected_tier === "guarded" && (
+        <p className="text-xs font-medium text-on-surface">
+          {uiText("Guarded storage consequences")}
+        </p>
+      )}
+      {consequences.length > 0 && (
+        <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
+          {consequences.map((consequence) => (
+            <li key={consequence}>{knownUiText(consequence)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function StorageProviderPicker(props: {
   providers: StorageProvider[];
   providerId: string;
@@ -99,13 +155,6 @@ export function StorageProviderPicker(props: {
   const secretFieldsSet = new Set(
     Array.isArray(props.values.secret_fields_set) ? props.values.secret_fields_set : [],
   );
-  const consequences = selected
-    ? providerConsequences(
-        selected,
-        i18n?.t("storage.guardedCatalog") ?? uiText("storage.guardedCatalog"),
-        i18n?.t("storage.guardedRetention") ?? uiText("storage.guardedRetention"),
-      )
-    : [];
 
   return (
     <div className="space-y-5">
@@ -271,43 +320,7 @@ export function StorageProviderPicker(props: {
               {uiText("setup.serverPaths")}
             </p>
           ) : (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">
-                  {i18n?.t("settings.storageSupport", {
-                    level: supportLabel(selected.support_level),
-                  }) ??
-                    uiText("Support: {value1}", {
-                      value1: String(supportLabel(selected.support_level)),
-                    })}
-                </Badge>
-                <Badge variant="secondary">
-                  {uiText("Expected: {value1}", {
-                    value1: String(tierLabel(selected.expected_tier) ?? ""),
-                  })}
-                </Badge>
-                {props.activeTier && (
-                  <Badge variant="outline">
-                    {uiText("Active: {value1}", {
-                      value1: String(tierLabel(props.activeTier) ?? ""),
-                    })}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-sm text-on-surface">{knownUiText(selected.expected_tier_note)}</p>
-              {selected.expected_tier === "guarded" && (
-                <p className="text-xs font-medium text-on-surface">
-                  {uiText("Guarded storage consequences")}
-                </p>
-              )}
-              {consequences.length > 0 && (
-                <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
-                  {consequences.map((consequence) => (
-                    <li key={consequence}>{knownUiText(consequence)}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <StorageProviderSummary provider={selected} activeTier={props.activeTier} />
           )}
 
           <StorageProviderFields

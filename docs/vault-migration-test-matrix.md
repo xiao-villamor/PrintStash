@@ -96,7 +96,7 @@ explicitly omitted. No row is inferred from coverage percentages.
 | 79 | `test_real_backup_yields_content_bound_verification` | Happy | Real current compatible backup | Proof includes exact content digest and source | Integration | ✅ `integration/modules/storage/test_migration_backup.py::TestVerifyMigrationBackup::test_real_backup_yields_content_bound_verification` |
 | 80 | `test_expired_backup_cannot_satisfy_preflight` | Error | Backup older than seven days | Backup prerequisite refused | Integration | ✅ `integration/modules/storage/test_migration_backup.py::TestVerifyMigrationBackup::test_expired_backup_cannot_satisfy_preflight` |
 | 81 | `test_duplicate_phase_does_not_enqueue_another_notification` | Edge | Repeated copying transition | One durable notification and transition audit | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestTransition::test_duplicate_phase_does_not_enqueue_another_notification` |
-| 82 | `test_illegal_activation_records_no_transition` | Error | Planned to active request | No state change or audit event | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestTransition::test_illegal_activation_records_no_transition` |
+| 82 | `test_illegal_activation_records_no_transition` | Error | Planned to active request with real audit listeners and existing creation history | No state change; audit history unchanged | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestTransition::test_illegal_activation_records_no_transition` |
 | 83 | `test_unavailable_capacity_probe_is_reported_as_unknown` | Error | Capacity probe unavailable | Unknown capacity, no invented free-space value | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestProject::test_unavailable_capacity_probe_is_reported_as_unknown` |
 | 84 | `test_empty_history_reports_idle` | Edge | No migration history | Idle health returned | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestHealth::test_empty_history_reports_idle` |
 | 85 | `test_maintenance_overrides_active_state` | Edge | Active run with recovery gate held | Health reports recovery required | Integration | ✅ `integration/modules/storage/test_migration_progress.py::TestHealth::test_maintenance_overrides_active_state` |
@@ -115,6 +115,15 @@ explicitly omitted. No row is inferred from coverage percentages.
 | 98 | `test_missing_terminal_native_staging_is_not_recreated` | Edge | Completed upload staging already consumed | No missing-upload error or recreated object | Integration | ✅ `integration/modules/storage/test_migration_census.py::TestCensus::test_missing_terminal_native_staging_is_not_recreated` |
 
 ## Execution evidence
+
+- CI run 34390353141 found an order-dependent assertion that required an empty
+  global audit table. Reproduced with real audit listeners, then corrected to
+  assert unchanged audit history across the rejected transition. Migration
+  progress and audit-listener tests: **7 passed**. The next full CI run is pending.
+- A local aggregate run was interrupted after disk capacity fell below the
+  configured headroom (**5,830 passed, 112 failed**); its failures are preserved
+  and are not counted as a green gate. Only that run's generated temporary files
+  were removed. CI's sole backend failure was the audit assertion above.
 
 - Fresh focused migration measurement on the current implementation: **129 passed**;
   owner 90.85%, census 95.65%, transfer 93.94%, backup/identity/journal/progress/
