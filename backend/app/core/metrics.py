@@ -143,6 +143,53 @@ capture_contract_errors = Counter(
     registry=registry,
 )
 
+artifact_upload_sessions = Counter(
+    "printstash_artifact_upload_sessions_total",
+    "Artifact upload session events by bounded mode and outcome.",
+    labelnames=("event", "mode"),
+    registry=registry,
+)
+artifact_upload_bytes = Counter(
+    "printstash_artifact_upload_bytes_total",
+    "Artifact upload bytes accepted by transfer path.",
+    labelnames=("mode", "path"),
+    registry=registry,
+)
+
+_ARTIFACT_UPLOAD_EVENTS = frozenset(
+    {
+        "created",
+        "resumed",
+        "completed",
+        "failed",
+        "expired",
+        "aborted",
+        "verification_failed",
+    }
+)
+_ARTIFACT_UPLOAD_MODES = frozenset({"api_chunks", "native_parts", "simple"})
+
+
+def record_artifact_upload_event(event: str, mode: str) -> None:
+    """Record only bounded upload labels; metrics never alter the operation."""
+
+    try:
+        normalized_event = event if event in _ARTIFACT_UPLOAD_EVENTS else "failed"
+        normalized_mode = mode if mode in _ARTIFACT_UPLOAD_MODES else "simple"
+        artifact_upload_sessions.labels(normalized_event, normalized_mode).inc()
+    except Exception:
+        pass
+
+
+def record_artifact_upload_bytes(mode: str, count: int, *, bypassed_api: bool) -> None:
+    try:
+        normalized_mode = mode if mode in _ARTIFACT_UPLOAD_MODES else "simple"
+        path = "direct" if bypassed_api else "api"
+        artifact_upload_bytes.labels(normalized_mode, path).inc(max(0, count))
+    except Exception:
+        pass
+
+
 _CAPTURE_PROVIDERS = frozenset(
     {"myminifactory", "cults", "makerworld", "printables", "thingiverse", "unknown"}
 )

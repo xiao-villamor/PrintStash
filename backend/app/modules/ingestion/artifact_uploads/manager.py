@@ -11,6 +11,7 @@ from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.metrics import record_artifact_upload_bytes, record_artifact_upload_event
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     ArtifactUploadPart,
@@ -124,6 +125,7 @@ class SqlArtifactUploadManager:
             self.session.add(upload)
             self.session.commit()
             self.session.refresh(upload)
+            record_artifact_upload_event("created", upload.adapter_id)
         except Exception:
             self.session.rollback()
             self.adapter_for(upload).abort_owned(upload)
@@ -150,6 +152,8 @@ class SqlArtifactUploadManager:
     def plan(self, session_id: str, actor: User) -> UploadPlan:
         upload = self.get(session_id, actor)
         self._require_active(upload)
+        if upload.received_bytes > 0:
+            record_artifact_upload_event("resumed", upload.adapter_id)
         if upload.adapter_id == "native_parts":
             adapter = self._native_for(upload)
             capability = adapter.capability
@@ -214,6 +218,9 @@ class SqlArtifactUploadManager:
             upload,
             ArtifactUploadState.UPLOADING,
             received_bytes=previous_received + receipt.size_bytes,
+        )
+        record_artifact_upload_bytes(
+            upload.adapter_id, receipt.size_bytes, bypassed_api=False
         )
         self.session.refresh(part)
         return part
@@ -296,6 +303,7 @@ class SqlArtifactUploadManager:
             ArtifactUploadState.UPLOADING,
             received_bytes=previous_received + size_bytes,
         )
+        record_artifact_upload_bytes(upload.adapter_id, size_bytes, bypassed_api=True)
         self.session.refresh(part)
         return part
 
@@ -349,6 +357,8 @@ class SqlArtifactUploadManager:
             else:
                 verified = self.api_adapter.assemble(upload)
         except Exception as exc:
+            record_artifact_upload_event("verification_failed", upload.adapter_id)
+            record_artifact_upload_event("failed", upload.adapter_id)
             code = (
                 str(exc).split(":", 1)[0][:128] or "artifact_upload_verification_failed"
             )

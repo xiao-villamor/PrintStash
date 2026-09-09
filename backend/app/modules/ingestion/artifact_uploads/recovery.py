@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlmodel import Session, col, select
 
+from app.core.metrics import record_artifact_upload_event
 from app.core.time import utcnow
 from app.db.models import (
     ArtifactUploadSession,
@@ -62,6 +63,7 @@ def _expire_one(
         error_code="artifact_upload_expired",
         retryable=False,
     )
+    record_artifact_upload_event("expired", upload.adapter_id)
     return True
 
 

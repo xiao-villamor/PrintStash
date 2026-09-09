@@ -33,6 +33,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
+from app.modules.administration import audit
 from app.modules.identity import rbac
 from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion.artifact_uploads import (
@@ -209,6 +210,17 @@ async def create_artifact_upload(
         )
     except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
+    audit.record(
+        session,
+        action="artifact_upload.create",
+        resource_type="artifact_upload",
+        diff={
+            "session_id": upload.id,
+            "purpose": upload.purpose,
+            "mode": upload.adapter_id,
+            "bytes": upload.declared_size,
+        },
+    )
     return _upload_read(manager, upload)
 
 
@@ -445,6 +457,18 @@ def finalize_artifact_upload(
         ArtifactUploadState.INGESTING,
         background_job_id=job_id,
     )
+    audit.record(
+        session,
+        action="artifact_upload.finalize",
+        resource_type="artifact_upload",
+        diff={
+            "session_id": upload.id,
+            "purpose": upload.purpose,
+            "mode": upload.adapter_id,
+            "bytes": verified.size_bytes,
+            "job_id": job_id,
+        },
+    )
     background_tasks.add_task(
         run_verified_upload_ingestion,
         upload_id=upload.id,
@@ -466,4 +490,15 @@ def abort_artifact_upload(
         upload = manager.abort(session_id, current_user)
     except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
         raise _translate_error(exc) from exc
+    audit.record(
+        session,
+        action="artifact_upload.abort",
+        resource_type="artifact_upload",
+        diff={
+            "session_id": upload.id,
+            "purpose": upload.purpose,
+            "mode": upload.adapter_id,
+            "bytes": upload.received_bytes,
+        },
+    )
     return _upload_read(manager, upload)

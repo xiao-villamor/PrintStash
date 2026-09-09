@@ -14,6 +14,8 @@ from app.core.config import settings
 from app.core.security import require_superuser
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
+    ArtifactUploadSession,
+    ArtifactUploadState,
     CapacityAdmissionEvent,
     CapacityReservation,
     ExternalLibrary,
@@ -74,6 +76,53 @@ def _database_probe() -> dict:
             "ok": False,
             "error": exc.__class__.__name__,
         }
+
+
+def _artifact_uploads_probe() -> dict:
+    """Report bounded actionable upload findings without session identifiers."""
+
+    try:
+        stale_before = utcnow() - timedelta(minutes=30)
+        active_states = (
+            ArtifactUploadState.CREATED,
+            ArtifactUploadState.UPLOADING,
+            ArtifactUploadState.VERIFYING,
+            ArtifactUploadState.INGESTING,
+        )
+        with get_session_factory().session() as session:
+            stuck = session.exec(
+                select(func.count(ArtifactUploadSession.id)).where(
+                    ArtifactUploadSession.state.in_(active_states),
+                    ArtifactUploadSession.updated_at <= stale_before,
+                )
+            ).one()
+            cleanup_failures = session.exec(
+                select(func.count(ArtifactUploadSession.id)).where(
+                    ArtifactUploadSession.state == ArtifactUploadState.FAILED,
+                    ArtifactUploadSession.error_code
+                    == "artifact_upload_cleanup_unproven",
+                )
+            ).one()
+        findings = []
+        if int(stuck):
+            findings.append(
+                {"code": "artifact_upload_sessions_stuck", "count": int(stuck)}
+            )
+        if int(cleanup_failures):
+            findings.append(
+                {
+                    "code": "artifact_upload_cleanup_failed",
+                    "count": int(cleanup_failures),
+                }
+            )
+        return {
+            "ok": not findings,
+            "stuck_active": int(stuck),
+            "cleanup_failures": int(cleanup_failures),
+            "findings": findings,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": exc.__class__.__name__}
 
 
 def _backup_probe() -> dict:
@@ -377,6 +426,7 @@ def health_details() -> dict:
         "backup": _backup_probe(),
         "printer_providers": _provider_probe(),
         "jobs": _jobs_probe(),
+        "artifact_uploads": _artifact_uploads_probe(),
         "fleet_scheduler": _fleet_scheduler_probe(),
         "external_libraries": _external_libraries_probe(),
         "spoolman": _spoolman_probe(),

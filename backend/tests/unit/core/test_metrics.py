@@ -33,6 +33,8 @@ from prometheus_client import generate_latest
 import app.modules.ingestion.provider_metadata_cache as provider_metadata_cache
 from app.core import metrics
 from app.core.metrics import (
+    record_artifact_upload_bytes,
+    record_artifact_upload_event,
     record_capture_operation,
     record_fleet_dispatch,
     record_ingestion_terminal,
@@ -188,6 +190,34 @@ class TestRecordCaptureOperation:
 
         # Telemetry is never worth failing the operation it measures.
         record_capture_operation("printables", "provider_api", "success", 0.1)
+
+
+class TestRecordArtifactUpload:
+    def test_records_bounded_session_events_and_transfer_paths(self) -> None:
+        event_labels = {"event": "created", "mode": "native_parts"}
+        byte_labels = {"mode": "native_parts", "path": "direct"}
+        event_before = _sample(
+            "printstash_artifact_upload_sessions_total", event_labels
+        )
+        bytes_before = _sample("printstash_artifact_upload_bytes_total", byte_labels)
+
+        record_artifact_upload_event("created", "native_parts")
+        record_artifact_upload_bytes("native_parts", 7, bypassed_api=True)
+
+        assert _sample("printstash_artifact_upload_sessions_total", event_labels) == (
+            event_before + 1
+        )
+        assert _sample("printstash_artifact_upload_bytes_total", byte_labels) == (
+            bytes_before + 7
+        )
+
+    def test_never_uses_untrusted_values_as_labels(self) -> None:
+        record_artifact_upload_event(SIGNED_URL, SIGNED_URL)
+        record_artifact_upload_bytes(SIGNED_URL, 3, bypassed_api=False)
+
+        text = _exposition()
+        assert SIGNED_URL not in text
+        assert "secret-user-model-file" not in text
 
 
 class TestObserveRequest:

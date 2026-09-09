@@ -17,6 +17,7 @@ Probe error branches — the ones a real dependency cannot produce on demand —
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -29,6 +30,7 @@ import app.modules.backups.backup.creation as backup_creation
 from app.core.config import get_config
 from app.core.time import utcnow
 from app.db.models import (
+    ArtifactUploadState,
     ExternalLibrary,
     ExternalLibraryScanStatus,
     File,
@@ -331,6 +333,37 @@ class TestDatabaseProbe:
         # The sentinel rows the suite seeds are real rows; count the delta instead.
         assert out["counts"]["models"] >= 1
         assert out["counts"]["files"] >= 1
+
+
+class TestArtifactUploadProbe:
+    def test_reports_stuck_and_cleanup_findings_without_session_ids(
+        self, make_user, make_artifact_upload
+    ) -> None:
+        owner = make_user("upload-health-owner")
+        stuck = make_artifact_upload(
+            owner,
+            state=ArtifactUploadState.UPLOADING,
+            updated_at=utcnow() - timedelta(hours=1),
+        )
+        cleanup = make_artifact_upload(
+            owner,
+            state=ArtifactUploadState.FAILED,
+            error_code="artifact_upload_cleanup_unproven",
+        )
+
+        out = health_mod._artifact_uploads_probe()
+
+        assert out == {
+            "ok": False,
+            "stuck_active": 1,
+            "cleanup_failures": 1,
+            "findings": [
+                {"code": "artifact_upload_sessions_stuck", "count": 1},
+                {"code": "artifact_upload_cleanup_failed", "count": 1},
+            ],
+        }
+        assert stuck.id not in str(out)
+        assert cleanup.id not in str(out)
 
 
 class TestProviderProbe:

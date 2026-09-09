@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from app.db.models import (
     ArtifactUploadPart,
     ArtifactUploadSession,
+    AuditLog,
     CollectionPermission,
     CollectionRole,
     File,
@@ -21,6 +22,7 @@ from app.db.models import (
     FileType,
     Model,
 )
+from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
     NativeMultipartCapability,
@@ -114,6 +116,53 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_rejects_an_oversized_session_before_accepting_bytes(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        request = _request(b"x") | {"size_bytes": 512 * 1024 * 1024 + 1}
+
+        response = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == "upload_too_large"
+
+    def test_rejects_a_chunk_body_larger_than_the_protocol_bound(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        payload = b"x"
+        upload_id = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        ).json()["id"]
+
+        response = client.put(
+            f"/api/v1/artifact-uploads/{upload_id}/chunks/0",
+            params={
+                "offset": 0,
+                "length": 1,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            },
+            content=payload,
+            headers=auth_headers | {"content-length": str(CHUNK_SIZE + 1)},
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == "upload_chunk_too_large"
+
+    def test_rate_limits_repeated_session_creation(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        responses = [
+            client.post(
+                "/api/v1/artifact-uploads", json=_request(b"x"), headers=auth_headers
+            )
+            for _ in range(31)
+        ]
+
+        assert responses[-1].status_code == 429
+        assert responses[-1].json()["detail"] == "rate_limited"
+
     def test_native_parts_bypass_the_chunk_request_body(
         self,
         client: TestClient,
@@ -245,6 +294,13 @@ class TestArtifactUploads:
             select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
         ).one()
         assert db_session.get(Model, artifact.model_id) is not None
+        actions = {
+            row.action
+            for row in db_session.exec(
+                select(AuditLog).where(AuditLog.resource_type == "artifact_upload")
+            ).all()
+        }
+        assert {"artifact_upload.create", "artifact_upload.finalize"} <= actions
 
     def test_gcode_uses_the_normal_ingestion_pipeline(
         self,
@@ -485,6 +541,9 @@ class TestArtifactUploads:
         assert second.json()["state"] == "aborted"
         upload = db_session.get(ArtifactUploadSession, upload_id)
         assert upload is not None
+        assert db_session.exec(
+            select(AuditLog).where(AuditLog.action == "artifact_upload.abort")
+        ).first()
         assert not db_session.exec(
             select(ArtifactUploadPart).where(ArtifactUploadPart.session_id == upload_id)
         ).all()

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sqlmodel import select
 
+from app.core.metrics import record_artifact_upload_event
 from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     ArtifactUploadSession,
@@ -122,6 +123,9 @@ def run_verified_upload_ingestion(
             target,
             error_code=None if completed else "artifact_ingestion_failed",
             retryable=bool(result.retryable) if result is not None else True,
+        )
+        record_artifact_upload_event(
+            "completed" if completed else "failed", upload.adapter_id
         )
         if completed:
             lease = session.exec(
