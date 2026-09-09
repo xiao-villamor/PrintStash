@@ -506,7 +506,8 @@ export function UploadModal({
         });
         return;
       }
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg =
+        err instanceof ApiError ? err.code : err instanceof Error ? err.message : String(err);
       updateTask(taskId, {
         status: "failed",
         progress: 100,

@@ -91,6 +91,8 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage("invalid_credentials")).toBe("Invalid username or password.");
     expect(getErrorMessage("collection_not_empty")).toMatch(/still has models/);
     expect(getErrorMessage("archive_blob_hash_mismatch")).toMatch(/Vault audit/);
+    expect(getErrorMessage("artifact_upload_file_mismatch")).toMatch(/same file/);
+    expect(getErrorMessage("staging_capacity_exceeded")).toMatch(/Free space/);
   });
 
   it("gives unknown codes a localized recovery message", () => {
@@ -109,6 +111,9 @@ describe("localized error recovery", () => {
     localStorage.setItem("printstash.locale", "es");
     try {
       expect(getErrorMessage("invalid_credentials")).toBe("Usuario o contraseña incorrectos.");
+      expect(getErrorMessage("artifact_upload_expired")).toBe(
+        "Esta carga ha caducado. Iníciala de nuevo.",
+      );
       expect(getErrorMessage("future_backend_code")).toBe(
         "Se ha producido un error al conectar con el servidor. Comprueba que PrintStash esté funcionando e inténtalo de nuevo.",
       );

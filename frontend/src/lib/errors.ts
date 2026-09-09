@@ -102,6 +102,19 @@ const ERROR_MESSAGES = {
   unsupported_file_type: "Unsupported file type.",
   file_too_large: "File exceeds the upload size limit.",
   upload_too_large: "File exceeds the upload size limit.",
+  artifact_upload_file_mismatch: "Choose the same file that started this upload.",
+  artifact_upload_expired: "This upload expired. Start it again.",
+  artifact_upload_state_conflict: "This upload changed elsewhere. Refresh and try again.",
+  artifact_upload_chunk_conflict: "An uploaded part conflicts with this file. Start again.",
+  artifact_upload_incomplete: "Some upload parts are missing. Resume the upload.",
+  artifact_upload_hash_mismatch: "The uploaded bytes failed verification. Start again.",
+  artifact_upload_part_failed: "A direct upload part failed. Check the connection and retry.",
+  artifact_upload_receipt_missing: "The storage service did not confirm the uploaded part.",
+  artifact_upload_ingestion_interrupted: "Processing was interrupted. Retry this upload.",
+  artifact_ingestion_failed: "The upload was verified but could not be processed.",
+  native_upload_capability_unavailable:
+    "Direct upload is unavailable. Refresh to request a fallback plan.",
+  staging_capacity_exceeded: "Upload staging is full. Free space or wait for active uploads.",
   // The backstop, not the upload limit: `BodyLimitMiddleware` bounds the whole
   // request — which sits above the per-file cap — so a merely-large file gets the
   // specific `upload_too_large` above and only a runaway body lands here.

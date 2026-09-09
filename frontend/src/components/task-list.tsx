@@ -1,6 +1,6 @@
 "use client";
 
-import { getErrorMessage } from "@/lib/errors";
+import { ApiError, getErrorMessage } from "@/lib/errors";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import {
@@ -188,7 +188,12 @@ function UploadControls({ task }: { task: TaskItem }) {
     } catch (error) {
       updateTask(task.id, {
         status: "failed",
-        detail: error instanceof Error ? error.message : String(error),
+        detail:
+          error instanceof ApiError
+            ? error.code
+            : error instanceof Error
+              ? error.message
+              : String(error),
         retryable: true,
       });
     }
@@ -208,7 +213,13 @@ function UploadControls({ task }: { task: TaskItem }) {
       const paused = error instanceof DOMException && error.name === "AbortError";
       updateTask(task.id, {
         status: paused ? "running" : "failed",
-        detail: paused ? uiText("Paused") : error instanceof Error ? error.message : String(error),
+        detail: paused
+          ? uiText("Paused")
+          : error instanceof ApiError
+            ? error.code
+            : error instanceof Error
+              ? error.message
+              : String(error),
         uploadPaused: paused,
         retryable: true,
       });
