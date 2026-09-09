@@ -7,7 +7,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -154,13 +154,11 @@ class SqlArtifactUploadManager:
             sha256=receipt.sha256.lower(),
         )
         self.session.add(part)
-        require_transition(upload.state, ArtifactUploadState.UPLOADING)
-        upload.state = ArtifactUploadState.UPLOADING
-        upload.received_bytes = previous_received + receipt.size_bytes
-        upload.updated_at = utcnow()
-        upload.version += 1
-        self.session.add(upload)
-        self.session.commit()
+        self.transition(
+            upload,
+            ArtifactUploadState.UPLOADING,
+            received_bytes=previous_received + receipt.size_bytes,
+        )
         self.session.refresh(part)
         return part
 
@@ -177,23 +175,20 @@ class SqlArtifactUploadManager:
         if upload.state != ArtifactUploadState.UPLOADING:
             raise ArtifactUploadError("artifact_upload_state_conflict")
         verified = self.adapter.assemble(upload)
-        require_transition(upload.state, ArtifactUploadState.VERIFYING)
-        upload.state = ArtifactUploadState.VERIFYING
-        upload.verified_size = verified.size_bytes
-        upload.verified_sha256 = verified.sha256
-        upload.staging_identity_json = json.dumps(
-            {
-                "device": verified.device,
-                "inode": verified.inode,
-                "ctime_ns": verified.ctime_ns,
-            },
-            sort_keys=True,
+        self.transition(
+            upload,
+            ArtifactUploadState.VERIFYING,
+            verified_size=verified.size_bytes,
+            verified_sha256=verified.sha256,
+            staging_identity_json=json.dumps(
+                {
+                    "device": verified.device,
+                    "inode": verified.inode,
+                    "ctime_ns": verified.ctime_ns,
+                },
+                sort_keys=True,
+            ),
         )
-        upload.updated_at = utcnow()
-        upload.version += 1
-        self.session.add(upload)
-        self.session.commit()
-        self.session.refresh(upload)
         return upload, verified
 
     def abort(self, session_id: str, actor: User) -> ArtifactUploadSession:
@@ -202,14 +197,41 @@ class SqlArtifactUploadManager:
             return upload
         if upload.state in {ArtifactUploadState.COMPLETED, ArtifactUploadState.EXPIRED}:
             raise ArtifactUploadError("artifact_upload_state_conflict")
-        require_transition(upload.state, ArtifactUploadState.ABORTED)
         self.adapter.abort_owned(upload)
         for part in self.parts(upload):
             self.session.delete(part)
-        upload.state = ArtifactUploadState.ABORTED
-        upload.updated_at = utcnow()
-        upload.version += 1
-        self.session.add(upload)
+        self.transition(upload, ArtifactUploadState.ABORTED)
+        return upload
+
+    def transition(
+        self,
+        upload: ArtifactUploadSession,
+        target: ArtifactUploadState,
+        **changes: object,
+    ) -> ArtifactUploadSession:
+        """Commit one legal state edge only if its durable version is unchanged."""
+
+        current = ArtifactUploadState(upload.state)
+        require_transition(current, target, retryable=upload.retryable)
+        expected_version = upload.version
+        result = self.session.execute(
+            update(ArtifactUploadSession)
+            .where(
+                ArtifactUploadSession.id == upload.id,
+                ArtifactUploadSession.version == expected_version,
+                ArtifactUploadSession.state == current.value,
+            )
+            .values(
+                state=target.value,
+                version=expected_version + 1,
+                updated_at=utcnow(),
+                **changes,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            self.session.rollback()
+            raise ArtifactUploadError("artifact_upload_state_conflict")
         self.session.commit()
         self.session.refresh(upload)
         return upload

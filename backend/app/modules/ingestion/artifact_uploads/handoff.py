@@ -7,7 +7,6 @@ from pathlib import Path
 
 from sqlmodel import select
 
-from app.core.time import utcnow
 from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     ArtifactUploadSession,
@@ -19,6 +18,7 @@ from app.modules.ingestion.ingestion import ingest_mesh, ingest_orca_gcode
 from app.runtime.jobs import registry
 
 from .api_chunks import ApiChunkUploadAdapter
+from .manager import SqlArtifactUploadManager
 
 
 def run_verified_upload_ingestion(
@@ -70,16 +70,15 @@ def run_verified_upload_ingestion(
         upload = session.get(ArtifactUploadSession, upload_id)
         if upload is None or upload.state != ArtifactUploadState.INGESTING:
             return
-        upload.state = (
+        target = (
             ArtifactUploadState.COMPLETED if completed else ArtifactUploadState.FAILED
         )
-        upload.error_code = None if completed else "artifact_ingestion_failed"
-        upload.retryable = bool(result.retryable) if result is not None else True
-        upload.updated_at = utcnow()
-        upload.version += 1
-        session.add(upload)
-        session.commit()
-        session.refresh(upload)
+        SqlArtifactUploadManager(session).transition(
+            upload,
+            target,
+            error_code=None if completed else "artifact_ingestion_failed",
+            retryable=bool(result.retryable) if result is not None else True,
+        )
         if completed:
             lease = session.exec(
                 select(StagingLease).where(StagingLease.background_job_id == job_id)

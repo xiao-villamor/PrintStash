@@ -296,12 +296,11 @@ def finalize_artifact_upload(
         sha256=verified.sha256,
         owner_user_id=current_user.id,
     )
-    upload.state = ArtifactUploadState.INGESTING
-    upload.background_job_id = job_id
-    upload.version += 1
-    session.add(upload)
-    session.commit()
-    session.refresh(upload)
+    manager.transition(
+        upload,
+        ArtifactUploadState.INGESTING,
+        background_job_id=job_id,
+    )
     background_tasks.add_task(
         run_verified_upload_ingestion,
         upload_id=upload.id,
