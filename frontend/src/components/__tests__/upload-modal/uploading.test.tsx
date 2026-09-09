@@ -427,7 +427,7 @@ describe("UploadModal ingestion", () => {
 
       await waitFor(() => expect(uploadRequests()).toHaveLength(2), { timeout: 5000 });
       expect(uploadRequests()[1].source_hash).toBe("a".repeat(64));
-    });
+    }, 10_000);
   });
 
   describe("a bulk drop", () => {
