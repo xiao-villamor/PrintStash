@@ -105,6 +105,15 @@ def versioned_s3_backend(s3_backend: S3StorageBackend) -> S3StorageBackend:
     return s3_backend
 
 
+@pytest.fixture
+def native_s3_backend(s3_backend: S3StorageBackend) -> S3StorageBackend:
+    """Return the real provider only when its checksum probe enables native parts."""
+    s3_backend._probe_capabilities()
+    if s3_backend.native_multipart_capability is None:
+        pytest.skip("S3 endpoint did not prove checksum-carrying multipart support")
+    return s3_backend
+
+
 class TestCaptureUploadSlotKey:
     def test_capture_upload_slot_key_uses_s3_prefix(self, s3_backend: S3StorageBackend):
         assert s3_backend.capture_upload_slot_key("slot-1").endswith(
@@ -123,9 +132,9 @@ class TestNativeMultipartCompatibility:
         )
 
     def test_round_trips_native_parts_when_supported(
-        self, s3_backend: S3StorageBackend
+        self, native_s3_backend: S3StorageBackend
     ) -> None:
-        s3_backend._probe_capabilities()
+        s3_backend = native_s3_backend
         capability = s3_backend.native_multipart_capability
         assert capability is not None
         payloads = [b"a" * (5 * 1024 * 1024), b"last native part"]
@@ -162,10 +171,9 @@ class TestNativeMultipartCompatibility:
         assert s3_backend.read_bytes(receipt.key) == b"".join(payloads)
 
     def test_aborts_the_exact_native_operation(
-        self, s3_backend: S3StorageBackend
+        self, native_s3_backend: S3StorageBackend
     ) -> None:
-        s3_backend._probe_capabilities()
-        assert s3_backend.native_multipart_capability is not None
+        s3_backend = native_s3_backend
         handle = s3_backend.begin_native_multipart(
             session_id=uuid.uuid4().hex,
             filename="artifact.stl",
