@@ -146,6 +146,16 @@ from tests.factories.scenarios import (
     a_member_who_can_see_one_collection,
     a_printer_with_a_queue,
 )
+from tests.factories.similarity import (
+    build_embedding_space,
+    build_geometry_fingerprint,
+    build_index_generation,
+    build_passage_vector,
+    build_similarity_candidate,
+    build_similarity_decision,
+    build_similarity_observation,
+    build_similarity_run,
+)
 from tests.factories.storage import (
     build_owned_storage_object,
     build_storage_delete_intent,
@@ -253,4 +263,16 @@ __all__ += [
     "build_capacity_lock",
     "build_capacity_reservation",
     "build_storage_inventory_sample",
+]
+
+
+__all__ += [
+    "build_embedding_space",
+    "build_geometry_fingerprint",
+    "build_index_generation",
+    "build_passage_vector",
+    "build_similarity_candidate",
+    "build_similarity_decision",
+    "build_similarity_observation",
+    "build_similarity_run",
 ]

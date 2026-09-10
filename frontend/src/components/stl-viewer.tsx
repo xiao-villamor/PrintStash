@@ -7,7 +7,13 @@ import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSt
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { STLLoader } from "three-stdlib";
+import { STLLoader, type OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import {
+  comparisonTransform,
+  sharedScale,
+  type ComparisonCamera,
+  type MeshComparison,
+} from "@/lib/comparison-camera";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 import { authHeaders } from "@/lib/api/request";
@@ -42,6 +48,9 @@ export interface STLViewerProps {
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
+  comparison?: MeshComparison;
+  comparisonCamera?: ComparisonCamera;
+  overlay?: { url: string; comparison: MeshComparison };
 }
 
 // The camera needs both shapes: R3F takes the tuple as a JSX prop, the orbit
@@ -60,10 +69,14 @@ function Mesh({
   url,
   displayMode,
   onSized,
+  comparison,
+  overlay = false,
 }: {
   url: string;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
+  comparison?: MeshComparison;
+  overlay?: boolean;
 }) {
   useUiLocale();
   const geometry = useLoader(STLLoader, url, (loader) => {
@@ -79,32 +92,42 @@ function Mesh({
     // 3D-print meshes are authored Z-up; stand them upright in this Y-up scene
     // (matches the thumbnail renderer) so the model rests on the grid instead of
     // lying on its back and being sliced through the middle.
-    mesh.rotation.set(-Math.PI / 2, 0, 0);
+    mesh.rotation.set(0, 0, 0);
+    if (comparison) mesh.applyMatrix4(comparisonTransform(comparison));
+    mesh.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
     mesh.updateMatrixWorld();
 
     box.setFromObject(mesh);
     box.getSize(sizeVec);
 
     const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
-    const scale = maxDim > 0 ? NORMALIZED_SIZE / maxDim : 1;
+    const scale = comparison
+      ? sharedScale(comparison.referenceSizeMm)
+      : maxDim > 0
+        ? NORMALIZED_SIZE / maxDim
+        : 1;
 
-    mesh.scale.setScalar(scale);
+    mesh.scale.multiplyScalar(scale);
     box.getCenter(centerVec);
     mesh.position.sub(centerVec.multiplyScalar(scale));
 
-    onSized(sizeVec.clone().multiplyScalar(scale));
-  }, [geometry, onSized]);
+    onSized(
+      comparison
+        ? new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE)
+        : sizeVec.clone().multiplyScalar(scale),
+    );
+  }, [geometry, onSized, comparison]);
 
   return (
     <mesh ref={meshRef} geometry={geometry}>
       <meshStandardMaterial
-        color="#8a93a6"
+        color={overlay ? "#497bbd" : "#8a93a6"}
         roughness={0.45}
         metalness={0.1}
         wireframe={displayMode === "wireframe"}
-        transparent={displayMode === "xray"}
-        opacity={displayMode === "xray" ? 0.3 : 1}
-        depthWrite={displayMode !== "xray"}
+        transparent={overlay || displayMode === "xray"}
+        opacity={overlay ? 0.42 : displayMode === "xray" ? 0.3 : 1}
+        depthWrite={!overlay && displayMode !== "xray"}
       />
     </mesh>
   );
@@ -118,19 +141,44 @@ function Scene({
   showGrid,
   screenshotName,
   screenshotScale,
-}: Required<Omit<STLViewerProps, "onControlsReady" | "onReadyChange">> & {
-  onControlsReady?: (api: STLViewerControls) => void;
-  onLoadedChange?: (loaded: boolean) => void;
-  screenshotScale: ScreenshotScale;
-}) {
+  comparison,
+  comparisonCamera,
+  overlay,
+}: Required<
+  Omit<
+    STLViewerProps,
+    "onControlsReady" | "onReadyChange" | "comparison" | "comparisonCamera" | "overlay"
+  >
+> &
+  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay"> & {
+    onControlsReady?: (api: STLViewerControls) => void;
+    onLoadedChange?: (loaded: boolean) => void;
+    screenshotScale: ScreenshotScale;
+  }) {
   useUiLocale();
-  const orbitRef = useRef<any>(null);
+  const orbitRef = useRef<OrbitControlsImpl>(null);
+  const syncing = useRef(false);
+  const sender = useRef(Symbol("comparison-camera"));
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
   const { gl, scene, camera, invalidate, size: canvasSize } = useThree();
   const [modelSize, setModelSize] = useState(
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
   const { loaded, setLoaded } = useViewerReadiness(url);
+  useEffect(
+    () =>
+      comparisonCamera?.subscribe((origin, pose) => {
+        if (origin === sender.current || !cameraRef.current || !orbitRef.current) return;
+        syncing.current = true;
+        cameraRef.current.position.fromArray(pose.position);
+        orbitRef.current.target.fromArray(pose.target);
+        orbitRef.current.update();
+        invalidate();
+        syncing.current = false;
+      }),
+    [comparisonCamera, invalidate],
+  );
+
   const loadedChangeRef = useRef(onLoadedChange);
   useEffect(() => {
     loadedChangeRef.current = onLoadedChange;
@@ -275,7 +323,22 @@ function Scene({
       <directionalLight position={[-6, -4, -8]} intensity={0.25} />
       <directionalLight position={[0, -8, 0]} intensity={0.15} color="#8899bb" />
       <Suspense fallback={null}>
-        <Mesh key={url} url={url} displayMode={displayMode} onSized={handleSized} />
+        <Mesh
+          key={url}
+          url={url}
+          displayMode={displayMode}
+          onSized={handleSized}
+          comparison={comparison}
+        />
+        {overlay && (
+          <Mesh
+            url={overlay.url}
+            displayMode="solid"
+            onSized={() => {}}
+            comparison={overlay.comparison}
+            overlay
+          />
+        )}
       </Suspense>
       {showGrid && (
         <gridHelper args={[gridSize, 26, "#94a3b8", "#475569"]} position={[0, floorY, 0]} />
@@ -287,7 +350,14 @@ function Scene({
         enableRotate
         minPolarAngle={0.02}
         maxPolarAngle={Math.PI / 2 - 0.02}
-        onChange={() => invalidate()}
+        onChange={() => {
+          invalidate();
+          if (!syncing.current && cameraRef.current && orbitRef.current)
+            comparisonCamera?.publish(sender.current, {
+              position: cameraRef.current.position.toArray(),
+              target: orbitRef.current.target.toArray(),
+            });
+        }}
       />
     </>
   );
@@ -334,6 +404,9 @@ export function STLViewer({
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
+  comparison,
+  comparisonCamera,
+  overlay,
 }: STLViewerProps) {
   useUiLocale();
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
@@ -362,6 +435,9 @@ export function STLViewer({
             showGrid={showGrid}
             screenshotName={screenshotName}
             screenshotScale={previewPreferences.screenshotScale}
+            comparison={comparison}
+            comparisonCamera={comparisonCamera}
+            overlay={overlay}
           />
         </Canvas>
         {/* Overlay while the mesh downloads/parses — the canvas mounts

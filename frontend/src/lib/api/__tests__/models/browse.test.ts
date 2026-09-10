@@ -245,3 +245,11 @@ describe("getVaultStats", () => {
     expectRequest("/api/v1/models/stats");
   });
 });
+
+describe("similarity filter", () => {
+  it("retains explicit false when browsing", async () => {
+    respondWith([]);
+    await listModels({ has_similar_candidates: false });
+    expect(lastCall().url).toContain("has_similar_candidates=false");
+  });
+});

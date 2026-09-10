@@ -334,6 +334,22 @@ def _read_samples(path: Path, budget: int) -> _SampledSTL | None:
     return _read_ascii_samples(path, budget, probe_bytes)
 
 
+def sample_stl_geometry(
+    path: Path, *, max_triangles: int = 10_000
+) -> _SampledSTL | None:
+    """The same bounded sampler used for previews, exposed for partial analysis.
+
+    Sampled topology is never full topology. ``complete`` says the parser reached
+    its source boundary, not that every source triangle is present in the sample.
+    """
+    if (
+        type(max_triangles) is not int
+        or not 1 <= max_triangles <= _MAX_SAMPLED_TRIANGLES
+    ):
+        raise ValueError("invalid_stl_sample_budget")
+    return _read_samples(path, max_triangles)
+
+
 def render_stl_thumbnail(
     path: Path,
     *,

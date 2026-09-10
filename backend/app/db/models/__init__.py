@@ -68,6 +68,9 @@ from .identity import (
 from .identity import (
     User as User,
 )
+from .inference import EmbeddingSpace as EmbeddingSpace
+from .inference import IndexGeneration as IndexGeneration
+from .inference import PassageVector as PassageVector
 from .ingestion import (
     BackgroundJob as BackgroundJob,
 )
@@ -209,6 +212,11 @@ from .provenance import (
 from .provenance import (
     ProvenanceCapture as ProvenanceCapture,
 )
+from .similarity import GeometryFingerprint as GeometryFingerprint
+from .similarity import SimilarityCandidate as SimilarityCandidate
+from .similarity import SimilarityCandidateObservation as SimilarityCandidateObservation
+from .similarity import SimilarityReviewDecision as SimilarityReviewDecision
+from .similarity import SimilarityRun as SimilarityRun
 from .sources import (
     ExternalLibrary as ExternalLibrary,
 )

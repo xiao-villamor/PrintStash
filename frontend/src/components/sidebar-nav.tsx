@@ -35,6 +35,7 @@ type NavItem = {
 const mainItems: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
   { href: "/builds", labelKey: "build.title", icon: Layers },
+  { href: "/library/similar", labelKey: "similarity.title", icon: Layers },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },

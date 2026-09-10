@@ -53,6 +53,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
+import { SimilarityQueue } from "@/components/similarity-queue";
 import { FilesTab } from "./files-tab";
 import { OverviewTab } from "./overview-tab";
 import {
@@ -203,10 +204,18 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     () => (canViewPrinters ? fetchedPrintJobs : []),
     [canViewPrinters, fetchedPrintJobs],
   );
-  const activeTab = !canViewPrinters && requestedTab === "history" ? "overview" : requestedTab;
+  const activeTab =
+    (!canViewPrinters && requestedTab === "history") ||
+    (!canEditModel && requestedTab === "similar")
+      ? "overview"
+      : requestedTab;
   const visibleTabs = useMemo(
-    () => TABS.filter((tab) => tab.key !== "history" || canViewPrinters),
-    [canViewPrinters],
+    () =>
+      TABS.filter(
+        (tab) =>
+          (tab.key !== "history" || canViewPrinters) && (tab.key !== "similar" || canEditModel),
+      ),
+    [canViewPrinters, canEditModel],
   );
 
   // Quick actions on the Overview card (mark failed / recommend).
@@ -935,6 +944,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 />
               )}
 
+              {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
               {activeTab === "source" && <SourceTab modelId={model.id} canEdit={canEditModel} />}
 
               {activeTab === "revisions" && (

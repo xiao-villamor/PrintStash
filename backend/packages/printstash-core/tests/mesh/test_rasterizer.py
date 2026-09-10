@@ -130,6 +130,31 @@ class RecordingLogger:
 
 
 class TestRenderMeshThumbnail:
+    def test_renders_an_explicit_orthographic_view(self) -> None:
+        mesh = box_mesh()
+        mesh.vertices[:, 0] *= 2
+
+        png = render_mesh_thumbnail(
+            mesh,
+            "orthographic",
+            width=64,
+            height=64,
+            view_rotation=np.eye(3),
+            matte=True,
+        )
+
+        assert png is not None
+        alpha = pixels(png)[:, :, 3]
+        ys, xs = np.nonzero(alpha >= 128)
+        assert 1.9 < np.ptp(xs) / np.ptp(ys) < 2.1
+
+    def test_rejects_a_nonorthogonal_camera(self) -> None:
+        png = render_mesh_thumbnail(
+            box_mesh(), "bad-camera", view_rotation=np.ones((3, 3))
+        )
+
+        assert png is None
+
     def test_renders_a_png_at_the_requested_size(self) -> None:
         png = render_mesh_thumbnail(box_mesh(), "box.stl", width=80, height=60)
 

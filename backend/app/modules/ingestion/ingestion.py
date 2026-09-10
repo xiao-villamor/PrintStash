@@ -1033,6 +1033,22 @@ def run_ingestion_pipeline(
         committed_at = utcnow()
         assert durable_ids is not None
         model_id, file_id = durable_ids
+        fingerprint_result = getattr(meta, "fingerprint_result", None)
+        if fingerprint_result is not None:
+            from app.modules.similarity.ingestion import after_commit
+
+            try:
+                fingerprint_status = after_commit(
+                    session_factory, file_id, actor_user_id, fingerprint_result
+                )
+            except Exception:
+                # The Artifact and thumbnail are already durable. A retryable
+                # derivative must never turn that successful ingest into failure.
+                fingerprint_status = "failed"
+                logger.warning(
+                    "ingestion fingerprint publication failed job_id=%s", job_id
+                )
+            registry.update(job_id, fingerprint_status=fingerprint_status)
         registry.update(
             job_id,
             model_id=model_id,
@@ -1145,12 +1161,16 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
     def process(
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
-        # Single mesh load for both geometry and thumbnail.
+        from app.modules.similarity.ingestion import extraction_options
+
+        # Single mesh load for geometry, thumbnail and opted-in fingerprints.
+        options = extraction_options(get_session_factory())
         return mesh_operations.analyze_mesh(
             path,
             report=report,
             file_type=file_type.value,
             output_format="WEBP",
+            **options,
         )
 
     return IngestionStrategy(

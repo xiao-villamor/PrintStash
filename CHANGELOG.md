@@ -2,11 +2,15 @@
 
 ## Unreleased
 
-### Development
+### Added
 
-- Started the Similar Models geometry core with versioned retrieval fingerprints
-  and deterministic surface descriptors. Analysis runs and the review interface
-  remain under development; this does not enable similarity detection in the app.
+- **Similar Models** offers opt-in local geometry analysis, resumable library scans,
+  a filtered review queue and synchronized comparisons at shared physical scale.
+  Evidence confirmation keeps each Model, Artifact and Revision separate; verified
+  part/plate matches can create or extend an existing Multipart Model.
+- Full installations can analyze STEP assemblies and use operator-supplied CPU
+  ONNX models for local text-to-shape or Model queries. Learned neighbors remain
+  separate from verified geometry, and analysis never downloads model weights.
 
 ### Fixed
 

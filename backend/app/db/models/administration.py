@@ -48,6 +48,9 @@ class SystemConfig(SQLModel, table=True):
     storage_identity: Optional[str] = Field(default=None, max_length=64, index=True)
 
     artifact_cache_policy_json: Optional[str] = Field(default=None)
+    similarity_settings_json: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
 
     # Local storage paths (overridden at runtime)
     data_dir: Optional[str] = Field(default=None, max_length=1024)

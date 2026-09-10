@@ -16,6 +16,11 @@ on:
   schedule:
     - cron: "27 4 * * *"
   workflow_dispatch:
+    inputs:
+      native_clip:
+        description: "Validate the pinned, preplaced real CLIP export on both native architectures"
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -25,6 +30,52 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  similarity-native:
+    name: Similarity native (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install full native dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - name: Check STEP and original ONNX contracts
+        working-directory: backend
+        run: uv run pytest -q tests/integration/modules/media/test_step_geometry.py tests/integration/modules/inference/test_local.py tests/integration/modules/inference/test_worker.py tests/integration/modules/similarity/test_embeddings.py
+      # Only an explicit workflow dispatch retrieves this pinned public export.
+      # Neither the application nor the ordinary PR tests download models.
+      - name: Preplace optional real CLIP export
+        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
+        env:
+          CLIP_DIR: ${{ runner.temp }}/similarity-clip
+        run: |
+          mkdir -p "$CLIP_DIR"
+          base='https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a'
+          curl --fail --location --retry 3 "$base/onnx/vision_model_quantized.onnx" --output "$CLIP_DIR/vision_model_quantized.onnx"
+          curl --fail --location --retry 3 "$base/onnx/text_model_quantized.onnx" --output "$CLIP_DIR/text_model_quantized.onnx"
+          curl --fail --location --retry 3 "$base/tokenizer.json" --output "$CLIP_DIR/tokenizer.json"
+          cp backend/tests/fixtures/embeddings/clip-vit-base-patch32-int8.json "$CLIP_DIR/manifest.json"
+      - name: Validate real CLIP towers and standalone text search
+        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
+        working-directory: backend
+        env:
+          SIMILARITY_CLIP_ASSETS: ${{ runner.temp }}/similarity-clip
+        run: uv run pytest -q tests/integration/modules/inference/preplaced_clip.py
+
   critical-capabilities:
     name: Critical capabilities
     runs-on: ubuntu-latest

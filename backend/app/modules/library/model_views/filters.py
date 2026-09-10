@@ -106,6 +106,11 @@ def _apply_structured_filters(stmt, filters: ModelFilters):
 def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
     stmt = select(Model).where(live(Model), Model.hash != SENTINEL_MODEL_HASH)
     stmt = _apply_model_access(stmt, session, user)
+    if filters.has_similar_candidates is not None:
+        from app.modules.similarity.projections import has_open_candidates
+
+        predicate = has_open_candidates(session, user)
+        stmt = stmt.where(predicate if filters.has_similar_candidates else ~predicate)
     if filters.favorites:
         stmt = stmt.where(
             Model.id.in_(  # type: ignore[union-attr]

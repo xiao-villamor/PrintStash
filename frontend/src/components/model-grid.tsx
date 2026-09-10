@@ -392,6 +392,7 @@ const STRUCTURED_FILTER_KEYS = [
   "print_outcome",
   "storage",
   "printed",
+  "has_similar_candidates",
 ] as const;
 type StructuredFilterKey = (typeof STRUCTURED_FILTER_KEYS)[number];
 
@@ -824,6 +825,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     print_outcome: searchParams.getAll("print_outcome"),
     storage: searchParams.getAll("storage"),
     printed: searchParams.getAll("printed"),
+    has_similar_candidates: searchParams.getAll("has_similar_candidates"),
   } satisfies Record<StructuredFilterKey, string[]>;
   // The enum-valued filters, parsed down to the values the API accepts.
   const fileTypes = parseFilterValues(structured.file_type, ARTIFACT_FILE_TYPES);
@@ -866,6 +868,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     print_outcome: printOutcomes,
     storage: storageKinds,
     printed: structured.printed[0] ? structured.printed[0] === "yes" : undefined,
+    has_similar_candidates: structured.has_similar_candidates[0]
+      ? structured.has_similar_candidates[0] === "yes"
+      : undefined,
     uploaded_after: searchParams.get("uploaded_after") || undefined,
     uploaded_before: searchParams.get("uploaded_before") || undefined,
   };
@@ -895,6 +900,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     ] as const) {
       for (const value of filters[key] ?? []) params.append(key, value);
     }
+    if (filters.has_similar_candidates != null)
+      params.set("has_similar_candidates", filters.has_similar_candidates ? "yes" : "no");
     if (filters.printed != null) params.set("printed", filters.printed ? "yes" : "no");
     if (filters.uploaded_after) params.set("uploaded_after", filters.uploaded_after);
     if (filters.uploaded_before) params.set("uploaded_before", filters.uploaded_before);
@@ -947,6 +954,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       print_outcome: printOutcomes,
       storage: storageKinds,
       printed: structured.printed[0] ? structured.printed[0] === "yes" : null,
+      has_similar_candidates: structured.has_similar_candidates[0]
+        ? structured.has_similar_candidates[0] === "yes"
+        : null,
       uploaded_after: searchParams.get("uploaded_after"),
       uploaded_before: searchParams.get("uploaded_before"),
     };
@@ -957,6 +967,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     activeSavedView !== null &&
     JSON.stringify({
       ...activeSavedView.filters,
+      has_similar_candidates: activeSavedView.filters.has_similar_candidates ?? null,
       collection: activeSavedView.filters.collection ?? null,
       q: activeSavedView.filters.q ?? null,
       printer_id: activeSavedView.filters.printer_id ?? null,
@@ -1619,6 +1630,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       "print_outcome",
       "storage",
       "printed",
+      "has_similar_candidates",
       "uploaded_after",
       "uploaded_before",
     ])

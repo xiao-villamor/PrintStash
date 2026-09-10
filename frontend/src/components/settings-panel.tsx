@@ -69,6 +69,7 @@ import { ProviderConnectionsPanel } from "@/components/provider-connections-pane
 import { NotificationsPanel } from "@/components/notifications-panel";
 import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
+import { SimilaritySettingsPanel } from "@/components/similarity-settings-panel";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
@@ -3360,7 +3361,12 @@ export function SettingsPanel() {
               </div>
             )}
 
-            {activeSection === "maintenance" && user?.is_superuser && <MaintenancePanel />}
+            {activeSection === "maintenance" && user?.is_superuser && (
+              <>
+                <MaintenancePanel />
+                <SimilaritySettingsPanel />
+              </>
+            )}
 
             {activeSection === "libraries" && (
               <div className="space-y-6 animate-panel-in">

@@ -198,6 +198,51 @@
           "title": "@critical configures WebDAV through restart with safe GC preview"
         }
       ]
+    },
+    {
+      "id": "similarity-exact-precision",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "node": "TestFrozenCorpus::test_meets_exact_class_precision"
+        }
+      ]
+    },
+    {
+      "id": "similarity-surface-recall",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "node": "TestFrozenCorpus::test_meets_surface_class_recall"
+        }
+      ]
+    },
+    {
+      "id": "similarity-washer-false-exact",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "node": "TestFrozenCorpus::test_rejects_false_exact_washers"
+        }
+      ]
+    },
+    {
+      "id": "similarity-independent-browser",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/similarity.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical reviews similar Models without grouping or changing Artifacts"
+        }
+      ]
     }
   ]
 }

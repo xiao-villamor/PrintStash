@@ -230,6 +230,21 @@ class Settings(BaseSettings):
     # an explicit CPU/RAM/storage tradeoff on self-hosted machines.
     model_thumbnail_width: int = Field(default=640, ge=320, le=1280)
 
+    # Similar Models remains opt-in. Its geometry budget is bounded by the
+    # renderer's adaptive budget and the descriptor implementation's own cap.
+    similarity_enabled: bool = False
+    similarity_fingerprint_on_ingest: bool = True
+    similarity_minimum_confidence: float = Field(default=0.9, ge=0.5, le=1.0)
+    similarity_triangle_cap: int = Field(default=200_000, ge=100, le=200_000)
+    similarity_sample_points: int = Field(default=5000, ge=256, le=5000)
+    similarity_max_candidates: int = Field(default=20, ge=1, le=100)
+    similarity_page_size: int = Field(default=100, ge=1, le=1000)
+    similarity_schedule_hours: int = Field(default=0, ge=0, le=168)
+    similarity_embeddings_enabled: bool = False
+    embedding_local_model_dir: str = ""
+    embedding_model_key: str = ""
+    embedding_onnx_threads: int = Field(default=1, ge=1, le=4)
+
     # For large 3MF files, prefer the slicer-embedded preview before handing the
     # archive to trimesh, whose XML loader is the dominant memory cost. When on
     # (default), a 3MF whose estimate exceeds the adaptive cap uses its embedded

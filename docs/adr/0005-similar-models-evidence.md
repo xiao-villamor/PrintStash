@@ -1,6 +1,7 @@
 # Similar Models fingerprints retrieve evidence without defining identity
 
-Status: Accepted; first geometry-core increment implemented. Remaining work is
+Status: Accepted; the standalone geometry, review, composition, STEP and local
+inference workflows are implemented. Remaining acceptance work is
 tracked in the [coverage matrix](0005-similar-models-coverage.md) and the
 [implementation plan for #154](https://github.com/xiao-villamor/PrintStash/issues/154#issuecomment-5622781316).
 
@@ -13,8 +14,10 @@ produce `identical_geometry`, confidence 1.0, or permission to group content.
 The geometric core lives in `printstash_core.mesh.similarity`. It accepts loaded
 triangle arrays and uses NumPy through the existing optional mesh extra. File
 parsing, unit conversion, storage leases, authorization and shared compute
-admission stay with product adapters. This keeps geometry available to lite and
-avoids introducing a second learned-inference runtime beside #166.
+admission stay with product adapters. This keeps geometry available to lite.
+The revised independent plan includes a minimal local inference owner, provider
+contract and durable Space/Generation/vector store. A later AI Search platform
+can adopt these contracts and rows; Similar Models does not wait for that issue.
 
 The first recipe cleans coincident vertices and duplicate/degenerate triangles
 on a copy, centers on surface area, and computes exact surface covariance. Vertex
@@ -38,15 +41,49 @@ The recipe and NumPy version accompany the result. A committed synthetic golden
 pins the recipe; changed output requires inspection and an algorithm version
 decision, never automatic golden replacement.
 
-Every result is currently `partial`. SH has no calibrated projection basis;
-view descriptors, hull ratios, volumetric inertia and Component extraction are
-explicitly unavailable. Surface covariance ratios are named as such, not passed
-off as volumetric inertia. Volume is absent for open/inconsistently wound or
-zero-volume surfaces; self-intersection validation remains outside this initial
-retrieval operation. These limitations prohibit treating the increment as T0
-completion or using its outputs for exact confirmation.
+The application recipe is `geometry-v2-sh5f4577c4`. Complete meshes include
+hull/fill ratios, volumetric inertia where defined, deterministic views and the
+frozen spherical-harmonic projection. Open, inconsistent or oversized geometry
+retains explicit unavailable measurements. Oversized STL sampling is always
+partial and cannot provide exact keys or exact-equivalence confirmation. STEP
+uses an isolated OCP process in the full profile, with millimetre conversion and
+a fixed tessellation recipe; lite reports the capability as unavailable.
 
-Later application stages retain the plan's separate review state/freshness,
-multiple observations per Model pair, resumable checkpoints and shared leases.
-Family confirmation uses #155; composition uses the Multipart owner; learned
-descriptors use #166. None of those workflows is implemented in this increment.
+Independent verification uses full triangle correspondence for exact classes.
+Surface registration and sampled distances retain seeds, counts and tolerances;
+sampled Hausdorff is not a bound on every point of the continuous surface.
+Voxel overlap uses the recorded orthographic parity-fill recipe. Intersecting
+shells and non-manifold inputs need human review. Confidence orders evidence;
+it is not a calibrated probability that two Models are interchangeable.
+The licensed, design-separated corpus and versioned evaluation golden are
+recorded beside the core fixtures. Export/repair quality and hardware performance
+are separate claims, with separate acceptance evidence.
+
+`modules.similarity` owns input-versioned fingerprints, indexed bounded retrieval,
+multiple observations per Model pair, run checkpoints, source freshness and
+append-only review decisions. `runtime.similarity` owns wakeups and maintenance
+drain. Both thumbnail work and similarity analysis share compute admission;
+`artifact_content` owns materialization and source leases. A lost run/source
+lease fences publication, and restarts resume the same committed run.
+
+Review state and freshness are independent: a source edit makes evidence stale
+without erasing a human confirmation or rejection. An algorithm change creates
+a new proposal linked to the preceding candidate; reruns of the same algorithm
+preserve its human decision. Both endpoints require EDIT access. Evidence-only
+confirmation preserves Models and Revisions. Verified component/plate proposals
+use the existing Multipart owner in the same transaction as their decision,
+including preservation of existing Choices when appending to a composition.
+
+Family confirmation remains conditional integration C-FAMILY. The capability
+is false and direct requests fail without writes until a real Family resolver
+exists. The independent schema has no foreign keys to absent Family tables.
+
+`printstash_core.inference` defines the framework-free embedding contract.
+`modules.inference` owns a local CPU adapter, immutable Space/Generation rows,
+native little-endian float32 vectors and bounded cosine queries. Preplaced
+manifest-pinned models must pass digest, signature and canary checks. No model
+is downloaded during analysis, and no geometry or rendered views leave the
+server. CLIP supports text-to-shape; image-only DINO supports Model queries.
+Semantic neighbors are never promoted to exact geometry without geometric
+verification. A future search platform may adopt the durable native vectors
+without re-embedding; model/recipe changes require an explicit new generation.

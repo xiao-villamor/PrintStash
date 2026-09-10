@@ -20,6 +20,8 @@ def analyze_mesh(
     report: Callable[[str], None] | None = None,
     file_type: str | None = None,
     output_format: Literal["PNG", "WEBP"] = "PNG",
+    include_fingerprint: bool = False,
+    triangle_cap: int = 200_000,
 ) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
     """Extract geometry and render a thumbnail with a single mesh load.
 
@@ -39,11 +41,17 @@ def analyze_mesh(
             reason="ingestion",
             report=report,
             output_format=output_format,
+            include_fingerprint=include_fingerprint,
+            triangle_cap=triangle_cap,
         )
     )
     thumb = result.image
     if thumb is not None and result.strategy.value in ("streaming", "fallback"):
         thumb = FallbackThumbnail(thumb, complete=result.complete)
+    if include_fingerprint:
+        from app.modules.media.fingerprints import GeometryMetadata
+
+        return GeometryMetadata(result.geometry, result.fingerprint_result), thumb
     return result.geometry, thumb
 
 

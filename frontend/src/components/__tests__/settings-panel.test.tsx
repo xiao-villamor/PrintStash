@@ -377,8 +377,10 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.type(screen.getByLabelText("Username"), "maker");
-      await user.type(screen.getByLabelText("Initial password"), "Password123");
+      await user.click(screen.getByLabelText("Username"));
+      await user.paste("maker");
+      await user.click(screen.getByLabelText("Initial password"));
+      await user.paste("Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -396,9 +398,12 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.type(screen.getByLabelText("Username"), "maker");
-      await user.type(screen.getByLabelText("Email"), "maker@example.test");
-      await user.type(screen.getByLabelText("Initial password"), "Password123");
+      await user.click(screen.getByLabelText("Username"));
+      await user.paste("maker");
+      await user.click(screen.getByLabelText("Email"));
+      await user.paste("maker@example.test");
+      await user.click(screen.getByLabelText("Initial password"));
+      await user.paste("Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -415,9 +420,11 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=access" });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.type(screen.getByLabelText("Username"), "maker");
+      await user.click(screen.getByLabelText("Username"));
+      await user.paste("maker");
 
-      await user.type(screen.getByLabelText("Initial password"), "short");
+      await user.click(screen.getByLabelText("Initial password"));
+      await user.paste("short");
 
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
     });
@@ -1563,7 +1570,8 @@ describe("SettingsPanel", () => {
         name: "Verify backup and quarantine",
       });
       expect(approve).toBeDisabled();
-      await user.type(screen.getByLabelText("Confirm GC plan digest"), GC_PLAN.digest);
+      await user.click(screen.getByLabelText("Confirm GC plan digest"));
+      await user.paste(GC_PLAN.digest);
       expect(approve).toBeEnabled();
       await user.click(approve);
 

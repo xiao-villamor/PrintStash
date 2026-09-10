@@ -29,7 +29,7 @@ from app.db.models import (
     ThumbnailRenderSlot,
 )
 from app.db.session import SessionFactory, get_session_factory
-from app.modules.media import thumbnail
+from app.modules.media import compute_slots, thumbnail
 from app.modules.media.thumbnail_engine import (
     ThumbnailEngine,
     ThumbnailFailureReason,
@@ -171,74 +171,27 @@ def _publish_pointers(
             session.add(model)
 
 
-def _ensure_slots(session: Session) -> None:
-    def operation() -> None:
-        limit = max(int(settings.max_render_jobs), 1)
-        existing = set(session.exec(select(ThumbnailRenderSlot.slot_number)).all())
-        changed = False
-        for slot_number in range(1, limit + 1):
-            if slot_number not in existing:
-                session.add(ThumbnailRenderSlot(slot_number=slot_number))
-                changed = True
-        if changed:
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-
-    _retry_sqlite_lock(session, operation)
-
-
 def _acquire_slot(
     session: Session, generation: ThumbnailGeneration, token: str
 ) -> ThumbnailRenderSlot | None:
-    _ensure_slots(session)
-    now = utcnow()
-    limit = max(int(settings.max_render_jobs), 1)
-    generation_id = generation.id
-    expires_at = now + timedelta(
-        seconds=max(int(settings.mesh_stream_timeout_seconds) + 30, 60)
+    return compute_slots.acquire(
+        session,
+        token,
+        generation_id=generation.id,
+        lease_seconds=min(
+            max(
+                int(
+                    max(
+                        settings.mesh_stream_timeout_seconds,
+                        settings.mesh_step_timeout_seconds,
+                    )
+                )
+                + 30,
+                60,
+            ),
+            900,
+        ),
     )
-
-    def operation() -> int | None:
-        candidates = session.exec(
-            select(ThumbnailRenderSlot)
-            .where(
-                ThumbnailRenderSlot.slot_number <= limit,  # type: ignore[operator]
-                or_(
-                    ThumbnailRenderSlot.lease_token.is_(None),  # type: ignore[union-attr]
-                    ThumbnailRenderSlot.lease_expires_at < now,  # type: ignore[operator]
-                ),
-            )
-            .order_by(ThumbnailRenderSlot.slot_number)  # type: ignore[arg-type]
-            .with_for_update(skip_locked=True)
-        ).all()
-        for candidate in candidates:
-            assert candidate.id is not None
-            claimed = session.connection().execute(
-                update(ThumbnailRenderSlot)
-                .where(
-                    ThumbnailRenderSlot.id == candidate.id,  # type: ignore[arg-type]
-                    or_(
-                        ThumbnailRenderSlot.lease_token.is_(None),  # type: ignore[union-attr]
-                        ThumbnailRenderSlot.lease_expires_at < now,  # type: ignore[operator]
-                    ),
-                )
-                .values(
-                    lease_token=token,
-                    generation_id=generation_id,
-                    lease_expires_at=expires_at,
-                    updated_at=now,
-                )
-            )
-            if claimed.rowcount == 1:
-                session.commit()
-                return candidate.id
-            session.rollback()
-        return None
-
-    slot_id = _retry_sqlite_lock(session, operation)
-    return session.get(ThumbnailRenderSlot, slot_id) if slot_id is not None else None
 
 
 def _claim_generation(
@@ -301,18 +254,7 @@ def _lease_is_owned(
 
 
 def _release_slot(session: Session, slot_id: int | None, token: str) -> None:
-    if slot_id is None:
-        return
-    slot = _retry_sqlite_lock(
-        session, lambda: session.get(ThumbnailRenderSlot, slot_id)
-    )
-    if slot is None or slot.lease_token != token:
-        return
-    slot.generation_id = None
-    slot.lease_token = None
-    slot.lease_expires_at = None
-    slot.updated_at = utcnow()
-    session.add(slot)
+    compute_slots.release(session, slot_id, token)
 
 
 def _mark_failure(

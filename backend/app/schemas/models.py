@@ -123,7 +123,13 @@ class PartGroupsReplace(BaseModel):
     groups: List[PartGroupWrite] = Field(max_length=50)
 
 
+class ModelSimilarityRead(BaseModel):
+    open_candidates: int = 0
+    confirmed: int = 0
+
+
 class ModelRead(BaseModel):
+    similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
     slug: str
@@ -224,6 +230,7 @@ class PrintSummaryRead(BaseModel):
 
 
 class ModelListItem(BaseModel):
+    similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
     slug: str
@@ -291,6 +298,7 @@ class ModelFilters(BaseModel):
     storage: list[Literal["vault", "external"]] = Field(default_factory=list)
     uploaded_after: Optional[datetime] = None
     uploaded_before: Optional[datetime] = None
+    has_similar_candidates: Optional[bool] = None
 
 
 class FacetValueRead(BaseModel):

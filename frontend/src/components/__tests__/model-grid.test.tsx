@@ -667,7 +667,7 @@ describe("ModelBrowser", () => {
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("button", { name: /Select/ }));
 
-      await user.click(screen.getAllByRole("checkbox")[0]);
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
 
       // The count renders in both the desktop toolbar and the mobile bar.
       expect(await screen.findAllByText(/1 selected/)).not.toHaveLength(0);
@@ -865,7 +865,7 @@ describe("ModelBrowser", () => {
 
       await user.click(screen.getByRole("button", { name: "Done" }));
 
-      expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+      expect(screen.queryAllByRole("checkbox", { name: /^Select / })).toHaveLength(0);
     });
 
     it("selects every model the current filters match", async () => {
@@ -1001,7 +1001,7 @@ describe("ModelBrowser", () => {
     async function selectOneModel(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("button", { name: "Select" }));
-      await user.click(screen.getAllByRole("checkbox")[0]);
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
     }
 
     it("tags the selection in one request", async () => {
@@ -1551,7 +1551,7 @@ describe("ModelBrowser", () => {
       });
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("button", { name: "Select" }));
-      await user.click(screen.getAllByRole("checkbox")[0]);
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
@@ -1578,7 +1578,7 @@ describe("ModelBrowser", () => {
       });
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("button", { name: "Select" }));
-      await user.click(screen.getAllByRole("checkbox")[0]);
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");

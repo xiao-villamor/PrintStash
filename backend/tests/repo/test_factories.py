@@ -678,3 +678,137 @@ class TestCapacityFactories:
             "factory-test", [CapacityResource.for_quota("test", 10, 100, role="test")]
         )
         assert manager.reserved_bytes() == {"quota:test": 10}
+
+
+class TestSimilarityFactories:
+    def test_leased_fingerprint_cannot_be_claimed(self, db_session):
+        from app.modules.similarity.fingerprints import claim
+
+        file = factories.build_file(db_session, factories.build_model(db_session))
+        factories.build_geometry_fingerprint(db_session, file, leased=True)
+
+        assert claim(db_session, file) is None
+
+    def test_pending_fingerprint_can_be_claimed(self, db_session):
+        from app.modules.similarity.fingerprints import claim
+
+        file = factories.build_file(db_session, factories.build_model(db_session))
+        row = factories.build_geometry_fingerprint(db_session, file)
+
+        assert claim(db_session, file)[0] == row.id
+
+    def test_active_run_conflicts_with_the_same_scope(self, db_session):
+        from app.core.errors import OperationError
+        from app.modules.similarity import configuration, runs
+
+        actor = factories.build_user(db_session, superuser=True)
+        configuration.update_settings(db_session, actor, {"enabled": True})
+        factories.build_similarity_run(db_session, actor)
+
+        with pytest.raises(OperationError, match="similarity_run_active"):
+            runs.start(db_session, actor)
+
+    def test_completed_run_is_not_claimed(self, db_session):
+        from app.modules.similarity.runs import claim
+
+        factories.build_similarity_run(
+            db_session, factories.build_user(db_session), active=False
+        )
+
+        assert claim(db_session) is None
+
+    def test_observations_keep_ordered_model_lineage(self, db_session):
+        from app.modules.similarity.candidates import project
+
+        first, second = (
+            factories.build_model(db_session),
+            factories.build_model(db_session),
+        )
+        left = factories.build_geometry_fingerprint(
+            db_session, factories.build_file(db_session, first), state="ready"
+        )
+        right = factories.build_geometry_fingerprint(
+            db_session, factories.build_file(db_session, second), state="ready"
+        )
+        candidate = factories.build_similarity_candidate(db_session, second, first)
+        factories.build_similarity_observation(db_session, candidate, right, left)
+
+        result = project(db_session, candidate, detail=True)
+
+        assert result["model_a"]["id"] == first.id
+        assert result["observations"][0]["source_a"]["file_id"] == left.file_id
+
+    def test_decisions_have_independent_request_identities(self, db_session):
+        from app.db.models import SimilarityReviewDecision
+
+        candidate = factories.build_similarity_candidate(
+            db_session,
+            factories.build_model(db_session),
+            factories.build_model(db_session),
+        )
+        actor = factories.build_user(db_session)
+        first = factories.build_similarity_decision(db_session, candidate, actor)
+        second = factories.build_similarity_decision(db_session, candidate, actor)
+
+        assert {
+            row.request_id for row in db_session.exec(select(SimilarityReviewDecision))
+        } == {first.request_id, second.request_id}
+        assert first.request_id != second.request_id
+
+    def test_space_roundtrips_the_public_contract(self, db_session):
+        import json
+
+        from printstash_core.inference import EmbeddingSpace
+
+        space = factories.build_embedding_space(db_session)
+
+        contract = EmbeddingSpace(**json.loads(space.config_json))
+
+        assert contract.config_hash == space.config_hash
+
+    def test_active_generation_is_queryable(self, db_session):
+        import json
+
+        from printstash_core.inference import EmbeddingSpace
+
+        from app.modules.inference.store import active_generation
+
+        space = factories.build_embedding_space(db_session)
+        generation = factories.build_index_generation(db_session, space)
+
+        assert (
+            active_generation(
+                db_session, EmbeddingSpace(**json.loads(space.config_json))
+            ).id
+            == generation.id
+        )
+
+    def test_retired_generation_is_not_queryable(self, db_session):
+        import json
+
+        from printstash_core.inference import EmbeddingSpace
+
+        from app.modules.inference.store import active_generation
+
+        space = factories.build_embedding_space(db_session)
+        factories.build_index_generation(db_session, space, active=False)
+
+        assert (
+            active_generation(
+                db_session, EmbeddingSpace(**json.loads(space.config_json))
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize("component", [0, 1, 2048])
+    def test_vectors_encode_component_identity(self, db_session, component):
+        from app.modules.inference.store import unit_component
+
+        space = factories.build_embedding_space(db_session)
+        generation = factories.build_index_generation(db_session, space)
+        file = factories.build_file(db_session, factories.build_model(db_session))
+        vector = factories.build_passage_vector(
+            db_session, generation, file, component_index=component
+        )
+
+        assert unit_component(vector.unit_key) == component

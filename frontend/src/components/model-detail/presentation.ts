@@ -14,7 +14,14 @@ import {
 } from "@/lib/format";
 import { MetadataPreferences } from "@/lib/metadata-preferences";
 
-export type TabKey = "overview" | "source" | "settings" | "revisions" | "files" | "history";
+export type TabKey =
+  | "overview"
+  | "source"
+  | "settings"
+  | "revisions"
+  | "files"
+  | "history"
+  | "similar";
 
 export const TABS: { key: TabKey; label: string }[] = [
   {
@@ -51,6 +58,12 @@ export const TABS: { key: TabKey; label: string }[] = [
     key: "history",
     get label() {
       return uiText("History");
+    },
+  },
+  {
+    key: "similar",
+    get label() {
+      return uiText("similarity.tab");
     },
   },
 ];

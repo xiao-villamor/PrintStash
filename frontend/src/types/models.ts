@@ -63,7 +63,13 @@ export interface FileRevisionUpdate {
   is_recommended?: boolean;
 }
 
+export interface ModelSimilarityRead {
+  open_candidates: number;
+  confirmed: number;
+}
+
 export interface ModelRead {
+  similarity?: ModelSimilarityRead;
   id: number;
   name: string;
   slug: string;
@@ -155,6 +161,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  similarity?: ModelSimilarityRead;
   id: number;
   name: string;
   slug: string;
@@ -410,6 +417,7 @@ export interface IngestJobStatus {
   completion?: "complete" | "partial" | null;
   thumbnail_status?: "generated" | "fallback_generated" | "skipped" | "failed" | null;
   thumbnail_reason?: string | null;
+  fingerprint_status?: "ready" | "partial" | "unsupported" | "failed" | "pending" | null;
   retryable?: boolean;
   failed_items?: Array<{ name: string; reason: string; retryable: boolean }>;
 }
@@ -573,6 +581,7 @@ export interface ListModelsParams {
   slicer_name?: string[];
   printer_model?: string[];
   revision_status?: FileRevisionStatus[];
+  has_similar_candidates?: boolean;
   printed?: boolean;
   print_outcome?: PrintJobState[];
   storage?: ("vault" | "external")[];
@@ -624,6 +633,7 @@ export interface SavedViewFilters {
   slicer_name?: string[];
   printer_model?: string[];
   revision_status?: FileRevisionStatus[];
+  has_similar_candidates?: boolean | null;
   printed?: boolean | null;
   print_outcome?: PrintJobState[];
   storage?: ("vault" | "external")[];

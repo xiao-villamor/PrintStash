@@ -1,0 +1,2 @@
+# Preserve upstream mesh bytes and digests, including ASCII STL line endings.
+*.stl -text -diff

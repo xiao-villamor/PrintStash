@@ -122,6 +122,19 @@ def fingerprint_mesh(
     """
     import numpy as np
 
+    validate_mesh_arrays(vertices, faces, budget)
+    try:
+        with np.errstate(over="raise", invalid="raise", divide="raise"):
+            return _fingerprint(vertices, faces)
+    except (FloatingPointError, np.linalg.LinAlgError) as exc:
+        raise GeometryError("numeric_range") from exc
+
+
+def validate_mesh_arrays(
+    vertices: NDArray[Any], faces: NDArray[Any], budget: FingerprintBudget
+) -> None:
+    import numpy as np
+
     for limit, ceiling in ((budget.max_vertices, 600_000), (budget.max_faces, 200_000)):
         if type(limit) is not int or not 1 <= limit <= ceiling:
             raise GeometryError("invalid_budget")
@@ -138,14 +151,10 @@ def fingerprint_mesh(
     if not len(faces):
         raise GeometryError("degenerate_surface")
 
-    try:
-        with np.errstate(over="raise", invalid="raise", divide="raise"):
-            return _fingerprint(vertices, faces)
-    except (FloatingPointError, np.linalg.LinAlgError) as exc:
-        raise GeometryError("numeric_range") from exc
 
-
-def _clean(vertices: NDArray[Any], faces: NDArray[Any]) -> tuple[FloatArray, IntArray]:
+def clean_mesh(
+    vertices: NDArray[Any], faces: NDArray[Any]
+) -> tuple[FloatArray, IntArray]:
     import numpy as np
 
     # Work only on referenced vertices: a stray unused coordinate must not
@@ -180,7 +189,7 @@ def _clean(vertices: NDArray[Any], faces: NDArray[Any]) -> tuple[FloatArray, Int
 def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint:
     import numpy as np
 
-    verts, tris = _clean(vertices, faces)
+    verts, tris = clean_mesh(vertices, faces)
     tri = verts[tris]
     areas = (
         np.linalg.norm(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]), axis=1)
@@ -227,7 +236,9 @@ def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint
         )
         sample_tri = tri / diagonal
     else:
-        keys, sample_tri, seed_data = _canonical_keys(normalized, tris, diagonal)
+        keys, sample_tri, seed_data = canonical_geometry_keys(
+            normalized, tris, diagonal
+        )
 
     seed = int.from_bytes(hashlib.sha256(seed_data).digest()[:8], "little")
     d2 = _d2(sample_tri, seed, diagonal)
@@ -285,7 +296,7 @@ def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint
     )
 
 
-def _canonical_keys(
+def canonical_geometry_keys(
     vertices: FloatArray, faces: IntArray, diagonal: float
 ) -> tuple[CanonicalKeys, FloatArray, bytes]:
     import numpy as np

@@ -14,9 +14,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Literal, Optional, Protocol
 
+from printstash_core.mesh.similarity import GeometryError
+
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.modules.media import mesh_render, stl_fallback, stl_streaming
+from app.modules.media.fingerprints import FingerprintResult, extract
+from app.modules.media.mesh_resources import (
+    ExpandedScene,
+    PreparedMesh,
+    load_3mf,
+    prepare_loaded_mesh,
+)
 
 logger = get_logger(__name__)
 
@@ -53,6 +62,8 @@ class ThumbnailRequest:
     reason: str = "ingestion"
     report: ProgressReporter | None = None
     output_format: Literal["PNG", "WEBP"] = "PNG"
+    include_fingerprint: bool = False
+    triangle_cap: int = 200_000
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,7 @@ class ThumbnailResult:
     failure_reason: ThumbnailFailureReason | None
     duration_ms: int
     peak_rss_bytes: int | None
+    fingerprint_result: FingerprintResult | None = None
 
 
 class ThumbnailMetricsSink(Protocol):
@@ -119,16 +131,25 @@ class ThumbnailEngine:
         failure: ThumbnailFailureReason | None = None
         image: bytes | None = None
         mesh: Any | None = None
+        prepared: PreparedMesh | None = None
+        fingerprint_result: FingerprintResult | None = None
 
         def report(label: str) -> None:
             if request.report is not None:
                 request.report(label)
 
+        if not 100 <= request.triangle_cap <= 200_000:
+            raise ValueError("invalid_triangle_cap")
         report("loading_mesh")
         if request.file_type is None:
             over_cap = mesh_processing._exceeds_cap(request.path)
         else:
             over_cap = mesh_processing._exceeds_cap(request.path, file_type=suffix)
+        if request.include_fingerprint and not over_cap:
+            estimate = mesh_processing._estimate_triangle_count(
+                request.path, file_type=suffix
+            )
+            over_cap = estimate is not None and estimate > request.triangle_cap
 
         try:
             with mesh_processing._render_semaphore():
@@ -145,13 +166,40 @@ class ThumbnailEngine:
                 # A thumbnail-only repair can return a validated embedded image
                 # without parsing the mesh archive. Ingestion still loads safe
                 # meshes once because it also needs exact geometry metadata.
-                if embedded is not None and not request.include_geometry:
+                if (
+                    embedded is not None
+                    and not request.include_geometry
+                    and not request.include_fingerprint
+                ):
                     image = embedded
                     strategy = ThumbnailStrategy.EMBEDDED
                     complete = True
                 else:
                     if not over_cap:
-                        if request.file_type is None:
+                        if request.include_fingerprint and suffix == ".3mf":
+                            try:
+                                prepared = load_3mf(request.path)
+                                mesh = prepared.whole_mesh
+                            except GeometryError as exc:
+                                fingerprint_result = FingerprintResult(
+                                    "failed", failure_code=exc.code
+                                )
+                        elif request.include_fingerprint and suffix in (
+                            ".step",
+                            ".stp",
+                        ):
+                            try:
+                                mesh = mesh_processing._load_step_mesh_isolated(
+                                    request.path, include_brep=True
+                                )
+                            except GeometryError as exc:
+                                fingerprint_result = FingerprintResult(
+                                    "unsupported"
+                                    if exc.code == "step_unavailable"
+                                    else "failed",
+                                    failure_code=exc.code,
+                                )
+                        elif request.file_type is None:
                             mesh = mesh_processing._load_mesh(request.path)
                         else:
                             mesh = mesh_processing._load_mesh(
@@ -161,6 +209,65 @@ class ThumbnailEngine:
                     report("extracting_geometry")
                     if request.include_geometry:
                         geometry = mesh_processing._geometry_from_mesh(mesh)
+
+                    if request.include_fingerprint and fingerprint_result is None:
+                        report("extracting_fingerprint")
+                        try:
+                            if prepared is None and mesh is not None:
+                                prepared = prepare_loaded_mesh(
+                                    mesh, file_type=suffix.lstrip(".")
+                                )
+                            if prepared is None and suffix == ".stl" and over_cap:
+                                import numpy as np
+                                import trimesh
+
+                                sampled = stl_fallback.sample_stl_geometry(
+                                    request.path,
+                                    max_triangles=min(10_000, request.triangle_cap),
+                                )
+                                if sampled is not None and sampled.sampled_triangles:
+                                    points = np.array(
+                                        sampled.coordinates, dtype=np.float64
+                                    ).reshape((-1, 3))
+                                    sampled_mesh = trimesh.Trimesh(
+                                        vertices=points,
+                                        faces=np.arange(len(points)).reshape((-1, 3)),
+                                        process=False,
+                                    )
+                                    prepared = PreparedMesh(
+                                        sampled_mesh,
+                                        ExpandedScene((), ()),
+                                        "stl",
+                                        complete=False,
+                                        failure_code="sampled_source",
+                                    )
+                            if (
+                                prepared is not None
+                                and len(prepared.whole_mesh.faces)
+                                > request.triangle_cap
+                            ):
+                                raise GeometryError("geometry_work_limit")
+                            fingerprint_result = (
+                                extract(prepared)
+                                if prepared is not None
+                                else FingerprintResult(
+                                    "unsupported"
+                                    if suffix in (".step", ".stp")
+                                    else "failed",
+                                    failure_code="step_unavailable"
+                                    if suffix in (".step", ".stp")
+                                    else "resource_limit"
+                                    if over_cap
+                                    else "invalid_source",
+                                )
+                            )
+                        except (GeometryError, ValueError, MemoryError) as exc:
+                            fingerprint_result = FingerprintResult(
+                                "failed",
+                                failure_code=exc.code
+                                if isinstance(exc, GeometryError)
+                                else "analysis_failed",
+                            )
 
                     report("rendering_thumbnail")
                     if embedded is not None:
@@ -276,6 +383,7 @@ class ThumbnailEngine:
                             else ThumbnailFailureReason.RENDERER_NO_OUTPUT
                         )
         finally:
+            prepared = None
             if mesh is not None:
                 del mesh
                 mesh_processing._reclaim_memory()
@@ -321,6 +429,7 @@ class ThumbnailEngine:
             failure_reason=failure,
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss,
+            fingerprint_result=fingerprint_result,
         )
 
 

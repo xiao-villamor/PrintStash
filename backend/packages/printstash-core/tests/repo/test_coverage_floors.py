@@ -29,7 +29,7 @@ REPORT = PACKAGE_ROOT / "coverage.json"
 LANE = "./scripts/test.sh coverage"
 
 # Two-sided: may not fall, and must be raised once the suite clears it by the slack.
-TOTAL_FLOOR = 98.8
+TOTAL_FLOOR = 99.03
 TOTAL_SLACK = 0.25
 
 # Every module on its own. There is no debt list: nothing in this package is below

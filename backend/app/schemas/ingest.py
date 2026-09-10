@@ -20,6 +20,9 @@ ImportCompletion = Literal[
     "complete",
     "partial",
 ]
+FingerprintStatus = Literal[
+    "pending", "ready", "partial", "unsupported", "failed", "stale", "skipped"
+]
 ThumbnailStatus = Literal[
     "generated",
     "fallback_generated",
@@ -162,6 +165,7 @@ class IngestJobStatus(BaseModel):
     skipped: int = 0
     failed: int = 0
     completion: Optional[ImportCompletion] = None
+    fingerprint_status: Optional[FingerprintStatus] = None
     thumbnail_status: Optional[ThumbnailStatus] = None
     thumbnail_reason: Optional[str] = None
     retryable: bool = False

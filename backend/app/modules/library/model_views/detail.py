@@ -25,6 +25,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.modules.library import provenance
+from app.modules.similarity.projections import summaries as similarity_summaries
 from app.schemas.models import (
     ModelRead,
 )
@@ -149,6 +150,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
     )
 
     return ModelRead(
+        similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
         id=m.id,  # type: ignore[arg-type]
         name=m.name,
         slug=m.slug,

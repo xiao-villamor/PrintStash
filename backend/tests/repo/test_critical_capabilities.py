@@ -18,6 +18,10 @@ from tests.paths import REPO_ROOT
 
 MANIFEST = REPO_ROOT / "critical-capabilities.json"
 REQUIRED_CAPABILITY_IDS = {
+    "similarity-exact-precision",
+    "similarity-surface-recall",
+    "similarity-washer-false-exact",
+    "similarity-independent-browser",
     "backup-browser-recovery",
     "backup-local-api",
     "backup-remote-only-api",

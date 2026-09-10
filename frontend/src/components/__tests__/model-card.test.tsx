@@ -250,3 +250,14 @@ describe("localized model card", () => {
     expect(screen.getByRole("button", { name: "Añadir etiquetas a Files" })).toBeVisible();
   });
 });
+
+describe("similarity badge", () => {
+  it("shows only the count provided for this Model", () => {
+    renderCard({ similarity: { open_candidates: 3, confirmed: 2 } });
+    expect(screen.getByText("3 similar to review")).toBeVisible();
+  });
+  it("omits an empty candidate badge", () => {
+    renderCard({ similarity: { open_candidates: 0, confirmed: 2 } });
+    expect(screen.queryByText(/similar to review/)).not.toBeInTheDocument();
+  });
+});

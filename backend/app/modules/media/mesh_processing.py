@@ -25,6 +25,7 @@ import threading
 import time
 import warnings
 import zipfile
+from contextlib import ExitStack
 from pathlib import Path, PurePosixPath
 from typing import Dict, Optional
 
@@ -403,15 +404,38 @@ def _step_memory_budget_bytes() -> int | None:
     return max(int(limit * fraction / _render_jobs_limit()), 1)
 
 
-def _load_step_mesh_isolated(path: Path):
+def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
     """Tessellate unknown-complexity STEP in a monitored child process (#72)."""
 
     import trimesh
 
-    with tempfile.TemporaryDirectory(prefix="printstash-step-") as tmp:
-        output = Path(tmp) / "mesh.glb"
+    with ExitStack() as resources:
+        tmp = resources.enter_context(
+            tempfile.TemporaryDirectory(prefix="printstash-step-")
+        )
+        if include_brep:
+            import secrets
+
+            from app.db.session import get_session_factory
+            from app.modules.storage.capacity import CapacityManager, CapacityResource
+
+            reservation = CapacityManager(get_session_factory()).reserve(
+                "step-tessellation:" + secrets.token_hex(12),
+                [
+                    CapacityResource.for_path(
+                        Path(tmp), 32 * 1024 * 1024, role="STEP tessellation"
+                    )
+                ],
+            )
+            resources.callback(reservation.release)
+        output = Path(tmp) / ("mesh.npz" if include_brep else "mesh.glb")
         env = os.environ.copy()
-        static_cap = int(settings.mesh_max_render_triangles)
+        env["PRINTSTASH_STEP_BREP"] = "1" if include_brep else "0"
+        static_cap = (
+            min(int(settings.mesh_max_render_triangles), 200_000)
+            if include_brep
+            else int(settings.mesh_max_render_triangles)
+        )
         ram_cap = _ram_triangle_cap(path.suffix.lower())
         env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(
             min(static_cap, ram_cap) if ram_cap is not None else static_cap
@@ -446,6 +470,20 @@ def _load_step_mesh_isolated(path: Path):
             time.sleep(0.05)
         _stdout, stderr = process.communicate()
         if failure or process.returncode != 0 or not output.is_file():
+            if include_brep:
+                from printstash_core.mesh.similarity import GeometryError
+
+                raise GeometryError(
+                    "tessellation_timeout"
+                    if failure == "timeout"
+                    else "worker_oom"
+                    if failure == "memory budget" or process.returncode == -9
+                    else "step_unavailable"
+                    if process.returncode == 7
+                    else "geometry_work_limit"
+                    if process.returncode == 3
+                    else "invalid_step"
+                )
             logger.warning(
                 "mesh_processing: isolated STEP tessellation failed for %s (%s%s)",
                 path.name,
@@ -453,6 +491,25 @@ def _load_step_mesh_isolated(path: Path):
                 f": {stderr.decode(errors='replace')[-300:]}" if stderr else "",
             )
             return None
+        if include_brep:
+            import json
+
+            import numpy as np
+            from printstash_core.mesh.similarity import GeometryError
+
+            if (
+                output.stat().st_size > 32 * 1024 * 1024
+                or output.with_suffix(".json").stat().st_size > 64 * 1024
+            ):
+                raise GeometryError("geometry_work_limit")
+            with np.load(output, allow_pickle=False) as arrays:
+                loaded = trimesh.Trimesh(
+                    vertices=arrays["vertices"], faces=arrays["faces"], process=False
+                )
+            loaded.metadata["brep"] = json.loads(
+                output.with_suffix(".json").read_text()
+            )
+            return loaded
         try:
             loaded = trimesh.load_mesh(str(output), process=False)
         except Exception:
@@ -467,7 +524,7 @@ def _load_step_mesh_isolated(path: Path):
         if isinstance(loaded, trimesh.Scene):
             meshes = [
                 geometry
-                for geometry in loaded.geometry.values()
+                for geometry in loaded.dump()
                 if isinstance(geometry, trimesh.Trimesh)
             ]
             return trimesh.util.concatenate(meshes) if meshes else None

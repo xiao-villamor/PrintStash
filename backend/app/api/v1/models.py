@@ -220,6 +220,7 @@ def list_models(
     ),
     uploaded_after: Optional[datetime] = Query(None),
     uploaded_before: Optional[datetime] = Query(None),
+    has_similar_candidates: Optional[bool] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(require_user),
@@ -247,6 +248,7 @@ def list_models(
         storage=storage_filter or [],
         uploaded_after=uploaded_after,
         uploaded_before=uploaded_before,
+        has_similar_candidates=has_similar_candidates,
     )
     return models_listing.list_items(
         session,
@@ -282,6 +284,7 @@ def page_models(
     ),
     uploaded_after: Optional[datetime] = Query(None),
     uploaded_before: Optional[datetime] = Query(None),
+    has_similar_candidates: Optional[bool] = Query(None),
     sort: ModelSort = Query(ModelSort.DATE_DESC),
     cursor: Optional[str] = Query(None, max_length=1024),
     limit: int = Query(60, ge=1, le=200),
@@ -310,6 +313,7 @@ def page_models(
         storage=storage_filter or [],
         uploaded_after=uploaded_after,
         uploaded_before=uploaded_before,
+        has_similar_candidates=has_similar_candidates,
     )
     try:
         return models_pagination.page_items(
@@ -348,6 +352,7 @@ def outliner_models(
     ),
     uploaded_after: Optional[datetime] = Query(None),
     uploaded_before: Optional[datetime] = Query(None),
+    has_similar_candidates: Optional[bool] = Query(None),
     limit: int = Query(500, ge=1, le=500),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
@@ -374,6 +379,7 @@ def outliner_models(
             storage=storage_filter or [],
             uploaded_after=uploaded_after,
             uploaded_before=uploaded_before,
+            has_similar_candidates=has_similar_candidates,
         ),
         limit=limit,
     )
@@ -400,6 +406,7 @@ def model_facets(
     ),
     uploaded_after: Optional[datetime] = Query(None),
     uploaded_before: Optional[datetime] = Query(None),
+    has_similar_candidates: Optional[bool] = Query(None),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelFacetsRead:
@@ -428,6 +435,7 @@ def model_facets(
             storage=storage_filter or [],
             uploaded_after=uploaded_after,
             uploaded_before=uploaded_before,
+            has_similar_candidates=has_similar_candidates,
         ),
     )
 
@@ -442,7 +450,9 @@ def star_model(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelStarRead:
-    return model_commands.star_model(model_id=model_id, current_user=current_user, session=session)
+    return model_commands.star_model(
+        model_id=model_id, current_user=current_user, session=session
+    )
 
 
 @router.delete(
@@ -455,7 +465,9 @@ def unstar_model(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelStarRead:
-    return model_commands.unstar_model(model_id=model_id, current_user=current_user, session=session)
+    return model_commands.unstar_model(
+        model_id=model_id, current_user=current_user, session=session
+    )
 
 
 @router.get(
@@ -1232,12 +1244,6 @@ async def import_print_jobs_from_printer(
         ) from exc
 
 
-
-
-
-
-
-
 @router.post(
     "/batch/move",
     response_model=ModelBatchResult,
@@ -1259,7 +1265,9 @@ def batch_move_models(
     # not per-item, because the destination is the same for everyone. Creating a
     # *missing* collection is deferred until we know at least one model will move
     # (below), so a fully-failed batch never leaves an orphan empty collection.
-    return model_commands.batch_move_models(payload=payload, current_user=current_user, session=session)
+    return model_commands.batch_move_models(
+        payload=payload, current_user=current_user, session=session
+    )
 
 
 @router.post(
@@ -1279,7 +1287,9 @@ def batch_tag_models(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelBatchResult:
-    return model_commands.batch_tag_models(payload=payload, current_user=current_user, session=session)
+    return model_commands.batch_tag_models(
+        payload=payload, current_user=current_user, session=session
+    )
 
 
 @router.patch(
@@ -1293,7 +1303,9 @@ def batch_set_revision_labels(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> RevisionBatchResult:
-    return model_commands.batch_set_revision_labels(payload=payload, current_user=current_user, session=session)
+    return model_commands.batch_set_revision_labels(
+        payload=payload, current_user=current_user, session=session
+    )
 
 
 @router.post(
@@ -1311,7 +1323,9 @@ def batch_delete_models(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelBatchResult:
-    return model_commands.batch_delete_models(payload=payload, current_user=current_user, session=session)
+    return model_commands.batch_delete_models(
+        payload=payload, current_user=current_user, session=session
+    )
 
 
 @router.patch(
@@ -1326,7 +1340,9 @@ def update_model(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    model_commands.update_model(model_id=model_id, payload=payload, current_user=current_user, session=session)
+    model_commands.update_model(
+        model_id=model_id, payload=payload, current_user=current_user, session=session
+    )
     return _detail_or_404(session, model_id, current_user)
 
 
@@ -1348,7 +1364,13 @@ def update_file_revision(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    model_commands.update_file_revision(model_id=model_id, file_id=file_id, payload=payload, current_user=current_user, session=session)
+    model_commands.update_file_revision(
+        model_id=model_id,
+        file_id=file_id,
+        payload=payload,
+        current_user=current_user,
+        session=session,
+    )
     return _detail_or_404(session, model_id, current_user)
 
 
@@ -1365,7 +1387,13 @@ def replace_file_tags(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    model_commands.replace_file_tags(model_id=model_id, file_id=file_id, payload=payload, current_user=current_user, session=session)
+    model_commands.replace_file_tags(
+        model_id=model_id,
+        file_id=file_id,
+        payload=payload,
+        current_user=current_user,
+        session=session,
+    )
     return _detail_or_404(session, model_id, current_user)
 
 

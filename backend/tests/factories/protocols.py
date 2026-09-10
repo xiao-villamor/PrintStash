@@ -28,14 +28,17 @@ from app.db.models import (
     CollectionTagLink,
     Document,
     DocumentKind,
+    EmbeddingSpace,
     ExternalLibrary,
     File,
     FileRevisionStatus,
     FileTagLink,
     FileType,
+    GeometryFingerprint,
     InboxItem,
     InboxItemState,
     InboxSourceKind,
+    IndexGeneration,
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
@@ -47,6 +50,7 @@ from app.db.models import (
     MultipartModelStar,
     MultipartPart,
     OwnedStorageObject,
+    PassageVector,
     Printer,
     PrinterFile,
     PrinterProvider,
@@ -55,6 +59,10 @@ from app.db.models import (
     PrintJobState,
     ProvenanceCapture,
     ShareLink,
+    SimilarityCandidate,
+    SimilarityCandidateObservation,
+    SimilarityReviewDecision,
+    SimilarityRun,
     StorageConnection,
     StorageConnectionPurpose,
     SystemConfig,
@@ -445,3 +453,63 @@ class MakeVaultMigrationObject(Protocol):
 
 class MakeVaultGeneration(Protocol):
     def __call__(self, run: VaultMigrationRun, **overrides: Any) -> VaultGeneration: ...
+
+
+class MakeGeometryFingerprint(Protocol):
+    def __call__(
+        self, file: File, *, leased: bool = False, **overrides: Any
+    ) -> GeometryFingerprint: ...
+
+
+class MakeSimilarityRun(Protocol):
+    def __call__(
+        self,
+        actor: User,
+        *,
+        model_ids: tuple[int, ...] = (),
+        active: bool = True,
+        **overrides: Any,
+    ) -> SimilarityRun: ...
+
+
+class MakeSimilarityCandidate(Protocol):
+    def __call__(
+        self, first: Model, second: Model, **overrides: Any
+    ) -> SimilarityCandidate: ...
+
+
+class MakeSimilarityObservation(Protocol):
+    def __call__(
+        self,
+        candidate: SimilarityCandidate,
+        first: GeometryFingerprint,
+        second: GeometryFingerprint,
+        **overrides: Any,
+    ) -> SimilarityCandidateObservation: ...
+
+
+class MakeSimilarityDecision(Protocol):
+    def __call__(
+        self, candidate: SimilarityCandidate, actor: User, **overrides: Any
+    ) -> SimilarityReviewDecision: ...
+
+
+class MakeEmbeddingSpace(Protocol):
+    def __call__(self, **overrides: Any) -> EmbeddingSpace: ...
+
+
+class MakeIndexGeneration(Protocol):
+    def __call__(
+        self, space: EmbeddingSpace, *, active: bool = True, **overrides: Any
+    ) -> IndexGeneration: ...
+
+
+class MakePassageVector(Protocol):
+    def __call__(
+        self,
+        generation: IndexGeneration,
+        file: File,
+        *,
+        component_index: int = 0,
+        **overrides: Any,
+    ) -> PassageVector: ...

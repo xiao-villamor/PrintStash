@@ -84,11 +84,15 @@ describe("RemoteStorageConnections", () => {
     });
     await screen.findByText(/No remote storage connected yet/);
 
-    await user.type(screen.getByLabelText("Connection name"), "Family Drive");
+    await user.click(screen.getByLabelText("Connection name"));
+    await user.paste("Family Drive");
     await user.selectOptions(screen.getByLabelText("Provider"), "gdrive");
-    await user.type(screen.getByLabelText("OAuth client ID"), "google-client");
-    await user.type(screen.getByLabelText("OAuth client secret"), "google-secret");
-    await user.type(screen.getByLabelText("Refresh token"), "google-refresh");
+    await user.click(screen.getByLabelText("OAuth client ID"));
+    await user.paste("google-client");
+    await user.click(screen.getByLabelText("OAuth client secret"));
+    await user.paste("google-secret");
+    await user.click(screen.getByLabelText("Refresh token"));
+    await user.paste("google-refresh");
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));

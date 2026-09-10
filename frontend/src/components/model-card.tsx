@@ -8,7 +8,7 @@ import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { FileText, Star, Tags } from "lucide-react";
+import { FileText, Star, Tags, ScanSearch } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { getAssetUrl, starModel, unstarModel } from "@/lib/api";
@@ -373,6 +373,12 @@ function ModelCardInner({
             />
           </div>
 
+          {Boolean(model.similarity?.open_candidates) && (
+            <p className="flex items-center gap-1 px-3 pb-2 text-xs text-primary">
+              <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />
+              {uiText("similarity.openCount", { count: model.similarity?.open_candidates ?? 0 })}
+            </p>
+          )}
           {/* Subtitle */}
           {(ps?.slicer_name || hasPrinter || ps?.material_type) && (
             <p className="px-3 pb-1 text-xs text-muted-foreground truncate">

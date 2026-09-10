@@ -47,10 +47,14 @@ async-db = [
 step = [
     # OpenCASCADE tessellation; 0.1.1 ships amd64 and arm64 Linux wheels.
     "cascadio>=0.1.1,<0.2",
+    "cadquery-ocp-novtk==7.9.3.1.1",
 ]
 full = [
+    "onnxruntime>=1.30,<2",
+    "tokenizers>=0.23,<0.24",
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
+    "cadquery-ocp-novtk==7.9.3.1.1",
     "opendal==0.47.6",
 ]
 storage-opendal = [
@@ -58,6 +62,8 @@ storage-opendal = [
     "opendal==0.47.6",
 ]
 dev = [
+    # Builds tiny licensed ONNX contract fixtures; never downloads model weights.
+    "onnx>=1.22,<2",
     # Shipped as the `async-db` extra for operators; installed for every
     # developer and CI run so the SQLite async contracts execute instead of
     # skipping. The capability-absent path is covered by patching find_spec.

@@ -567,7 +567,56 @@ def _apply_parts(
             session.add(choice_row)
 
 
-def save(
+def append_composition_in_transaction(
+    session: Session,
+    user: User,
+    aggregate: MultipartModel,
+    additions: list[MultipartPartWrite],
+) -> MultipartModel:
+    """Append reviewed parts while retaining every current Choice identity.
+
+    Resolve current composition under the owner's row lock. The caller supplies
+    additions only; it cannot remove or replace existing choices via this seam.
+    Duplicate names/members are validated by the normal complete-save contract.
+    """
+    session.exec(
+        select(MultipartModel)
+        .where(MultipartModel.id == aggregate.id)
+        .with_for_update()
+    ).one()
+    parts = session.exec(
+        select(MultipartPart)
+        .where(MultipartPart.multipart_model_id == aggregate.id)
+        .order_by(MultipartPart.sort_order, MultipartPart.id)
+    ).all()
+    choices = session.exec(
+        select(MultipartModelChoice)
+        .where(MultipartModelChoice.multipart_model_id == aggregate.id)
+        .order_by(MultipartModelChoice.sort_order, MultipartModelChoice.id)
+    ).all()
+    by_part: dict[int, list[MultipartChoiceWrite]] = defaultdict(list)
+    for choice in choices:
+        by_part[choice.multipart_part_id].append(
+            MultipartChoiceWrite(model_id=choice.model_id, choice_id=choice.id)
+        )
+    if len(parts) + len(additions) > 100:
+        raise MultipartModelError("multipart_part_limit")
+    if any(
+        choice.choice_id is not None
+        for part in additions
+        for choice in _choice_inputs(part)
+    ):
+        raise MultipartModelError("multipart_append_requires_new_choice")
+    preserved = [
+        MultipartPartWrite(
+            name=part.name, quantity=part.quantity, choices=by_part[part.id]
+        )
+        for part in parts
+    ]
+    return save_in_transaction(session, user, aggregate, [*preserved, *additions])
+
+
+def save_in_transaction(
     session: Session,
     user: User,
     aggregate: MultipartModel,
@@ -583,7 +632,7 @@ def save(
     cover_model_set: bool = False,
     cover_image_url: str | None = None,
     cover_image_set: bool = False,
-) -> MultipartModelRead:
+) -> MultipartModel:
     """Validate and persist metadata plus composition in one transaction."""
     prepared = _prepare_parts(session, user, aggregate, requested)
     if name is not None:
@@ -613,6 +662,44 @@ def save(
 
     aggregate.updated_at = utcnow()
     session.add(aggregate)
+    session.flush()
+    return aggregate
+
+
+def save(
+    session: Session,
+    user: User,
+    aggregate: MultipartModel,
+    requested: list[MultipartPartWrite],
+    *,
+    name: str | None = None,
+    slug: str | None = None,
+    description: str | None = None,
+    description_set: bool = False,
+    collection_id: int | None = None,
+    collection_set: bool = False,
+    cover_model_id: int | None = None,
+    cover_model_set: bool = False,
+    cover_image_url: str | None = None,
+    cover_image_set: bool = False,
+) -> MultipartModelRead:
+    """Validate and commit a composition through the transactional owner."""
+    save_in_transaction(
+        session,
+        user,
+        aggregate,
+        requested,
+        name=name,
+        slug=slug,
+        description=description,
+        description_set=description_set,
+        collection_id=collection_id,
+        collection_set=collection_set,
+        cover_model_id=cover_model_id,
+        cover_model_set=cover_model_set,
+        cover_image_url=cover_image_url,
+        cover_image_set=cover_image_set,
+    )
     session.commit()
     session.refresh(aggregate)
     return read(session, user, aggregate)
@@ -681,3 +768,46 @@ def candidates(
         for model in rows
         if model.id is not None
     ]
+
+
+def create_composition_in_transaction(
+    session: Session,
+    user: User,
+    *,
+    name: str,
+    collection_id: int | None,
+    parts: list[MultipartPartWrite],
+) -> MultipartModel:
+    """Create a reference-only composition; the command caller owns the commit."""
+    from printstash_core.files import slugify
+
+    normalized = " ".join(name.split())
+    if not normalized or len(normalized) > 255:
+        raise MultipartModelError("name_required")
+    if collection_id is not None:
+        collection = session.exec(
+            select(Collection).where(Collection.id == collection_id, live(Collection))
+        ).first()
+        if collection is None:
+            raise MultipartModelError("collection_not_found")
+    rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
+    slug = slugify(normalized)
+    if (
+        session.exec(
+            select(MultipartModel.id).where(MultipartModel.slug == slug)
+        ).first()
+        is not None
+    ):
+        raise MultipartModelError("multipart_model_slug_exists")
+    aggregate = MultipartModel(
+        name=normalized,
+        slug=slug,
+        collection_id=collection_id,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    # Validate the members before adding even an empty composition.
+    _prepare_parts(session, user, aggregate, parts)
+    session.add(aggregate)
+    session.flush()
+    return save_in_transaction(session, user, aggregate, parts)

@@ -28,6 +28,7 @@ from app.api.v1 import (
     saved_views,
     setup,
     share,
+    similarity,
     spoolman,
     storage,
     storage_connections,
@@ -51,6 +52,7 @@ api_router.include_router(ingest.router)
 api_router.include_router(inbox.router)
 api_router.include_router(maintenance.router)
 api_router.include_router(models.router)
+api_router.include_router(similarity.router)
 api_router.include_router(multipart_models.router)
 api_router.include_router(multipart_builds.router)
 api_router.include_router(saved_views.router)

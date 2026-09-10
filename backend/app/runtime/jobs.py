@@ -22,6 +22,7 @@ from app.core.time import utcnow
 from app.db.models import BackgroundJob, StagingLease
 from app.db.session import get_session_factory
 from app.schemas.ingest import (
+    FingerprintStatus,
     ImportCompletion,
     ImportFailedItem,
     ImportStage,
@@ -322,6 +323,7 @@ class JobRegistry:
         retryable: Optional[bool] = None,
         failed_items: Optional[list[dict[str, Any] | ImportFailedItem]] = None,
         committed_at=None,
+        fingerprint_status: Optional[FingerprintStatus] = None,
         thumbnail_status: Optional[ThumbnailStatus] = None,
         thumbnail_reason: Optional[str] = None,
     ) -> None:
@@ -377,6 +379,8 @@ class JobRegistry:
                 job.completion = completion
             if committed_at is not None:
                 job.committed_at = committed_at
+            if fingerprint_status is not None:
+                job.fingerprint_status = fingerprint_status
             if thumbnail_status is not None:
                 job.thumbnail_status = thumbnail_status
             if thumbnail_reason is not None:

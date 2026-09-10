@@ -1,0 +1,1263 @@
+{
+  "algorithm_version": "geometry-v2-sh5f4577c4",
+  "verification_version": "surface-verification-v2",
+  "cases": [
+    {
+      "case_id": "70561-original",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "original",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            1.0,
+            3.469446951953614e-18,
+            -1.6779160202291154e-17,
+            4.1947903814450334e-17
+          ],
+          [
+            3.469446951953614e-18,
+            0.9999999999999998,
+            3.0145182924968113e-16,
+            -7.536295653693846e-16
+          ],
+          [
+            -1.6779160202291154e-17,
+            3.0145182924968113e-16,
+            0.9999999999999991,
+            2.220446049250313e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064857132218382,
+        "sampled_chamfer": 0.009616851246866752,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.3808596456860196,
+        "sampled_chamfer_mm": 0.12182564322156056,
+        "unavailable": [],
+        "sampled_surface_chamfer": 5.906031315374227e-17,
+        "sampled_surface_hausdorff": 3.3486643248170386e-16
+      }
+    },
+    {
+      "case_id": "70561-stl_ascii",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "stl_ascii",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            1.0,
+            3.469446951953614e-18,
+            -1.6779160202291154e-17,
+            4.1947903814450334e-17
+          ],
+          [
+            3.469446951953614e-18,
+            0.9999999999999998,
+            3.0145182924968113e-16,
+            -7.536295653693846e-16
+          ],
+          [
+            -1.6779160202291154e-17,
+            3.0145182924968113e-16,
+            0.9999999999999991,
+            2.220446049250313e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064857132218382,
+        "sampled_chamfer": 0.009616851246866752,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.3808596456860196,
+        "sampled_chamfer_mm": 0.12182564322156056,
+        "unavailable": [],
+        "sampled_surface_chamfer": 5.906031315374227e-17,
+        "sampled_surface_hausdorff": 3.3486643248170386e-16
+      }
+    },
+    {
+      "case_id": "70561-obj",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "obj",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "similar_shape",
+        "confidence": 0.99,
+        "scale_factor": 0.9999999999988498,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": false,
+        "transform": [
+          [
+            1.0000000000011346,
+            -1.0500311909888623e-07,
+            1.3554243355988692e-07,
+            -3.2022144731269015e-07
+          ],
+          [
+            1.050031348397136e-07,
+            1.0000000000011366,
+            -1.151796723852024e-07,
+            1.030737469194987e-07
+          ],
+          [
+            -1.3554242204666604e-07,
+            1.1517968808469647e-07,
+            1.0000000000011307,
+            3.9084282477119814e-08
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064833790001348,
+        "sampled_chamfer": 0.009616851225781056,
+        "voxel_iou": 1.0,
+        "convergence_error": 2.0721075369483995e-08,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.3808593499883394,
+        "sampled_chamfer_mm": 0.12182564295444834,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.150333867770924e-08,
+        "sampled_surface_hausdorff": 7.352839201695088e-08
+      }
+    },
+    {
+      "case_id": "70561-rigid",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "rigid",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0000000000000004,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.7815948306283849,
+            0.2561121425725109,
+            -0.5687847494104459,
+            -30.86286103105362
+          ],
+          [
+            -0.08303634810244685,
+            0.9464289210208505,
+            0.3120533004938695,
+            -62.611181285990256
+          ],
+          [
+            0.6182349760639521,
+            -0.19666943809912568,
+            0.7609905692510119,
+            14.43342602955839
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.032362898250652174,
+        "sampled_chamfer": 0.00957288658086187,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.40997108041825636,
+        "sampled_chamfer_mm": 0.1212687017053017,
+        "unavailable": [],
+        "sampled_surface_chamfer": 1.4382419446903473e-10,
+        "sampled_surface_hausdorff": 3.4407270727507594e-10
+      }
+    },
+    {
+      "case_id": "70561-scale-0.5",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "scale-0.5",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 0.5,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            2.0,
+            6.938893903907228e-18,
+            -3.355832040458231e-17,
+            4.1947903814450334e-17
+          ],
+          [
+            6.938893903907228e-18,
+            1.9999999999999996,
+            6.029036584993623e-16,
+            -7.536295653693846e-16
+          ],
+          [
+            -3.355832040458231e-17,
+            6.029036584993623e-16,
+            1.9999999999999982,
+            2.220446049250313e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064857132218382,
+        "sampled_chamfer": 0.009616851246866752,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.3808596456860196,
+        "sampled_chamfer_mm": 0.12182564322156056,
+        "unavailable": [],
+        "sampled_surface_chamfer": 5.906031315374227e-17,
+        "sampled_surface_hausdorff": 3.3486643248170386e-16
+      }
+    },
+    {
+      "case_id": "70561-scale-2",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "scale-2",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 2.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.5,
+            1.734723475976807e-18,
+            -8.389580101145577e-18,
+            4.1947903814450334e-17
+          ],
+          [
+            1.734723475976807e-18,
+            0.4999999999999999,
+            1.5072591462484056e-16,
+            -7.536295653693846e-16
+          ],
+          [
+            -8.389580101145577e-18,
+            1.5072591462484056e-16,
+            0.49999999999999956,
+            2.220446049250313e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064857132218382,
+        "sampled_chamfer": 0.009616851246866752,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.3808596456860196,
+        "sampled_chamfer_mm": 0.12182564322156056,
+        "unavailable": [],
+        "sampled_surface_chamfer": 5.906031315374227e-17,
+        "sampled_surface_hausdorff": 3.3486643248170386e-16
+      }
+    },
+    {
+      "case_id": "70561-scale-25.4",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "scale-25.4",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 25.4,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.03937007874015748,
+            5.620732581249525e-12,
+            -2.3295281860646135e-18,
+            -8.470940540639998e-15
+          ],
+          [
+            -5.620732717841924e-12,
+            0.03937007874015747,
+            2.9408855007360254e-17,
+            -2.0410520810834878e-15
+          ],
+          [
+            1.9450197264201764e-18,
+            -9.736804288027358e-18,
+            0.03937007874015746,
+            -4.440892098500626e-16
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.030064857132187917,
+        "sampled_chamfer": 0.00961685124709974,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.38085964568563363,
+        "sampled_chamfer_mm": 0.12182564322451202,
+        "unavailable": [],
+        "sampled_surface_chamfer": 1.6102274648794388e-11,
+        "sampled_surface_hausdorff": 3.851404910681711e-11
+      }
+    },
+    {
+      "case_id": "70561-subdivision",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "subdivision",
+      "expected": "remeshed",
+      "evidence": {
+        "evidence_class": "remeshed",
+        "confidence": 0.99,
+        "scale_factor": 0.9999999999999999,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": false,
+        "transform": [
+          [
+            1.0000000000000002,
+            -6.210758643487858e-10,
+            -3.256770213787861e-17,
+            -9.645783986743871e-15
+          ],
+          [
+            6.210758608793389e-10,
+            1.0,
+            -5.866472410822335e-16,
+            5.688375356390464e-16
+          ],
+          [
+            2.8925612665917827e-17,
+            8.289614021309081e-16,
+            0.9999999999999997,
+            -3.1086244689504383e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.03445111364183645,
+        "sampled_chamfer": 0.009635183064693983,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.4364244565478988,
+        "sampled_chamfer_mm": 0.12205786949197839,
+        "unavailable": [],
+        "sampled_surface_chamfer": 7.002948731108872e-11,
+        "sampled_surface_hausdorff": 1.6755545734853206e-10
+      }
+    },
+    {
+      "case_id": "70561-microrepair",
+      "design_id": "thingiverse-23030",
+      "split": "evaluation",
+      "base": "thingi10k-70561.stl",
+      "left_variant": "original",
+      "right_variant": "microrepair",
+      "expected": "repaired",
+      "evidence": {
+        "evidence_class": "repaired",
+        "confidence": 0.99,
+        "scale_factor": 0.9999999999748145,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": false,
+        "transform": [
+          [
+            1.00000000001468,
+            4.583393284835783e-06,
+            -6.194628604654336e-08,
+            7.422145302999056e-06
+          ],
+          [
+            -4.583393225061878e-06,
+            1.0000000000142188,
+            9.61563144534064e-07,
+            -4.016932844682676e-06
+          ],
+          [
+            6.1950693234305e-08,
+            -9.615628599043007e-07,
+            1.0000000000247207,
+            4.6747748383424437e-07
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.038456851972413886,
+        "sampled_chamfer": 0.009617013676953678,
+        "voxel_iou": 1.0,
+        "convergence_error": 6.225137623310787e-07,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.4871688879810928,
+        "sampled_chamfer_mm": 0.1218277008752884,
+        "unavailable": [],
+        "sampled_surface_chamfer": 6.587765984425641e-07,
+        "sampled_surface_hausdorff": 1.862946012462505e-06
+      }
+    },
+    {
+      "case_id": "843549-original",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "original",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.9999999999999999,
+            0.0,
+            -3.851859888774472e-34,
+            -6.776263578034403e-21
+          ],
+          [
+            0.0,
+            0.9999999999999999,
+            6.798455588955649e-27,
+            -1.7763568394002505e-15
+          ],
+          [
+            -3.851859888774472e-34,
+            6.798455588955649e-27,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.013605509378697955,
+        "sampled_chamfer": 0.0037496588938779113,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.7813731896202327,
+        "sampled_chamfer_mm": 0.49094389911143477,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.599340429752526e-17,
+        "sampled_surface_hausdorff": 1.615022384890214e-16
+      }
+    },
+    {
+      "case_id": "843549-stl_ascii",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "stl_ascii",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.9999999999999999,
+            0.0,
+            -3.851859888774472e-34,
+            -6.776263578034403e-21
+          ],
+          [
+            0.0,
+            0.9999999999999999,
+            6.798455588955649e-27,
+            -1.7763568394002505e-15
+          ],
+          [
+            -3.851859888774472e-34,
+            6.798455588955649e-27,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.013605509378697955,
+        "sampled_chamfer": 0.0037496588938779113,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.7813731896202327,
+        "sampled_chamfer_mm": 0.49094389911143477,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.599340429752526e-17,
+        "sampled_surface_hausdorff": 1.615022384890214e-16
+      }
+    },
+    {
+      "case_id": "843549-obj",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "obj",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 1.0000000000008449,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.999999999999155,
+            1.564372094063857e-15,
+            -1.4027758407729485e-18,
+            -3.905275557688874e-13
+          ],
+          [
+            -1.564372094063857e-15,
+            0.999999999999155,
+            -4.2538248907328574e-18,
+            8.615330671091215e-13
+          ],
+          [
+            1.4027758407729414e-18,
+            4.2538248972474495e-18,
+            0.9999999999991551,
+            5.0670578843892145e-12
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.01360550937845417,
+        "sampled_chamfer": 0.0037496588938753595,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.781373189588314,
+        "sampled_chamfer_mm": 0.49094389911110065,
+        "unavailable": [],
+        "sampled_surface_chamfer": 1.8651342244780956e-13,
+        "sampled_surface_hausdorff": 2.979544811940157e-11
+      }
+    },
+    {
+      "case_id": "843549-rigid",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "rigid",
+      "expected": "identical_geometry",
+      "evidence": {
+        "evidence_class": "identical_geometry",
+        "confidence": 1.0,
+        "scale_factor": 0.9999999999999997,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.7815948305224775,
+            0.25611214377963387,
+            -0.5687847490124366,
+            -30.862861110911147
+          ],
+          [
+            -0.08303634909933247,
+            0.9464289206941929,
+            0.3120533012193264,
+            -62.6111812466262
+          ],
+          [
+            0.6182349760639507,
+            -0.19666943809912585,
+            0.7609905692510124,
+            14.433426029558358
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.012065159993791404,
+        "sampled_chamfer": 0.003712963142068888,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.5796948091535146,
+        "sampled_chamfer_mm": 0.48613931395213894,
+        "unavailable": [],
+        "sampled_surface_chamfer": 3.227302552021916e-16,
+        "sampled_surface_hausdorff": 4.312590532374462e-15
+      }
+    },
+    {
+      "case_id": "843549-scale-0.5",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "scale-0.5",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 0.5,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            1.9999999999999998,
+            0.0,
+            -7.703719777548943e-34,
+            -6.776263578034403e-21
+          ],
+          [
+            0.0,
+            1.9999999999999998,
+            1.3596911177911298e-26,
+            -1.7763568394002505e-15
+          ],
+          [
+            -7.703719777548943e-34,
+            1.3596911177911298e-26,
+            2.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.013605509378697955,
+        "sampled_chamfer": 0.0037496588938779113,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.7813731896202327,
+        "sampled_chamfer_mm": 0.49094389911143477,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.599340429752526e-17,
+        "sampled_surface_hausdorff": 1.615022384890214e-16
+      }
+    },
+    {
+      "case_id": "843549-scale-2",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "scale-2",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 2.0,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.49999999999999994,
+            0.0,
+            -1.925929944387236e-34,
+            -6.776263578034403e-21
+          ],
+          [
+            0.0,
+            0.49999999999999994,
+            3.3992277944778245e-27,
+            -1.7763568394002505e-15
+          ],
+          [
+            -1.925929944387236e-34,
+            3.3992277944778245e-27,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.013605509378697955,
+        "sampled_chamfer": 0.0037496588938779113,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.7813731896202327,
+        "sampled_chamfer_mm": 0.49094389911143477,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.599340429752526e-17,
+        "sampled_surface_hausdorff": 1.615022384890214e-16
+      }
+    },
+    {
+      "case_id": "843549-scale-25.4",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "scale-25.4",
+      "expected": "rescaled",
+      "evidence": {
+        "evidence_class": "rescaled",
+        "confidence": 1.0,
+        "scale_factor": 25.399999999999967,
+        "mirrored": false,
+        "mirror_ambiguous": true,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            0.03937007874015753,
+            -3.3698280406343633e-18,
+            -1.0102811268474452e-21,
+            3.898873005047168e-14
+          ],
+          [
+            3.3698280406343633e-18,
+            0.03937007874015753,
+            1.0108131180574268e-19,
+            1.2434497875801753e-14
+          ],
+          [
+            1.0102811268474148e-21,
+            -1.0108131131741954e-19,
+            0.039370078740157535,
+            -8.881784197001252e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.013605509378697955,
+        "sampled_chamfer": 0.0037496588938780275,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.7813731896202327,
+        "sampled_chamfer_mm": 0.49094389911145,
+        "unavailable": [],
+        "sampled_surface_chamfer": 2.3244977059051253e-16,
+        "sampled_surface_hausdorff": 1.0657763966338688e-15
+      }
+    },
+    {
+      "case_id": "843549-subdivision",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "subdivision",
+      "expected": "remeshed",
+      "evidence": {
+        "evidence_class": "remeshed",
+        "confidence": 0.99,
+        "scale_factor": 1.0000000000000002,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": false,
+        "transform": [
+          [
+            0.9999999999999996,
+            -3.660001770340596e-16,
+            -6.697124608482184e-18,
+            -1.5422938533932173e-13
+          ],
+          [
+            3.660001770340596e-16,
+            0.9999999999999996,
+            9.275024271324585e-18,
+            3.552713678800501e-15
+          ],
+          [
+            6.6971246084821795e-18,
+            -9.275024246095175e-18,
+            0.9999999999999994,
+            9.769962616701378e-15
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.01383902495656609,
+        "sampled_chamfer": 0.003774483601231559,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.8119474502520518,
+        "sampled_chamfer_mm": 0.4941942050639039,
+        "unavailable": [],
+        "sampled_surface_chamfer": 4.4281668952057163e-16,
+        "sampled_surface_hausdorff": 1.4042021362941964e-15
+      }
+    },
+    {
+      "case_id": "843549-microrepair",
+      "design_id": "thingiverse-512350",
+      "split": "evaluation",
+      "base": "thingi10k-843549.stl",
+      "left_variant": "original",
+      "right_variant": "microrepair",
+      "expected": "repaired",
+      "evidence": {
+        "evidence_class": "repaired",
+        "confidence": 0.99,
+        "scale_factor": 0.9999999984393073,
+        "mirrored": false,
+        "mirror_ambiguous": false,
+        "exact_equivalence": false,
+        "transform": [
+          [
+            1.0000000015606925,
+            2.002358021752116e-09,
+            6.649401684987801e-10,
+            2.04937885773771e-07
+          ],
+          [
+            -2.002358020506713e-09,
+            1.0000000015606922,
+            -1.8729417942639323e-09,
+            -1.77843748616624e-08
+          ],
+          [
+            -6.649401722490796e-10,
+            1.8729417887612696e-09,
+            1.000000001560692,
+            -2.1367396740856748e-09
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.012661376493287397,
+        "sampled_chamfer": 0.0037316152462402745,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 1.6577576040000115,
+        "sampled_chamfer_mm": 0.4885814392247828,
+        "unavailable": [],
+        "sampled_surface_chamfer": 3.7492811909365703e-10,
+        "sampled_surface_hausdorff": 2.4048229648703294e-09
+      }
+    },
+    {
+      "case_id": "chiral-mirror",
+      "design_id": "original-chiral-tetrahedron",
+      "split": "evaluation",
+      "base": "chiral-tetrahedron",
+      "left_variant": "original",
+      "right_variant": "mirror",
+      "expected": "mirrored",
+      "evidence": {
+        "evidence_class": "mirrored",
+        "confidence": 1.0,
+        "scale_factor": 1.0,
+        "mirrored": true,
+        "mirror_ambiguous": false,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            -0.9999999999999999,
+            -5.551115123125783e-17,
+            -2.7755575615628914e-17,
+            1.3322676295501878e-15
+          ],
+          [
+            5.551115123125783e-17,
+            1.0,
+            -2.7755575615628914e-17,
+            0.0
+          ],
+          [
+            2.7755575615628914e-17,
+            -2.7755575615628914e-17,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.017312193753572874,
+        "sampled_chamfer": 0.00516528096629234,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.6987634564378407,
+        "sampled_chamfer_mm": 0.20848366376064498,
+        "unavailable": [],
+        "sampled_surface_chamfer": 9.712175682212477e-18,
+        "sampled_surface_hausdorff": 1.0070546869786781e-16
+      }
+    },
+    {
+      "case_id": "chiral-scaled_mirror",
+      "design_id": "original-chiral-tetrahedron",
+      "split": "evaluation",
+      "base": "chiral-tetrahedron",
+      "left_variant": "original",
+      "right_variant": "scaled_mirror",
+      "expected": "rescaled_mirrored",
+      "evidence": {
+        "evidence_class": "rescaled_mirrored",
+        "confidence": 1.0,
+        "scale_factor": 2.0,
+        "mirrored": true,
+        "mirror_ambiguous": false,
+        "exact_equivalence": true,
+        "transform": [
+          [
+            -0.49999999999999994,
+            -2.7755575615628914e-17,
+            -1.3877787807814457e-17,
+            1.3322676295501878e-15
+          ],
+          [
+            2.7755575615628914e-17,
+            0.5,
+            -1.3877787807814457e-17,
+            0.0
+          ],
+          [
+            1.3877787807814457e-17,
+            -1.3877787807814457e-17,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "sampled_hausdorff": 0.017312193753572874,
+        "sampled_chamfer": 0.00516528096629234,
+        "voxel_iou": 1.0,
+        "convergence_error": 0.0,
+        "sample_points": 5000,
+        "fit_seed": 154,
+        "evaluation_seeds": [
+          15401,
+          15402
+        ],
+        "tolerance_relative": 1e-06,
+        "version": "surface-verification-v2",
+        "distance_normalization": "pca_bbox_diagonal",
+        "sampled_hausdorff_mm": 0.6987634564378407,
+        "sampled_chamfer_mm": 0.20848366376064498,
+        "unavailable": [],
+        "sampled_surface_chamfer": 9.712175682212477e-18,
+        "sampled_surface_hausdorff": 1.0070546869786781e-16
+      }
+    }
+  ],
+  "confusion": [
+    {
+      "expected": "identical_geometry",
+      "predicted": "identical_geometry",
+      "count": 7
+    },
+    {
+      "expected": "identical_geometry",
+      "predicted": "similar_shape",
+      "count": 1
+    },
+    {
+      "expected": "mirrored",
+      "predicted": "mirrored",
+      "count": 1
+    },
+    {
+      "expected": "remeshed",
+      "predicted": "remeshed",
+      "count": 2
+    },
+    {
+      "expected": "repaired",
+      "predicted": "repaired",
+      "count": 2
+    },
+    {
+      "expected": "rescaled",
+      "predicted": "rescaled",
+      "count": 6
+    },
+    {
+      "expected": "rescaled_mirrored",
+      "predicted": "rescaled_mirrored",
+      "count": 1
+    }
+  ]
+}

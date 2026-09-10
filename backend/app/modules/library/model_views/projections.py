@@ -33,6 +33,7 @@ from app.modules.printing.costing import (
     cost_profiles,
     match_cost_profile,
 )
+from app.modules.similarity.projections import summaries as similarity_summaries
 from app.schemas.models import (
     FileRead,
     MetadataRead,
@@ -150,6 +151,7 @@ def _hydrate_list_rows(
     model_ids = [m.id for m in rows if m.id is not None]
     if not model_ids:
         return []
+    similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(
         session.exec(
             select(ModelStar.model_id).where(
@@ -289,6 +291,7 @@ def _hydrate_list_rows(
         out.append(
             ModelListItem(
                 id=model.id,
+                similarity=similarity.get(model.id, {}),
                 name=model.name,
                 slug=model.slug,
                 collection=collection_name_for(model),

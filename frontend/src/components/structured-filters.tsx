@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
 import type { FacetValueRead, ModelFacetsRead } from "@/types";
 
-type FilterKey =
+type FacetFilterKey =
   | "file_type"
   | "material_type"
   | "slicer_name"
@@ -18,7 +18,9 @@ type FilterKey =
   | "storage"
   | "printed";
 
-const GROUPS: Array<{ key: FilterKey; label: string }> = [
+type FilterKey = FacetFilterKey | "has_similar_candidates";
+
+const GROUPS: Array<{ key: FacetFilterKey; label: string }> = [
   {
     key: "file_type",
     get label() {
@@ -122,6 +124,7 @@ export function StructuredFilters({
       return;
     }
     GROUPS.forEach(({ key }) => onChange(key, []));
+    onChange("has_similar_candidates", []);
     onDateChange?.("uploaded_after", "");
     onDateChange?.("uploaded_before", "");
   }
@@ -155,6 +158,14 @@ export function StructuredFilters({
           </p>
         )}
         <div className="space-y-0.5">
+          <label className="flex items-center gap-2 px-2 py-2 text-sm">
+            <Checkbox
+              ariaLabel={uiText("similarity.hasCandidates")}
+              checked={active.has_similar_candidates?.includes("yes") ?? false}
+              onChange={(checked) => onChange("has_similar_candidates", checked ? ["yes"] : [])}
+            />
+            {uiText("similarity.hasCandidates")}
+          </label>
           {GROUPS.map(({ key, label }) => {
             const values: FacetValueRead[] = facets?.[key] ?? [];
             const selected = active[key] ?? [];

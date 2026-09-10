@@ -303,3 +303,22 @@ endpoint and permissions for every intended role. Google Drive remains beta for
 read-only Library sources and backup replicas; managed Vault use is unavailable.
 Signed browser downloads depend on endpoint and CORS proof independently of the
 active deletion safety tier.
+
+## Similar Models (Unreleased)
+
+- Analysis defaults off. Similarity is review evidence, not byte deduplication,
+  printable compatibility or automatic grouping. Family resolution is unavailable;
+  evidence-only review and existing Multipart composition remain independent.
+- Complete STL/OBJ/3MF geometry is available in lite; STEP and local ONNX require
+  the full profile. Sources beyond the geometry budget remain explicitly partial
+  or unavailable. The repository's large Benchy STL is sampled under the default
+  200,000-triangle cap and cannot receive exact-equivalence confirmation.
+- Candidate work is bounded. Dense primitive buckets may be truncated; the run
+  reports skipped work instead of implying exhaustive library coverage.
+- Confidence is a ranking score. Sampled distances and voxel overlap do not certify
+  manufacturing tolerances, non-manifold repairs or intersecting solid shells.
+- Local learned search needs operator-supplied, manifest-pinned models. Image-only
+  models cannot accept text. Remote inference and automatic model downloading
+  are outside this feature. Pi/NAS-scale performance targets remain unverified.
+
+The [user guide](similar-models.md) explains controls, evidence and review choices.

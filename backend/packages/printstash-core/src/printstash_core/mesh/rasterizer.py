@@ -113,6 +113,8 @@ def render_mesh_thumbnail(
     logger: LogSink | None = None,
     rasterise_triangles: Rasteriser | None = None,
     output_format: Literal["PNG", "WEBP"] = "PNG",
+    view_rotation: FloatArray | None = None,
+    matte: bool = False,
 ) -> bytes | None:
     """Render a PNG thumbnail from an already-loaded mesh.
 
@@ -168,7 +170,17 @@ def render_mesh_thumbnail(
         #    most recognisable from their broad face, matching the web viewer's
         #    first-open camera. Chunkier parts keep the older isometric angle.
         # ------------------------------------------------------------------
-        rotation = _select_view_rotation(verts)
+        rotation = (
+            _select_view_rotation(verts)
+            if view_rotation is None
+            else np.asarray(view_rotation, dtype=np.float64)
+        )
+        if (
+            rotation.shape != (3, 3)
+            or not np.isfinite(rotation).all()
+            or not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-6)
+        ):
+            raise ValueError("invalid orthographic view rotation")
         view_handedness = float(np.linalg.det(rotation))
         # Keep the matmul in float32 (rotation is built in float64 for accuracy)
         # so `view` and everything derived from it stays half-width.
@@ -316,7 +328,7 @@ def render_mesh_thumbnail(
         # facet to facet on tessellated curves. Camera is on +Z in view-space, so
         # the half-vector is between key_dir and (0,0,1).
         half = _normalise(key_dir + np.array([0.0, 0.0, 1.0]))
-        spec_str = 0.22
+        spec_str = 0.0 if matte else 0.22
         spec_power = 32.0
 
         def _shade(n: FloatArray) -> FloatArray:

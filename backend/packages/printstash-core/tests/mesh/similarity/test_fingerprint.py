@@ -27,14 +27,6 @@ from ...paths import FIXTURES_DIR
 
 
 @pytest.fixture
-def tetra():
-    return (
-        np.array([[0, 0, 0], [10, 0, 0], [1, 20, 0], [2, 3, 30]], dtype=np.float64),
-        np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int64),
-    )
-
-
-@pytest.fixture
 def uneven_tetra(tetra):
     vertices, faces = tetra
     refined = faces[:1]

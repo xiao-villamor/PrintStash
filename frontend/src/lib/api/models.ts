@@ -61,6 +61,8 @@ function modelListSearch(params?: ListModelsParams): URLSearchParams {
   ] as const) {
     for (const value of params?.[key] ?? []) search.append(key, String(value));
   }
+  if (params?.has_similar_candidates !== undefined)
+    search.set("has_similar_candidates", String(params.has_similar_candidates));
   if (params?.printed !== undefined) search.set("printed", String(params.printed));
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
@@ -115,6 +117,8 @@ export async function getModelFacets(
   ] as const) {
     for (const value of params?.[key] ?? []) search.append(key, String(value));
   }
+  if (params?.has_similar_candidates !== undefined)
+    search.set("has_similar_candidates", String(params.has_similar_candidates));
   if (params?.printed !== undefined) search.set("printed", String(params.printed));
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);

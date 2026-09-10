@@ -37,9 +37,12 @@ from tests.factories.protocols import (
     MakeCollection,
     MakeCover,
     MakeDocument,
+    MakeEmbeddingSpace,
     MakeExternalLibrary,
     MakeFile,
+    MakeGeometryFingerprint,
     MakeInboxItem,
+    MakeIndexGeneration,
     MakeModel,
     MakeMultipartBuild,
     MakeMultipartBuildAttempt,
@@ -49,11 +52,16 @@ from tests.factories.protocols import (
     MakeMultipartModelStar,
     MakeMultipartPart,
     MakeOwnedStorageObject,
+    MakePassageVector,
     MakePrinter,
     MakePrinterFile,
     MakePrintJob,
     MakeProvenanceSource,
     MakeShareLink,
+    MakeSimilarityCandidate,
+    MakeSimilarityDecision,
+    MakeSimilarityObservation,
+    MakeSimilarityRun,
     MakeStorageConnection,
     MakeSystemConfig,
     MakeUser,
@@ -535,3 +543,55 @@ def make_storage_inventory_sample(db_session):
 @pytest.fixture
 def make_capacity_lock(db_session):
     return _bound(factories.build_capacity_lock, db_session)
+
+
+@pytest.fixture
+def make_geometry_fingerprint(db_session: Session) -> MakeGeometryFingerprint:
+    return _bound(factories.build_geometry_fingerprint, db_session)
+
+
+@pytest.fixture
+def make_similarity_run(db_session: Session) -> MakeSimilarityRun:
+    return _bound(factories.build_similarity_run, db_session)
+
+
+@pytest.fixture
+def make_similarity_candidate(db_session: Session) -> MakeSimilarityCandidate:
+    return _bound(factories.build_similarity_candidate, db_session)
+
+
+@pytest.fixture
+def make_similarity_observation(db_session: Session) -> MakeSimilarityObservation:
+    return _bound(factories.build_similarity_observation, db_session)
+
+
+@pytest.fixture
+def make_similarity_decision(db_session: Session) -> MakeSimilarityDecision:
+    return _bound(factories.build_similarity_decision, db_session)
+
+
+@pytest.fixture
+def make_embedding_space(db_session: Session) -> MakeEmbeddingSpace:
+    return _bound(factories.build_embedding_space, db_session)
+
+
+@pytest.fixture
+def make_index_generation(db_session: Session) -> MakeIndexGeneration:
+    return _bound(factories.build_index_generation, db_session)
+
+
+@pytest.fixture
+def make_passage_vector(db_session: Session) -> MakePassageVector:
+    return _bound(factories.build_passage_vector, db_session)
+
+
+__all__ += [
+    "make_geometry_fingerprint",
+    "make_similarity_run",
+    "make_similarity_candidate",
+    "make_similarity_observation",
+    "make_similarity_decision",
+    "make_embedding_space",
+    "make_index_generation",
+    "make_passage_vector",
+]

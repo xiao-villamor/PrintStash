@@ -804,7 +804,8 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
-    await user.type(screen.getByRole("textbox", { name: "Or use an image URL" }), coverImageUrl);
+    await user.click(screen.getByRole("textbox", { name: "Or use an image URL" }));
+    await user.paste(coverImageUrl);
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
