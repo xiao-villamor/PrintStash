@@ -132,7 +132,9 @@ class SimilarityProcessor:
                 counters=counters,
             )
             return
-        claimed = fingerprints.claim(session, file)
+        claimed = fingerprints.claim(
+            session, file, retry_incomplete=run.trigger == "manual"
+        )
         if claimed is None:
             row = session.exec(
                 select(GeometryFingerprint).where(

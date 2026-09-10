@@ -5,7 +5,6 @@ import { ArrowLeft, ScanSearch } from "lucide-react";
 import { SimilarityComparison } from "@/components/similarity-comparison";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -215,19 +214,33 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
           )}
         </details>
       </div>
-      <ConfirmModal
+      <Modal
         open={confirmation?.action === "confirm_evidence"}
         onClose={() => {
           if (!decision.isPending) setConfirmation(null);
         }}
-        onConfirm={() => {
-          if (confirmation) decision.mutate(confirmation);
-        }}
         title={t("similarity.confirmEvidence")}
-        description={t("similarity.confirmHelp")}
-        confirmLabel={t("similarity.confirmEvidence")}
-        busy={decision.isPending}
-      />
+        className="max-w-md"
+      >
+        <p className="text-sm text-muted-foreground">{t("similarity.confirmHelp")}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button
+            variant="outline"
+            disabled={decision.isPending}
+            onClick={() => setConfirmation(null)}
+          >
+            {t("Cancel")}
+          </Button>
+          <Button
+            loading={decision.isPending}
+            onClick={() => {
+              if (confirmation) decision.mutate(confirmation);
+            }}
+          >
+            {t("similarity.confirmEvidence")}
+          </Button>
+        </div>
+      </Modal>
       <Modal
         open={confirmation?.action === "create_multipart"}
         onClose={() => {

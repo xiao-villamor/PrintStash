@@ -219,3 +219,8 @@ these focused results do not replace the full coverage or CI gates.
 | F015 | contains long Multipart names on mobile | Edge | Two 255-character names; 390px and desktop | Dialog stays in viewport, scrolls internally, actions remain reachable | Playwright | ❌ missing |
 
 Final interaction update: 57 focused queue, comparison and camera tests passed; strict frontend/backend type checks passed. All 399 mirrored backend/core test modules resolve to their production owner. The minimum-dependency Pyright checks pass on Python 3.11 and 3.13. Frontend library coverage floors rise to 93.4% statements and 84.9% branches, reflecting measured CI coverage.
+
+| F016 | retries incomplete geometry on manual analysis | Error | Real Cube with failed, unsupported or partial prior analysis | Same Artifact becomes ready; attempt advances; source bytes unchanged | Integration | ❌ missing |
+| F017 | avoids automatic incomplete-analysis retry loops | Edge | Scheduled Run with failed, unsupported or partial fingerprint | Cached state and attempt count retained | Integration | ❌ missing |
+
+| F018 | preserves pretrained canaries across native CPUs | Edge | Pinned real CLIP image and text canaries; amd64/arm64 | Maximum absolute drift stays within the manifest tolerance | Integration | ❌ missing |

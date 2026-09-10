@@ -18,6 +18,7 @@ from app.db.models import PassageVector
 from app.db.session import get_session_factory
 from app.modules.inference import store
 from app.modules.inference.local import configured_provider
+from app.modules.inference.onnx_cpu import OnnxCpuProvider
 from app.modules.inference.search import SearchRequest, search
 from app.modules.similarity import configuration, runs
 
@@ -34,7 +35,36 @@ def preplaced_clip(monkeypatch):
     return configured_provider(get_session_factory())
 
 
+@pytest.fixture
+def native_canary_towers(preplaced_clip, monkeypatch):
+    # The golden-vector test performs this check itself so a native-architecture
+    # failure reports its modality and numerical drift. The subprocess tests
+    # below still exercise the production canary guard without any patch.
+    monkeypatch.setattr(OnnxCpuProvider, "_check_canaries", lambda self: None)
+    return OnnxCpuProvider(preplaced_clip.directory, preplaced_clip.manifest, 1)
+
+
 class TestPreplacedClip:
+    @pytest.mark.parametrize("modality", ["image", "text"])
+    def test_preserves_pretrained_canary(self, native_canary_towers, modality):
+        provider = native_canary_towers
+        inputs = {
+            "image": EmbeddingInput("image", rgb=bytes([127] * 3), width=1, height=1),
+            "text": EmbeddingInput("text", text=provider.manifest.text.canary_text),
+        }
+        expected = {
+            "image": provider.manifest.image.canary,
+            "text": provider.manifest.text.canary,
+        }
+
+        actual = provider.embed((inputs[modality],), provider.space)[0]
+
+        difference = float(np.max(np.abs(np.asarray(actual) - expected[modality])))
+        assert difference <= provider.manifest.canary_tolerance, (
+            f"{modality} canary: maximum absolute drift {difference:.8f}; "
+            f"tolerance {provider.manifest.canary_tolerance}"
+        )
+
     def test_runs_compatible_native_towers(self, preplaced_clip):
         provider = preplaced_clip
         provider.validate()

@@ -350,3 +350,63 @@ class TestUnexpectedAnalysisFailure:
             row.lease_token is None
             for row in db_session.exec(select(ThumbnailRenderSlot))
         )
+
+
+@pytest.fixture
+def reanalysis_source(db_session, local_storage, make_user, make_model, make_file):
+    from tests.paths import TESTDATA_DIR
+
+    actor = make_user(superuser=True)
+    configuration.update_settings(db_session, actor, {"enabled": True})
+    content = (TESTDATA_DIR / "Calibration Cube.stl").read_bytes()
+    file = make_file(
+        make_model(),
+        file_type=FileType.STL,
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    file.path = get_backend().blob_key(
+        file.model.slug, file.version, file.original_filename
+    )
+    get_backend().write_stream(io.BytesIO(content), file.path)
+    db_session.add(file)
+    db_session.commit()
+    return actor, file
+
+
+class TestIncompleteReanalysis:
+    @pytest.mark.parametrize("state", ["failed", "unsupported", "partial"])
+    def test_manual_run_retries_incomplete_geometry(
+        self, db_session, reanalysis_source, make_geometry_fingerprint, state
+    ):
+        actor, file = reanalysis_source
+        fingerprint = make_geometry_fingerprint(file, state=state, attempts=1)
+        run = runs.start(db_session, actor)
+
+        assert SimilarityProcessor(get_session_factory(), get_backend()).work_one()
+
+        db_session.refresh(fingerprint)
+        db_session.refresh(run)
+        assert fingerprint.state == "ready"
+        assert fingerprint.attempts == 2
+        assert json.loads(run.counters_json)["ready"] == 1
+        assert (
+            hashlib.sha256(get_backend().read_bytes(file.path)).hexdigest()
+            == file.sha256
+        )
+
+    @pytest.mark.parametrize("state", ["failed", "unsupported", "partial"])
+    def test_scheduled_run_keeps_cached_incomplete_geometry(
+        self, db_session, reanalysis_source, make_geometry_fingerprint, state
+    ):
+        actor, file = reanalysis_source
+        fingerprint = make_geometry_fingerprint(file, state=state, attempts=1)
+        run = runs.start(db_session, actor, trigger="scheduled")
+
+        assert SimilarityProcessor(get_session_factory(), get_backend()).work_one()
+
+        db_session.refresh(fingerprint)
+        db_session.refresh(run)
+        assert fingerprint.state == state
+        assert fingerprint.attempts == 1
+        assert json.loads(run.counters_json)["cached"] == 1

@@ -205,7 +205,7 @@
       "tests": [
         {
           "runtime": "pytest",
-          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "path": "backend/tests/integration/modules/media/geometry_analysis/test_calibration.py",
           "node": "TestFrozenCorpus::test_meets_exact_class_precision"
         }
       ]
@@ -216,7 +216,7 @@
       "tests": [
         {
           "runtime": "pytest",
-          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "path": "backend/tests/integration/modules/media/geometry_analysis/test_calibration.py",
           "node": "TestFrozenCorpus::test_meets_surface_class_recall"
         }
       ]
@@ -227,7 +227,7 @@
       "tests": [
         {
           "runtime": "pytest",
-          "path": "backend/tests/integration/modules/similarity/test_calibration.py",
+          "path": "backend/tests/integration/modules/media/geometry_analysis/test_calibration.py",
           "node": "TestFrozenCorpus::test_rejects_false_exact_washers"
         }
       ]

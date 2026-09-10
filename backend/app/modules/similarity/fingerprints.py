@@ -83,7 +83,7 @@ def _row(
 
 
 def claim(
-    session: Session, file: File, *, retry_failed: bool = False
+    session: Session, file: File, *, retry_incomplete: bool = False
 ) -> tuple[int, str] | None:
     if file.id is None or not current_source(session, file.id, file.sha256):
         return None
@@ -91,7 +91,11 @@ def claim(
     assert row.id is not None
     token = secrets.token_hex(32)
     now = utcnow()
-    states = ["pending", "failed"] if retry_failed else ["pending"]
+    states = (
+        ["pending", "failed", "partial", "unsupported"]
+        if retry_incomplete
+        else ["pending"]
+    )
     changed = session.connection().execute(
         update(GeometryFingerprint)
         .where(
@@ -103,6 +107,7 @@ def claim(
             ),
         )
         .values(
+            state="pending",
             lease_token=token,
             lease_expires_at=now + timedelta(seconds=LEASE_SECONDS),
             attempts=col(GeometryFingerprint.attempts) + 1,

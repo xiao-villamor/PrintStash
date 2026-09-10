@@ -96,18 +96,22 @@ class TestFingerprintLeases:
             db_session.get(GeometryFingerprint, claimed[0]).lease_token == "successor"
         )
 
-    def test_retries_failure_only_when_requested(
-        self, db_session, make_model, make_file
+    @pytest.mark.parametrize("state", ["failed", "partial", "unsupported"])
+    def test_retries_incomplete_analysis_only_when_requested(
+        self, db_session, make_model, make_file, state
     ):
         file = make_file(make_model())
         claimed = fingerprints.claim(db_session, file)
-        failed = FingerprintResult("failed", failure_code="invalid_source")
+        failed = FingerprintResult(state, failure_code="invalid_source")
         assert fingerprints.publish(
             db_session, file, failed, fingerprint_id=claimed[0], token=claimed[1]
         )
 
         assert fingerprints.claim(db_session, file) is None
-        assert fingerprints.claim(db_session, file, retry_failed=True) is not None
+        assert fingerprints.claim(db_session, file, retry_incomplete=True) is not None
+        db_session.expire_all()
+        assert db_session.get(GeometryFingerprint, claimed[0]).state == "pending"
+        assert fingerprints.claim(db_session, file, retry_incomplete=True) is None
 
     def test_precomputed_analysis_rejects_trashed_input(
         self, db_session, make_model, make_file, extracted
