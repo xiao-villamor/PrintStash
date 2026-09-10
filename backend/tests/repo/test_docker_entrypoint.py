@@ -3,7 +3,7 @@
 Bind-mounted data must remain writable across restarts, while migrations and an
 operator-supplied command must run only after the process has dropped privileges.
 These tests execute the real shell flow with tiny command shims standing in for
-the container-only ``id``, ``gosu``, and Python runtime.
+the container-only ``id``, ``setpriv``, and Python runtime.
 """
 
 from __future__ import annotations
@@ -41,11 +41,18 @@ fi
 """,
     )
     _write_executable(
-        fake_bin / "gosu",
+        fake_bin / "setpriv",
         """#!/bin/sh
-spec=$1
-shift
-FAKE_UID=${spec%:*} FAKE_GID=${spec#*:} exec "$@"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --reuid=*) FAKE_UID=${1#*=}; shift ;;
+    --regid=*) FAKE_GID=${1#*=}; shift ;;
+    --clear-groups) shift ;;
+    *) break ;;
+  esac
+done
+export FAKE_UID FAKE_GID
+exec "$@"
 """,
     )
     _write_executable(
@@ -80,6 +87,7 @@ printf 'server:%s:%s:%s\\n' "$FAKE_UID" "$FAKE_GID" "$*" >> {command_log}
     source = ENTRYPOINT.read_text()
     source = source.replace("/app/.venv/bin/python", str(fake_python))
     source = source.replace("/data/db", str(tmp_path / "db"))
+    source = source.replace("/data/artifact-cache", str(tmp_path / "artifact-cache"))
     script = _write_executable(tmp_path / "entrypoint.sh", source)
     return script, command_log, fake_bin, fake_server
 
@@ -99,6 +107,7 @@ def _run_entrypoint(
     env["VAULT_THUMB_DIR"] = str(tmp_path / "thumbs")
     env["VAULT_STAGING_DIR"] = str(tmp_path / "staging")
     env["VAULT_BACKUP_DIR"] = str(tmp_path / "backups")
+    env["VAULT_ARTIFACT_CACHE_ROOT"] = str(tmp_path / "artifact-cache")
     if puid is None:
         env.pop("PUID", None)
     else:
@@ -151,7 +160,7 @@ class TestDockerEntrypointIdentity:
     def test_re_owns_every_data_root_for_the_requested_identity(
         self, tmp_path: Path
     ) -> None:
-        """All five roots, not the ones a contributor remembered.
+        """All six roots, including the disposable artifact cache.
 
         A root left owned by the previous uid is one the container can read and
         not write, which surfaces later as a single feature failing — thumbnails,
@@ -174,7 +183,7 @@ class TestDockerEntrypointIdentity:
             for line in log.read_text().splitlines()
             if line.startswith("chown:-h 1234:2345 ")
         ]
-        for root in ("files", "thumbs", "staging", "backups", "db"):
+        for root in ("files", "thumbs", "staging", "backups", "db", "artifact-cache"):
             assert any(str(tmp_path / root) in line for line in ownership_repairs)
 
     def test_preserves_metadata_for_entries_already_owned_by_runtime_identity(
@@ -202,7 +211,7 @@ class TestDockerEntrypointIdentity:
     def test_passes_the_operator_command_through_unchanged(
         self, tmp_path: Path
     ) -> None:
-        # The re-exec goes through `gosu "-e" ""`, so a lost argument would
+        # The re-exec goes through `setpriv`, so a lost argument would
         # silently start the default server instead of what the operator asked for.
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
 

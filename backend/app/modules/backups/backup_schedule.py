@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, time
 
 from sqlmodel import Session
@@ -17,13 +18,12 @@ DEFAULT_BACKUP_TIME_UTC = "02:00"
 
 
 def parse_backup_time(value: str) -> time:
+    if re.fullmatch(r"[0-9]{2}:[0-9]{2}", value) is None:
+        raise ValueError("automatic_backup_time_invalid")
     try:
-        parsed = time.fromisoformat(value)
+        return time(hour=int(value[:2]), minute=int(value[3:]))
     except ValueError as exc:
         raise ValueError("automatic_backup_time_invalid") from exc
-    if parsed.second or parsed.microsecond or len(value) != 5:
-        raise ValueError("automatic_backup_time_invalid")
-    return parsed
 
 
 def automatic_backup_due(config: SystemConfig | None, now: datetime) -> bool:

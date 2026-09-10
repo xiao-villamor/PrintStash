@@ -104,9 +104,14 @@ class TestSimpleCompose:
         )
         assert services["api"]["healthcheck"]["test"] == [
             "CMD",
-            "curl",
-            "-fsS",
-            "http://localhost:8000/api/v1/health",
+            "/app/.venv/bin/python",
+            "-c",
+            (
+                "import http.client; connection = http.client.HTTPConnection("
+                "'127.0.0.1', 8000, timeout=4); connection.request('GET', "
+                "'/api/v1/health'); raise SystemExit(0 if "
+                "connection.getresponse().status == 200 else 1)"
+            ),
         ]
         assert not services["api"].get("entrypoint")
         assert not services["api"].get("command")

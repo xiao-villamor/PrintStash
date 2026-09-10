@@ -8,15 +8,75 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
 from tests.paths import REPO_ROOT
+
+
+@pytest.fixture
+def healthcheck_server():
+    statuses = {"/api/v1/health": 200, "/": 200}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(statuses[self.path])
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    source = (REPO_ROOT / "backend/unified/Dockerfile").read_text()
+    instruction = source.split("HEALTHCHECK", 1)[1].split("\n#", 1)[0]
+    command = shlex.split(instruction.split("CMD ", 1)[1])
+    command = [
+        sys.executable if arg == "/app/.venv/bin/python" else arg for arg in command
+    ]
+    command = [arg.replace("3000", str(server.server_port)) for arg in command]
+    try:
+        yield statuses, command
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+class TestUnifiedHealthcheck:
+    def test_reports_healthy_when_both_endpoints_respond(
+        self, healthcheck_server
+    ) -> None:
+        _statuses, command = healthcheck_server
+
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+
+        assert result.returncode == 0, result.stderr
+
+    @pytest.mark.parametrize(
+        ("path", "status"),
+        [("/api/v1/health", 500), ("/", 503)],
+        ids=["api-unavailable", "spa-unavailable"],
+    )
+    def test_rejects_an_unhealthy_endpoint(
+        self, healthcheck_server, path, status
+    ) -> None:
+        statuses, command = healthcheck_server
+        statuses[path] = status
+
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+
+        assert result.returncode != 0
 
 
 @pytest.fixture

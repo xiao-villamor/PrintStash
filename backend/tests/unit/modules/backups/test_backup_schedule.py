@@ -25,8 +25,13 @@ class TestParseBackupTime:
         "value",
         [
             pytest.param("24:00", id="hour-overflow"),
+            pytest.param("25:00", id="invalid-hour"),
+            pytest.param("23:60", id="minute-overflow"),
             pytest.param("02:00:00", id="seconds"),
             pytest.param("2:00", id="short-hour"),
+            pytest.param("0200Z", id="compact-utc"),
+            pytest.param("02-00", id="wrong-separator"),
+            pytest.param("", id="empty"),
             pytest.param("invalid", id="text"),
         ],
     )

@@ -474,17 +474,20 @@ class TestElegooCentauriPrinter:
     def test_create_original_carbon_without_access_code(
         self, client: TestClient, auth_headers
     ):
-        resp = client.post(
-            "/api/v1/printers",
-            json={
-                "name": "Centauri Carbon",
-                "provider": "elegoo_centauri",
-                "provider_variant": "elegoo_centauri_carbon",
-                "elegoo_centauri_host": "192.168.1.50",
-                "elegoo_centauri_mainboard_id": "mainboard-123",
-            },
-            headers=auth_headers,
-        )
+        with patch.object(
+            client.app.state.printer_hub, "add_printer", new_callable=AsyncMock
+        ):
+            resp = client.post(
+                "/api/v1/printers",
+                json={
+                    "name": "Centauri Carbon",
+                    "provider": "elegoo_centauri",
+                    "provider_variant": "elegoo_centauri_carbon",
+                    "elegoo_centauri_host": "192.168.1.50",
+                    "elegoo_centauri_mainboard_id": "mainboard-123",
+                },
+                headers=auth_headers,
+            )
         assert resp.status_code == 201
         body = resp.json()
         assert body["provider"] == "elegoo_centauri"

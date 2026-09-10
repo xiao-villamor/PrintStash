@@ -2,7 +2,20 @@
 
 ## Unreleased
 
+### Security
+
+- Full and light API images use a digest-pinned Python 3.14.7 base on Debian
+  Bookworm. Runtime health checks use Python's standard library, allowing the
+  images to omit the unused curl and OpenSSH command-line packages while full
+  images retain SFTP support through AsyncSSH. The entrypoint uses Bookworm's
+  existing `setpriv` utility instead of adding `gosu` and its embedded Go
+  runtime.
+
 ### Fixed
+
+- Unified containers remain healthy without curl and prepare the artifact cache
+  for custom user and group IDs. Python 3.14 retains strict daily backup times
+  and the safe fallback for G-code filenames whose stem contains only dots.
 
 - Active print jobs no longer remain paused indefinitely after an out-of-band
   emergency stop. Authoritative idle printer updates now close interrupted jobs,

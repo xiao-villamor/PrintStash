@@ -54,8 +54,6 @@ PUID=$(canonicalize_id "$PUID")
 PGID=$(canonicalize_id "$PGID")
 
 if [ "$(id -u)" = "0" ]; then
-  requested_identity="$PUID:$PGID"
-
   # Named volumes are created by Docker, while bind mounts may not exist yet.
   # Creating the configured roots here keeps the ownership repair below
   # deterministic and preserves the local-first defaults.
@@ -64,6 +62,7 @@ if [ "$(id -u)" = "0" ]; then
     "${VAULT_THUMB_DIR:-/data/thumbs}" \
     "${VAULT_STAGING_DIR:-/data/staging}" \
     "${VAULT_BACKUP_DIR:-/data/backups}" \
+    "${VAULT_ARTIFACT_CACHE_ROOT:-/data/artifact-cache}" \
     /data/db
 
   # Numeric ownership works for host-created bind mounts even when the
@@ -77,16 +76,17 @@ if [ "$(id -u)" = "0" ]; then
     "${VAULT_THUMB_DIR:-/data/thumbs}" \
     "${VAULT_STAGING_DIR:-/data/staging}" \
     "${VAULT_BACKUP_DIR:-/data/backups}" \
+    "${VAULT_ARTIFACT_CACHE_ROOT:-/data/artifact-cache}" \
     /data/db
   do
     find "$managed_root" -xdev \
       \( ! -uid "$PUID" -o ! -gid "$PGID" \) \
-      -exec chown -h "$requested_identity" {} +
+      -exec chown -h "$PUID:$PGID" {} +
   done
   # Re-exec the same entrypoint as the requested numeric identity. This keeps
   # migration and operator-supplied commands in the exact existing order while
   # allowing arbitrary positive host IDs without mutating the image's user DB.
-  exec gosu "$requested_identity" "$0" "$@"
+  exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups "$0" "$@"
 fi
 
 if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then

@@ -57,10 +57,14 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
 
 def build_traceable_remote_filename(file: File) -> str:
     """Return a Moonraker-safe filename with a Vault revision marker."""
-    suffix = PurePosixPath(file.original_filename).suffix
+    path = PurePosixPath(file.original_filename)
+    # A supported extension still denotes G-code when the stem is only dots.
+    # pathlib's treatment of that case differs between Python versions.
+    stem, _, extension = path.name.rpartition(".")
+    suffix = f".{extension}"
     if suffix.lower() not in {".gcode", ".bgcode", ".g", ".gco"}:
         suffix = ".gcode"
-    stem = PurePosixPath(file.original_filename).stem or "print"
+        stem = path.stem
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"
     marker = f"vault-f{file.id}-{file.sha256[:12]}"
     max_stem_len = max(1, 512 - len(marker) - len(suffix) - 2)

@@ -20,6 +20,6 @@ RUN chmod -R a+rX /app/app /app/alembic
 ENV NGINX_CLIENT_MAX_BODY_SIZE=528m
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:3000/api/v1/health && curl -fsS -o /dev/null http://127.0.0.1:3000/
+  CMD /app/.venv/bin/python -c "import http.client; c = http.client.HTTPConnection('127.0.0.1', 3000, timeout=2); c.request('GET', '/api/v1/health'); r = c.getresponse(); r.read(); healthy = r.status == 200; c.request('GET', '/'); raise SystemExit(0 if healthy and c.getresponse().status == 200 else 1)"
 # Inherit the API entrypoint: repair volume ownership, drop privileges, migrate.
 CMD ["/usr/bin/tini", "--", "/app/unified-run.sh"]

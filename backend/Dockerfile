@@ -1,4 +1,5 @@
 ARG PRINTSTASH_VARIANT=full
+ARG PYTHON_BASE_IMAGE=python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 FROM rust:1.91-slim-bookworm AS opendal-builder
 
@@ -33,9 +34,9 @@ RUN curl -fsSL \
 FROM scratch AS opendal-wheel
 COPY --from=opendal-builder /wheels /
 
-FROM python:3.11-slim AS bgcode-builder
+FROM ${PYTHON_BASE_IMAGE} AS bgcode-builder
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost-dev libboost-nowide-dev zlib1g-dev \
+ && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost1.81-dev libboost-nowide1.81-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 COPY scripts/build-bgcode.sh /tmp/build-bgcode.sh
 RUN sh /tmp/build-bgcode.sh
@@ -43,7 +44,7 @@ RUN sh /tmp/build-bgcode.sh
 FROM scratch AS bgcode-binary
 COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /bgcode
 
-FROM python:3.11-slim AS base
+FROM ${PYTHON_BASE_IMAGE} AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -56,8 +57,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-    curl \
-    gosu libstdc++6 zlib1g \
+    libpcre2-8-0 libstdc++6 zlib1g \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /usr/local/bin/bgcode
@@ -74,10 +74,7 @@ RUN uv sync --frozen --no-dev --no-editable \
 
 FROM base AS dependencies-full
 COPY --from=opendal-builder /wheels /tmp/opendal-wheels
-RUN apt-get update \
- && apt-get install -y --no-install-recommends openssh-client \
- && rm -rf /var/lib/apt/lists/* \
- && uv sync --frozen --no-dev --no-editable --extra full \
+RUN uv sync --frozen --no-dev --no-editable --extra full \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
  && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh' \
  && rm -rf /tmp/opendal-wheels \
