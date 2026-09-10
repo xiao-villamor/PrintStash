@@ -148,6 +148,21 @@ class TestNativeTessellation:
         assert brep["volume_mm3"] is None
         assert brep["volume_unavailable"] == "not_solid"
 
+    def test_rejects_document_without_transferable_geometry(self, tmp_path):
+        from app.modules.media.step_geometry import StepGeometryError, tessellate
+
+        path = tmp_path / "empty.step"
+        path.write_text(
+            "ISO-10303-21;\nHEADER;\n"
+            "FILE_DESCRIPTION(('empty'), '2;1');\n"
+            "FILE_NAME('empty.step','2026-01-01T00:00:00',(''),(''),'','','');\n"
+            "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n"
+            "ENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n"
+        )
+
+        with pytest.raises(StepGeometryError, match="invalid_step"):
+            tessellate(path, triangle_limit=100)
+
     def test_wire_cannot_supply_surface_geometry(self, tmp_path):
         from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
         from OCP.gp import gp_Pnt

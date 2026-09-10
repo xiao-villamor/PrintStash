@@ -202,11 +202,13 @@ test.describe("Multipart review layout", () => {
       expect(bounds!.y).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+      expect(bounds!.height).toBeLessThan(650);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await dialog.getByRole("button", { name: "Create multipart model" }).scrollIntoViewIfNeeded();
       await expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeInViewport();
+      await expect(dialog.getByTitle(candidate.model_a.name)).toHaveText(candidate.model_a.name);
+      await expect(dialog.getByTitle(candidate.model_b.name)).toHaveText(candidate.model_b.name);
       await dialog.screenshot({ path: testInfo.outputPath(`multipart-${width}.png`) });
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(dialog).toHaveCount(0);

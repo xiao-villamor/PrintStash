@@ -277,7 +277,14 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
           <ul className="divide-y divide-border rounded-md border border-border">
             {proof.composition?.map((part) => (
               <li key={part.model_id} className="flex justify-between gap-4 p-3 text-sm">
-                <span className="min-w-0 break-words">
+                <span
+                  className="line-clamp-2 min-w-0 break-words"
+                  title={
+                    part.model_id === candidate.model_a_id
+                      ? candidate.model_a.name
+                      : candidate.model_b.name
+                  }
+                >
                   {part.model_id === candidate.model_a_id
                     ? candidate.model_a.name
                     : candidate.model_b.name}

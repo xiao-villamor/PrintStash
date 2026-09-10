@@ -30,7 +30,7 @@ class TestRemoteProcessing:
     def test_releases_temporary_capacity_after_invalid_remote_mesh(
         self, db_session, local_storage, make_user, make_model, make_file, monkeypatch
     ):
-        config = real_preset_configuration("s3_self_hosted")
+        config = real_preset_configuration("seaweedfs")
         backend = S3StorageBackend(
             transport=resolve_transport(parse_provider_config(config))
         )

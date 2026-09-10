@@ -65,10 +65,10 @@ jobs:
         run: |
           mkdir -p "$CLIP_DIR"
           base='https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a'
-          curl --fail --location --retry 3 "$base/onnx/vision_model_quantized.onnx" --output "$CLIP_DIR/vision_model_quantized.onnx"
-          curl --fail --location --retry 3 "$base/onnx/text_model_quantized.onnx" --output "$CLIP_DIR/text_model_quantized.onnx"
+          curl --fail --location --retry 3 "$base/onnx/vision_model.onnx" --output "$CLIP_DIR/vision_model.onnx"
+          curl --fail --location --retry 3 "$base/onnx/text_model.onnx" --output "$CLIP_DIR/text_model.onnx"
           curl --fail --location --retry 3 "$base/tokenizer.json" --output "$CLIP_DIR/tokenizer.json"
-          cp backend/tests/fixtures/embeddings/clip-vit-base-patch32-int8.json "$CLIP_DIR/manifest.json"
+          cp backend/tests/fixtures/embeddings/clip-vit-base-patch32-fp32.json "$CLIP_DIR/manifest.json"
       - name: Validate real CLIP towers and standalone text search
         if: github.event_name == 'workflow_dispatch' && inputs.native_clip
         working-directory: backend

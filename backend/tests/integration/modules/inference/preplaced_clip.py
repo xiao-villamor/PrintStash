@@ -31,7 +31,7 @@ def preplaced_clip(monkeypatch):
     root = Path(value)
     assert root.is_dir(), "configured preplaced CLIP directory must exist"
     monkeypatch.setitem(_overlay, "embedding_local_model_dir", str(root))
-    monkeypatch.setitem(_overlay, "embedding_model_key", "clip-vit-base-patch32-int8")
+    monkeypatch.setitem(_overlay, "embedding_model_key", "clip-vit-base-patch32-fp32")
     return configured_provider(get_session_factory())
 
 

@@ -62,7 +62,10 @@ upload intact. Runs keep their checkpoints across restarts and can be cancelled
 between work units. Maintenance and storage garbage collection share the normal
 application admission and retention controls. Truncated buckets, partial inputs,
 and unsupported Artifacts are reported in progress instead of implying a complete
-search.
+search. Starting a manual analysis retries previously failed, unsupported or
+partial geometry, which is useful after increasing a limit or enabling format
+support. Scheduled analysis keeps those cached results to avoid retry loops.
+Complete fingerprints are reused.
 
 STL, OBJ, and 3MF geometry works in the lite profile. Oversized STL inputs can
 produce partial descriptors, which cannot prove exact equivalence. STEP requires
@@ -80,7 +83,7 @@ and (for CLIP) a tokenizer file. Set:
 
 ```text
 VAULT_EMBEDDING_LOCAL_MODEL_DIR=/models/similarity
-VAULT_EMBEDDING_MODEL_KEY=clip-vit-base-patch32-int8
+VAULT_EMBEDDING_MODEL_KEY=clip-vit-base-patch32-fp32
 VAULT_EMBEDDING_ONNX_THREADS=2
 ```
 
