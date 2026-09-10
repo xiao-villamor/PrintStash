@@ -62,6 +62,7 @@ if [ "$(id -u)" = "0" ]; then
     "${VAULT_THUMB_DIR:-/data/thumbs}" \
     "${VAULT_STAGING_DIR:-/data/staging}" \
     "${VAULT_BACKUP_DIR:-/data/backups}" \
+    "${VAULT_ARTIFACT_CACHE_ROOT:-/data/artifact-cache}" \
     /data/db
 
   # Numeric ownership works for host-created bind mounts even when the
@@ -75,6 +76,7 @@ if [ "$(id -u)" = "0" ]; then
     "${VAULT_THUMB_DIR:-/data/thumbs}" \
     "${VAULT_STAGING_DIR:-/data/staging}" \
     "${VAULT_BACKUP_DIR:-/data/backups}" \
+    "${VAULT_ARTIFACT_CACHE_ROOT:-/data/artifact-cache}" \
     /data/db
   do
     find "$managed_root" -xdev \

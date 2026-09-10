@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlmodel import Session, select
 
 from app.db.models import File, Model, PrinterFile
@@ -62,9 +63,25 @@ class TestTraceableFilename:
         assert "/" not in name and "!" not in name and "@" not in name
         assert pf._VAULT_MARKER_RE.search(name) is not None
 
-    def test_empty_stem_falls_back_to_print(self) -> None:
-        f = _FakeFile(7, "....gcode", "deadbeef" * 8)
-        assert build_traceable_remote_filename(f).startswith("print__vault-f7-")
+    @pytest.mark.parametrize(
+        "suffix", [".gcode", ".bgcode", ".g", ".gco", ".GCODE"], ids=str
+    )
+    def test_empty_stem_falls_back_to_print(self, suffix: str) -> None:
+        f = _FakeFile(7, "..." + suffix, "deadbeef" * 8)
+        assert (
+            build_traceable_remote_filename(f)
+            == f"print__vault-f7-deadbeefdead{suffix}"
+        )
+
+    @pytest.mark.parametrize(
+        "suffix", [".gcode", ".bgcode", ".g", ".gco", ".GCODE"], ids=str
+    )
+    def test_preserves_supported_suffixes(self, suffix: str) -> None:
+        f = _FakeFile(7, "part" + suffix, "deadbeef" * 8)
+
+        assert (
+            build_traceable_remote_filename(f) == f"part__vault-f7-deadbeefdead{suffix}"
+        )
 
     def test_non_gcode_suffix_is_coerced(self) -> None:
         f = _FakeFile(9, "model.stl", "cafe" * 16)

@@ -26,11 +26,21 @@ ready() {
 }
 ready
 # Browser requests reach the SPA and the API through the same listener.
-docker exec "$name" sh -ec '
-  curl -fsS http://127.0.0.1:3000/library > /tmp/page
-  grep -q "<html" /tmp/page
-  curl -fsS http://127.0.0.1:3000/api/v1/health > /tmp/health
-  test "$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/assets/missing.js)" = 404
+docker exec "$name" /app/.venv/bin/python -c '
+import http.client, json
+connection = http.client.HTTPConnection("127.0.0.1", 3000, timeout=5)
+connection.request("GET", "/library")
+response = connection.getresponse()
+assert response.status == 200, response.status
+assert b"<html" in response.read()
+connection.request("GET", "/api/v1/health")
+response = connection.getresponse()
+assert response.status == 200, response.status
+assert json.loads(response.read())["status"] == "ok"
+connection.request("GET", "/assets/missing.js")
+response = connection.getresponse()
+assert response.status == 404, response.status
+connection.close()
 '
 # Identity, actual migrations, SQLite default and optional adapters in final image.
 docker exec --user 12345:23456 "$name" /app/.venv/bin/python -c '
@@ -41,7 +51,7 @@ p = Path("/data/db/printstash.sqlite")
 assert p.stat().st_uid == 12345
 with sqlite3.connect(p) as db:
     assert db.execute("select version_num from alembic_version").fetchone()
-for folder in ("files", "thumbs", "staging", "backups", "db"):
+for folder in ("files", "thumbs", "staging", "backups", "db", "artifact-cache"):
     Path("/data", folder, "unified-smoke").write_text("persisted")
 for service, options in (
     ("s3", dict(bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true")),
@@ -56,7 +66,7 @@ docker start "$name" >/dev/null
 ready
 docker exec --user 12345:23456 "$name" /app/.venv/bin/python -c '
 from pathlib import Path
-for folder in ("files", "thumbs", "staging", "backups", "db"):
+for folder in ("files", "thumbs", "staging", "backups", "db", "artifact-cache"):
     assert Path("/data", folder, "unified-smoke").read_text() == "persisted"
 '
 # A real API exit must stop the web process too (Settings restart uses this path).

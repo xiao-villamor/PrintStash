@@ -13,6 +13,10 @@
 
 ### Fixed
 
+- Unified containers remain healthy without curl and prepare the artifact cache
+  for custom user and group IDs. Python 3.14 retains strict daily backup times
+  and the safe fallback for G-code filenames whose stem contains only dots.
+
 - Active print jobs no longer remain paused indefinitely after an out-of-band
   emergency stop. Authoritative idle printer updates now close interrupted jobs,
   with an operator recovery action for stale history when no update arrives.
