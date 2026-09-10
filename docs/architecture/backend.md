@@ -94,6 +94,13 @@ Revision was recommended, clears a thumbnail only when it belonged to that
 Revision, and commits once. OSS executes the examples in `printstash_core_testkit.revisions` against its real
 persistence adapter. Cloud must execute the same examples when it adopts this port.
 
+The initial Similar Models geometry operation is
+`printstash_core.mesh.similarity.fingerprint_mesh`: bounded analysis over loaded
+arrays with no file, database, framework or inference dependency. Its partial
+results are retrieval evidence, never Model identity. The planned product
+similarity owner and its API/worker adapters are not yet implemented; see
+[ADR-0005](../adr/0005-similar-models-evidence.md).
+
 The OSS adapter checks collection edit authority and writes source tombstones
 in the same transaction. The future Cloud adapter must obtain a validated tenant context,
 check that its actor matches the caller, filter Model and Artifact reads by

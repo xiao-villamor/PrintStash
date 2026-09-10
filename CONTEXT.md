@@ -87,6 +87,33 @@ Model → response-schema composition (browse list, detail, export, trash
 list, vault stats). Routers never hand-map Model rows.
 _Avoid_: serializers, read builders scattered in routers
 
+### Similar Models
+
+**Geometry Fingerprint**:
+Versioned geometric descriptors of one mesh Artifact or one Component, used
+to retrieve candidates for verification. It never defines Model identity.
+_Avoid_: hash (means source-byte SHA-256), signature, embedding
+
+**Component**:
+One connected piece of a mesh Artifact, or one object resource inside a 3MF.
+Repeated instances retain their quantities and placement.
+_Avoid_: part (Multipart Part), shell
+
+**Similarity Candidate**:
+Evidence that two Models, or their Components, may share geometry, with
+measurements and a human review state distinct from the evidence's freshness.
+_Avoid_: duplicate, match, hit
+
+**Evidence Class**:
+A machine-observed geometric relationship, such as identical geometry,
+rescaled, mirrored, repaired, remeshed, similar shape, component-of or plate-of.
+It is distinct from a human Variant Role and never authorizes deletion or merging.
+_Avoid_: verdict, role
+
+**Similarity Run**:
+One bounded, cancellable, restart-safe execution of fingerprinting and candidate
+generation over an explicit scope.
+
 ### Trash
 
 **Live**:

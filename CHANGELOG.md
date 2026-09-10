@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Development
+
+- Started the Similar Models geometry core with versioned retrieval fingerprints
+  and deterministic surface descriptors. Analysis runs and the review interface
+  remain under development; this does not enable similarity detection in the app.
+
 ### Fixed
 
 - Active print jobs no longer remain paused indefinitely after an out-of-band
