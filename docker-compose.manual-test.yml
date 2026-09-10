@@ -98,7 +98,7 @@ services:
     networks:
       - printstash
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import http.client; connection = http.client.HTTPConnection('127.0.0.1', 8000, timeout=4); connection.request('GET', '/api/v1/health'); raise SystemExit(0 if connection.getresponse().status == 200 else 1)"]
       interval: 15s
       timeout: 5s
       retries: 8

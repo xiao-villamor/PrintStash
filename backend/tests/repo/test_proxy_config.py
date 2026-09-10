@@ -105,6 +105,27 @@ class TestComposeFiles:
             "docker-compose.yml",
             "docker-compose.light.yml",
             "docker-compose.prod.yml",
+            "docker-compose.simple.yml",
+            "docker-compose.manual-test.yml",
+        ],
+    )
+    def test_every_api_healthcheck_uses_the_python_runtime(
+        self, compose_file: str
+    ) -> None:
+        config = yaml.safe_load((_root() / compose_file).read_text())
+
+        command = config["services"]["api"]["healthcheck"]["test"]
+        assert command[:2] == ["CMD", "/app/.venv/bin/python"]
+        assert "http.client.HTTPConnection" in command[3]
+        assert "127.0.0.1" in command[3]
+        assert "/api/v1/health" in command[3]
+
+    @pytest.mark.parametrize(
+        "compose_file",
+        [
+            "docker-compose.yml",
+            "docker-compose.light.yml",
+            "docker-compose.prod.yml",
             "docker-compose.manual-test.yml",
         ],
     )
@@ -178,6 +199,51 @@ class TestComposeFiles:
 
 
 class TestBackendDockerfile:
+    def test_backend_uses_the_pinned_python_314_bookworm_image(self) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+        assert (
+            "ARG PYTHON_BASE_IMAGE=python:3.14.7-slim-bookworm@"
+            "sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f"
+            in dockerfile
+        )
+        assert dockerfile.count("FROM ${PYTHON_BASE_IMAGE}") == 2
+
+    def test_backend_runtime_omits_unneeded_network_clients(self) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+        runtime_stages = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS base", 1)[1]
+        assert "curl" not in runtime_stages
+        assert "openssh-client" not in runtime_stages
+
+    def test_backend_uses_the_existing_setpriv_binary_for_identity_handoff(
+        self,
+    ) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+        entrypoint = (_root() / "backend" / "docker-entrypoint.sh").read_text()
+
+        runtime_stages = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS base", 1)[1]
+        assert "gosu" not in runtime_stages
+        assert (
+            'exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups "$0" "$@"'
+            in entrypoint
+        )
+
+    def test_backend_installs_the_available_bookworm_pcre_security_update(
+        self,
+    ) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+        runtime_stages = dockerfile.split("FROM ${PYTHON_BASE_IMAGE} AS base", 1)[1]
+        assert "libpcre2-8-0" in runtime_stages
+
+    def test_bgcode_builder_uses_bookworms_supported_boost_release(self) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+        build_script = (_root() / "backend" / "scripts" / "build-bgcode.sh").read_text()
+
+        assert "libboost1.81-dev libboost-nowide1.81-dev" in dockerfile
+        assert "/usr/share/doc/libboost1.81-dev/copyright" in build_script
+
     def test_backend_uv_toolchain_image_is_immutable(self) -> None:
         dockerfile = (_root() / "backend" / "Dockerfile").read_text()
 
@@ -222,7 +288,7 @@ class TestBackendDockerfile:
         A container running as root turns any RCE into host access. The backend
         starts as root on purpose — it has to `chown` the bind-mounted vault to
         whatever uid the operator asked for — so what matters is that it hands
-        off: it re-execs itself through `gosu` under the requested identity, and
+        off: it re-execs itself through `setpriv` under the requested identity, and
         the second pass refuses to continue if it is still not that identity.
         """
         root = _root()
@@ -230,8 +296,10 @@ class TestBackendDockerfile:
         frontend = (root / "frontend" / "Dockerfile").read_text()
         entrypoint = (root / "backend" / "docker-entrypoint.sh").read_text()
 
-        assert 'exec gosu "$requested_identity"' in entrypoint
-        assert 'requested_identity="$PUID:$PGID"' in entrypoint
+        assert (
+            'exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups "$0" "$@"'
+            in entrypoint
+        )
         # The re-exec is only a hand-off if the second pass verifies it landed.
         assert (
             'if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then'

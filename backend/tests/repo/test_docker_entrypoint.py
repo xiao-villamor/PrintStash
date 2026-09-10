@@ -3,7 +3,7 @@
 Bind-mounted data must remain writable across restarts, while migrations and an
 operator-supplied command must run only after the process has dropped privileges.
 These tests execute the real shell flow with tiny command shims standing in for
-the container-only ``id``, ``gosu``, and Python runtime.
+the container-only ``id``, ``setpriv``, and Python runtime.
 """
 
 from __future__ import annotations
@@ -41,11 +41,18 @@ fi
 """,
     )
     _write_executable(
-        fake_bin / "gosu",
+        fake_bin / "setpriv",
         """#!/bin/sh
-spec=$1
-shift
-FAKE_UID=${spec%:*} FAKE_GID=${spec#*:} exec "$@"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --reuid=*) FAKE_UID=${1#*=}; shift ;;
+    --regid=*) FAKE_GID=${1#*=}; shift ;;
+    --clear-groups) shift ;;
+    *) break ;;
+  esac
+done
+export FAKE_UID FAKE_GID
+exec "$@"
 """,
     )
     _write_executable(
@@ -202,7 +209,7 @@ class TestDockerEntrypointIdentity:
     def test_passes_the_operator_command_through_unchanged(
         self, tmp_path: Path
     ) -> None:
-        # The re-exec goes through `gosu "-e" ""`, so a lost argument would
+        # The re-exec goes through `setpriv`, so a lost argument would
         # silently start the default server instead of what the operator asked for.
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
 

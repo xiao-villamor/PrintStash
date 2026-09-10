@@ -39,6 +39,27 @@ class TestCriticalCapabilitiesJob:
         )
 
 
+class TestBackendRuntimeCompatibilityJob:
+    def test_python_314_runtime_is_a_required_ci_gate(self) -> None:
+        job = _ci_workflow()["jobs"]["backend-python314"]
+        python_setup = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("actions/setup-python@")
+        )
+
+        assert job["name"] == "Backend runtime (Python 3.14)"
+        assert job.get("continue-on-error", False) is False
+        assert python_setup["with"]["python-version"] == "3.14"
+        assert any(
+            step.get("run") == "uv sync --extra dev --extra full --frozen"
+            for step in job["steps"]
+        )
+        assert any(
+            step.get("run") == "./scripts/test.sh full -q" for step in job["steps"]
+        )
+
+
 class TestMultiArchWorkflows:
     """The release workflows build each architecture where it is native.
 
