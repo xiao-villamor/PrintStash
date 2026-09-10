@@ -7,6 +7,8 @@ import { modelCard } from "./util";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
 
+test.use({ trace: "retain-on-failure" });
+
 test.afterEach(async ({ page }) => {
   await page.request.patch(`${API}/api/v1/similarity/settings`, { data: { enabled: false } });
 });
@@ -56,10 +58,12 @@ test.describe("Standalone similarity", () => {
     }
     await page.setViewportSize({ width: 1280, height: 800 });
     const models: { id: number; name: string; hashes: string[] }[] = [];
-    {
+    try {
       for (let index = 0; index < 2; index++) {
         const name = `${prefix}-${index}`;
         const mesh = calibrationCube(index * 40);
+        // A distinct STL header avoids content deduplication across failed attempts.
+        Buffer.from(name).copy(mesh, 0, 0, 80);
         const revision = Buffer.concat([
           readFileSync(
             new URL("../../../testdata/Calibration Cube_PLA_19m6s.gcode", import.meta.url),
@@ -208,7 +212,14 @@ test.describe("Standalone similarity", () => {
       ).toBe(true);
       await page.screenshot({ path: testInfo.outputPath("similarity-mobile.png"), fullPage: true });
       await page.getByRole("button", { name: "Confirm evidence" }).click();
-      await page.getByRole("dialog").getByRole("button", { name: "Confirm evidence" }).click();
+      const [reviewResponse] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().endsWith("/decision") && response.request().method() === "POST",
+        ),
+        page.getByRole("dialog").getByRole("button", { name: "Confirm evidence" }).click(),
+      ]);
+      expect(reviewResponse.ok(), await reviewResponse.text()).toBe(true);
       await expect(page.getByText("Resolution: evidence confirmed")).toBeVisible();
       await page.reload();
       await expect(page.getByText("Resolution: evidence confirmed")).toBeVisible();
@@ -225,6 +236,8 @@ test.describe("Standalone similarity", () => {
           "stl",
         ]);
       }
+    } finally {
+      for (const model of models) await page.request.delete(`${API}/api/v1/models/${model.id}`);
     }
   });
 });

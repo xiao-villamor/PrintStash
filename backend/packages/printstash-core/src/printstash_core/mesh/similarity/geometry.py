@@ -92,7 +92,10 @@ def sample_surface(surface: Surface, count: int, seed: int) -> FloatArray:
     triangles = surface.vertices[surface.faces[np.searchsorted(cdf, rng.random(count))]]
     uv = rng.random((count, 2))
     root = np.sqrt(uv[:, 0])
-    weights = np.column_stack((1 - root, root * (1 - uv[:, 1]), root * uv[:, 1]))
+    weights = np.asarray(
+        np.column_stack((1 - root, root * (1 - uv[:, 1]), root * uv[:, 1])),
+        dtype=np.float64,
+    )
     return np.einsum("fi,fij->fj", weights, triangles)
 
 

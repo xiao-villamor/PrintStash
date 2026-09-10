@@ -28,7 +28,7 @@ export function similaritySettings(
 export function similarityStatus(overrides: Partial<SimilarityStatus> = {}): SimilarityStatus {
   return {
     enabled: true,
-    algorithm_version: "geometry-v1-sh5f4577c4",
+    algorithm_version: "geometry-v2-sh5f4577c4",
     pending_fingerprints: 0,
     capabilities: {
       family_resolution: false,
@@ -80,7 +80,7 @@ export function aSimilarityCandidate(
     primary_lineage_key: null,
     observations: [],
     allowed_actions: ["confirm_evidence", "reject", "later", "reopen"],
-    algorithm_version: "geometry-v1-sh5f4577c4",
+    algorithm_version: "geometry-v2-sh5f4577c4",
     reconsidered_candidate_id: null,
     ...overrides,
   };

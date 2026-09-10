@@ -246,7 +246,7 @@ def project_sh(spectrum: FloatArray) -> tuple[tuple[float, ...], str]:
 
 def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
     import numpy as np
-    from PIL import Image
+    from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
 
     diagonal = float(np.linalg.norm(np.ptp(surface.vertices @ surface.frame, axis=0)))
     normalized = surface.vertices @ surface.frame / diagonal

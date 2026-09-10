@@ -48,28 +48,49 @@ class TestRetrieval:
         )
         assert result.fingerprint_ids == (repaired.id,)
 
+    @pytest.mark.parametrize("base", ["thingi10k-70561.stl", "thingi10k-843549.stl"])
     def test_retains_quarter_face_decimation(
-        self,
-        db_session,
-        make_model,
-        make_file,
-        make_user,
-        source,
-        make_geometry_fingerprint,
+        self, db_session, make_model, make_file, make_user, base, tmp_path
     ):
-        source.face_count = 1000
-        db_session.add(source)
-        db_session.commit()
-        remesh = make_geometry_fingerprint(
-            make_file(make_model()),
-            state="ready",
-            face_count=250,
-            normalized_area=1.05,
-            d2_blob=source.d2_blob,
+        from app.db.models import FileType
+        from app.modules.media.fingerprints import extract
+        from app.modules.media.geometry_analysis import _load
+        from app.modules.similarity.fingerprints import publish_precomputed
+        from tests.factories.similarity_corpus import mesh_for
+
+        first, second = (
+            make_file(make_model(), file_type=FileType.STL),
+            make_file(make_model(), file_type=FileType.STL),
         )
-        assert retrieval.find_candidates(
+        dense = tmp_path / "dense.stl"
+        reduced = tmp_path / "reduced.stl"
+        dense.write_bytes(mesh_for(base, "subdivision").export(file_type="stl"))
+        reduced.write_bytes(mesh_for(base, "original").export(file_type="stl"))
+        publish_precomputed(
+            db_session, first, extract(_load(dense, "stl", triangle_cap=200_000))
+        )
+        publish_precomputed(
+            db_session, second, extract(_load(reduced, "stl", triangle_cap=200_000))
+        )
+        source = db_session.exec(
+            select(GeometryFingerprint).where(
+                GeometryFingerprint.file_id == first.id,
+                GeometryFingerprint.component_index == 0,
+            )
+        ).one()
+        target = db_session.exec(
+            select(GeometryFingerprint).where(
+                GeometryFingerprint.file_id == second.id,
+                GeometryFingerprint.component_index == 0,
+            )
+        ).one()
+
+        result = retrieval.find_candidates(
             db_session, source, make_user(superuser=True)
-        ).fingerprint_ids == (remesh.id,)
+        )
+
+        assert target.face_count * 4 == source.face_count
+        assert target.id in result.fingerprint_ids
 
     def test_bounds_primitive_buckets(
         self,

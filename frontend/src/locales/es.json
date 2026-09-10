@@ -3431,5 +3431,6 @@
   "similarity.previous": "Anterior",
   "similarity.previewError": "No se pudo actualizar el número de candidatos. No se ha guardado la configuración.",
   "similarity.noModelMatches": "Ningún modelo coincide con esta búsqueda.",
-  "similarity.clearSelection": "Limpiar selección"
+  "similarity.clearSelection": "Limpiar selección",
+  "similarity.reviewChanged": "La evidencia ha cambiado. Revisa la comparación actualizada antes de confirmar de nuevo."
 }

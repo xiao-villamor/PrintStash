@@ -57,7 +57,7 @@ const SUITES = [
     areas: [
       // The tested core: formatters, stores, query hooks, the api client. This is
       // the area where a unit test is the right tier, so it carries the real floor.
-      { prefix: "src/lib/", statements: 93.1, branches: 84.6 },
+      { prefix: "src/lib/", statements: 93.4, branches: 84.9 },
       // The bulk of the app, and where the remaining debt is. Route-level
       // behaviour is covered by Playwright, which v8 cannot see; component-level
       // behaviour is being brought up module by module.

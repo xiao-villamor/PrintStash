@@ -6,7 +6,7 @@ import SimilarModelComparisonPage from "@/pages/similar-model-comparison";
 import { aModel, aMultipartModel } from "@/test-support/factories";
 import { aSimilarityCandidate } from "@/test-support/similarity";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { SimilarityCandidate } from "@/types/similarity";
+import type { ReviewState, SimilarityCandidate } from "@/types/similarity";
 
 function renderComparison(
   candidate: SimilarityCandidate = aSimilarityCandidate(),
@@ -227,5 +227,131 @@ describe("Multipart destination discovery", () => {
     const dialog = within(screen.getByRole("dialog"));
     expect(await dialog.findByRole("status")).toHaveTextContent("You can still create a new one");
     expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeEnabled();
+  });
+});
+
+describe("Comparison address validation", () => {
+  it.each(["0", "-1", "invalid", "9007199254740992"])(
+    "rejects invalid comparison address %s",
+    async (id) => {
+      const app = renderComparison(aSimilarityCandidate(), { at: `/library/similar/${id}` });
+      expect(await screen.findByText("Could not load similarity results")).toBeVisible();
+      expect(screen.getByRole("link", { name: "Back to similar models" })).toHaveAttribute(
+        "href",
+        "/library/similar",
+      );
+      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+      expect(
+        app
+          .requestsWithMethod("GET")
+          .filter((request) => request.url.includes("similarity/candidates")),
+      ).toEqual([]);
+    },
+  );
+});
+
+describe("Review state controls", () => {
+  it.each([
+    { label: "Reject match", action: "reject", state: "open" },
+    { label: "Review later", action: "later", state: "open" },
+    { label: "Reopen review", action: "reopen", state: "rejected" },
+  ] satisfies { label: string; action: string; state: ReviewState }[])(
+    "submits $action",
+    async ({ label, action, state }) => {
+      const user = userEvent.setup();
+      const app = renderComparison(aSimilarityCandidate({ review_state: state, version: 4 }));
+      await user.click(await screen.findByRole("button", { name: label }));
+      await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toEqual({
+        action,
+        version: 4,
+        request_id: expect.any(String),
+      });
+    },
+  );
+  it.each(["Confirm evidence", "Create multipart model"])(
+    "cancels %s without writing",
+    async (label) => {
+      const user = userEvent.setup();
+      const app = renderComparison(
+        aSimilarityCandidate({
+          allowed_actions: ["confirm_evidence", "create_multipart"],
+          summary: { composition: [{ model_id: 1, quantity: 2 }] },
+        }),
+      );
+      await user.click(await screen.findByRole("button", { name: label }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(app.requestsWithMethod("POST")).toEqual([]);
+    },
+  );
+  it("submits an edited Multipart name", async () => {
+    const user = userEvent.setup();
+    const app = renderComparison(
+      aSimilarityCandidate({
+        allowed_actions: ["create_multipart"],
+        summary: { unmatched_components: 1, composition: [{ model_id: 2, quantity: 3 }] },
+      }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Create multipart model" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.clear(dialog.getByRole("textbox"));
+    expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeDisabled();
+    await user.click(dialog.getByRole("textbox"));
+    await user.paste("  Workshop parts  ");
+    await user.click(dialog.getByRole("button", { name: "Create multipart model" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({
+      name: "Workshop parts",
+      parts: [{ name: "Bracket copy", model_ids: [2], quantity: 3 }],
+    });
+  });
+  it("retries a failed comparison request", async () => {
+    const user = userEvent.setup();
+    let failed = true;
+    renderComparison(aSimilarityCandidate(), {
+      routes: {
+        "GET /api/v1/similarity/candidates/1": () =>
+          failed ? json({ detail: "unavailable" }, 503) : json(aSimilarityCandidate()),
+      },
+    });
+    await screen.findByText("Could not load similarity results");
+    failed = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "Confirm evidence" })).toBeVisible();
+  });
+});
+
+describe("Concurrent review recovery", () => {
+  it("refreshes a conflicted review before retry", async () => {
+    const user = userEvent.setup();
+    let conflicted = false;
+    const app = renderComparison(aSimilarityCandidate(), {
+      routes: {
+        "GET /api/v1/similarity/candidates/1": () =>
+          json(aSimilarityCandidate({ version: conflicted ? 2 : 1 })),
+        "POST /api/v1/similarity/candidates/1/decision": () => {
+          conflicted = true;
+          return json({ detail: "similarity_version_conflict" }, 409);
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Confirm evidence" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm evidence" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This evidence changed. Review the updated comparison before confirming again.",
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Confirm evidence" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm evidence" }),
+    );
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(2));
+    const first = JSON.parse(app.requestsWithMethod("POST")[0].body);
+    const second = JSON.parse(app.requestsWithMethod("POST")[1].body);
+    expect(second.version).toBe(2);
+    expect(second.request_id).not.toBe(first.request_id);
   });
 });

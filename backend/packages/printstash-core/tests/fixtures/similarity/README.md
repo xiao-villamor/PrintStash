@@ -31,3 +31,9 @@ on these thin/open source files it could close holes, change topology, or fail t
 reach the requested 25% face count. The positive quarter-count fixture uses an
 analytic annulus with a known preserved surface. Severe destructive reductions
 are outside the positive repair/remesh claim.
+
+The quarter-count integration gate also runs in the reverse direction on both
+held-out real designs: a once-subdivided surface is reduced to its original
+triangulation, with the actual 4:1 face ratio asserted before retrieval and
+verification acceptance. This controls surface preservation explicitly; it does
+not certify arbitrary QEM simplification or count a derivative as a new design.

@@ -15,6 +15,7 @@ import { listMultipartModels } from "@/lib/api/multipart-models";
 import { getModel } from "@/lib/api/models";
 import { decideSimilarity, getSimilarityCandidate } from "@/lib/api/similarity";
 import { useI18n } from "@/lib/i18n";
+import { parseApiError } from "@/lib/errors";
 import { Link } from "@/lib/link";
 import { evidenceDescription, evidenceLabel } from "@/lib/similarity";
 import { toast } from "@/lib/toast";
@@ -32,6 +33,7 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
     queryFn: () => getModel(candidate.model_b_id),
   });
   const [confirmation, setConfirmation] = useState<SimilarityDecision | null>(null);
+  const [reviewChanged, setReviewChanged] = useState(false);
   const [multipartName, setMultipartName] = useState("");
   const [targetId, setTargetId] = useState<number | undefined>();
   const [targetName, setTargetName] = useState("");
@@ -53,10 +55,17 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
       void queryClient.invalidateQueries({ queryKey: ["similarity", "candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["models"] });
       setConfirmation(null);
+      setReviewChanged(false);
       toast.success(t("similarity.decisionSaved"));
     },
     onError: (error) => {
-      toast.error(error);
+      const code = parseApiError(error).code;
+      if (code === "similarity_version_conflict" || code === "similarity_evidence_stale") {
+        setConfirmation(null);
+        setReviewChanged(true);
+      } else {
+        toast.error(error);
+      }
       void queryClient.invalidateQueries({ queryKey: ["similarity-candidate", candidate.id] });
     },
   });
@@ -81,9 +90,18 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
     <>
       <PageHeader
         title={t("similarity.compareTitle")}
-        description={`${candidate.model_a.name} · ${candidate.model_b.name}`}
+        description={
+          <span className="break-words">
+            {candidate.model_a.name} · {candidate.model_b.name}
+          </span>
+        }
       />
       <div className="space-y-5">
+        {reviewChanged && (
+          <p role="alert" className="text-sm text-warning">
+            {t("similarity.reviewChanged")}
+          </p>
+        )}
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
             <Badge variant="secondary">{evidenceLabel(candidate.evidence_class)}</Badge>
@@ -216,6 +234,7 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
           if (!decision.isPending) setConfirmation(null);
         }}
         title={t("similarity.createMultipart")}
+        className="max-h-[90dvh] overflow-y-auto"
       >
         <form
           className="space-y-4"
@@ -245,12 +264,12 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
           <ul className="divide-y divide-border rounded-md border border-border">
             {proof.composition?.map((part) => (
               <li key={part.model_id} className="flex justify-between gap-4 p-3 text-sm">
-                <span>
+                <span className="min-w-0 break-words">
                   {part.model_id === candidate.model_a_id
                     ? candidate.model_a.name
                     : candidate.model_b.name}
                 </span>
-                <span>
+                <span className="shrink-0">
                   {t("similarity.quantity")}: {part.quantity}
                 </span>
               </li>
@@ -360,11 +379,12 @@ function CandidateReview({ candidate }: { candidate: SimilarityCandidate }) {
 export default function SimilarModelComparisonPage() {
   const { id } = useParams();
   const candidateId = Number(id);
+  const validId = Number.isSafeInteger(candidateId) && candidateId > 0;
   const { t } = useI18n();
   const candidate = useQuery({
     queryKey: ["similarity-candidate", candidateId],
     queryFn: () => getSimilarityCandidate(candidateId),
-    enabled: Number.isSafeInteger(candidateId) && candidateId > 0,
+    enabled: validId,
   });
   return (
     <PageContainer>
@@ -377,14 +397,16 @@ export default function SimilarModelComparisonPage() {
       </Link>
       {candidate.data ? (
         <CandidateReview candidate={candidate.data} />
-      ) : candidate.isError || !Number.isSafeInteger(candidateId) ? (
+      ) : candidate.isError || !validId ? (
         <EmptyState
           icon={ScanSearch}
           title={t("similarity.loadError")}
           action={
-            <Button variant="outline" onClick={() => void candidate.refetch()}>
-              {t("similarity.retry")}
-            </Button>
+            validId ? (
+              <Button variant="outline" onClick={() => void candidate.refetch()}>
+                {t("similarity.retry")}
+              </Button>
+            ) : undefined
           }
         />
       ) : (

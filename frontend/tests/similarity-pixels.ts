@@ -26,14 +26,37 @@ export async function silhouetteOverlap(page: Page, first: Buffer, second: Buffe
           );
         }),
       );
-      let intersection = 0,
-        union = 0;
-      for (let i = 0; i < masks[0].length; i++) {
-        if (masks[0][i] && masks[1][i]) intersection++;
-        if (masks[0][i] || masks[1][i]) union++;
-      }
       // Empty/error canvases must not count as matching geometry.
-      return union > 100 ? intersection / union : 0;
+      const foreground = masks.map((mask) => mask.filter(Boolean).length);
+      if (Math.min(...foreground) <= 100) return 0;
+      let overlap = 0;
+      // Adjacent CSS grid cells can differ by one raster pixel after resizing
+      // to 256px. Allow that translation, keeping scale and rotation unchanged.
+      for (const dx of [-1, 0, 1]) {
+        for (const dy of [-1, 0, 1]) {
+          let intersection = 0;
+          for (let y = 0; y < 256; y++) {
+            for (let x = 0; x < 256; x++) {
+              const targetX = x + dx,
+                targetY = y + dy;
+              if (
+                targetX >= 0 &&
+                targetX < 256 &&
+                targetY >= 0 &&
+                targetY < 256 &&
+                masks[0][y * 256 + x] &&
+                masks[1][targetY * 256 + targetX]
+              )
+                intersection++;
+            }
+          }
+          overlap = Math.max(
+            overlap,
+            intersection / (foreground[0] + foreground[1] - intersection),
+          );
+        }
+      }
+      return overlap;
     },
     [[...first], [...second]],
   );

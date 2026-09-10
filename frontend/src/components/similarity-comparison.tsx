@@ -198,7 +198,7 @@ export function SimilarityComparison({
           >
             <div className="border-b border-border px-4 py-3">
               <Link
-                className="font-medium text-primary hover:underline"
+                className="break-words font-medium text-primary hover:underline"
                 href={`/models/${modelRefs[index].id}`}
               >
                 {modelRefs[index].name}

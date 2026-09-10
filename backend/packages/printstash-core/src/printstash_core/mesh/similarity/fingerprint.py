@@ -360,7 +360,10 @@ def _d2(triangles: FloatArray, seed: int, diagonal: float) -> D2Descriptor:
     selected = triangles[np.searchsorted(cdf, rng.random(_D2_PAIRS * 2))]
     uv = rng.random((_D2_PAIRS * 2, 2))
     root = np.sqrt(uv[:, 0])
-    weights = np.column_stack((1 - root, root * (1 - uv[:, 1]), root * uv[:, 1]))
+    weights = np.asarray(
+        np.column_stack((1 - root, root * (1 - uv[:, 1]), root * uv[:, 1])),
+        dtype=np.float64,
+    )
     points = np.einsum("fi,fij->fj", weights, selected)
     distances = np.linalg.norm(points[:_D2_PAIRS] - points[_D2_PAIRS:], axis=1)
     mean = float(distances.mean())

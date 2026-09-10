@@ -149,3 +149,28 @@ class TestFrozenCorpus:
             row["evidence"]["evidence_class"] == row["expected"] for row in mirrors
         )
         assert all(not row["evidence"]["mirror_ambiguous"] for row in mirrors)
+
+
+class TestSurfacePreservingDecimation:
+    @pytest.mark.parametrize(
+        "base",
+        [
+            item["path"]
+            for item in provenance()["files"]
+            if item["split"] == "evaluation"
+        ],
+    )
+    @pytest.mark.critical
+    def test_recognizes_quarter_count_retessellation(self, base):
+        # Reverse one subdivision level on each held-out real design. This is
+        # controlled surface-preserving decimation, not a QEM quality claim.
+        first, second = mesh_for(base, "subdivision"), mesh_for(base, "original")
+
+        evidence = verify_meshes(
+            first.vertices, first.faces, second.vertices, second.faces
+        )
+
+        assert len(second.faces) * 4 == len(first.faces)
+        assert evidence.evidence_class == "remeshed"
+        assert evidence.confidence >= 0.9
+        assert evidence.exact_equivalence is False

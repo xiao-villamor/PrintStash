@@ -173,3 +173,43 @@ test.describe("Similarity preview compensation", () => {
     });
   }
 });
+
+test.describe("Multipart review layout", () => {
+  test("contains long Multipart names on mobile", async ({ page }, testInfo) => {
+    const candidate = aSimilarityCandidate({
+      model_a: { id: 1, name: "A".repeat(255), slug: "long-a", thumbnail_file_id: null },
+      model_b: { id: 2, name: "B".repeat(255), slug: "long-b", thumbnail_file_id: null },
+      allowed_actions: ["create_multipart"],
+      summary: {
+        composition: [
+          { model_id: 1, quantity: 2 },
+          { model_id: 2, quantity: 3 },
+        ],
+      },
+    });
+    await page.route("**/api/v1/similarity/candidates/1", (route) =>
+      route.fulfill({ json: candidate }),
+    );
+    await page.route("**/api/v1/multipart-models?**", (route) => route.fulfill({ json: [] }));
+    await page.goto("/library/similar/1");
+    for (const width of [390, 1280]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.getByRole("button", { name: "Create multipart model" }).click();
+      const dialog = page.getByRole("dialog", { name: "Create multipart model" });
+      const bounds = await dialog.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await dialog.getByRole("button", { name: "Create multipart model" }).scrollIntoViewIfNeeded();
+      await expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeInViewport();
+      await dialog.screenshot({ path: testInfo.outputPath(`multipart-${width}.png`) });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toHaveCount(0);
+    }
+  });
+});

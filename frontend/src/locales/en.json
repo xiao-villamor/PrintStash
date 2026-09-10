@@ -3320,7 +3320,10 @@
   "similarity.embeddings": "Enable local semantic search",
   "similarity.noRuns": "No analysis runs yet",
   "similarity.progress": "{processed} Artifacts · {verified} comparisons",
-  "similarity.partial": { "one": "{count} partial Artifact", "other": "{count} partial Artifacts" },
+  "similarity.partial": {
+    "one": "{count} partial Artifact",
+    "other": "{count} partial Artifacts"
+  },
   "similarity.budget": "Some candidates were left out by the work limit. Increase the limit and rerun to expand coverage.",
   "similarity.unsupported": {
     "one": "{count} unsupported Artifact",
@@ -3428,5 +3431,6 @@
   "similarity.previous": "Previous",
   "similarity.previewError": "Could not update the candidate count. Your settings have not been saved.",
   "similarity.noModelMatches": "No models match this search.",
-  "similarity.clearSelection": "Clear selection"
+  "similarity.clearSelection": "Clear selection",
+  "similarity.reviewChanged": "This evidence changed. Review the updated comparison before confirming again."
 }
