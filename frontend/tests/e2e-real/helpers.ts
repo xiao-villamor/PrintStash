@@ -52,19 +52,27 @@ async function ensureAuth(): Promise<{ token: string; user: string }> {
   return { token: cachedToken!, user: cachedUser! };
 }
 
-// `page` override seeds the real HttpOnly cookie before any navigation.
+// `page` seeds the real HttpOnly cookie unless a login test requests no session.
+// The account still exists on the server in both cases.
 /* eslint-disable react-hooks/rules-of-hooks -- `use` here is Playwright's fixture callback, not a React hook. */
-export const test = base.extend({
-  page: async ({ page }, use) => {
+export const test = base.extend<{ authenticated: boolean }>({
+  authenticated: [true, { option: true }],
+  page: async ({ page, authenticated }, use) => {
     const { token, user } = await ensureAuth();
-    await page
-      .context()
-      .addCookies([
-        { name: "printstash_session", value: token, url: API, httpOnly: true, sameSite: "Strict" },
+    if (authenticated) {
+      await page.context().addCookies([
+        {
+          name: "printstash_session",
+          value: token,
+          url: API,
+          httpOnly: true,
+          sameSite: "Strict",
+        },
       ]);
-    await page.addInitScript((u) => {
-      localStorage.setItem("printstash.user", u);
-    }, user);
+      await page.addInitScript((u) => {
+        localStorage.setItem("printstash.user", u);
+      }, user);
+    }
     await use(page);
   },
 });

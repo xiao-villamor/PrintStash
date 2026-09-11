@@ -214,6 +214,8 @@ Frontend acceptance details (the S081–S090 rows above are refined here):
 | F030 | rejects an invalid compute lease | Error | Empty token or lease outside 1–900 seconds | ValueError; no slot created | Integration | ✅ `backend/tests/integration/modules/media/test_compute_slots.py::TestAcquire::test_rejects_invalid_lease` |
 | F031 | keeps malformed storage configuration unavailable at startup | Error | Persisted provider parse error | Unavailable backend refuses publication; no fallback writes | Integration | ✅ `backend/tests/integration/bootstrap/test_lifecycle.py::TestStorageComposition::test_invalid_provider_keeps_storage_unavailable` |
 | F032 | survives generation contention after claiming a compute permit | Error | Another SQLite connection locks the generation after permit commit | One ready thumbnail; render permit released; no lock error escapes | Integration | ✅ `backend/tests/integration/modules/media/test_thumbnail_generations.py::TestThumbnailGenerations::test_survives_generation_contention_after_compute_claim` |
+| F033 | signs in from an unauthenticated browser | Happy | Existing administrator; no browser session or cached user | Login form accepts credentials; authenticated library appears | Playwright | ✅ `frontend/tests/e2e-real/auth.spec.ts::authentication::without a browser session::sign in through the real login form` |
+| F034 | refuses a wrong password from an unauthenticated browser | Error | Existing administrator; no browser session; wrong password | Server rejection appears in the login form | Playwright | ✅ `frontend/tests/e2e-real/auth.spec.ts::authentication::without a browser session::the login form rejects a wrong password` |
 
 Verification evidence:
 
@@ -223,5 +225,7 @@ Verification evidence:
 - The full frontend CI pass completed 2,167 application, 60 domain and 198 UI tests, plus 75 mock-API Playwright tests; all frontend coverage floors held. The focused queue, comparison and camera pass completed 57 tests. Library floors are 93.4% statements and 84.9% branches; app branches are 76.5%, page statements 88.0%, and page branches 79.8%.
 - The real-backend headline uses repository Cube/G-code fixtures. It waits for the manual Run and both Models’ upload-triggered Runs to complete before confirming evidence; two consecutive real-browser repetitions passed in 3.4 minutes. Concurrent-version recovery is separately asserted by F013, which requires a fresh explicit decision rather than automatically retrying a confirmation.
 - Minimum-dependency Pyright checks pass on Python 3.11 and 3.13, with all 1,678 core tests passing in the four-entry CI matrix. Native STEP and preplaced float32 CLIP checks passed on amd64 and arm64.
+
+The shared real-browser helper now offers an explicit unauthenticated state. Login tests use it instead of clearing only localStorage while retaining a seeded HttpOnly session. The ordinary login, wrong-password and API-key lifecycle scenarios each passed twice on a fresh backend (six passed). A five-repeat stress trial reached the existing authentication rate limit after its first six successful cases; that limit remains unchanged.
 
 The PR records final results for the complete application suites, the coverage gates and the security scan over the exact submitted diff. Focused passes do not substitute for those gates.

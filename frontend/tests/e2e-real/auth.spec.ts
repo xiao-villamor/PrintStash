@@ -10,28 +10,29 @@
 import { test, expect, ADMIN } from "./helpers";
 
 test.describe("authentication", () => {
-  test("sign in through the real login form", async ({ page }) => {
-    // The fixture seeds a token; clear it so we exercise the actual /login flow.
-    await page.addInitScript(() => localStorage.clear());
-    await page.goto("/login");
+  test.describe("without a browser session", () => {
+    test.use({ authenticated: false });
 
-    await page.getByLabel("Username").fill(ADMIN.username);
-    await page.getByLabel("Password").fill(ADMIN.password);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    test("sign in through the real login form", async ({ page }) => {
+      await page.goto("/login");
 
-    await expect(page).toHaveURL(/\/(\?.*)?$/);
-    await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
-  });
+      await page.getByLabel("Username").fill(ADMIN.username);
+      await page.getByLabel("Password").fill(ADMIN.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
 
-  test("the login form rejects a wrong password", async ({ page }) => {
-    await page.addInitScript(() => localStorage.clear());
-    await page.goto("/login");
+      await expect(page).toHaveURL(/\/(\?.*)?$/);
+      await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+    });
 
-    await page.getByLabel("Username").fill(ADMIN.username);
-    await page.getByLabel("Password").fill("definitely-wrong");
-    await page.getByRole("button", { name: "Sign in" }).click();
+    test("the login form rejects a wrong password", async ({ page }) => {
+      await page.goto("/login");
 
-    await expect(page.getByText("Invalid username or password.")).toBeVisible();
+      await page.getByLabel("Username").fill(ADMIN.username);
+      await page.getByLabel("Password").fill("definitely-wrong");
+      await page.getByRole("button", { name: "Sign in" }).click();
+
+      await expect(page.getByText("Invalid username or password.")).toBeVisible();
+    });
   });
 
   test("a username + API key authenticates, and stops once revoked", async ({ page }) => {
