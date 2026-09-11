@@ -55,6 +55,30 @@ def _count_queries(session: Session, fn: Callable[[], object]) -> int:
 
 
 class TestListItems:
+    def test_batches_family_summaries(
+        self, db_session, make_user, make_model, make_family, make_family_member
+    ):
+        user = make_user(superuser=True)
+        [
+            make_family_member(make_family(), make_model(), canonical=True)
+            for _ in range(2)
+        ]
+        _ = user.is_superuser
+        small = _count_queries(
+            db_session, lambda: models_listing.list_items(db_session, user, limit=100)
+        )
+        [
+            make_family_member(make_family(), make_model(), canonical=True)
+            for _ in range(30)
+        ]
+        _ = user.is_superuser
+
+        large = _count_queries(
+            db_session, lambda: models_listing.list_items(db_session, user, limit=100)
+        )
+
+        assert large == small, f"Family projection grew from {small} to {large} queries"
+
     @pytest.mark.parametrize("superuser", [False, True])
     def test_list_query_count_is_independent_of_page_size(
         self, db_session: Session, superuser: bool

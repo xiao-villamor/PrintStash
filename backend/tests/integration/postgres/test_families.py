@@ -21,6 +21,7 @@ from app.db.session import _set_sqlite_pragmas
 from app.db.url import normalize_database_url
 from app.modules.library.families import canonical, members
 from app.schemas.families import FamilyCanonicalChange, FamilyMemberAdd
+from app.schemas.models import ModelSort
 from tests import factories as f
 from tests.containers import postgres_url
 from tests.paths import ALEMBIC_INI
@@ -210,3 +211,41 @@ class TestConcurrentFamilyEdits:
                     col(ModelFamilyMember.detached_at).is_(None),
                 )
             ).all() == [family.canonical_member_id]
+
+
+class TestFamilyBrowse:
+    @pytest.mark.parametrize("sort", list(ModelSort))
+    def test_pages_family_union_on_supported_databases(self, family_engine, sort):
+        from datetime import datetime, timezone
+
+        from app.modules.library.model_views.family_browse import collapsed_page
+        from app.schemas.models import ModelFilters
+
+        engine, config = family_engine
+        command.upgrade(config, FAMILY_REVISION)
+        with Session(engine) as session:
+            actor = f.build_user(session, superuser=True)
+            when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            family = f.build_family(session, "Same", updated_at=when)
+            member = f.build_model(session, "Same", updated_at=when)
+            f.build_family_member(session, family, member, canonical=True)
+            standalone = f.build_model(session, "Same", updated_at=when)
+            first = collapsed_page(
+                session, actor, filters=ModelFilters(), sort=sort, cursor=None, limit=1
+            )
+
+            second = collapsed_page(
+                session,
+                actor,
+                filters=ModelFilters(),
+                sort=sort,
+                cursor=first.next_cursor,
+                limit=1,
+            )
+
+            assert first.total == second.total == 2
+            assert first.items[0].kind == "family"
+            assert first.items[0].family.id == family.id
+            assert second.items[0].kind == "model"
+            assert second.items[0].model.id == standalone.id
+            assert second.next_cursor is None

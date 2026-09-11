@@ -1,17 +1,15 @@
 """Human variation relationships and authorized Family projections."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole
-
-MemberRole = Literal["identical", "rescaled", "mirrored", "repaired", "print_variant"]
-VariantRole = Literal[
-    "canonical", "identical", "rescaled", "mirrored", "repaired", "print_variant"
-]
+from app.schemas.family_types import MemberRole, VariantRole
+from app.schemas.models import FileRead, ModelListItem
 
 
 class FamilyMemberInput(BaseModel):
@@ -117,6 +115,7 @@ class FamilyRead(BaseModel):
     cover_thumbnail_url: str | None = None
     cover_image_uploaded: bool = False
     member_count: int = 0
+    total_visible_members: int = 0
     matching_visible_members: int = 0
     tags: list[str] = Field(default_factory=list)
     starred: bool = False
@@ -154,3 +153,51 @@ class FamilyMemberRead(BaseModel):
 class FamilyRestoreRead(BaseModel):
     family: FamilyRead
     omitted_member_ids: list[int] = Field(default_factory=list)
+
+
+class FamilyPageRead(BaseModel):
+    items: list[FamilyRead]
+    total: int
+    next_cursor: str | None = None
+
+
+class FamilyBrowseCard(BaseModel):
+    kind: Literal["family"] = "family"
+    family: FamilyRead
+
+
+class ModelBrowseCard(BaseModel):
+    kind: Literal["model"] = "model"
+    model: ModelListItem
+
+
+class FamilyBrowsePage(BaseModel):
+    items: list[FamilyBrowseCard | ModelBrowseCard]
+    total: int
+    next_cursor: str | None = None
+
+
+class FamilyMemberSort(str, Enum):
+    ORDER = "order"
+    SCALE_ASC = "scale-asc"
+    SCALE_DESC = "scale-desc"
+    DATE_ASC = "date-asc"
+    DATE_DESC = "date-desc"
+    SUCCESS_DESC = "success-desc"
+
+
+class FamilyMemberItem(FamilyMemberRead):
+    model: ModelListItem
+    preview_file: FileRead | None = None
+    formats: list[str] = Field(default_factory=list)
+    source_file_count: int = 0
+    gcode_revision_count: int = 0
+    known_good_count: int = 0
+    latest_print_outcome: str | None = None
+    units: Literal["mm", "unknown"] = "unknown"
+
+
+class FamilyMemberPage(BaseModel):
+    items: list[FamilyMemberItem]
+    total: int
+    next_cursor: str | None = None

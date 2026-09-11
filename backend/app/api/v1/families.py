@@ -1,14 +1,15 @@
 """HTTP boundary for independent, human-managed Model variations."""
 
 from contextlib import contextmanager
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.errors import ErrorKind, OperationError
 from app.core.security import require_auth, require_user
-from app.db.models import User
+from app.db.models import FileType, ModelFamily, User
 from app.db.session import get_session
 from app.modules.library.families import (
     access,
@@ -18,19 +19,28 @@ from app.modules.library.families import (
     metadata,
     mutations,
 )
+from app.modules.library.model_views import family_browse, family_members
 from app.modules.library.model_views.families import family_reads
 from app.schemas.families import (
+    FamilyBrowsePage,
     FamilyCanonicalChange,
     FamilyCreate,
     FamilyMemberAdd,
     FamilyMemberMove,
+    FamilyMemberPage,
     FamilyMemberRead,
+    FamilyMemberSort,
     FamilyMemberUpdate,
+    FamilyPageRead,
     FamilyRead,
     FamilyRestoreRead,
     FamilyUpdate,
     FamilyVersion,
 )
+from app.schemas.family_types import VariantRole
+from app.schemas.models import ModelFilters, ModelSort
+
+from .family_filters import family_browse_filters
 
 router = APIRouter(prefix="/families", tags=["families"])
 
@@ -74,6 +84,67 @@ def create_family(
     return result
 
 
+@router.get("", response_model=FamilyPageRead)
+def list_families(
+    q: str | None = Query(None, max_length=255),
+    collection_id: int | None = Query(None, gt=0),
+    favorites: bool = Query(False),
+    tag: list[str] = Query(default=[]),
+    trashed: bool = Query(False),
+    sort: ModelSort = Query(ModelSort.DATE_DESC),
+    cursor: str | None = Query(None, max_length=1024),
+    limit: int = Query(60, ge=1, le=200),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyPageRead:
+    return family_browse.family_page(
+        session,
+        user,
+        q=q,
+        collection_id=collection_id,
+        favorites=favorites,
+        tags=tag,
+        include_trashed=trashed,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.get("/browse", response_model=FamilyBrowsePage)
+def browse_families(
+    filters: ModelFilters = Depends(family_browse_filters),
+    sort: ModelSort = Query(ModelSort.DATE_DESC),
+    cursor: str | None = Query(None, max_length=1024),
+    limit: int = Query(60, ge=1, le=200),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyBrowsePage:
+    return family_browse.collapsed_page(
+        session,
+        user,
+        filters=filters,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.get("/by-slug/{slug}", response_model=FamilyRead)
+def get_family_by_slug(
+    slug: str,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyRead:
+    family_id = session.exec(
+        select(ModelFamily.id).where(ModelFamily.slug == slug)
+    ).first()
+    if family_id is None:
+        raise OperationError("family_not_found", kind=ErrorKind.NOT_FOUND)
+    family = access.require(session, user, family_id)
+    return family_reads(session, user, [family])[family_id]
+
+
 @router.get(
     "/{family_id}",
     response_model=FamilyRead,
@@ -85,6 +156,37 @@ def get_family(
 ) -> FamilyRead:
     family = access.require(session, user, family_id)
     return family_reads(session, user, [family])[family_id]
+
+
+@router.get("/{family_id}/members", response_model=FamilyMemberPage)
+def list_members(
+    family_id: int,
+    q: str | None = Query(None, max_length=255),
+    role: VariantRole | None = Query(None),
+    file_type: list[FileType] = Query(default=[]),
+    known_good: bool | None = Query(None),
+    has_revisions: bool | None = Query(None),
+    source: Literal["vault", "external"] | None = Query(None),
+    sort: FamilyMemberSort = Query(FamilyMemberSort.ORDER),
+    cursor: str | None = Query(None, max_length=1024),
+    limit: int = Query(60, ge=1, le=200),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyMemberPage:
+    return family_members.member_page(
+        session,
+        user,
+        family_id,
+        q=q,
+        role=role,
+        formats=file_type,
+        known_good=known_good,
+        has_revisions=has_revisions,
+        source=source,
+        sort=sort,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.post(

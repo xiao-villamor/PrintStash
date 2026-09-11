@@ -24,6 +24,56 @@ from app.modules.library.families.access import (
     visible_clause,
 )
 from app.schemas.families import FamilyRead
+from app.schemas.models import ModelFamilyRead
+
+from .access import accessible_live_model_ids_stmt
+from .thumbnails import thumb_url
+
+
+def membership_rows(session: Session, user: User):
+    """Visible, live memberships; hidden Family identity is never a filter hint."""
+    visible_families = select(ModelFamily.id).where(
+        live(ModelFamily), visible_clause(session, user)
+    )
+    return select(ModelFamilyMember).where(
+        col(ModelFamilyMember.detached_at).is_(None),
+        col(ModelFamilyMember.family_id).in_(visible_families),
+        col(ModelFamilyMember.model_id).in_(
+            accessible_live_model_ids_stmt(session, user)
+        ),
+    )
+
+
+def family_summaries(
+    session: Session, user: User, model_ids: list[int]
+) -> dict[int, ModelFamilyRead]:
+    if not model_ids:
+        return {}
+    members = session.exec(
+        membership_rows(session, user).where(
+            col(ModelFamilyMember.model_id).in_(model_ids)
+        )
+    ).all()
+    ids = {member.family_id for member in members}
+    families = list(
+        session.exec(select(ModelFamily).where(col(ModelFamily.id).in_(ids))).all()
+    )
+    cards = family_reads(session, user, families)
+    return {
+        int(member.model_id): ModelFamilyRead(
+            id=card.id,
+            name=card.name,
+            slug=card.slug,
+            version=card.version,
+            member_id=int(member.id),
+            role=member.role,
+            member_count=card.member_count,
+            canonical_model_id=card.canonical_model_id,
+            effective_role=card.effective_role,
+        )
+        for member in members
+        if (card := cards.get(member.family_id)) is not None
+    }
 
 
 def family_reads(
@@ -31,8 +81,6 @@ def family_reads(
     user: User,
     families: list[ModelFamily],
 ) -> dict[int, FamilyRead]:
-    from .projections import thumb_url
-
     if not families:
         return {}
     ids = [int(family.id) for family in families]
@@ -151,6 +199,7 @@ def family_reads(
             cover_thumbnail_url=thumbnail,
             cover_image_uploaded=bool(family.cover_filename),
             member_count=counts.get(family.id, 0),
+            total_visible_members=counts.get(family.id, 0),
             matching_visible_members=counts.get(family.id, 0),
             tags=tags[family.id],
             starred=family.id in starred,

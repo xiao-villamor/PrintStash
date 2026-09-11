@@ -12,6 +12,7 @@ from app.db.models import (
     FileType,
     Metadata,
     Model,
+    ModelFamilyMember,
     ModelStar,
     Printer,
     PrinterFile,
@@ -106,6 +107,31 @@ def _apply_structured_filters(stmt, filters: ModelFilters):
 def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
     stmt = select(Model).where(live(Model), Model.hash != SENTINEL_MODEL_HASH)
     stmt = _apply_model_access(stmt, session, user)
+    if (
+        filters.family_id is not None
+        or filters.family_role is not None
+        or filters.in_family is not None
+    ):
+        from .families import membership_rows
+
+        memberships = membership_rows(session, user)
+        if filters.in_family is not None:
+            any_membership = Model.id.in_(
+                memberships.with_only_columns(ModelFamilyMember.model_id)
+            )
+            stmt = stmt.where(any_membership if filters.in_family else ~any_membership)
+        if filters.family_id is not None:
+            memberships = memberships.where(
+                ModelFamilyMember.family_id == filters.family_id
+            )
+        if filters.family_role is not None:
+            memberships = memberships.where(
+                ModelFamilyMember.role == filters.family_role
+            )
+        if filters.family_id is not None or filters.family_role is not None:
+            stmt = stmt.where(
+                Model.id.in_(memberships.with_only_columns(ModelFamilyMember.model_id))
+            )
     if filters.has_similar_candidates is not None:
         from app.modules.similarity.projections import has_open_candidates
 

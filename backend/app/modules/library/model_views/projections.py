@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
-from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import case, func
@@ -42,6 +40,9 @@ from app.schemas.models import (
     PrintSummaryRead,
 )
 
+from .families import family_summaries
+from .thumbnails import thumb_url
+
 # ---------------------------------------------------------------------------
 # Shared building blocks
 # ---------------------------------------------------------------------------
@@ -50,27 +51,6 @@ from app.schemas.models import (
 def collection_name_for(model: Model) -> Optional[str]:
     """Resolve the collection name from the FK-joined relationship."""
     return model.collection_rel.path if model.collection_rel else None
-
-
-def thumb_url(model: Model) -> Optional[str]:
-    """Stable URL for the model's thumbnail, or None.
-
-    Prefers ``thumbnail_file_id`` (current); falls back to parsing the legacy
-    ``thumbnail_path`` for rows written before the file-id column existed.
-    """
-    if model.thumbnail_file_id:
-        url = f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
-        if model.thumbnail_path:
-            stem = Path(model.thumbnail_path).stem
-            if stem.startswith(f"{model.thumbnail_file_id}-"):
-                version = hashlib.sha256(model.thumbnail_path.encode()).hexdigest()[:12]
-                return f"{url}?v={version}"
-        return url
-    if model.thumbnail_path:
-        stem = Path(model.thumbnail_path).stem
-        if stem.isdigit():
-            return f"/api/v1/files/{stem}/thumbnail"
-    return None
 
 
 def metadata_read(
@@ -152,6 +132,7 @@ def _hydrate_list_rows(
     if not model_ids:
         return []
     similarity = similarity_summaries(session, user, model_ids)
+    families = family_summaries(session, user, model_ids)
     starred_ids = set(
         session.exec(
             select(ModelStar.model_id).where(
@@ -291,6 +272,7 @@ def _hydrate_list_rows(
         out.append(
             ModelListItem(
                 id=model.id,
+                family=families.get(model.id),
                 similarity=similarity.get(model.id, {}),
                 name=model.name,
                 slug=model.slug,

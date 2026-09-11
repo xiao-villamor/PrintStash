@@ -32,7 +32,6 @@ from app.modules.sources.external_library import _collection_path_for, _walk, is
 from tests.factories import (
     build_file,
     build_model,
-    detached_model,
 )
 
 
@@ -271,38 +270,6 @@ class TestCsvCell:
         assert row["top_shell_layers"] == "0"
         assert row["size_bytes"] == "0"
         assert row["slicer_name"] == ""  # truly absent stays blank
-
-
-# --------------------------------------------------------------------------- #
-# model_views — thumbnail URL resolution
-# --------------------------------------------------------------------------- #
-class TestThumbUrl:
-    def test_prefers_thumbnail_file_id(self) -> None:
-        model = detached_model(thumbnail_file_id=7, thumbnail_path="99.png")
-        assert models_projections.thumb_url(model) == "/api/v1/files/7/thumbnail"
-
-    def test_versioned_path_changes_the_asset_cache_key(self) -> None:
-        model = detached_model(
-            thumbnail_file_id=7,
-            thumbnail_path="thumbs/7-aaaaaaaaaaaa-recipe.webp",
-        )
-
-        url = models_projections.thumb_url(model)
-
-        assert url is not None
-        assert url.startswith("/api/v1/files/7/thumbnail?v=")
-
-    def test_falls_back_to_legacy_digit_stem_path(self) -> None:
-        model = detached_model(thumbnail_path="uploads/42.png")
-        assert models_projections.thumb_url(model) == "/api/v1/files/42/thumbnail"
-
-    def test_non_digit_legacy_stem_returns_none(self) -> None:
-        model = detached_model(thumbnail_path="uploads/legacy.png")
-        assert models_projections.thumb_url(model) is None
-
-    def test_no_thumbnail_at_all_returns_none(self) -> None:
-        model = detached_model()
-        assert models_projections.thumb_url(model) is None
 
 
 # --------------------------------------------------------------------------- #

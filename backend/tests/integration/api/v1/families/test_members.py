@@ -4,9 +4,18 @@ No ordinary grouping action may change an Artifact, Revision, print outcome or
 source. Mixed permissions must reject a write before any relationship changes.
 """
 
+from datetime import datetime, timezone
+
+import pytest
 from sqlmodel import select
 
-from app.db.models import ModelFamilyMember
+from app.db.models import (
+    CollectionRole,
+    FileRevisionStatus,
+    FileType,
+    ModelFamilyMember,
+    PrintJobState,
+)
 
 
 class TestAddMember:
@@ -170,3 +179,217 @@ class TestDetachMember:
         assert family.canonical_member_id is None
         assert selected.detach_reason == "removed"
         assert model.deleted_at is None
+
+
+class TestListMembers:
+    def test_returns_member_metadata(
+        self,
+        client,
+        auth_headers,
+        make_family,
+        make_model,
+        make_family_member,
+        make_file,
+        make_print_job,
+    ):
+        family, model = make_family(), make_model("Benchy")
+        member = make_family_member(
+            family, model, canonical=True, transformation_note="Original hull"
+        )
+        mesh = make_file(
+            model,
+            file_type=FileType.STL,
+            metadata={
+                "bbox_x_mm": 60,
+                "bbox_y_mm": 30,
+                "bbox_z_mm": 48,
+                "triangle_count": 225706,
+            },
+        )
+        revision = make_file(
+            model,
+            file_type=FileType.GCODE,
+            recommended=True,
+            status=FileRevisionStatus.KNOWN_GOOD,
+        )
+        make_file(model, file_type=FileType.GCODE, status=FileRevisionStatus.NEEDS_TEST)
+        make_print_job(revision, state=PrintJobState.COMPLETED)
+
+        response = client.get(
+            f"/api/v1/families/{family.id}/members", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        item = response.json()["items"][0]
+        assert item["id"] == member.id
+        assert item["model"]["id"] == model.id
+        assert item["transformation_note"] == "Original hull"
+        assert item["formats"] == ["gcode", "stl"]
+        assert item["source_file_count"] == 1
+        assert item["gcode_revision_count"] == 2
+        assert item["known_good_count"] == 1
+        assert item["latest_print_outcome"] == "completed"
+        assert item["preview_file"]["id"] == mesh.id
+        assert item["preview_file"]["metadata"]["triangle_count"] == 225706
+        assert item["units"] == "unknown"
+
+    @pytest.mark.parametrize(
+        "query,names",
+        [
+            pytest.param("role=canonical", ["Original"], id="canonical"),
+            pytest.param("role=rescaled", ["Scaled"], id="role"),
+            pytest.param("file_type=3mf", ["Scaled"], id="format"),
+            pytest.param("known_good=true", ["Original"], id="known-good"),
+            pytest.param("known_good=false", ["Scaled", "Empty"], id="not-known-good"),
+            pytest.param("has_revisions=true", ["Original", "Scaled"], id="revisions"),
+            pytest.param("has_revisions=false", ["Empty"], id="no-revisions"),
+            pytest.param("source=external", ["Scaled"], id="external"),
+            pytest.param("source=vault", ["Original"], id="vault"),
+            pytest.param("q=Scaled", ["Scaled"], id="search"),
+        ],
+    )
+    def test_filters_family_member_grid(
+        self,
+        client,
+        auth_headers,
+        make_family,
+        make_model,
+        make_family_member,
+        make_file,
+        query,
+        names,
+    ):
+        family = make_family()
+        original, scaled, empty = (
+            make_model("Original"),
+            make_model("Scaled"),
+            make_model("Empty"),
+        )
+        make_family_member(family, original, canonical=True, sort_order=0)
+        make_family_member(family, scaled, role="rescaled", sort_order=1)
+        make_family_member(family, empty, sort_order=2)
+        make_file(original, file_type=FileType.STL)
+        make_file(
+            original, file_type=FileType.GCODE, status=FileRevisionStatus.KNOWN_GOOD
+        )
+        make_file(scaled, file_type=FileType.THREE_MF, external=True)
+        make_file(scaled, file_type=FileType.GCODE, external=True)
+
+        response = client.get(
+            f"/api/v1/families/{family.id}/members?{query}", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert [item["model"]["name"] for item in response.json()["items"]] == names
+        assert response.json()["total"] == len(names)
+
+    @pytest.mark.parametrize(
+        "sort,names",
+        [
+            pytest.param(
+                "scale-asc",
+                ["Small", "Middle A", "Middle B", "Unknown"],
+                id="scale-asc",
+            ),
+            pytest.param(
+                "scale-desc",
+                ["Middle B", "Middle A", "Small", "Unknown"],
+                id="scale-desc",
+            ),
+            pytest.param(
+                "date-asc", ["Small", "Unknown", "Middle A", "Middle B"], id="date-asc"
+            ),
+            pytest.param(
+                "date-desc",
+                ["Middle B", "Middle A", "Unknown", "Small"],
+                id="date-desc",
+            ),
+            pytest.param(
+                "success-desc",
+                ["Middle B", "Middle A", "Unknown", "Small"],
+                id="success-null-ties",
+            ),
+        ],
+    )
+    def test_sorts_family_members_deterministically(
+        self,
+        client,
+        auth_headers,
+        make_family,
+        make_model,
+        make_family_member,
+        sort,
+        names,
+    ):
+        family = make_family()
+        first = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        second = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        make_family_member(
+            family, make_model("Small"), scale_factor=0.5, created_at=first
+        )
+        make_family_member(
+            family, make_model("Unknown"), scale_factor=None, created_at=first
+        )
+        make_family_member(
+            family, make_model("Middle A"), scale_factor=1, created_at=second
+        )
+        make_family_member(
+            family, make_model("Middle B"), scale_factor=1, created_at=second
+        )
+        initial = client.get(
+            f"/api/v1/families/{family.id}/members",
+            params={"sort": sort, "limit": 2},
+            headers=auth_headers,
+        )
+
+        following = client.get(
+            f"/api/v1/families/{family.id}/members",
+            params={"sort": sort, "limit": 2, "cursor": initial.json()["next_cursor"]},
+            headers=auth_headers,
+        )
+
+        assert initial.status_code == 200, initial.text
+        assert following.status_code == 200, following.text
+        assert [
+            item["model"]["name"]
+            for item in initial.json()["items"] + following.json()["items"]
+        ] == names
+        assert following.json()["next_cursor"] is None
+
+    def test_hides_invisible_member_metadata(
+        self,
+        client,
+        make_user,
+        headers_for,
+        make_collection,
+        grant_role,
+        make_family,
+        make_model,
+        make_family_member,
+        make_file,
+    ):
+        user = make_user()
+        shared, hidden = make_collection("Shared"), make_collection("Private")
+        grant_role(user, shared, CollectionRole.VIEW)
+        family = make_family()
+        model = make_model("Visible", collection=shared)
+        secret = make_model("Secret prototype", collection=hidden)
+        make_family_member(family, model)
+        make_family_member(
+            family, secret, canonical=True, transformation_note="Private dimensions"
+        )
+        make_family_member(
+            family, make_model("Trashed", collection=shared, trashed=True)
+        )
+        make_file(secret, filename="classified.stl")
+
+        response = client.get(
+            f"/api/v1/families/{family.id}/members", headers=headers_for(user)
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 1
+        assert [item["model_id"] for item in response.json()["items"]] == [model.id]
+        assert "Secret prototype" not in response.text
+        assert "Private dimensions" not in response.text
+        assert "classified" not in response.text
