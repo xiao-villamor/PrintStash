@@ -433,6 +433,7 @@ class TestUpdateMember:
     ):
         family = make_family()
         member = make_family_member(family, make_model(), canonical=True)
+        db_session.refresh(member)
         before = member.model_dump()
 
         response = client.patch(

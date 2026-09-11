@@ -190,11 +190,27 @@ test.describe("Family preview independence", () => {
       await expect(
         page.getByRole("link", { name: models[0].name, exact: true }).first(),
       ).toBeVisible();
+      await expect(page.getByRole("link", { name: models[0].name, exact: true })).toHaveCount(1);
+      await expect(page.getByRole("link", { name: "Back", exact: true })).toHaveAttribute(
+        "href",
+        "/",
+      );
       for (const [label, width, height] of [
         ["desktop", 1280, 900],
         ["mobile", 390, 844],
       ] as const) {
         await page.setViewportSize({ width, height });
+        expect(
+          await page
+            .getByRole("heading", { name: models[1].name, exact: true })
+            .evaluate((node) => {
+              const text = document.createRange();
+              text.selectNodeContents(node);
+              return [...text.getClientRects()].every(
+                (rect) => rect.left >= 0 && rect.right <= innerWidth,
+              );
+            }),
+        ).toBe(true);
         await page.screenshot({
           path: testInfo.outputPath(`family-overview-${label}.png`),
           style: screenshotStyle,

@@ -17,10 +17,14 @@ class TestFamilyMetadata:
         make_family,
         make_family_member,
     ):
-        original, destination = make_collection(), make_collection()
+        original, destination = (
+            make_collection("Original"),
+            make_collection("Destination"),
+        )
         model = make_model(collection=original)
         family = make_family(collection=original)
         make_family_member(family, model, canonical=True)
+        db_session.refresh(model)
         before = model.model_dump()
 
         response = client.patch(
@@ -49,11 +53,15 @@ class TestFamilyMetadata:
         make_family_member,
     ):
         actor = make_user()
-        original, destination = make_collection(), make_collection()
+        original, destination = (
+            make_collection("Original"),
+            make_collection("Destination"),
+        )
         grant_role(actor, original, CollectionRole.EDIT)
         grant_role(actor, destination, CollectionRole.VIEW)
         family = make_family(collection=original)
         make_family_member(family, make_model(collection=original), canonical=True)
+        db_session.refresh(family)
         before = family.model_dump()
 
         response = client.patch(
@@ -82,6 +90,7 @@ class TestFamilyMetadata:
             make_family_member(make_family(), model)
         elif reservation == "detached":
             make_family_member(family, model, detached="removed")
+        db_session.refresh(family)
         before = family.model_dump()
 
         response = client.patch(
@@ -115,6 +124,7 @@ class TestPersonalFamilyStar:
         make_family_star(other, family)
         if initial:
             make_family_star(actor, family)
+        db_session.refresh(family)
         before = family.model_dump()
 
         for _ in range(2):

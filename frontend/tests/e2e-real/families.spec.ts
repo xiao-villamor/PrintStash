@@ -113,6 +113,16 @@ test.describe("Manual Model Families", () => {
         ["mobile", 390, 844],
       ] as const) {
         await page.setViewportSize({ width, height });
+        expect(
+          await comparison
+            .getByRole("rowheader", { name: "Transformation note" })
+            .evaluate((node) => {
+              const word = document.createRange();
+              word.setStart(node.firstChild!, 0);
+              word.setEnd(node.firstChild!, "Transformation".length);
+              return word.getClientRects().length;
+            }),
+        ).toBe(1);
         await comparison.screenshot({
           path: testInfo.outputPath(`family-compare-${label}.png`),
           style: screenshotStyle,

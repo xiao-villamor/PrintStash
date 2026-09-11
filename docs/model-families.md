@@ -26,8 +26,8 @@ The detail page shows dimensions, source files, Revisions, known-good counts and
 print result for each member. Filter or sort this list before comparing or
 editing a variation. A Family's own tags, Collection, star and cover are separate
 from those of its members.
-Model overview also links to the authorized canonical Model, visible siblings
-and **Manage Family**. Family pages accept their readable slug as well as the
+Model overview links to the authorized canonical Model and up to three other
+variations, with **Manage Family** providing access to the complete group. Family pages accept their readable slug as well as the
 existing numeric link.
 
 ## Variations and comparison

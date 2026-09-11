@@ -115,7 +115,7 @@ class TestFamilyBrowse:
         sort,
     ):
         actor = make_user()
-        shared, hidden = make_collection(), make_collection()
+        shared, hidden = make_collection("Shared"), make_collection("Hidden")
         grant_role(actor, shared, CollectionRole.VIEW)
         families = []
         for amount, collection in [(200, shared), (100, shared), (50, hidden)]:
@@ -392,7 +392,7 @@ class TestListFamilies:
         make_family_member,
     ):
         actor = make_user()
-        editable, readonly = make_collection(), make_collection()
+        editable, readonly = make_collection("Editable"), make_collection("Read only")
         grant_role(actor, editable, CollectionRole.EDIT)
         grant_role(actor, readonly, CollectionRole.VIEW)
         wanted = make_family(trashed=True)

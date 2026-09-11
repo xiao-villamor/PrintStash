@@ -34,7 +34,7 @@ describe("Family overview", () => {
         },
       },
     );
-    expect(await screen.findAllByRole("link", { name: "Original boat" })).toHaveLength(2);
+    expect(await screen.findAllByRole("link", { name: "Original boat" })).toHaveLength(1);
     expect(screen.getByText("Rescaled")).toBeVisible();
     expect(screen.getByRole("link", { name: "Manage Family" })).toHaveAttribute(
       "href",
@@ -45,6 +45,49 @@ describe("Family overview", () => {
       "/families/7",
     );
     expect(screen.queryByRole("link", { name: "Small boat" })).not.toBeInTheDocument();
+  });
+
+  it("does not repeat the current canonical as a navigation target", async () => {
+    renderApp(
+      <FamilyMembershipSummary
+        model={aModel({ name: "Current boat" })}
+        family={aFamilySummary({ role: "canonical", member_count: 1 })}
+      />,
+      {
+        routes: {
+          "GET /api/v1/families/7/members": json({
+            items: [aFamilyMember({ model: aModelListItem({ name: "Current boat" }) })],
+            total: 1,
+            next_cursor: null,
+          }),
+        },
+      },
+    );
+    expect(await screen.findByText("1 Model")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Current boat" })).not.toBeInTheDocument();
+    expect(screen.getByText("Canonical", { exact: true })).toBeVisible();
+  });
+
+  it("keeps a larger Family overview to three other variations", async () => {
+    renderApp(<FamilyMembershipSummary model={aModel()} family={aFamilySummary()} />, {
+      routes: {
+        "GET /api/v1/families/7/members": json({
+          items: Array.from({ length: 5 }, (_, index) =>
+            aFamilyMember({
+              id: index + 10,
+              model_id: index + 1,
+              model: aModelListItem({ id: index + 1, name: `Boat ${index + 1}` }),
+            }),
+          ),
+          total: 5,
+          next_cursor: null,
+        }),
+      },
+    });
+    expect(await screen.findAllByRole("link", { name: /^Boat/ })).toHaveLength(3);
+    expect(screen.getByRole("link", { name: "Boat 2" })).toHaveAttribute("href", "/models/2");
+    expect(screen.queryByRole("link", { name: "Boat 5" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View individual Models" })).toBeVisible();
   });
 
   it("explains an unavailable canonical without requesting an identity", async () => {

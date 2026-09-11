@@ -14,7 +14,10 @@ export function MetadataComparison({
       <table className="w-full table-fixed text-left text-xs">
         <thead className="bg-muted/50">
           <tr>
-            <th scope="col" className="w-[30%] px-3 py-2 font-medium text-muted-foreground">
+            <th
+              scope="col"
+              className="w-[40%] px-3 py-2 font-medium text-muted-foreground sm:w-[30%]"
+            >
               {t("families.field")}
             </th>
             {headings.map((heading, index) => (

@@ -18,20 +18,28 @@ export function FamilyMembershipSummary({
   const { t } = useI18n();
   const members = useQuery({
     queryKey: ["families", family.id, "overview"],
-    queryFn: () => listFamilyMembers(family.id, { limit: 4 }),
+    queryFn: () => listFamilyMembers(family.id, { limit: 5 }),
   });
   const canonical = useQuery({
     queryKey: ["models", family.canonical_model_id],
     enabled: family.canonical_model_id != null && family.canonical_model_id !== model.id,
     queryFn: () => getModel(family.canonical_model_id!),
   });
-  const canonicalModel = family.canonical_model_id === model.id ? model : canonical.data;
-  const siblings = members.data?.items.filter((item) => item.model_id !== model.id) ?? [];
+  const siblings =
+    members.data?.items
+      .filter((item) => item.model_id !== model.id && item.model_id !== family.canonical_model_id)
+      .slice(0, 3) ?? [];
+  const shownModelIds = new Set([model.id, ...siblings.map((item) => item.model_id)]);
+  if (family.canonical_model_id != null) shownModelIds.add(family.canonical_model_id);
+  const hasMore = members.data != null && members.data.total > shownModelIds.size;
   return (
-    <section aria-label={t("families.family")} className="mt-2 space-y-1 text-xs">
+    <section aria-label={t("families.family")} className="mt-2 space-y-1 break-words text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <Link href={`/families/${family.id}`} className="font-medium text-primary hover:underline">
+        <Link
+          href={`/families/${family.id}`}
+          className="max-w-full font-medium text-primary hover:underline"
+        >
           {family.name}
         </Link>
         <span className="text-muted-foreground">{t(`families.role.${family.role}`)}</span>
@@ -39,22 +47,27 @@ export function FamilyMembershipSummary({
           {t("families.manage")}
         </Link>
       </div>
-      <p className="text-muted-foreground">
-        {family.canonical_model_id == null || canonical.isError ? (
-          t("families.vacancy")
-        ) : (
-          <>
-            {t("families.canonical")}:{" "}
-            {canonicalModel ? (
-              <Link href={`/models/${canonicalModel.id}`} className="text-primary hover:underline">
-                {canonicalModel.name}
-              </Link>
-            ) : (
-              t("families.loading")
-            )}
-          </>
-        )}
-      </p>
+      {family.canonical_model_id !== model.id && (
+        <p className="text-muted-foreground">
+          {family.canonical_model_id == null || canonical.isError ? (
+            t("families.vacancy")
+          ) : (
+            <>
+              {t("families.canonical")}:{" "}
+              {canonical.data ? (
+                <Link
+                  href={`/models/${canonical.data.id}`}
+                  className="text-primary hover:underline"
+                >
+                  {canonical.data.name}
+                </Link>
+              ) : (
+                t("families.loading")
+              )}
+            </>
+          )}
+        </p>
+      )}
       {members.isError ? (
         <div className="flex items-center gap-2">
           <span role="alert" className="text-destructive">
@@ -64,19 +77,21 @@ export function FamilyMembershipSummary({
             {t("families.retry")}
           </Button>
         </div>
-      ) : siblings.length > 0 ? (
+      ) : siblings.length > 0 || hasMore ? (
         <div className="flex flex-wrap gap-x-2 gap-y-1">
-          <span className="text-muted-foreground">{t("families.siblings")}:</span>
+          {siblings.length > 0 && (
+            <span className="text-muted-foreground">{t("families.siblings")}:</span>
+          )}
           {siblings.map((item) => (
             <Link
               key={item.id}
               href={`/models/${item.model_id}`}
-              className="text-primary hover:underline"
+              className="max-w-full text-primary hover:underline"
             >
               {item.model.name}
             </Link>
           ))}
-          {members.data && members.data.total > members.data.items.length && (
+          {hasMore && (
             <Link href={`/families/${family.id}`} className="text-primary hover:underline">
               {t("families.viewMembers")}
             </Link>
