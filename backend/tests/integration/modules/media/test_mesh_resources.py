@@ -126,6 +126,14 @@ class TestMalformedPackages:
             (three_mf(unit="yard"), "unsupported_unit"),
             (three_mf(build=((0, None),)), "invalid_resource_id"),
         ],
+        ids=[
+            "not-a-zip",
+            "missing-model",
+            "invalid-xml",
+            "wrong-model-root",
+            "unsupported-unit",
+            "invalid-resource-id",
+        ],
     )
     def test_contains_malformed_package(self, tmp_path, payload, code):
         path = tmp_path / "bad.3mf"
