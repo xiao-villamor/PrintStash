@@ -582,6 +582,10 @@ class TestKeyDerivation:
                 lambda b: b.multipart_model_cover_key(5, "cover.webp"),
                 "multipart-covers/5/cover.webp",
             ),
+            (
+                lambda b: b.model_family_cover_key("5", "cover.webp"),
+                "family-covers/5/cover.webp",
+            ),
         ],
     )
     def test_puts_every_object_kind_in_its_own_namespace(

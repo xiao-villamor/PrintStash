@@ -1,14 +1,40 @@
 """Release and restore reservations without changing member content."""
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, delete, select
 
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import utcnow
-from app.db.models import ModelFamily, ModelFamilyMember, User
+from app.db.models import (
+    ModelFamily,
+    ModelFamilyMember,
+    ModelFamilyStar,
+    ModelFamilyTagLink,
+    User,
+)
 from app.modules.administration.audit import current_audit_context
+from app.runtime.maintenance import guarded_destructive_operation
 
 from .access import lock_families, require
+from .covers import clear_upload
 from .mutations import record, touch
+
+
+@guarded_destructive_operation
+def purge_family(session: Session, user: User, family_id: int, version: int) -> None:
+    lock_families(session, [family_id])
+    family = require(session, user, family_id, edit=True, include_trashed=True)
+    if family.deleted_at is None:
+        raise OperationError("family_trash_required", kind=ErrorKind.CONFLICT)
+    touch(session, user, family, version)
+    clear_upload(session, family)
+    record(session, user, family, "purge", {"name": family.name})
+    family.canonical_member_id = None
+    session.add(family)
+    session.flush()
+    # Explicit order also works on adapters without ORM relationships loaded.
+    for table in (ModelFamilyStar, ModelFamilyTagLink, ModelFamilyMember):
+        session.exec(delete(table).where(table.family_id == family_id))
+    session.delete(family)
 
 
 def trash_family(session: Session, user: User, family_id: int, version: int) -> None:
@@ -143,4 +169,29 @@ def purge_model_references(session: Session, model_id: int) -> None:
         family.updated_at, family.updated_by = instant, actor_id
         session.add(family)
         record(session, actor, family, "model_purge", {"model_id": model_id})
+    session.flush()
+
+
+def purge_collection_references(session: Session, collection_id: int) -> None:
+    """A Collection purge leaves the independent Family and its members intact."""
+    family_ids = list(
+        session.exec(
+            select(ModelFamily.id).where(ModelFamily.collection_id == collection_id)
+        ).all()
+    )
+    if not family_ids:
+        return
+    lock_families(session, family_ids)
+    actor_id, _ = current_audit_context()
+    actor = session.get(User, actor_id) if actor_id is not None else None
+    for family in session.exec(
+        select(ModelFamily).where(ModelFamily.collection_id == collection_id)
+    ).all():
+        family.collection_id = None
+        family.version += 1
+        family.updated_at, family.updated_by = utcnow(), actor_id
+        session.add(family)
+        record(
+            session, actor, family, "collection_purge", {"collection_id": collection_id}
+        )
     session.flush()

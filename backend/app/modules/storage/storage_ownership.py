@@ -35,6 +35,7 @@ _SMALL_HASH_KINDS = {
     "thumbnail",
     "model_source_cover",
     "multipart_model_cover",
+    "model_family_cover",
     "source_cover",
     "collection_image",
     "document_image",

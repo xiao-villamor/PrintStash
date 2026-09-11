@@ -109,6 +109,7 @@ class TestUnavailableStorageBackend:
             ("document_file_key", (1, "manual.pdf")),
             ("document_image_key", (1, "figure.webp")),
             ("multipart_model_cover_key", (1, "cover.webp")),
+            ("model_family_cover_key", ("1", "cover.webp")),
         ],
     )
     def test_rejects_key_derivation(
@@ -212,6 +213,9 @@ class _ProbeBackend(StorageBackend):
 
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return f"multipart-cover/{multipart_model_id}/{name}"
+
+    def model_family_cover_key(self, family_id: str, name: str) -> str:
+        return f"family-cover/{family_id}/{name}"
 
     def exists(self, key: str) -> bool:
         return key == "present"

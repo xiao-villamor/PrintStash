@@ -748,6 +748,10 @@ class TestS3CompatibilityCoverage:
             backend.multipart_model_cover_key(7, "cover.webp")
             == "vault-data/multipart-covers/7/cover.webp"
         )
+        assert (
+            backend.model_family_cover_key("7", "cover.webp")
+            == "vault-data/family-covers/7/cover.webp"
+        )
 
     def test_round_trips_objects(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend, client = _memory_s3_backend(monkeypatch)

@@ -675,6 +675,9 @@ class S3StorageBackend(StorageBackend):
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return f"{self._prefix()}multipart-covers/{multipart_model_id}/{name}"
 
+    def model_family_cover_key(self, family_id: str, name: str) -> str:
+        return f"{self._prefix()}family-covers/{family_id}/{name}"
+
     def exists(self, key: str) -> bool:
         return self.object_info(key) is not None
 

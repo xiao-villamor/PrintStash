@@ -376,6 +376,10 @@ class TestOpenDALStorageBackend:
             backend.multipart_model_cover_key(12, "cover.webp")
             == "vault/data/multipart-covers/12/cover.webp"
         )
+        assert (
+            backend.model_family_cover_key("12", "cover.webp")
+            == "vault/data/family-covers/12/cover.webp"
+        )
 
     def test_missing_remote_object_raises_file_not_found(self) -> None:
         backend = _backend(_spec(), operator=_MemoryOperator())

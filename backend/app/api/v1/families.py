@@ -3,7 +3,8 @@
 from contextlib import contextmanager
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Response, UploadFile
+from fastapi import File as UploadFileParam
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 
@@ -15,6 +16,7 @@ from app.modules.library.families import (
     access,
     bulk,
     canonical,
+    covers,
     lifecycle,
     members,
     metadata,
@@ -22,6 +24,9 @@ from app.modules.library.families import (
 )
 from app.modules.library.model_views import family_browse, family_members
 from app.modules.library.model_views.families import family_reads
+from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
+from app.modules.storage.storage_backend.runtime import get_backend
+from app.modules.storage.storage_deletion import process_storage_delete_intents
 from app.schemas.families import (
     FamilyBrowsePage,
     FamilyBulkCollection,
@@ -46,6 +51,82 @@ from app.schemas.models import ModelBatchResult, ModelFilters, ModelSort
 from .family_filters import family_browse_filters
 
 router = APIRouter(prefix="/families", tags=["families"])
+
+
+@router.get("/{family_id}/cover")
+def get_family_cover(
+    family_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> Response:
+    family = access.require(session, user, family_id)
+    key = covers.uploaded_key(family)
+    if key is None:
+        raise OperationError("family_cover_not_found", kind=ErrorKind.NOT_FOUND)
+    backend = get_backend()
+    if not backend.exists(key):
+        raise OperationError("family_cover_blob_missing", kind=ErrorKind.GONE)
+    return Response(
+        content=backend.read_bytes(key),
+        media_type=family.cover_content_type or "image/webp",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "ETag": f'"family-cover-{family.id}-{family.cover_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.put(
+    "/{family_id}/cover",
+    response_model=FamilyRead,
+    dependencies=[Depends(require_auth)],
+)
+async def upload_family_cover(
+    family_id: int,
+    version: int = Query(..., gt=0),
+    file: UploadFile = UploadFileParam(...),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyRead:
+    access.require(session, user, family_id, edit=True)
+    data = await file.read(MAX_SOURCE_COVER_BYTES + 1)
+    family = covers.upload(session, user, family_id, version, data, file.content_type)
+    process_storage_delete_intents()
+    return family_reads(session, user, [family])[family_id]
+
+
+@router.delete(
+    "/{family_id}/cover",
+    response_model=FamilyRead,
+    dependencies=[Depends(require_auth)],
+)
+def remove_family_cover(
+    family_id: int,
+    version: int = Query(..., gt=0),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> FamilyRead:
+    with _transaction(session):
+        family = covers.remove(session, user, family_id, version)
+        result = family_reads(session, user, [family])[family_id]
+    process_storage_delete_intents()
+    return result
+
+
+@router.delete(
+    "/{family_id}/purge", status_code=204, dependencies=[Depends(require_auth)]
+)
+def purge_family(
+    family_id: int,
+    version: int = Query(..., gt=0),
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> Response:
+    with _transaction(session):
+        lifecycle.purge_family(session, user, family_id, version)
+    process_storage_delete_intents()
+    return Response(status_code=204)
 
 
 @contextmanager
@@ -324,6 +405,11 @@ def update_family(
     with _transaction(session):
         family = metadata.update_metadata(session, user, family_id, data)
         result = family_reads(session, user, [family])[family_id]
+    if (
+        "cover_model_id" in data.model_fields_set
+        or "cover_image_url" in data.model_fields_set
+    ):
+        process_storage_delete_intents()
     return result
 
 

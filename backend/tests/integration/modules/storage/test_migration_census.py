@@ -42,6 +42,30 @@ class TestRemapOwnedKey:
 
 
 class TestCensus:
+    @pytest.mark.parametrize("trashed", [False, True])
+    def test_migrates_owned_family_cover(
+        self, db_session, make_family, tmp_path, trashed
+    ):
+        source = get_backend()
+        family = make_family(
+            trashed=trashed, cover_filename="cover.webp", cover_size_bytes=4
+        )
+        key = source.model_family_cover_key(family.export_id, family.cover_filename)
+        source.create_bytes(b"data", key)
+        destination = LocalStorageBackend(
+            data_dir=tmp_path / "destination", thumb_dir=tmp_path / "new-thumbs"
+        )
+
+        result = census(db_session, source, destination)
+
+        assert len(result) == 1
+        assert result[0].source_key == key
+        assert result[0].destination_key == destination.model_family_cover_key(
+            family.export_id, "cover.webp"
+        )
+        assert result[0].expected_size == 4
+        assert result[0].resource_type == "model_family_cover"
+
     def test_model_cover_without_file_thumbnail_is_owned(self, db_session, make_model):
         source = get_backend()
         model = make_model()

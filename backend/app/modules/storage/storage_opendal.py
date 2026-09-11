@@ -76,6 +76,9 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return self._key(f"multipart-covers/{multipart_model_id}/{name}")
 
+    def model_family_cover_key(self, family_id: str, name: str) -> str:
+        return self._key(f"family-covers/{family_id}/{name}")
+
     @guarded_storage_destruction
     def move(self, src_key: str, dest_key: str) -> None:
         source = self._relative(src_key)

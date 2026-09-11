@@ -291,6 +291,23 @@ class TestRestoreDocument:
 
 
 class TestHardDeleteCollection:
+    def test_detaches_family_collection_without_removing_members(
+        self, db_session, make_collection, make_family, make_model, make_family_member
+    ):
+        collection = make_collection(trashed=True)
+        family = make_family(collection_id=collection.id)
+        member = make_family_member(family, make_model(), canonical=True)
+        version = family.version
+
+        trash.hard_delete_collection(db_session, collection)
+        db_session.commit()
+        db_session.refresh(family)
+
+        assert family.collection_id is None
+        assert family.canonical_member_id == member.id
+        assert family.version == version + 1
+        assert member.detached_at is None
+
     def test_does_nothing_for_a_collection_that_was_never_persisted(
         self, db_session: Session
     ) -> None:

@@ -15,6 +15,7 @@ from app.modules.library import taxonomy
 from app.schemas.families import FamilyUpdate
 
 from .access import lock_families, require, require_models
+from .covers import clear_upload
 from .mutations import active_member, record, touch
 
 
@@ -23,7 +24,7 @@ def update_metadata(
 ) -> ModelFamily:
     lock_families(session, [family_id])
     family = require(session, user, family_id, edit=True)
-    changes = data.model_dump(exclude_unset=True, exclude={"version"})
+    changes = data.model_dump(mode="json", exclude_unset=True, exclude={"version"})
     if data.collection_id is not None:
         rbac.require_collection_role(
             session, user, data.collection_id, CollectionRole.EDIT
@@ -36,6 +37,12 @@ def update_metadata(
     touch(session, user, family, data.version)
     tag_names = changes.pop("tags", None)
     before = {key: getattr(family, key) for key in changes}
+    if "cover_image_url" in changes or "cover_model_id" in changes:
+        clear_upload(session, family)
+        if data.cover_model_id is not None:
+            family.cover_image_url = None
+        if data.cover_image_url is not None:
+            family.cover_model_id = None
     if tag_names is not None:
         tags = taxonomy.resolve_or_create_tags_in_transaction(session, tag_names)
         session.exec(

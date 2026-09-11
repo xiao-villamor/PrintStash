@@ -94,6 +94,7 @@ class TestPublishBytes:
                 "multipart_model_cover_key",
                 (707, "cover.webp"),
             ),
+            ("model_family_cover", "model_family_cover_key", ("708", "cover.webp")),
         ],
     )
     def test_publishes_every_managed_key_kind_through_the_ledger(

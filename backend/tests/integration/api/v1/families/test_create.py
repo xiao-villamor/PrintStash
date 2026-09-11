@@ -4,13 +4,70 @@ No ordinary grouping action may change an Artifact, Revision, print outcome or
 source. Mixed permissions must reject a write before any relationship changes.
 """
 
+import hashlib
+
 import pytest
 from sqlmodel import select
 
 from app.db.models import FileType, ModelFamily, ModelFamilyMember
+from tests.factories import build_external_library
+from tests.paths import TESTDATA_DIR, require_fixtures
+
+BENCHY = TESTDATA_DIR / "benchy" / "3dbenchy.stl"
+require_fixtures(BENCHY)
 
 
 class TestCreateFamily:
+    def test_groups_read_only_source_models(
+        self, client, auth_headers, db_session, make_model, make_file, tmp_path
+    ):
+        root = tmp_path / "read-only-library"
+        root.mkdir()
+        path = root / "benchy.stl"
+        data = BENCHY.read_bytes()
+        path.write_bytes(data)
+        library = build_external_library(db_session, root, writeback_enabled=False)
+        models = [make_model("Original Benchy"), make_model("Benchy print variant")]
+        artifacts = [
+            make_file(
+                model,
+                external=True,
+                file_type=FileType.STL,
+                filename=path.name,
+                path=str(path),
+                external_library_id=library.id,
+                source_key=path.name,
+                sha256=hashlib.sha256(data).hexdigest(),
+                size_bytes=len(data),
+            )
+            for model in models
+        ]
+        before = [db_session.get(type(row), row.id).model_dump() for row in artifacts]
+        path.chmod(0o444)
+        root.chmod(0o555)
+        stat = path.stat()
+        try:
+            created = client.post(
+                "/api/v1/families",
+                headers=auth_headers,
+                json={
+                    "name": "Source variants",
+                    "canonical_model_id": models[0].id,
+                    "members": [{"model_id": model.id} for model in models],
+                },
+            )
+            assert created.status_code == 201, created.text
+            assert created.json()["member_count"] == 2
+            assert path.read_bytes() == data
+            assert path.stat().st_mtime_ns == stat.st_mtime_ns
+            db_session.expire_all()
+            assert [
+                db_session.get(type(row), row.id).model_dump() for row in artifacts
+            ] == before
+        finally:
+            root.chmod(0o755)
+            path.chmod(0o644)
+
     def test_creates_family_without_changing_members(
         self, client, auth_headers, db_session, make_model, make_file
     ):

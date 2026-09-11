@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Annotated, Literal
 
 from pydantic import (
+    AnyHttpUrl,
     BaseModel,
     ConfigDict,
     Field,
@@ -72,6 +73,13 @@ class FamilyUpdate(FamilyVersion):
     collection_id: int | None = Field(default=None, gt=0)
     tags: list[FamilyTagName] | None = Field(default=None, max_length=100)
     cover_model_id: int | None = Field(default=None, gt=0)
+    cover_image_url: AnyHttpUrl | None = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def one_cover(self) -> "FamilyUpdate":
+        if self.cover_model_id is not None and self.cover_image_url is not None:
+            raise ValueError("family_cover_invalid")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -125,6 +133,7 @@ class FamilyRead(BaseModel):
     cover_model_id: int | None = None
     cover_thumbnail_url: str | None = None
     cover_image_uploaded: bool = False
+    cover_image_url: str | None = None
     member_count: int = 0
     total_visible_members: int = 0
     matching_visible_members: int = 0

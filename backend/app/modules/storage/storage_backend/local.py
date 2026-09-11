@@ -588,6 +588,9 @@ class LocalStorageBackend(StorageBackend):
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return str(self.thumb_dir / "multipart-covers" / str(multipart_model_id) / name)
 
+    def model_family_cover_key(self, family_id: str, name: str) -> str:
+        return str(self.thumb_dir / "family-covers" / str(family_id) / name)
+
     def exists(self, key: str) -> bool:
         return Path(key).exists()
 

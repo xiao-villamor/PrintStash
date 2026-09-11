@@ -185,6 +185,8 @@ def family_reads(
         thumbnail = thumb_url(representative) if representative else None
         if family.cover_filename:
             thumbnail = f"/api/v1/families/{family.id}/cover?v={family.version}"
+        elif family.cover_image_url:
+            thumbnail = family.cover_image_url
         result[int(family.id)] = FamilyRead(
             id=int(family.id),
             name=family.name,
@@ -198,6 +200,7 @@ def family_reads(
             cover_model_id=cover.id if cover else None,
             cover_thumbnail_url=thumbnail,
             cover_image_uploaded=bool(family.cover_filename),
+            cover_image_url=family.cover_image_url,
             member_count=counts.get(family.id, 0),
             total_visible_members=counts.get(family.id, 0),
             matching_visible_members=counts.get(family.id, 0),

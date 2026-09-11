@@ -561,6 +561,9 @@ def hard_delete_collection(
             CollectionTagLink.collection_id == collection.id
         )
     )
+    from app.modules.library.families.lifecycle import purge_collection_references
+
+    purge_collection_references(session, int(collection.id))
     session.delete(collection)
 
 
