@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from itertools import permutations, product
 from typing import TYPE_CHECKING, Any, Literal
 
-from .fingerprint import GeometryError, fingerprint_mesh
+from .fingerprint import GeometryError
 from .geometry import (
     Surface,
     equivalent_triangles,
+    measure_surface,
     nearest_neighbors,
     prepare_surface,
     sample_surface,
@@ -155,8 +156,8 @@ def verify_meshes(
     surface_ba = proximity_a.closest(b)[0] / diagonal
     surface_chamfer = float((surface_ab.mean() + surface_ba.mean()) / 2)
     surface_hausdorff = float(max(surface_ab.max(), surface_ba.max()))
-    metrics_a = fingerprint_mesh(left_vertices, left_faces).metrics
-    metrics_b = fingerprint_mesh(right_vertices, right_faces).metrics
+    metrics_a = measure_surface(left)
+    metrics_b = measure_surface(right)
     half_width = (
         float(
             max(
@@ -271,6 +272,10 @@ def verify_meshes(
 def _proposals(left: Surface, right: Surface, scale: float):
     import numpy as np
 
+    # Exports commonly change only the origin or units. Float32 STL rounding
+    # perturbs PCA axes slightly; the unchanged axes are a useful independent
+    # hypothesis. Full vertex/triangle correspondence still has to prove it.
+    yield np.eye(3)
     for permutation in permutations(range(3)):
         for signs in product((-1, 1), repeat=3):
             yield right.frame @ (np.eye(3)[:, permutation] * signs) @ left.frame.T

@@ -311,8 +311,10 @@ active deletion safety tier.
   evidence-only review and existing Multipart composition remain independent.
 - Complete STL/OBJ/3MF geometry is available in lite; STEP and local ONNX require
   the full profile. Sources beyond the geometry budget remain explicitly partial
-  or unavailable. The repository's large Benchy STL is sampled under the default
-  200,000-triangle cap and cannot receive exact-equivalence confirmation.
+  or unavailable. The default ceiling is 2,000,000 faces; the repository Benchy
+  and Spatula are analyzed completely when admitted by the host memory budget.
+  Existing explicit lower settings remain in effect. Invalid solid topology can
+  still make volume descriptors unavailable for an otherwise complete mesh.
 - Candidate work is bounded. Dense primitive buckets may be truncated; the run
   reports skipped work instead of implying exhaustive library coverage.
 - Confidence is a ranking score. Sampled distances and voxel overlap do not certify

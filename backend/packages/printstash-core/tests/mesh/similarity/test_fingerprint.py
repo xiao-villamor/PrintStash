@@ -45,6 +45,23 @@ def uneven_tetra(tetra):
 
 
 class TestFingerprintMesh:
+    def test_preserves_canonical_retrieval_keys(self, tetra):
+        result = fingerprint_mesh(*tetra)
+
+        assert result.keys.physical == (
+            "3164a46bddf8f5a3c6147acf5f918ec123ac408741bc0d53122d5c2bfc4fc342",
+            "17a5aa33d275b709d357948910164ab7de14bdd85698d3265e1f2f0e10faa14a",
+            "00624ecf4fdf0bac470ab49ba6844929690dff4e039e98bc6cf348b511344800",
+            "0f37156ed1b28996f2930b9d793db24d001a70d477e36f1da34fdef09c482f82",
+        )
+        assert result.keys.normalized == (
+            "10ba07f028ee13b0406e03461e6e0f86c1d2a308a72fe448546566e43c412ea4",
+            "1587dbb5a42fb35139908c5f8dbbe00197fefa6992ec9bcd4dbb2fcf07dc7cef",
+            "0061294bd7bc7f4faa88ebb6ee04cbd67640aafda5f5471582fe6747ecc263ef",
+            "21e9a62e1840b8b48598c4ed740231143bac84e9f47c928f2417e60cb26e6020",
+        )
+        assert result.d2.seed == 7554692190584237869
+
     def test_reports_physical_surface_metrics(self, tetra):
         # Analytic cross products of the edge vectors give these four areas.
         area = (200 + np.sqrt(90900) + np.sqrt(362269) + np.sqrt(450589)) / 2
@@ -287,7 +304,7 @@ class TestFingerprintMesh:
         with pytest.raises(GeometryError, match="^resource_limit$"):
             fingerprint_mesh(*tetra, budget=budget)
 
-    @pytest.mark.parametrize("limit", [0, -1, True, 600001], ids=str)
+    @pytest.mark.parametrize("limit", [0, -1, True, 6_000_001], ids=str)
     def test_rejects_invalid_budget(self, tetra, limit):
         with pytest.raises(GeometryError, match="^invalid_budget$"):
             fingerprint_mesh(*tetra, budget=FingerprintBudget(max_vertices=limit))

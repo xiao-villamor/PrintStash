@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .budgets import MAX_ANALYSIS_FACES, MAX_ANALYSIS_VERTICES
 from .fingerprint import (
     FingerprintBudget,
     GeometryError,
@@ -109,7 +110,7 @@ def expand_scene(
     *,
     max_instances: int = 2048,
     max_depth: int = 64,
-    max_faces: int = 200_000,
+    max_faces: int = MAX_ANALYSIS_FACES,
 ) -> ExpandedScene:
     """Resolve nested resources once while preserving every placed instance.
 
@@ -121,7 +122,7 @@ def expand_scene(
     for value, ceiling in (
         (max_instances, 2048),
         (max_depth, 64),
-        (max_faces, 200_000),
+        (max_faces, MAX_ANALYSIS_FACES),
     ):
         if type(value) is not int or not 1 <= value <= ceiling:
             raise GeometryError("invalid_scene_budget")
@@ -159,7 +160,7 @@ def expand_scene(
             if (
                 len(output) >= max_instances
                 or face_count > max_faces
-                or vertex_count > 600_000
+                or vertex_count > MAX_ANALYSIS_VERTICES
             ):
                 raise GeometryError("scene_resource_limit")
             if obj.resource_id not in admitted:

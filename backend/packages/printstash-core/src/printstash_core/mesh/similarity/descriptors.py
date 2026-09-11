@@ -16,8 +16,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from ..rasterizer import render_mesh_thumbnail
-from .fingerprint import GeometryError, canonical_geometry_keys
+from .fingerprint import GeometryError, canonical_sample_triangles
 from .geometry import Surface
+from .hull import hull_volume
 from .voxel import voxelize
 
 if TYPE_CHECKING:
@@ -79,56 +80,6 @@ def describe_surface(
         inertia = volume_inertia_ratios(surface)
     return ShapeDescriptors(
         sh, digest, views, hull_ratio, fill_ratio, inertia, tuple(missing)
-    )
-
-
-def hull_volume(vertices: FloatArray, *, max_work: int = 20_000_000) -> float:
-    """Incremental convex hull with a hard work ceiling and deterministic order."""
-    import numpy as np
-
-    if type(max_work) is not int or not 1 <= max_work <= 20_000_000:
-        raise GeometryError("invalid_hull_budget")
-    first = int(np.argmin(vertices[:, 0]))
-    second = int(np.argmax(np.linalg.norm(vertices - vertices[first], axis=1)))
-    axis = vertices[second] - vertices[first]
-    third = int(
-        np.argmax(np.linalg.norm(np.cross(vertices - vertices[first], axis), axis=1))
-    )
-    normal = np.cross(vertices[third] - vertices[first], axis)
-    fourth = int(np.argmax(np.abs((vertices - vertices[first]) @ normal)))
-    chosen = np.array([first, second, third, fourth])
-    scale = float(np.linalg.norm(np.ptp(vertices, axis=0)))
-    if abs(float((vertices[fourth] - vertices[first]) @ normal)) <= scale**3 * 1e-12:
-        raise GeometryError("degenerate_hull")
-    interior = vertices[chosen].mean(axis=0)
-    facets = chosen[np.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])]
-    tested = 0
-    for point in range(len(vertices)):
-        triangles = vertices[facets]
-        normals = np.cross(
-            triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
-        )
-        inward = np.einsum("ij,ij->i", normals, interior - triangles[:, 0]) > 0
-        facets[inward] = facets[inward, ::-1]
-        normals[inward] *= -1
-        tested += len(facets)
-        if tested > max_work:
-            raise GeometryError("hull_resource_limit")
-        visible = (
-            np.einsum("ij,ij->i", normals, vertices[point] - triangles[:, 0])
-            > np.linalg.norm(normals, axis=1) * scale * 1e-10
-        )
-        if not np.any(visible):
-            continue
-        edges = facets[visible][:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2))
-        unique, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
-        horizon = unique[counts == 1]
-        new = np.column_stack((horizon, np.full(len(horizon), point)))
-        facets = np.vstack((facets[~visible], new))
-    tri = vertices[facets] - interior
-    return float(
-        np.abs(np.einsum("ij,ij->i", tri[:, 0], np.cross(tri[:, 1], tri[:, 2]))).sum()
-        / 6
     )
 
 
@@ -253,7 +204,7 @@ def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
     if ambiguous_frame:
         triangles = normalized[surface.faces]
     else:
-        _, triangles, _ = canonical_geometry_keys(normalized, surface.faces, diagonal)
+        triangles = canonical_sample_triangles(normalized, surface.faces)
     mesh = SimpleNamespace(
         vertices=triangles.reshape((-1, 3)),
         faces=np.arange(triangles.size // 3).reshape((-1, 3)),

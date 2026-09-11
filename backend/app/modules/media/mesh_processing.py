@@ -29,6 +29,8 @@ from contextlib import ExitStack
 from pathlib import Path, PurePosixPath
 from typing import Dict, Optional
 
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
 from app import __file__ as application_file
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -271,6 +273,28 @@ def _detect_memory_limit_bytes() -> int | None:
             limits.append(int(raw))
     except (OSError, ValueError):
         pass
+    # On a host service the cgroup filesystem is mounted above this process's
+    # group. Reading only its root misses MemoryMax on the service or a parent
+    # slice. Containers with a cgroup namespace already expose their group at /.
+    try:
+        root = Path("/sys/fs/cgroup")
+        for line in Path("/proc/self/cgroup").read_text().splitlines():
+            if not line.startswith("0::/"):
+                continue
+            parts = PurePosixPath(line[3:]).parts[1:]
+            if len(parts) > 128 or any(part in (".", "..") for part in parts):
+                continue
+            group = root.joinpath(*parts)
+            while group != root:
+                try:
+                    value = int((group / "memory.max").read_text().strip())
+                    if value > 0:
+                        limits.append(value)
+                except (OSError, ValueError):
+                    pass
+                group = group.parent
+    except OSError:
+        pass
     try:  # cgroup v1
         v1 = int(
             Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip()
@@ -409,6 +433,14 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
 
     import trimesh
 
+    static_cap = int(settings.mesh_max_render_triangles)
+    if include_brep:
+        static_cap = min(static_cap, MAX_ANALYSIS_FACES)
+    ram_cap = _ram_triangle_cap(path.suffix.lower())
+    triangle_limit = min(static_cap, ram_cap) if ram_cap is not None else static_cap
+    # Worst case: three float64 vertices and three int64 indices per face.
+    # Include NPZ headers and the bounded B-rep sidecar in the capacity lease.
+    result_limit = max(triangle_limit, 1) * 96 + 1024 * 1024
     with ExitStack() as resources:
         tmp = resources.enter_context(
             tempfile.TemporaryDirectory(prefix="printstash-step-")
@@ -423,7 +455,7 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
                 "step-tessellation:" + secrets.token_hex(12),
                 [
                     CapacityResource.for_path(
-                        Path(tmp), 32 * 1024 * 1024, role="STEP tessellation"
+                        Path(tmp), result_limit + 64 * 1024, role="STEP tessellation"
                     )
                 ],
             )
@@ -431,15 +463,7 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
         output = Path(tmp) / ("mesh.npz" if include_brep else "mesh.glb")
         env = os.environ.copy()
         env["PRINTSTASH_STEP_BREP"] = "1" if include_brep else "0"
-        static_cap = (
-            min(int(settings.mesh_max_render_triangles), 200_000)
-            if include_brep
-            else int(settings.mesh_max_render_triangles)
-        )
-        ram_cap = _ram_triangle_cap(path.suffix.lower())
-        env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(
-            min(static_cap, ram_cap) if ram_cap is not None else static_cap
-        )
+        env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(triangle_limit)
         command = [
             sys.executable,
             "-m",
@@ -498,7 +522,7 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
             from printstash_core.mesh.similarity import GeometryError
 
             if (
-                output.stat().st_size > 32 * 1024 * 1024
+                output.stat().st_size > result_limit
                 or output.with_suffix(".json").stat().st_size > 64 * 1024
             ):
                 raise GeometryError("geometry_work_limit")

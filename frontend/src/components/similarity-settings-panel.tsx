@@ -127,7 +127,7 @@ function SettingsForm({ initial, onSaved }: { initial: SimilaritySettings; onSav
               className="w-28 shrink-0"
               type="number"
               min={100}
-              max={200000}
+              max={2000000}
               required
               value={draft.triangle_cap}
               onChange={(e) => setDraft({ ...draft, triangle_cap: Number(e.target.value) })}

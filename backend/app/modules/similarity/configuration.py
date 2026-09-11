@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.verification import EvidenceClass
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlmodel import Session
@@ -28,7 +29,9 @@ class SimilaritySettings(CandidateSelection):
 
     enabled: bool = False
     fingerprint_on_ingest: bool = True
-    triangle_cap: int = Field(default=200_000, ge=100, le=200_000, strict=True)
+    triangle_cap: int = Field(
+        default=MAX_ANALYSIS_FACES, ge=100, le=MAX_ANALYSIS_FACES, strict=True
+    )
     sample_points: int = Field(default=5000, ge=256, le=5000, strict=True)
     voxel_resolution: Literal[64] = 64
     max_candidates: int = Field(default=20, ge=1, le=100, strict=True)

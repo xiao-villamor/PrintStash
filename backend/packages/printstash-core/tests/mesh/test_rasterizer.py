@@ -531,13 +531,22 @@ class TestRasteriseTriangles:
         assert 0 < painted <= 64
         assert img.max() > 0
 
+    def test_preserves_full_face_when_only_allocation_chunk_is_small(self) -> None:
+        tri = np.array([[[0.0, 0.0, 0.0], [511.0, 0.0, 0.0], [0.0, 511.0, 0.0]]])
+        budget = RasterBudget(limit=1_000_000)
+
+        painted, img = self.paint(tri, size=512, budget=budget)
+
+        assert painted == budget.used == 512 * 512
+        assert img[10, 10].tolist() == [255, 255, 255]
+
 
 class TestRasterBudget:
-    def test_starts_unspent_at_the_chunk_cap(self) -> None:
+    def test_preserves_default_cumulative_pixel_budget(self) -> None:
         budget = RasterBudget()
 
         assert budget.used == 0
-        assert budget.limit == rasterizer._CHUNK_PIXEL_BUDGET
+        assert budget.limit == 1_000_000
 
 
 class TestModuleDependencies:

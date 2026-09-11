@@ -14,7 +14,13 @@ from app.db.session import SessionFactory
 from app.modules.media import compute_slots, geometry_analysis
 from app.modules.media.fingerprints import FingerprintResult
 from app.modules.media.thumbnail_engine import ThumbnailEngine, ThumbnailRequest
-from app.modules.similarity import candidates, fingerprints, retrieval, runs
+from app.modules.similarity import (
+    candidates,
+    fingerprints,
+    retrieval,
+    runs,
+    verification_cache,
+)
 from app.modules.similarity.configuration import SimilaritySettings, read_settings
 from app.modules.storage import artifact_content
 from app.modules.storage.storage_backend.contracts import StorageBackend
@@ -169,6 +175,8 @@ class SimilarityProcessor:
                                 ThumbnailRequest(
                                     path=path,
                                     file_type=file.file_type.value,
+                                    include_thumbnail=False,
+                                    include_geometry=False,
                                     include_fingerprint=True,
                                     triangle_cap=config.triangle_cap,
                                     reason="similarity",
@@ -314,6 +322,13 @@ class SimilarityProcessor:
                     or fingerprints.source_digest(path_b) != second.source_sha256
                 ):
                     counters["stale"] = counters.get("stale", 0) + 1
+                    return
+                if verification_cache.reusable_pair(
+                    session, first, second, sample_points=config.sample_points
+                ):
+                    counters["verification_cached"] = (
+                        counters.get("verification_cached", 0) + 1
+                    )
                     return
                 evidence = geometry_analysis.verify_paths(
                     path_a,

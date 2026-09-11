@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Dict, Literal, Optional, Tuple
 
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
 from app.modules.media import mesh_render as mesh_render
 from app.modules.media import stl_fallback as stl_fallback
 from app.modules.media import stl_streaming as stl_streaming
@@ -21,7 +23,7 @@ def analyze_mesh(
     file_type: str | None = None,
     output_format: Literal["PNG", "WEBP"] = "PNG",
     include_fingerprint: bool = False,
-    triangle_cap: int = 200_000,
+    triangle_cap: int = MAX_ANALYSIS_FACES,
 ) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
     """Extract geometry and render a thumbnail with a single mesh load.
 

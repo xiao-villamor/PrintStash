@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 from .fingerprint import (
     FingerprintBudget,
     GeometryError,
+    SurfaceMetrics,
     clean_mesh,
+    measure_triangles,
     validate_mesh_arrays,
 )
 
@@ -78,6 +80,20 @@ def prepare_surface(vertices: NDArray[Any], faces: NDArray[Any]) -> Surface:
             )
     except (FloatingPointError, np.linalg.LinAlgError) as exc:
         raise GeometryError("numeric_range") from exc
+
+
+def measure_surface(surface: Surface) -> SurfaceMetrics:
+    """Measure a prepared surface without re-cleaning or computing retrieval keys."""
+    import numpy as np
+
+    diagonal = float(np.linalg.norm(np.ptp(surface.vertices @ surface.frame, axis=0)))
+    return measure_triangles(
+        surface.vertices,
+        surface.faces,
+        float(surface.areas.sum()),
+        diagonal,
+        surface.eigenvalues,
+    )
 
 
 def sample_surface(surface: Surface, count: int, seed: int) -> FloatArray:

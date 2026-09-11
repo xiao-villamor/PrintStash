@@ -65,10 +65,17 @@ class SurfaceProximity:
             raise GeometryError("invalid_proximity_budget")
         best = np.full(len(points), np.inf)
         nearest = np.empty_like(points, dtype=np.float64)
-        stack = [(self.root, np.arange(len(points)))]
+        ids = np.arange(len(points))
+        stack = [(self.root, ids, False)]
+        if self.root.indices is None:
+            # First establish a real distance upper bound from one nearby leaf
+            # per point. Starting every point at infinity made a left-first walk
+            # test distant triangles before reaching its own region of the mesh.
+            # The subsequent complete traversal still proves the closest point.
+            stack.append((self.root, ids, True))
         work = 0
         while stack:
-            node, ids = stack.pop()
+            node, ids, seed = stack.pop()
             delta = np.maximum(
                 np.maximum(node.low - points[ids], points[ids] - node.high), 0
             )
@@ -77,7 +84,30 @@ class SurfaceProximity:
                 continue
             if node.indices is None:
                 assert node.left is not None and node.right is not None
-                stack.extend(((node.right, ids), (node.left, ids)))
+                if seed:
+                    left_delta = np.maximum(
+                        np.maximum(
+                            node.left.low - points[ids], points[ids] - node.left.high
+                        ),
+                        0,
+                    )
+                    right_delta = np.maximum(
+                        np.maximum(
+                            node.right.low - points[ids], points[ids] - node.right.high
+                        ),
+                        0,
+                    )
+                    prefer_left = np.einsum(
+                        "ij,ij->i", left_delta, left_delta
+                    ) <= np.einsum("ij,ij->i", right_delta, right_delta)
+                    stack.extend(
+                        (
+                            (node.right, ids[~prefer_left], True),
+                            (node.left, ids[prefer_left], True),
+                        )
+                    )
+                else:
+                    stack.extend(((node.right, ids, False), (node.left, ids, False)))
                 continue
             work += len(ids) * len(node.indices)
             if work > max_work:

@@ -12,6 +12,7 @@ import pytest
 from printstash_core.mesh.similarity.fingerprint import GeometryError
 from printstash_core.mesh.similarity.geometry import (
     equivalent_triangles,
+    measure_surface,
     nearest_neighbors,
     prepare_surface,
     sample_surface,
@@ -19,6 +20,19 @@ from printstash_core.mesh.similarity.geometry import (
 
 
 class TestPrepareSurface:
+    def test_preserves_verification_metrics(self, cube):
+        vertices, faces = cube
+        surface = prepare_surface(vertices + [30, -20, 40], faces)
+
+        metrics = measure_surface(surface)
+
+        assert metrics.surface_area == pytest.approx(24)
+        assert metrics.volume == pytest.approx(8)
+        assert metrics.face_count == 12
+        assert metrics.vertex_count == 8
+        assert metrics.euler_characteristic == 2
+        assert metrics.watertight is True
+
     def test_retains_original_origin(self, tetra):
         vertices, faces = tetra
 

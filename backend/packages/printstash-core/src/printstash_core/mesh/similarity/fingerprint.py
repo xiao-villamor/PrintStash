@@ -18,6 +18,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from .budgets import MAX_ANALYSIS_FACES, MAX_ANALYSIS_VERTICES
+
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
@@ -51,8 +53,8 @@ class FingerprintBudget:
     These caps do not replace the application's cgroup-aware admission control.
     """
 
-    max_vertices: int = 600_000
-    max_faces: int = 200_000
+    max_vertices: int = MAX_ANALYSIS_VERTICES
+    max_faces: int = MAX_ANALYSIS_FACES
 
 
 _DEFAULT_BUDGET = FingerprintBudget()
@@ -135,7 +137,10 @@ def validate_mesh_arrays(
 ) -> None:
     import numpy as np
 
-    for limit, ceiling in ((budget.max_vertices, 600_000), (budget.max_faces, 200_000)):
+    for limit, ceiling in (
+        (budget.max_vertices, MAX_ANALYSIS_VERTICES),
+        (budget.max_faces, MAX_ANALYSIS_FACES),
+    ):
         if type(limit) is not int or not 1 <= limit <= ceiling:
             raise GeometryError("invalid_budget")
     if vertices.ndim != 2 or vertices.shape[1] != 3 or vertices.dtype.kind not in "fiu":
@@ -152,6 +157,23 @@ def validate_mesh_arrays(
         raise GeometryError("degenerate_surface")
 
 
+def _unique_rows(values: NDArray[Any]) -> tuple[NDArray[Any], IntArray]:
+    """Lexicographically weld finite rows without NumPy's structured-array sort.
+
+    Geometry is validated before this seam. Sorting the numeric columns directly
+    avoids a Python-comparator-like structured sort for millions of STL corners.
+    The returned row order and inverse mapping match np.unique(axis=0).
+    """
+    import numpy as np
+
+    order = np.lexsort(values.T[::-1])
+    ordered = values[order]
+    first = np.r_[True, np.any(ordered[1:] != ordered[:-1], axis=1)]
+    inverse = np.empty(len(order), dtype=np.int64)
+    inverse[order] = np.cumsum(first) - 1
+    return ordered[first], inverse
+
+
 def clean_mesh(
     vertices: NDArray[Any], faces: NDArray[Any]
 ) -> tuple[FloatArray, IntArray]:
@@ -160,9 +182,7 @@ def clean_mesh(
     # Work only on referenced vertices: a stray unused coordinate must not
     # change cleanup tolerances, centering, PCA, or any surface descriptor.
     used, remap = np.unique(faces, return_inverse=True)
-    verts, welded = np.unique(
-        vertices[used].astype(np.float64), axis=0, return_inverse=True
-    )
+    verts, welded = _unique_rows(vertices[used].astype(np.float64))
     tris = welded[remap].reshape((-1, 3))
     # Canonical cyclic order keeps winding, including when duplicate faces
     # arrive with opposite winding. Lexical order makes that choice repeatable.
@@ -242,10 +262,36 @@ def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint
 
     seed = int.from_bytes(hashlib.sha256(seed_data).digest()[:8], "little")
     d2 = _d2(sample_tri, seed, diagonal)
-    edges = tris[:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2))
-    unique_edges, inverse, counts = np.unique(
-        np.sort(edges, axis=1), axis=0, return_inverse=True, return_counts=True
+    metrics = measure_triangles(verts, tris, area, diagonal, eigenvalues)
+    return MeshFingerprint(
+        ALGORITHM_VERSION,
+        np.__version__,
+        keys,
+        ambiguous,
+        metrics,
+        d2,
+        tuple(unavailable),
     )
+
+
+def measure_triangles(
+    verts: FloatArray,
+    tris: IntArray,
+    area: float,
+    diagonal: float,
+    eigenvalues: FloatArray,
+) -> SurfaceMetrics:
+    """Topology and physical measurements of an already-cleaned surface.
+
+    Verification needs these measurements, not retrieval hashes or D2 samples.
+    Keep one implementation so the two consumers cannot disagree about volume.
+    """
+    import numpy as np
+
+    tri = verts[tris]
+    edges = tris[:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2))
+    unique_edges, inverse = _unique_rows(np.sort(edges, axis=1))
+    counts = np.bincount(inverse)
     watertight = bool(np.all(counts == 2))
     direction_sums = np.bincount(
         inverse, weights=np.where(edges[:, 0] < edges[:, 1], 1, -1)
@@ -270,7 +316,7 @@ def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint
             volume_reason = "degenerate_volume"
         else:
             volume = estimate
-    metrics = SurfaceMetrics(
+    return SurfaceMetrics(
         vertex_count=len(verts),
         face_count=len(tris),
         euler_characteristic=len(verts) - len(unique_edges) + len(tris),
@@ -285,15 +331,6 @@ def _fingerprint(vertices: NDArray[Any], faces: NDArray[Any]) -> MeshFingerprint
             float(x) for x in eigenvalues / eigenvalues[-1]
         ),
     )
-    return MeshFingerprint(
-        ALGORITHM_VERSION,
-        np.__version__,
-        keys,
-        ambiguous,
-        metrics,
-        d2,
-        tuple(unavailable),
-    )
 
 
 def canonical_geometry_keys(
@@ -307,18 +344,17 @@ def canonical_geometry_keys(
     scale = format(diagonal, ".6g").encode("ascii")
     physical: list[list[str]] = [[], [], [], []]
     normalized: list[list[str]] = [[], [], [], []]
-    sample_options: list[tuple[bytes, FloatArray]] = []
+    sample_data: bytes | None = None
+    sample_tri: FloatArray | None = None
     for signs in ((1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)):
         oriented = vertices * signs
-        for insensitive in (False, True):
-            for offset in (0.0, 0.5):
-                quantized = np.floor(oriented / _GRID_RELATIVE + offset).astype(
-                    np.int64
-                )
-                # Unique positions give numeric lexicographic corner order,
-                # independent of vertex indices, face order and host endian.
-                positions, ids = np.unique(quantized, axis=0, return_inverse=True)
-                face_ids = ids[faces]
+        for offset in (0.0, 0.5):
+            quantized = np.floor(oriented / _GRID_RELATIVE + offset).astype(np.int64)
+            # Winding changes corner ordering, never the welded positions. Reuse
+            # that sort for both keys instead of sorting all vertices twice.
+            positions, ids = _unique_rows(quantized)
+            face_ids = ids[faces]
+            for insensitive in (False, True):
                 if insensitive:
                     corners = np.argsort(face_ids, axis=1, kind="stable")
                 else:
@@ -328,23 +364,58 @@ def canonical_geometry_keys(
                 data = positions[ordered[order]].astype("<i8").tobytes()
                 slot = 2 * int(insensitive) + int(offset != 0)
                 prefix = f"{ALGORITHM_VERSION}:{slot}:".encode("ascii")
-                normalized[slot].append(hashlib.sha256(prefix + data).hexdigest())
-                physical[slot].append(
-                    hashlib.sha256(prefix + scale + b":" + data).hexdigest()
-                )
-                if insensitive and offset == 0:
-                    triangles = np.take_along_axis(
+                normalized_hash = hashlib.sha256(prefix)
+                normalized_hash.update(data)
+                normalized[slot].append(normalized_hash.hexdigest())
+                physical_hash = hashlib.sha256(prefix + scale + b":")
+                physical_hash.update(data)
+                physical[slot].append(physical_hash.hexdigest())
+                if (
+                    insensitive
+                    and offset == 0
+                    and (sample_data is None or data < sample_data)
+                ):
+                    sample_data = data
+                    sample_tri = np.take_along_axis(
                         oriented[faces], corners[:, :, None], axis=1
                     )[order]
-                    sample_options.append((data, triangles))
-    seed_data, sample_tri = min(sample_options, key=lambda item: item[0])
+    assert sample_data is not None and sample_tri is not None
     return (
         CanonicalKeys(
             tuple(min(x) for x in physical), tuple(min(x) for x in normalized)
         ),
         sample_tri,
-        seed_data,
+        sample_data,
     )
+
+
+def canonical_sample_triangles(vertices: FloatArray, faces: IntArray) -> FloatArray:
+    """The canonical view frame without computing 32 unused retrieval hashes.
+
+    Use exactly the same unoriented base-grid ordering as canonical_geometry_keys.
+    Keep only the best candidate's arrays, so four orientation hypotheses do not
+    retain four full copies of a dense mesh.
+    """
+    import numpy as np
+
+    chosen: bytes | None = None
+    triangles: FloatArray | None = None
+    for signs in ((1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)):
+        oriented = vertices * signs
+        quantized = np.floor(oriented / _GRID_RELATIVE).astype(np.int64)
+        positions, ids = _unique_rows(quantized)
+        face_ids = ids[faces]
+        corners = np.argsort(face_ids, axis=1, kind="stable")
+        ordered = np.take_along_axis(face_ids, corners, axis=1)
+        order = np.lexsort(ordered.T[::-1])
+        data = positions[ordered[order]].astype("<i8").tobytes()
+        if chosen is None or data < chosen:
+            chosen = data
+            triangles = np.take_along_axis(
+                oriented[faces], corners[:, :, None], axis=1
+            )[order]
+    assert triangles is not None
+    return triangles
 
 
 def _d2(triangles: FloatArray, seed: int, diagonal: float) -> D2Descriptor:

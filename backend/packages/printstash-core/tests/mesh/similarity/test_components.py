@@ -180,7 +180,8 @@ class TestExpandScene:
             expand_scene((), ())
 
     @pytest.mark.parametrize(
-        "name,value", [("max_depth", 0), ("max_faces", 200001), ("max_instances", True)]
+        "name,value",
+        [("max_depth", 0), ("max_faces", 2_000_001), ("max_instances", True)],
     )
     def test_rejects_invalid_budget(self, name, value):
         with pytest.raises(GeometryError, match="invalid_scene_budget"):

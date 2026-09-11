@@ -5,13 +5,49 @@ import hashlib
 import pytest
 from sqlmodel import select
 
-from app.db.models import File, SimilarityReviewDecision
+from app.db.models import File, Metadata, SimilarityReviewDecision
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.similarity import process_one
 from tests.factories.geometry import tetrahedron
+from tests.paths import TESTDATA_DIR
 
 
 class TestSimilarity:
+    @pytest.mark.asyncio
+    async def test_ingests_complete_repository_benchy(
+        self, api, superuser_headers, e2e_db
+    ):
+        source = (TESTDATA_DIR / "benchy" / "3dbenchy.stl").read_bytes()
+        configured = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=superuser_headers,
+            json={"enabled": True},
+        )
+        assert configured.status_code == 200, configured.text
+
+        response = await api.post(
+            "/api/v1/ingest/model",
+            headers=superuser_headers,
+            files={"file": ("3dbenchy.stl", source, "application/octet-stream")},
+            data={"model_name": "Complete repository Benchy"},
+        )
+
+        assert response.status_code == 202, response.text
+        job = await api.get(
+            f"/api/v1/ingest/jobs/{response.json()['job_id']}",
+            headers=superuser_headers,
+        )
+        assert job.json()["state"] == "completed", job.text
+        assert job.json()["fingerprint_status"] == "ready", job.text
+        file = e2e_db.get(File, job.json()["file_id"])
+        metadata = e2e_db.exec(
+            select(Metadata).where(Metadata.file_id == file.id)
+        ).one()
+        assert metadata.triangle_count == 225706
+        assert get_backend().read_bytes(file.path) == source
+        assert file.thumbnail_path is not None
+        assert get_backend().read_bytes(file.thumbnail_path)
+
     @pytest.mark.asyncio
     async def test_confirms_evidence_after_local_scan(
         self, api, superuser_headers, e2e_db

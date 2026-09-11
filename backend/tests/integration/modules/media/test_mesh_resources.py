@@ -108,7 +108,7 @@ class TestRootRelationship:
 
 
 class TestMalformedPackages:
-    @pytest.mark.parametrize("budget", [0, 200001, True])
+    @pytest.mark.parametrize("budget", [0, 2_000_001, True])
     def test_rejects_invalid_scene_budget(self, tmp_path, budget):
         with pytest.raises(GeometryError, match="invalid_scene_budget"):
             load_3mf(tmp_path / "absent.3mf", max_faces=budget)

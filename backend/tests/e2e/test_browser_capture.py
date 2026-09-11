@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from app.core.config import settings
 from app.db.models import (
     ArtifactProvenanceLink,
     File,
+    GeometryFingerprint,
     InboxItem,
     InboxItemState,
     Model,
@@ -21,7 +23,8 @@ from app.db.models import (
 from app.modules.identity.auth import create_api_key
 from app.modules.ingestion import import_resolvers, inbox
 from app.modules.storage.hashing import sha256_file
-from tests.paths import FIXTURES_DIR
+from app.modules.storage.storage_backend.runtime import get_backend
+from tests.paths import FIXTURES_DIR, TESTDATA_DIR
 
 
 def _captured_manifest() -> CaptureManifestV2:
@@ -69,6 +72,82 @@ class TestBrowserCapture:
     into an inbox item the user reviews. Every step crosses a trust boundary — the
     payload is attacker-shaped by construction — so these run the real flow
     rather than the services under it."""
+
+    @pytest.mark.asyncio
+    async def test_preserves_capture_artifact_content(
+        self, api, superuser_headers, e2e_db
+    ):
+        source = (TESTDATA_DIR / "Spatula_Printables_IS.3mf").read_bytes()
+        url = "https://www.printables.com/model/1234-test-spatula"
+        configured = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=superuser_headers,
+            json={"enabled": True},
+        )
+        assert configured.status_code == 200, configured.text
+
+        captured = await api.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=superuser_headers,
+            json={
+                "source_url": url,
+                "capture_source": {
+                    "provider": "printables",
+                    "canonical_url": url,
+                    "source_item_id": "1234",
+                    "source_revision": None,
+                    "adapter_version": "fixture-v1",
+                    "fields": {"title": {"value": "Spatula", "origin": "confirmed"}},
+                    "tags": [],
+                },
+                "files": [
+                    {
+                        "id": "spatula",
+                        "filename": "spatula.3mf",
+                        "media_type": "application/octet-stream",
+                        "size_bytes": len(source),
+                        "sha256": hashlib.sha256(source).hexdigest(),
+                    }
+                ],
+            },
+        )
+        assert captured.status_code == 201, captured.text
+        item_id = captured.json()["item"]["id"]
+        slot_id = captured.json()["slots"][0]["id"]
+        uploaded = await api.put(
+            f"/api/v1/inbox/capture-upload-slots/{slot_id}",
+            headers={**superuser_headers, "content-type": "application/octet-stream"},
+            content=source,
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        finalized = await api.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize",
+            headers=superuser_headers,
+        )
+        assert finalized.status_code == 200, finalized.text
+        imported = await api.post(
+            f"/api/v1/inbox/{item_id}/import",
+            headers=superuser_headers,
+            json={"selected_ids": ["spatula"]},
+        )
+        assert imported.status_code == 200, imported.text
+
+        completed = await api.get(f"/api/v1/inbox/{item_id}", headers=superuser_headers)
+        assert completed.json()["state"] == "completed", completed.text
+        file_id = completed.json()["results"][0]["file_id"]
+        file = e2e_db.get(File, file_id)
+        fingerprint = e2e_db.exec(
+            select(GeometryFingerprint).where(
+                GeometryFingerprint.file_id == file_id,
+                GeometryFingerprint.component_index == 0,
+            )
+        ).one()
+        assert fingerprint.state == "ready"
+        assert get_backend().read_bytes(file.path) == source
+        provenance = await api.get(
+            f"/api/v1/models/{file.model_id}/provenance", headers=superuser_headers
+        )
+        assert provenance.json()["sources"][0]["canonical_url"] == url
 
     @pytest.mark.asyncio
     async def test_browser_capture_resolves_offline_printables_fixture_to_review(

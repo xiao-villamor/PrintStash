@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import app.modules.media.mesh_operations as mesh_operations
 from app.core.config import _overlay
 from app.modules.media import mesh_processing, mesh_render
@@ -41,6 +43,52 @@ from .._meshes import _fake_mesh, _write_binary_stl
 
 
 class TestDetectMemoryLimitBytes:
+    @pytest.mark.parametrize(
+        "membership",
+        ["1:cpu:/slice", "0::/", "0::/../outside", "0::/" + "/".join(["slice"] * 129)],
+    )
+    def test_ignores_unusable_cgroup_membership(self, monkeypatch, membership):
+        files = {
+            "/proc/self/cgroup": membership,
+            "/sys/fs/cgroup/memory.max": "max",
+            "/proc/meminfo": "MemTotal:       8388608 kB\n",
+        }
+
+        def read(path, *args, **kwargs):
+            if str(path) in files:
+                return files[str(path)]
+            raise OSError("absent")
+
+        monkeypatch.setattr(Path, "read_text", read)
+
+        assert mesh_processing._detect_memory_limit_bytes() == 8 * 1024**3
+
+    @pytest.mark.parametrize(
+        "parent,child,expected",
+        [("max", "1073741824", 1073741824), ("536870912", "max", 536870912)],
+        ids=["service-limit", "parent-slice-limit"],
+    )
+    def test_detects_effective_nested_cgroup_limit(
+        self, monkeypatch, parent, child, expected
+    ):
+        files = {
+            "/proc/self/cgroup": "0::/test.slice/printstash.service\n",
+            "/sys/fs/cgroup/memory.max": "max",
+            "/sys/fs/cgroup/test.slice/memory.max": parent,
+            "/sys/fs/cgroup/test.slice/printstash.service/memory.max": child,
+            "/proc/meminfo": "MemTotal:       8388608 kB\n",
+        }
+
+        def read(path, *args, **kwargs):
+            try:
+                return files[str(path)]
+            except KeyError as exc:
+                raise OSError("absent") from exc
+
+        monkeypatch.setattr(Path, "read_text", read)
+
+        assert mesh_processing._detect_memory_limit_bytes() == expected
+
     def test_detect_memory_limit_is_positive_on_linux(self) -> None:
         limit = mesh_processing._detect_memory_limit_bytes()
         # On Linux CI this reads /proc/meminfo or a cgroup; elsewhere it may be None.
@@ -100,6 +148,7 @@ class TestDetectMemoryLimitBytes:
 
         real_read_text = _Path.read_text
         unreadable = {
+            "/proc/self/cgroup",
             "/sys/fs/cgroup/memory.max",
             "/sys/fs/cgroup/memory/memory.limit_in_bytes",
             "/proc/meminfo",
@@ -213,9 +262,7 @@ class TestRenderSemaphore:
                 state["current"] -= 1
             return b"PNG"
 
-        monkeypatch.setattr(
-            mesh_render, "render_mesh_thumbnail", _slow_render
-        )
+        monkeypatch.setattr(mesh_render, "render_mesh_thumbnail", _slow_render)
 
         threads = [
             threading.Thread(target=lambda: mesh_operations.analyze_mesh(p))

@@ -1,6 +1,7 @@
 """Real files produce review derivatives without a second mesh load or source edits."""
 
 import hashlib
+import weakref
 from dataclasses import asdict
 
 import numpy as np
@@ -16,6 +17,78 @@ from tests.factories.geometry import tetrahedron, three_mf
 
 
 class TestFingerprintExtraction:
+    def test_releases_loaded_mesh_before_reclaim(self, tmp_path, monkeypatch):
+        path = tmp_path / "single.stl"
+        path.write_bytes(tetrahedron().export(file_type="stl"))
+        original_load = mesh_processing._load_mesh
+        original_reclaim = mesh_processing._reclaim_memory
+        loaded = []
+        released = []
+
+        def observed_load(*args, **kwargs):
+            mesh = original_load(*args, **kwargs)
+            loaded.append(weakref.ref(mesh))
+            return mesh
+
+        def observed_reclaim():
+            original_reclaim()
+            released.append(all(reference() is None for reference in loaded))
+
+        monkeypatch.setattr(mesh_processing, "_load_mesh", observed_load)
+        monkeypatch.setattr(mesh_processing, "_reclaim_memory", observed_reclaim)
+
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(path, include_fingerprint=True, include_thumbnail=False)
+        )
+
+        assert result.fingerprint_result.state == "ready"
+        assert loaded
+        assert released[-1] is True
+
+    def test_preserves_transformed_component_measurements(self, tmp_path):
+        path = tmp_path / "scaled.3mf"
+        path.write_bytes(three_mf(build=((1, "2 0 0 0 2 0 0 0 2 0 0 0"),)))
+
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(path, include_fingerprint=True, include_thumbnail=False)
+        )
+
+        whole, component = result.fingerprint_result.records
+        assert whole.values["volume"] == pytest.approx(8000)
+        assert component.values["volume"] == pytest.approx(1000)
+
+    def test_preserves_single_component_descriptors(self, tmp_path):
+        path = tmp_path / "single.stl"
+        path.write_bytes(tetrahedron().export(file_type="stl"))
+
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(path, include_fingerprint=True, include_thumbnail=False)
+        )
+
+        whole, component = result.fingerprint_result.records
+        assert whole.values == component.values
+        assert whole.values is not component.values
+        assert whole.values["recipe"] is not component.values["recipe"]
+
+    def test_avoids_discarded_similarity_thumbnails(self, tmp_path):
+        path = tmp_path / "single.stl"
+        path.write_bytes(tetrahedron().export(file_type="stl"))
+        progress = []
+
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(
+                path,
+                include_fingerprint=True,
+                include_thumbnail=False,
+                report=progress.append,
+            )
+        )
+
+        assert result.fingerprint_result.state == "ready"
+        assert result.image is None
+        assert result.failure_reason is None
+        assert "rendering_thumbnail" not in progress
+
     @pytest.mark.parametrize("format", ["stl", "stl_ascii", "obj", "3mf"])
     def test_extracts_lite_format(self, tmp_path, format):
         mesh = tetrahedron()

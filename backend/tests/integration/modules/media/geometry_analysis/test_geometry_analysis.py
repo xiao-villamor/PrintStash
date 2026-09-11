@@ -43,7 +43,7 @@ class TestVerifyPaths:
                 sample_points=256,
             )
 
-    @pytest.mark.parametrize("cap", [99, 200001])
+    @pytest.mark.parametrize("cap", [99, 2_000_001, True, 100.0])
     def test_refuses_invalid_triangle_caps(self, mesh_path, cap):
         with pytest.raises(GeometryError, match="invalid_triangle_cap"):
             geometry_analysis.verify_paths(

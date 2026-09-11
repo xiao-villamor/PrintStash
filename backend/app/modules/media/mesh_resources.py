@@ -9,6 +9,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.budgets import (
+    MAX_ANALYSIS_FACES,
+    MAX_ANALYSIS_VERTICES,
+)
 from printstash_core.mesh.similarity.components import (
     Assembly,
     ExpandedScene,
@@ -39,6 +43,7 @@ class PreparedMesh:
     complete: bool = True
     failure_code: str | None = None
     brep: dict[str, Any] | None = None
+    whole_resource_id: str | None = None
 
 
 def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
@@ -49,10 +54,16 @@ def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
         resources,
         tuple(Instance(resource.resource_id, np.eye(4)) for resource in resources),
     )
-    return PreparedMesh(mesh, scene, file_type, brep=mesh.metadata.get("brep"))
+    return PreparedMesh(
+        mesh,
+        scene,
+        file_type,
+        brep=mesh.metadata.get("brep"),
+        whole_resource_id=resources[0].resource_id if len(resources) == 1 else None,
+    )
 
 
-def load_3mf(path: Path, *, max_faces: int = 200_000) -> PreparedMesh:
+def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh:
     """Parse bounded XML resources once; never flatten away resource placement.
 
     Production-extension external .model parts inside the same archive are
@@ -63,7 +74,7 @@ def load_3mf(path: Path, *, max_faces: int = 200_000) -> PreparedMesh:
     import trimesh
     from lxml import etree
 
-    if type(max_faces) is not int or not 1 <= max_faces <= 200_000:
+    if type(max_faces) is not int or not 1 <= max_faces <= MAX_ANALYSIS_FACES:
         raise GeometryError("invalid_scene_budget")
     try:
         with zipfile.ZipFile(path) as archive:
@@ -168,7 +179,10 @@ def load_3mf(path: Path, *, max_faces: int = 200_000) -> PreparedMesh:
                             )
                             total_vertices += len(nodes)
                             total_faces += len(triangles)
-                            if total_faces > max_faces or total_vertices > 600_000:
+                            if (
+                                total_faces > max_faces
+                                or total_vertices > MAX_ANALYSIS_VERTICES
+                            ):
                                 raise GeometryError("resource_limit")
                             vertices = (
                                 np.array(
@@ -220,7 +234,17 @@ def load_3mf(path: Path, *, max_faces: int = 200_000) -> PreparedMesh:
             if not np.isfinite(vertices).all():
                 raise GeometryError("nonfinite_geometry")
             mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-            return PreparedMesh(mesh, scene, "3mf")
+            same_resource = len(scene.resources) == len(
+                scene.instances
+            ) == 1 and np.array_equal(scene.instances[0].transform, np.eye(4))
+            return PreparedMesh(
+                mesh,
+                scene,
+                "3mf",
+                whole_resource_id=(
+                    scene.resources[0].resource_id if same_resource else None
+                ),
+            )
     except GeometryError:
         raise
     except (

@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
 
 class StepGeometryError(ValueError):
     pass
@@ -32,7 +34,7 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
     from OCP.TopoDS import TopoDS
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    if not 1 <= triangle_limit <= 2_000_000:
+    if type(triangle_limit) is not int or not 1 <= triangle_limit <= MAX_ANALYSIS_FACES:
         raise StepGeometryError("geometry_work_limit")
     reader = STEPControl_Reader()
     if reader.ReadFile(str(source)) != IFSelect_RetDone:
@@ -89,7 +91,7 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
             raise StepGeometryError("tessellation_incomplete")
         if (
             len(triangles) + mesh.NbTriangles() > triangle_limit
-            or len(vertices) + mesh.NbNodes() > 600_000
+            or len(vertices) + mesh.NbNodes() > 3 * triangle_limit
         ):
             raise StepGeometryError("geometry_work_limit")
         offset = len(vertices)

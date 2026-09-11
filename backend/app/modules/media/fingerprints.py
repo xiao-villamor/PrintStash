@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -61,6 +62,9 @@ def extract(prepared: PreparedMesh) -> FingerprintResult:
             np.asarray(mesh.faces),
             partial=not prepared.complete,
         )
+        # A single connected mesh already describes its sole Component. Preserve
+        # independent mutable records while avoiding a second full analysis.
+        whole_shape = deepcopy(whole) if prepared.whole_resource_id else None
         whole["component_count"] = component_count if prepared.complete else None
         if prepared.brep is not None:
             whole["brep"] = prepared.brep
@@ -78,7 +82,12 @@ def extract(prepared: PreparedMesh) -> FingerprintResult:
                 )
                 # Preserve scale/reflection per instance; resource arrays stay in
                 # their physical source frame and are not flattened or duplicated.
-                described = _describe(resource.vertices, resource.faces, partial=False)
+                described = (
+                    deepcopy(whole_shape)
+                    if resource.resource_id == prepared.whole_resource_id
+                    and whole_shape is not None
+                    else _describe(resource.vertices, resource.faces, partial=False)
+                )
                 described["component_count"] = 1
                 records.append(
                     FingerprintRecord(index, len(instances), described, instances)

@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+from pathlib import Path
 
 import pytest
 from sqlmodel import select
@@ -51,6 +52,51 @@ def local_pair(db_session, make_model, make_file, make_user, local_storage):
 
 
 class TestProcessing:
+    def test_rejects_corrupted_cached_source(self, db_session, local_pair):
+        actor, files = local_pair
+        processor = SimilarityProcessor(get_session_factory(), get_backend())
+        original = runs.start(db_session, actor)
+        for _ in range(35):
+            assert processor.work_one()
+            db_session.refresh(original)
+            if original.state in runs.TERMINAL:
+                break
+        assert original.state == "completed"
+        assert db_session.exec(select(SimilarityCandidate)).one().exact_equivalence
+        # Simulate bytes changed outside the immutable StorageBackend writer.
+        Path(files[0].path).write_bytes(b"changed source")
+        repeated = runs.start(db_session, actor)
+
+        for _ in range(35):
+            assert processor.work_one()
+            db_session.refresh(repeated)
+            if repeated.state in runs.TERMINAL:
+                break
+
+        assert repeated.state == "completed"
+        counters = json.loads(repeated.counters_json)
+        assert counters.get("verification_cached", 0) == 0
+        assert counters.get("verified", 0) == 0
+        assert counters["stale"] > 0
+
+    def test_reuses_verified_unchanged_pairs(self, db_session, local_pair):
+        actor, _ = local_pair
+        processor = SimilarityProcessor(get_session_factory(), get_backend())
+        for _ in range(2):
+            run = runs.start(db_session, actor)
+            for _ in range(35):
+                assert processor.work_one()
+                db_session.refresh(run)
+                if run.state in runs.TERMINAL:
+                    break
+            assert run.state == "completed", run.failure_code
+
+        counters = json.loads(run.counters_json)
+        assert counters.get("verified", 0) == 0
+        assert counters["verification_cached"] > 0
+        candidate = db_session.exec(select(SimilarityCandidate)).one()
+        assert candidate.exact_equivalence is True
+
     def test_preserves_source_bytes_during_analysis(
         self, db_session, local_pair, make_file
     ):

@@ -7,6 +7,18 @@ from app.modules.similarity.configuration import SimilaritySettings, read_settin
 
 
 class TestStoredConfiguration:
+    def test_admits_dense_geometry_configuration(self, db_session):
+        result = read_settings(db_session)
+
+        assert result.triangle_cap == 2_000_000
+
+    def test_preserves_operator_configuration(self, db_session, make_system_config):
+        make_system_config(similarity_settings_json='{"triangle_cap":200000}')
+
+        result = read_settings(db_session)
+
+        assert result.triangle_cap == 200_000
+
     @pytest.mark.parametrize(
         "payload", ["null", "[]", "invalid-json", '{"sample_points": 999999}']
     )

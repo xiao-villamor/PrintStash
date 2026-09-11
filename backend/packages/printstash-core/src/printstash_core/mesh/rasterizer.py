@@ -41,7 +41,7 @@ drop-in later.
 from __future__ import annotations
 
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
@@ -53,24 +53,23 @@ if TYPE_CHECKING:
 
     FloatArray: TypeAlias = NDArray[np.floating[Any]]
     UInt8Array: TypeAlias = NDArray[np.uint8]
+    IntArray: TypeAlias = NDArray[np.int64]
     Shade: TypeAlias = Callable[[FloatArray], FloatArray]
 
 FLAT_MESH_THICKNESS_RATIO = PREVIEW_PROFILE.flat_thickness_ratio
 
 # Cap candidate-pixel expansion per rasteriser chunk (~tens of MB of
 # temporaries at this size).
-# One million candidates keeps the largest NumPy expansion below the RSS of
-# the 0.13.0 renderer even with the canonical 10% framing (which paints more
-# pixels than the legacy margin). Smaller batches also fit CPU caches better;
-# output is invariant because every batch resolves through the same z-buffer.
-_CHUNK_PIXEL_BUDGET = 1_000_000
+# Smaller batches bound dense-model temporaries without reducing the image or
+# sampling faces. Every triangle still resolves through the same z-buffer.
+_CHUNK_PIXEL_BUDGET = 250_000
 
 
 @dataclass
 class RasterBudget:
     """Cumulative candidate-pixel budget shared by rasteriser calls."""
 
-    limit: int = _CHUNK_PIXEL_BUDGET
+    limit: int = 1_000_000
     used: int = 0
 
 
@@ -109,7 +108,7 @@ def render_mesh_thumbnail(
     width: int = 640,
     height: int = 480,
     *,
-    face_chunk_size: int = 200_000,
+    face_chunk_size: int = 64_000,
     logger: LogSink | None = None,
     rasterise_triangles: Rasteriser | None = None,
     output_format: Literal["PNG", "WEBP"] = "PNG",
@@ -619,81 +618,22 @@ def _rasterise_triangles(
     # Chunk triangles so the candidate-pixel expansion stays within budget. A
     # budget passed by a caller is cumulative across all rasteriser calls; this
     # matters for fallback renderers, which call us once per input chunk.
-    cum_areas = np.cumsum(areas)
-    start = 0
-    n_faces = len(areas)
     candidates = 0
-    while start < n_faces:
-        consumed_before = int(cum_areas[start - 1]) if start else 0
-        partial_tile = False
-        # Keep ``end`` definitely assigned for the partial-tile branch too;
-        # the loop's final cursor update and the non-partial count slice both
-        # intentionally use it only when a full face chunk was selected.
-        end = start + 1
-        if budget is None:
-            # The normal mesh renderer treats the cap as a temporary allocation
-            # target, so a single large face is still rendered in full.
-            end = int(
-                np.searchsorted(
-                    cum_areas,
-                    consumed_before + _CHUNK_PIXEL_BUDGET,
-                    side="right",
-                )
-            )
-            end = min(max(end, start + 1), n_faces)
-            candidate_count = int(cum_areas[end - 1] - consumed_before)
-            source_faces = np.arange(start, end, dtype=np.int64)
-            candidate_x0 = x0[source_faces]
-            candidate_y0 = y0[source_faces]
-            candidate_width = bbox_w[source_faces]
-        else:
-            available = min(_CHUNK_PIXEL_BUDGET, budget.limit - budget.used)
-            if available <= 0:
-                break
-            # A single giant projected triangle gets a centered tile of its true
-            # area, then the loop continues. This keeps the shared budget bounded
-            # without silently dropping the face altogether.
-            if int(areas[start]) > available:
-                partial_tile = True
-                tile_width = min(int(bbox_w[start]), available)
-                tile_height = min(int(bbox_h[start]), max(1, available // tile_width))
-                candidate_count = tile_width * tile_height
-                source_faces = np.array([start], dtype=np.int64)
-                candidate_x0 = np.array(
-                    [x0[start] + max(0, (int(bbox_w[start]) - tile_width) // 2)]
-                )
-                candidate_y0 = np.array(
-                    [y0[start] + max(0, (int(bbox_h[start]) - tile_height) // 2)]
-                )
-                candidate_width = np.array([tile_width], dtype=np.int64)
-            else:
-                end = int(
-                    np.searchsorted(
-                        cum_areas,
-                        consumed_before + available,
-                        side="right",
-                    )
-                )
-                end = min(max(end, start + 1), n_faces)
-                candidate_count = int(cum_areas[end - 1] - consumed_before)
-                if candidate_count > available:  # defensive integer guard
-                    start += 1
-                    continue
-                source_faces = np.arange(start, end, dtype=np.int64)
-                candidate_x0 = x0[source_faces]
-                candidate_y0 = y0[source_faces]
-                candidate_width = bbox_w[source_faces]
-            budget.used += candidate_count
-        candidates += candidate_count
-
-        if not partial_tile:
-            counts = areas[start:end]
-        else:
-            counts = np.array([candidate_count], dtype=np.int64)
+    for (
+        source_faces,
+        candidate_x0,
+        candidate_y0,
+        candidate_width,
+        counts,
+        pixel_offset,
+    ) in _pixel_batches(x0, y0, bbox_w, bbox_h, areas, budget):
+        candidates += int(counts.sum())
         tri_idx = np.repeat(np.arange(len(source_faces)), counts)
         source_idx = source_faces[tri_idx]
         starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
-        offsets = np.arange(int(counts.sum())) - np.repeat(starts, counts)
+        offsets = (
+            pixel_offset + np.arange(int(counts.sum())) - np.repeat(starts, counts)
+        )
 
         w_per_tri = candidate_width[tri_idx]
         pix_x = candidate_x0[tri_idx] + offsets % w_per_tri
@@ -717,37 +657,99 @@ def _rasterise_triangles(
         if inside.any():
             pix = (pix_y * width + pix_x)[inside]
             z = (w0 * a[:, 2] + w1 * b[:, 2] + w2 * c[:, 2])[inside]
-            # Phong: interpolate the three corner normals by the same barycentric
-            # weights, renormalise, then light per fragment. Only inside pixels are
-            # shaded, so the per-pixel lighting cost stays proportional to covered
-            # area, not bounding-box area.
-            wi0, wi1, wi2 = w0[inside, None], w1[inside, None], w2[inside, None]
-            vn = vert_nrm[source_idx[inside]]  # (P, 3, 3)
-            n = wi0 * vn[:, 0] + wi1 * vn[:, 1] + wi2 * vn[:, 2]
-            nlen = np.linalg.norm(n, axis=1, keepdims=True)
-            n = n / np.where(nlen == 0, 1.0, nlen)
-            col = shade(n)  # (P, 3) in [0, 1]
-
             # Nearest candidate per pixel within this chunk: sort by
             # (pixel, z) and keep the first occurrence of each pixel.
             order = np.lexsort((z, pix))
             pix_s = pix[order]
             z_s = z[order]
-            col_s = col[order]
             first = np.ones(len(pix_s), dtype=bool)
             first[1:] = pix_s[1:] != pix_s[:-1]
             pix_u = pix_s[first]
             z_u = z_s[first]
-            col_u = col_s[first]
 
             # Then resolve against the global z-buffer.
             nearer = z_u < flat_z[pix_u]
             target = pix_u[nearer]
-            flat_z[target] = z_u[nearer]
-            flat_img[target] = np.clip(base_color * col_u[nearer], 0, 255).astype(
-                np.uint8
+            # Only visible winners need Phong shading. Interpolating normals for
+            # hidden layers formerly allocated a 3×3 array for every covered
+            # fragment, then immediately discarded most of those colors.
+            winners = np.flatnonzero(inside)[order[first][nearer]]
+            vn = vert_nrm[source_idx[winners]]
+            n = (
+                w0[winners, None] * vn[:, 0]
+                + w1[winners, None] * vn[:, 1]
+                + w2[winners, None] * vn[:, 2]
             )
-
-        start = start + 1 if partial_tile else end
+            nlen = np.linalg.norm(n, axis=1, keepdims=True)
+            n = n / np.where(nlen == 0, 1.0, nlen)
+            col = shade(n)
+            flat_z[target] = z_u[nearer]
+            flat_img[target] = np.clip(base_color * col, 0, 255).astype(np.uint8)
 
     return candidates
+
+
+def _pixel_batches(
+    x0: IntArray,
+    y0: IntArray,
+    widths: IntArray,
+    heights: IntArray,
+    areas: IntArray,
+    budget: RasterBudget | None,
+) -> Iterator[tuple[IntArray, IntArray, IntArray, IntArray, IntArray, int]]:
+    """Bound allocations independently from the cumulative work allowance.
+
+    Large faces span several pixel batches. Only an insufficient total work
+    budget selects a centered partial tile; an allocation chunk never crops a
+    face that the caller can afford to render completely.
+    """
+    import numpy as np
+
+    cumulative = np.cumsum(areas)
+    start = 0
+    while start < len(areas):
+        remaining = budget.limit - budget.used if budget is not None else None
+        available = (
+            _CHUNK_PIXEL_BUDGET
+            if remaining is None
+            else min(_CHUNK_PIXEL_BUDGET, remaining)
+        )
+        if available <= 0:
+            break
+        if int(areas[start]) > available:
+            width, height = int(widths[start]), int(heights[start])
+            left, top = int(x0[start]), int(y0[start])
+            if remaining is not None and int(areas[start]) > remaining:
+                width = min(width, remaining)
+                height = min(height, max(1, remaining // width))
+                left += (int(widths[start]) - width) // 2
+                top += (int(heights[start]) - height) // 2
+            total = width * height
+            for offset in range(0, total, _CHUNK_PIXEL_BUDGET):
+                count = min(_CHUNK_PIXEL_BUDGET, total - offset)
+                if budget is not None:
+                    budget.used += count
+                yield (
+                    np.array([start], dtype=np.int64),
+                    np.array([left], dtype=np.int64),
+                    np.array([top], dtype=np.int64),
+                    np.array([width], dtype=np.int64),
+                    np.array([count], dtype=np.int64),
+                    offset,
+                )
+            start += 1
+            continue
+        consumed = int(cumulative[start - 1]) if start else 0
+        end = int(np.searchsorted(cumulative, consumed + available, side="right"))
+        counts = areas[start:end]
+        if budget is not None:
+            budget.used += int(counts.sum())
+        yield (
+            np.arange(start, end),
+            x0[start:end],
+            y0[start:end],
+            widths[start:end],
+            counts,
+            0,
+        )
+        start = end

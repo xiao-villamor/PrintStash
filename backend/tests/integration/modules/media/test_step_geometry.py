@@ -25,6 +25,26 @@ def ocp_box(tmp_path):
 
 
 class TestStepGeometry:
+    def test_uses_shared_dense_budget_for_step(self, ocp_box, monkeypatch):
+        from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        native_popen = mesh_processing.subprocess.Popen
+        limits = []
+
+        def observed_worker(command, **kwargs):
+            limits.append(int(kwargs["env"]["PRINTSTASH_STEP_TRIANGLE_LIMIT"]))
+            return native_popen(command, **kwargs)
+
+        monkeypatch.setattr(mesh_processing.subprocess, "Popen", observed_worker)
+
+        mesh = mesh_processing._load_step_mesh_isolated(ocp_box, include_brep=True)
+
+        assert mesh.metadata["brep"]["volume_mm3"] == pytest.approx(6000)
+        assert limits == [MAX_ANALYSIS_FACES]
+
     def test_extracts_brep_through_isolated_worker(self, ocp_box):
         result = ThumbnailEngine().generate(
             ThumbnailRequest(ocp_box, include_fingerprint=True, width=64)
@@ -110,7 +130,7 @@ class TestNativeTessellation:
         assert brep["volume_mm3"] == pytest.approx(mesh.volume)
         assert brep["recipe"]["parallel"] is False
 
-    @pytest.mark.parametrize("limit", [0, 2000001])
+    @pytest.mark.parametrize("limit", [0, 2000001, True, 100.0])
     def test_rejects_invalid_face_budget(self, ocp_box, limit):
         from app.modules.media.step_geometry import StepGeometryError, tessellate
 

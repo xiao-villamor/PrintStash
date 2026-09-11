@@ -53,7 +53,7 @@ confirmed as current. Candidates and counts require edit access to both Models.
 
 The default confidence threshold is 90%. Changing it previews the number of
 already measured candidates; it does not start analysis or erase decisions.
-Advanced settings provide per-class thresholds, a triangle cap (200,000),
+Advanced settings provide per-class thresholds, a triangle cap (2,000,000),
 verification samples (5,000), candidates per shortlist (20), an optional scan
 interval, and local embeddings. These controls have enforced upper bounds.
 
@@ -65,7 +65,13 @@ and unsupported Artifacts are reported in progress instead of implying a complet
 search. Starting a manual analysis retries previously failed, unsupported or
 partial geometry, which is useful after increasing a limit or enabling format
 support. Scheduled analysis keeps those cached results to avoid retry loops.
-Complete fingerprints are reused.
+Complete fingerprints are reused. Exact comparisons can also reuse their stored
+proof after both source digests and the verification recipe are checked.
+
+The repository Benchy and Spatula use complete geometry at the default limits.
+An existing explicit lower cap remains unchanged; increase it before a manual
+retry. See [mesh processing measurements](mesh-processing-performance.md) for
+resource limits, source fixtures and the Rust assessment.
 
 STL, OBJ, and 3MF geometry works in the lite profile. Oversized STL inputs can
 produce partial descriptors, which cannot prove exact equivalence. STEP requires

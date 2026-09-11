@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import ExpandedScene
 from printstash_core.mesh.similarity.verification import Verification, verify_meshes
 
@@ -16,7 +17,7 @@ def _load(path: Path, file_type: str, *, triangle_cap: int) -> PreparedMesh:
     import numpy as np
     import trimesh
 
-    if not 100 <= triangle_cap <= 200_000:
+    if type(triangle_cap) is not int or not 100 <= triangle_cap <= MAX_ANALYSIS_FACES:
         raise GeometryError("invalid_triangle_cap")
     estimate = mesh_processing._estimate_triangle_count(path, file_type=file_type)
     over_cap = (
@@ -80,7 +81,7 @@ def verify_paths(
     first_component: int = 0,
     second_component: int = 0,
     sample_points: int = 5000,
-    triangle_cap: int = 200_000,
+    triangle_cap: int = MAX_ANALYSIS_FACES,
 ) -> Verification:
     """Materialized Artifact paths only; never open storage keys in media."""
     left = right = None

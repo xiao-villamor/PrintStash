@@ -10,6 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine.url import make_url
@@ -223,7 +224,7 @@ class Settings(BaseSettings):
     # rather than O(total_faces) — a million-triangle mesh no longer materialises
     # ~70 MB float32 arrays all at once (#29). Lower it to shrink peak RSS further
     # on tiny containers; raise it for marginally less Python-loop overhead.
-    mesh_render_face_chunk_size: int = Field(default=200_000, gt=0)
+    mesh_render_face_chunk_size: int = Field(default=64_000, gt=0)
 
     # Width of generated Model preview images. Height keeps the renderer's 4:3
     # aspect ratio. The Settings UI offers bounded presets so higher fidelity is
@@ -235,7 +236,9 @@ class Settings(BaseSettings):
     similarity_enabled: bool = False
     similarity_fingerprint_on_ingest: bool = True
     similarity_minimum_confidence: float = Field(default=0.9, ge=0.5, le=1.0)
-    similarity_triangle_cap: int = Field(default=200_000, ge=100, le=200_000)
+    similarity_triangle_cap: int = Field(
+        default=MAX_ANALYSIS_FACES, ge=100, le=MAX_ANALYSIS_FACES
+    )
     similarity_sample_points: int = Field(default=5000, ge=256, le=5000)
     similarity_max_candidates: int = Field(default=20, ge=1, le=100)
     similarity_page_size: int = Field(default=100, ge=1, le=1000)

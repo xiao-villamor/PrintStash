@@ -15,7 +15,7 @@ export function similaritySettings(
     fingerprint_on_ingest: true,
     minimum_confidence: 0.9,
     class_overrides: {},
-    triangle_cap: 200000,
+    triangle_cap: 2000000,
     sample_points: 5000,
     voxel_resolution: 64,
     max_candidates: 20,

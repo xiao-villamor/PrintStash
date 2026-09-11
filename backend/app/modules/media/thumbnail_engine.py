@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Literal, Optional, Protocol
 
 from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -63,7 +64,8 @@ class ThumbnailRequest:
     report: ProgressReporter | None = None
     output_format: Literal["PNG", "WEBP"] = "PNG"
     include_fingerprint: bool = False
-    triangle_cap: int = 200_000
+    triangle_cap: int = MAX_ANALYSIS_FACES
+    include_thumbnail: bool = True
 
 
 @dataclass(frozen=True)
@@ -138,7 +140,10 @@ class ThumbnailEngine:
             if request.report is not None:
                 request.report(label)
 
-        if not 100 <= request.triangle_cap <= 200_000:
+        if (
+            type(request.triangle_cap) is not int
+            or not 100 <= request.triangle_cap <= MAX_ANALYSIS_FACES
+        ):
             raise ValueError("invalid_triangle_cap")
         report("loading_mesh")
         if request.file_type is None:
@@ -154,8 +159,13 @@ class ThumbnailEngine:
         try:
             with mesh_processing._render_semaphore():
                 embedded = None
-                if suffix == ".3mf" and (
-                    not over_cap or settings.use_embedded_3mf_preview_for_large_files
+                if (
+                    request.include_thumbnail
+                    and suffix == ".3mf"
+                    and (
+                        not over_cap
+                        or settings.use_embedded_3mf_preview_for_large_files
+                    )
                 ):
                     embedded = mesh_processing.extract_embedded_3mf_thumbnail(
                         request.path,
@@ -268,6 +278,22 @@ class ThumbnailEngine:
                                 if isinstance(exc, GeometryError)
                                 else "analysis_failed",
                             )
+
+                    if not request.include_thumbnail:
+                        return ThumbnailResult(
+                            image=None,
+                            geometry=geometry,
+                            strategy=ThumbnailStrategy.NONE,
+                            complete=prepared.complete
+                            if prepared
+                            else mesh is not None,
+                            failure_reason=None,
+                            duration_ms=max(
+                                round((time.monotonic() - started) * 1000), 0
+                            ),
+                            peak_rss_bytes=_peak_rss_bytes(),
+                            fingerprint_result=fingerprint_result,
+                        )
 
                     report("rendering_thumbnail")
                     if embedded is not None:

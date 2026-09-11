@@ -34,6 +34,13 @@ class _Mesh:
 
 
 class TestThumbnailEngine:
+    @pytest.mark.parametrize("cap", [99, 2_000_001, True, 100.0])
+    def test_rejects_invalid_analysis_budgets(self, tmp_path, cap):
+        with pytest.raises(ValueError, match="invalid_triangle_cap"):
+            ThumbnailEngine().generate(
+                ThumbnailRequest(tmp_path / "unused.stl", triangle_cap=cap)
+            )
+
     @staticmethod
     def test_full_renderer_is_reported_as_the_selected_strategy(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -46,7 +53,8 @@ class TestThumbnailEngine:
             mesh_processing, "_geometry_from_mesh", lambda _mesh: _geometry()
         )
         monkeypatch.setattr(
-            "app.modules.media.mesh_render.render_mesh_thumbnail", lambda *_a, **_k: b"png"
+            "app.modules.media.mesh_render.render_mesh_thumbnail",
+            lambda *_a, **_k: b"png",
         )
 
         result = ThumbnailEngine().generate(ThumbnailRequest(path=source))

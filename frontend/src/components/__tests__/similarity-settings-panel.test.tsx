@@ -26,6 +26,23 @@ afterEach(() => {
 });
 
 describe("SimilaritySettingsPanel", () => {
+  it("saves a complete dense-mesh budget", async () => {
+    const user = userEvent.setup();
+    const rendered = renderSettings();
+    await user.click(await screen.findByText("Advanced settings"));
+    const input = screen.getByRole("spinbutton", { name: "Triangle limit per mesh" });
+    await user.clear(input);
+    await user.type(input, "2000000");
+    expect(input).toBeValid();
+
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(rendered.requestsWithMethod("PATCH")).toHaveLength(1));
+    expect(JSON.parse(rendered.requestsWithMethod("PATCH")[0].body)).toMatchObject({
+      triangle_cap: 2000000,
+    });
+  });
+
   it("persists the operator opt-in", async () => {
     const user = userEvent.setup();
     const rendered = renderSettings();
