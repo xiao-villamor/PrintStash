@@ -1,6 +1,6 @@
 # Similar Models — implementation coverage
 
-Tracking the complete independent [#154 plan](https://github.com/xiao-villamor/PrintStash/issues/154#issuecomment-5622781316). Geometry, durable review, components, STEP, local ONNX, and UI are implemented on this branch. Remaining verification and integration gaps are explicit below; the feature is not yet ready for release. Family integration remains conditional on its separate owner.
+Tracking the complete independent [#154 plan](https://github.com/xiao-villamor/PrintStash/issues/154#issuecomment-5622781316). Geometry, durable review, components, STEP, local ONNX, and UI are implemented on this branch. This matrix records the implemented assertions for the standalone scope; final suite and security results are attached to the pull request. Family integration remains conditional on its separate owner. This document describes unreleased development work.
 
 ## Coverage matrix
 
@@ -37,35 +37,22 @@ These rows record the initial fingerprint contract; the full-plan matrix below t
 | C26 | stabilizes_surface_pca_after_retessellation | Happy | One face retessellated to 81 triangles | Surface covariance eigenvalue ratios stay equal | Unit | ✅ `mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_stabilizes_surface_pca_after_retessellation` |
 | C27 | recovers_across_base_grid_boundary | Edge | Fixed 0.0004-coordinate perturbation | Half-cell grid retrieves pair split by base grid | Unit | ✅ `mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_recovers_across_base_grid_boundary` |
 
-## Initial core-increment validation (historical)
-
-- `cd backend/packages/printstash-core && ./scripts/test.sh coverage -q`:
-  1,503 passed, five coverage-gate tests passed; aggregate branch-aware coverage
-  98.91%; new similarity module 100% statements/branches. Floors unchanged.
-- Python 3.11.15 / NumPy 1.26.4: all 54 geometry cases passed against the same
-  golden used by Python 3.14.6 / NumPy 2.5.2.
-- Autonomous package Ruff lint/format and strict Pyright: passed.
-- Backend Ruff lint: passed. Repository test-hygiene suite: 2,544 passed.
-- Application full-stack/e2e suites were not run: this increment adds a pure,
-  currently unconnected core operation. No API, schema or frontend code changes.
-- Security diff scan and the complete feature e2e remain gates before the feature
-  PR is marked ready. This initial branch remains implementation in progress.
-
 ## Full-plan tracking
 
 The independent public plan was updated on 2026-09-10. Conditional C-FAMILY
 integration is separate from the independent release gates below.
 
 ✅ names an implemented assertion with a passing focused run; ❌ remains incomplete or awaits the specified verification; ⏭️ is an explicitly conditional integration, excluded from standalone completion. Final complete-suite and CI results are recorded separately. Paths below are repository-relative.
+
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
 | S001 | preserves_source_bytes_during_analysis | Happy | Artifact con Revisions e historial | Hash de bytes y contexto iguales tras run | Integration | ✅ `backend/tests/integration/modules/similarity/processing/test_processing.py::TestProcessing::test_preserves_source_bytes_during_analysis` |
 | S002 | extracts_fingerprints_in_single_mesh_load | Happy | Ingest solicita thumbnail y huella | Resultados de ambos con presupuesto de una carga instrumentada | Integration | ✅ `backend/tests/integration/modules/media/test_fingerprints.py::TestFingerprintExtraction::test_reuses_loaded_mesh_for_descriptors` |
 | S003 | loads_mesh_despite_embedded_3mf_preview | Edge | 3MF con preview y fingerprint solicitado | Huella real lista junto al thumbnail | Integration | ✅ `backend/tests/integration/modules/media/test_fingerprints.py::TestFingerprintExtraction::test_embedded_preview_still_computes_geometry` |
-| S004 | supports_lite_mesh_formats | Happy | STL ASCII/binary, OBJ, 3MF | Huella completa sin dependencias AI | Integration | ✅ `backend/tests/integration/modules/media/test_fingerprints.py::TestFingerprintExtraction::test_large_stl_remains_explicitly_partial` |
+| S004 | supports_lite_mesh_formats | Happy | STL ASCII/binary, OBJ, 3MF | Huella completa sin dependencias AI | Integration | ✅ `backend/tests/integration/modules/media/test_fingerprints.py::TestFingerprintExtraction::test_extracts_lite_format` |
 | S005 | rejects_nonfinite_geometry | Error | NaN/inf o índices inválidos | Código estable sin candidate exacto | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_rejects_nonfinite_geometry` |
 | S006 | handles_degenerate_surface | Edge | Área o bbox diagonal cero | Descriptor ausente con motivo | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_reports_degenerate_surface` |
-| S007 | stabilizes_reexport_hashes | Happy | Misma malla exportada en cuatro formatos | Claves compatibles en fixture golden | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_stabilizes_reexport_order` |
+| S007 | stabilizes_reexport_hashes | Happy | Misma malla exportada en cuatro formatos | Claves compatibles en fixture golden | Integration | ✅ `backend/tests/integration/modules/media/test_fingerprints.py::TestFingerprintExtraction::test_preserves_keys_across_file_formats` |
 | S008 | stabilizes_dual_grid_boundaries | Edge | Vértices cerca de bordes de cuantización | Recuperación del equivalente en fixtures | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_recovers_across_base_grid_boundary` |
 | S009 | retains_physical_scale_in_raw_hashes | Edge | Versiones 0.5x/2x/25.4x | Raw y normalized no confunden escala física | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_retains_physical_scale` |
 | S010 | handles_degenerate_pca_frame | Edge | Cube/sphere con eigenvalues repetidos | Ambigüedad explícita; sin identidad inventada | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_fingerprint.py::TestFingerprintMesh::test_reports_ambiguous_frame` |
@@ -88,8 +75,8 @@ integration is separate from the independent release gates below.
 | S027 | requires_correspondence_for_procrustes | Error | Igual vertex count con orden permutado | Registro correcto sin asumir correspondencia | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_geometry.py::TestEquivalentTriangles::test_verifies_permuted_vertices` |
 | S028 | verifies_rigid_transform | Happy | Rotación y traslación de una malla | Equivalencia con transformada recuperada | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_verifies_rotated_symmetric_cube` |
 | S029 | classifies_uniform_scale | Happy | 0.5x/2x/25.4x | rescaled con factor correcto | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_verifies_uniform_scale` |
-| S030 | classifies_chiral_mirror | Happy | Par quiral reflejado | mirrored; nunca identical | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_identifies_chiral_mirror` |
-| S031 | classifies_scaled_mirror | Happy | Espejo y escala uniforme | rescaled_mirrored con métricas | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_identifies_chiral_mirror` |
+| S030 | classifies_chiral_mirror | Happy | Par quiral reflejado | mirrored; nunca identical | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_identifies_chiral_mirror[1]` |
+| S031 | classifies_scaled_mirror | Happy | Espejo y escala uniforme | rescaled_mirrored con métricas | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_identifies_chiral_mirror[2]` |
 | S032 | reports_achiral_mirror_ambiguity | Edge | Geometría simétrica especular | No atribuye historia de espejo única | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_proves_ambiguity_on_octahedral_surface` |
 | S033 | labels_sampled_distances_honestly | Happy | Verificación de 5000 puntos | Evidencia incluye muestreo/seed/tolerancia | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_verification.py::TestVerifyMeshes::test_retains_sampling_provenance` |
 | S034 | bounds_icp_memory | Edge | Puntos al límite bajo cgroup 1GB | Sin matriz NxN ilimitada ni OOM | Integration | ✅ `backend/tests/fakes/similarity_resource_probe.py (actual 1 GiB cgroup, 5,000 samples; 170,074,112-byte process RSS)` |
@@ -127,7 +114,7 @@ integration is separate from the independent release gates below.
 | S066 | replays_candidate_confirmation | Edge | C-FAMILY: Mismo request id repetido | Sin segunda Family/Member/decisión | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S067 | rejects_conflicting_existing_families | Error | C-FAMILY: Models en Families distintas | 409; no merge automático | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S068 | rolls_back_failed_confirmation | Error | C-FAMILY: Falla auditoría o permiso | Sin relación o decisión parcial | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
-| S069 | routes_composition_to_multipart | Happy | component_of/plate_of confirmado | Choices/cantidades creadas; no Family | Integration | ✅ `backend/tests/integration/modules/similarity/composition/test_composition.py::TestComposition::test_detects_six_copy_plate` |
+| S069 | routes_composition_to_multipart | Happy | component_of/plate_of confirmado | Choices/cantidades creadas; no Family | Integration | ✅ `backend/tests/integration/modules/similarity/test_review.py::TestReview::test_preserves_existing_multipart_choices` |
 | S070 | rejects_stale_bulk_confirmation | Error | C-FAMILY: Candidate se invalida tras preview | Lote no aplicado | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S071 | restricts_bulk_to_verified_exact | Error | C-FAMILY: Remesh/0.999/partial seleccionado | Bulk denegado | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S072 | avoids_transitive_bulk_grouping | Edge | C-FAMILY: A-B y B-C sin evidencia A-C suficiente | No agrupación implícita fuera del preview | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
@@ -135,7 +122,7 @@ integration is separate from the independent release gates below.
 | S074 | rechecks_family_permissions_at_confirm | Error | C-FAMILY: Hermano oculto sin EDIT en destino | Confirm rechazado sin efectos | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S075 | sanitizes_run_failures | Error | Error con path/filename/secret | No información sensible en logs/status | Integration | ✅ `backend/tests/integration/runtime/test_similarity.py::TestSimilarityRuntime::test_reports_worker_failure_without_paths` |
 | S076 | keeps_ingest_success_when_fingerprint_fails | Error | Derivative falla después de primary persist | Upload exitoso y fingerprint_status failed | Integration | ✅ `backend/tests/integration/modules/similarity/test_ingestion.py::TestIngestDerivative::test_persists_failed_derivative_without_starting_run` |
-| S077 | serves_progressive_find_similar | Happy | Cached verified más faltantes | Respuesta inicial útil y job bounded | E2E | ✅ `backend/tests/integration/modules/similarity/test_service.py::TestQueryModel::test_returns_cached_evidence_before_analysis` |
+| S077 | serves_progressive_find_similar | Happy | Cached verified más faltantes | Respuesta inicial útil y job bounded | Integration | ✅ `backend/tests/integration/modules/similarity/test_service.py::TestQueryModel::test_returns_cached_evidence_before_analysis` |
 | S078 | meets_find_similar_response_budget | Edge | 10k library Pi4 o hardware documentado | Inicial <2s; completion medido separado | E2E | ✅ `backend/tests/fakes/similarity_benchmark.py` — 10,000 Artifacts, 0.154 s initial response; [measured limits](0005-similar-models-benchmark.md) |
 | S079 | honours_geometry_resource_budget | Edge | 1GB cgroup; dos meshes y render concurrente | RSS y concurrencia dentro del cap | Integration | ✅ `backend/tests/fakes/similarity_resource_probe.py (actual simultaneous Spatula/Cube work under MemoryMax=1G)` |
 | S080 | persists_similarity_saved_filter | Happy | has_similar_candidates en Saved View | Filtro autorizado restaurado | Playwright | ✅ `frontend/tests/e2e-real/similarity.spec.ts (Calibration Cube and saved candidate filter restored)` |
@@ -147,7 +134,7 @@ integration is separate from the independent release gates below.
 | S086 | uses_embedding_provider_contract | Happy | Space mesh_view y adapter local o compartido con fixture de contrato | Vectores compatibles con dimensión/recipe sin exigir API de AI Search | Integration | ✅ `backend/tests/integration/modules/inference/test_local.py::TestLocalProvider::test_queries_both_native_towers` |
 | S087 | maps_artifact_components_to_unique_units | Edge | Component 0 en dos Artifacts del Model | Vectores distintos y linaje correcto | Integration | ✅ `backend/tests/integration/modules/inference/test_store.py::TestNativeStore::test_indexes_distinct_component_inputs` |
 | S088 | disables_learned_leg_without_disabling_geometry | Edge | AI off o lite sin ONNX | T0-T3 siguen funcionales | Integration | ✅ `backend/tests/integration/modules/similarity/test_embeddings.py::TestEmbeddingRun::test_unavailable_embeddings_leave_geometry_enabled` |
-| S089 | runs_optional_onnx_cpu_adapter | Happy | Model preplaced amd64/arm64 | Vectores compatibles con Space; lane opt-in | Integration | ❌ missing |
+| S089 | runs_optional_onnx_cpu_adapter | Happy | Model preplaced amd64/arm64 | Vectores compatibles con Space; lane opt-in | Integration | ✅ `backend/tests/integration/modules/inference/preplaced_clip.py::TestPreplacedClip::test_runs_compatible_native_towers` — native amd64 and arm64 passed |
 | S090 | enforces_remote_modality_consent | Error | Integración opcional: proveedor remoto disponible sin consentimiento visual | No egress de renders ni geometría | Integration | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S091 | preserves_three_variants_after_family_review | Happy | C-FAMILY: resolver real disponible; tres uploads/revisions y confirmación | Family creada; cada Model y Revision intactos | Playwright | ⏭️ Conditional integration; unavailable in this standalone feature |
 | S092 | localizes_similarity_states | Edge | en/es; partial/stale/unsupported/empty | Mensajes traducidos y accesibles | Frontend unit | ✅ `frontend/src/components/__tests__/similarity-settings-panel.test.tsx::Localized analysis outcomes + similarity-queue.test.tsx::Spanish review states + frontend/src/lib/__tests__/similarity.test.ts` |
@@ -164,8 +151,8 @@ Frontend acceptance details (the S081–S090 rows above are refined here):
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
 | UI01 | preserves physical size ratios | Happy | Two meshes of different dimensions | Shared scale preserves the ratio | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts — preserves physical size ratios` |
-| UI02 | compensates verified scale independently | Edge | Rotation/reflection/scale transform | Toggles alter only selected compensation | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts — applies each compensation independently` |
-| UI03 | synchronizes subscribed cameras | Happy | Two viewer subscribers | Pose delivered and unsubscribe respected | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts — delivers camera pose / stops after unmount` |
+| UI02 | compensates verified scale independently | Edge | Rotation/reflection/scale transform | Toggles alter only selected compensation | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts — comparisonTransform::applies $label compensation` |
+| UI03 | synchronizes subscribed cameras | Happy | Two viewer subscribers | Originating pose reaches subscribed viewers | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts — createComparisonCamera::delivers the originating camera pose to each subscriber` |
 | UI04 | sends every candidate filter | Happy | Collection/source/format/known-good/filter cursor | Exact HTTP query fields preserved | Frontend unit | ✅ `frontend/src/lib/api/__tests__/similarity.test.ts — retains all candidate filters` |
 | UI05 | confirms evidence with optimistic identity | Happy | Current candidate | Confirm dialog sends request ID/version without grouping payload | Frontend unit | ✅ `frontend/src/pages/__tests__/similar-model-comparison.test.tsx — confirms evidence with a durable request identity` |
 | UI06 | hides stale confirmation | Error | Source changed | Stale text and no confirm control | Frontend unit | ✅ `frontend/src/pages/__tests__/similar-model-comparison.test.tsx — hides confirmation when evidence is stale` |
@@ -174,29 +161,22 @@ Frontend acceptance details (the S081–S090 rows above are refined here):
 | UI09 | shows disabled analysis distinctly | Edge | Feature disabled | Maintenance enable guidance | Frontend unit | ✅ `frontend/src/components/__tests__/similarity-queue.test.tsx — explains disabled analysis` |
 | UI10 | finds missing per-Model work | Happy | Query returns a run | Model query request and progress | Frontend unit | ✅ `frontend/src/components/__tests__/similarity-queue.test.tsx — starts only the selected Model work` |
 | UI11 | persists Maintenance settings | Happy | Superuser changes threshold/caps | Validated settings PATCH | Frontend unit | ✅ `frontend/src/components/__tests__/similarity-settings-panel.test.tsx — persists the operator opt-in` |
-| UI12 | preserves similarity Saved View filters | Happy | Saved filter and reload | Browse query retains filter | Frontend unit | ✅ `frontend/tests/e2e-real/similarity.spec.ts — saved candidate filter survives navigation` |
+| UI12 | preserves similarity Saved View filters | Happy | Saved filter and reload | Browse query retains filter | Playwright | ✅ `frontend/tests/e2e-real/similarity.spec.ts::Standalone similarity::@critical reviews similar Models without grouping or changing Artifacts` |
 | UI13 | displays authorized candidate badges | Happy | Model projection has open count | Local Model count rendered | Frontend unit | ✅ `frontend/src/components/__tests__/model-card.test.tsx — shows only the count provided for this Model` |
+| UI14 | stops camera delivery after unmount | Edge | Subscriber is removed | Later poses are not delivered | Frontend unit | ✅ `frontend/src/lib/__tests__/comparison-camera.test.ts::createComparisonCamera::stops delivering after unmount` |
 
-## Integrated verification in progress
+## Integrated verification
 
 - Core: 1,678 tests passed in all four Python/dependency CI combinations; branch-aware coverage 99.12%, five floor tests passed; strict Pyright passed.
-- SQLite and PostgreSQL populated upgrade/downgrade/upgrade passed.
-- Source-preserving browser review and synchronized cameras passed at desktop/mobile widths. The existing Calibration Cube, Saved View and queue-filter extension passed.
-- Malformed scope IDs: seven rejection cases passed. Progress/history service: 12 passed. New factory promises: 12 passed.
-- Impeccable detector: no findings across the five new similarity UI components.
-- 10,000-Artifact prepared-index benchmark passed; [measurements and limits](0005-similar-models-benchmark.md).
-- Frontend CI: 2,143 app, 60 domain and 198 UI tests passed. Component/page coverage floors still need additional behavior coverage.
-- Native STEP/ONNX fixture CI passed on amd64 and arm64.
-- Remaining: complete coverage floors, final security diff scan and CI. Process restart, cgroup resource containment and scale/reflection browser tests passed.
-
-Additional repository-model acceptance: `geometry_analysis/test_existing_models.py`
-passed four cases using the committed Calibration Cube STL, Spatula 3MF and
-Benchy STL. They cover real cross-format equivalence, source preservation and
-explicit oversized/low-budget behavior. The native process restart test passed
-with an abrupt exit after one committed cube and a fresh process completing the
-same run. Focused owner/API/runtime verification: 277 tests passed; backend
-Pyright: zero errors. Remaining per-module coverage is visible in the work log;
-these focused results do not replace the full coverage or CI gates.
+- Populated SQLite and PostgreSQL upgrade/downgrade/upgrade passed.
+- The repository's Calibration Cube STL/G-code, Spatula 3MF and Benchy STL cover cross-format equivalence, source preservation and explicit oversized/low-budget outcomes.
+- An abruptly terminated process resumed the same committed Run in a fresh process.
+- The 10,000-Artifact prepared-index benchmark passed; [measurements and limits](0005-similar-models-benchmark.md) distinguish it from a full cold backfill or 10,000 independent designs.
+- A real 1 GiB cgroup contained concurrent 5,000-point Spatula verification and Cube rendering.
+- Native STEP and original ONNX contracts passed on amd64 and arm64. The four preplaced float32 CLIP checks also passed on both architectures, including pinned image/text canaries and standalone text search.
+- The real-backend browser review passed with Cube/G-code, Saved Views, filters, synchronized cameras and preserved Artifact hashes at desktop/mobile widths. Scale/reflection/overlay and compact long-name Multipart browser checks passed.
+- The [UI audit](0005-similar-models-ui-audit.md) records the rendered review. The one Impeccable detector pass reported no findings across the five new similarity UI components.
+- Complete application suites, coverage floors and the exact-diff security review remain PR gates; their final results are reported with the PR checks rather than inferred from focused tests.
 
 ## Final interaction and failure coverage
 
@@ -219,7 +199,7 @@ these focused results do not replace the full coverage or CI gates.
 | F015 | contains long Multipart names on mobile | Edge | Two 255-character names; 390px and desktop | Two-line names retain full accessible text; dialog stays compact; actions visible without scrolling | Playwright | ✅ `frontend/tests/e2e/similarity.spec.ts::Multipart review layout::contains long Multipart names on mobile` |
 | F016 | retries incomplete geometry on manual analysis | Error | Real Cube with failed, unsupported or partial prior analysis | Same Artifact becomes ready; attempt advances; source bytes unchanged | Integration | ✅ `backend/tests/integration/modules/similarity/processing/test_processing.py::TestIncompleteReanalysis::test_manual_run_retries_incomplete_geometry` |
 | F017 | avoids automatic incomplete-analysis retry loops | Edge | Scheduled Run with failed, unsupported or partial fingerprint | Cached state and attempt count retained | Integration | ✅ `backend/tests/integration/modules/similarity/processing/test_processing.py::TestIncompleteReanalysis::test_scheduled_run_keeps_cached_incomplete_geometry` |
-| F018 | preserves pretrained canaries across native CPUs | Edge | Pinned real CLIP image and text canaries; amd64/arm64 | Maximum absolute drift stays within the manifest tolerance | Integration | ❌ missing |
+| F018 | preserves pretrained canaries across native CPUs | Edge | Pinned real CLIP image and text canaries; amd64/arm64 | Maximum absolute drift stays within the manifest tolerance | Integration | ✅ `backend/tests/integration/modules/inference/preplaced_clip.py::TestPreplacedClip::test_preserves_pretrained_canary` — native amd64 and arm64 passed |
 | F019 | refuses STEP without transferable geometry | Error | Syntactically valid STEP document with no shape roots | Stable invalid_step failure, no surface emitted | Integration | ✅ `backend/tests/integration/modules/media/test_step_geometry.py::TestNativeTessellation::test_rejects_document_without_transferable_geometry` |
 
 Verification update: 2,832 focused backend/repository tests passed, including the real Cube manual retry, cached scheduled results, quarter-count retrieval and held-out verification. The original full non-resource pass ran 10,446 successful tests with five test-file mirror failures; those paths are corrected and the focused repository checks now pass. The resource pass and final CI remain required.

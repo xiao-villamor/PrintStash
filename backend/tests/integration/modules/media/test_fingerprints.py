@@ -1,9 +1,11 @@
 """Real files produce review derivatives without a second mesh load or source edits."""
 
 import hashlib
+from dataclasses import asdict
 
 import numpy as np
 import pytest
+from printstash_core.mesh.similarity import fingerprint_mesh
 
 from app.core.config import _overlay
 from app.modules.media import mesh_processing
@@ -37,6 +39,24 @@ class TestFingerprintExtraction:
         assert len(whole.values["view_blob"]) == 48
         assert whole.values["recipe"]["sh_basis"] == SH_BASIS_DIGEST
         assert hashlib.sha256(path.read_bytes()).hexdigest() == source_hash
+
+    @pytest.mark.parametrize("format", ["stl", "stl_ascii", "obj", "3mf"])
+    def test_preserves_keys_across_file_formats(self, tmp_path, format):
+        mesh = tetrahedron()
+        expected = fingerprint_mesh(mesh.vertices, mesh.faces)
+        assert expected.keys is not None
+        suffix = "stl" if format == "stl_ascii" else format
+        encoded = three_mf() if format == "3mf" else mesh.export(file_type=format)
+        path = tmp_path / f"reexport.{suffix}"
+        path.write_bytes(encoded.encode() if isinstance(encoded, str) else encoded)
+
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(path, width=64, include_fingerprint=True)
+        )
+
+        assert result.fingerprint_result.records[0].values["keys"] == asdict(
+            expected.keys
+        )
 
     def test_reuses_loaded_mesh_for_descriptors(self, tmp_path, monkeypatch):
         import trimesh
