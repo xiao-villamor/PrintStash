@@ -23,6 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { anIngestJob } from "@/test-support/factories";
 import type { IngestJobSource } from "@/lib/task-center";
 import type { IngestJobStatus } from "@/types";
 
@@ -213,6 +214,101 @@ describe("clearCompletedTasks", () => {
 });
 
 describe("groupUploadJobs", () => {
+  it("reports grouped progress across unfinished jobs", async () => {
+    const taskId = tc.createTask({ title: "Upload Benchy", expectedJobCount: 3 });
+    tc.linkTaskToJob(taskId, "mesh-job");
+    tc.linkTaskToJob(taskId, "gcode-job");
+    listIngestJobs.mockResolvedValue([
+      anIngestJob({
+        job_id: "mesh-job",
+        state: "completed",
+        model_id: 1,
+        file_id: 1,
+        error: null,
+        started_at: null,
+        finished_at: null,
+      }),
+      anIngestJob({
+        job_id: "gcode-job",
+        state: "running",
+        model_id: 1,
+        file_id: null,
+        error: null,
+        started_at: null,
+        finished_at: null,
+        progress: 40,
+        current_item: "Benchy.gcode",
+        processed: 2,
+        total: 5,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toHaveLength(1);
+    expect(tc.listTasks()[0]).toMatchObject({
+      id: taskId,
+      status: "running",
+      progress: 47,
+      currentItem: "Benchy.gcode",
+      detail: "running 2/5 · Benchy.gcode · continues in background",
+    });
+  });
+
+  it("keeps unknown grouped progress pending", async () => {
+    const taskId = tc.createTask({ title: "Upload Benchy", expectedJobCount: 2 });
+    tc.linkTaskToJob(taskId, "mesh-job");
+    listIngestJobs.mockResolvedValue([
+      anIngestJob({
+        job_id: "mesh-job",
+        state: "pending",
+        model_id: null,
+        file_id: null,
+        error: null,
+        started_at: null,
+        finished_at: null,
+        current_item: "Benchy.stl",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toHaveLength(1);
+    expect(tc.listTasks()[0]).toMatchObject({
+      id: taskId,
+      status: "pending",
+      progress: 0,
+      currentItem: "Benchy.stl",
+      detail: "pending · Benchy.stl · continues in background",
+    });
+  });
+
+  it("reports a failed grouped upload", async () => {
+    const taskId = tc.createTask({ title: "Upload Benchy", expectedJobCount: 2 });
+    tc.linkTaskToJob(taskId, "mesh-job");
+    listIngestJobs.mockResolvedValue([
+      anIngestJob({
+        job_id: "mesh-job",
+        state: "failed",
+        model_id: null,
+        file_id: null,
+        error: "The source file could not be read",
+        started_at: null,
+        finished_at: null,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toHaveLength(1);
+    expect(tc.listTasks()[0]).toMatchObject({
+      id: taskId,
+      status: "failed",
+      progress: 100,
+      detail: "The source file could not be read",
+    });
+  });
+
   it("removes a duplicate pending row persisted by an older client", async () => {
     localStorage.setItem(
       "printstash:import-tasks:v1",
