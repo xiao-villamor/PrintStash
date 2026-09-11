@@ -102,3 +102,34 @@ class TestMain:
         # be indistinguishable to the parent from a usable one.
         assert step_worker.main() == 3
         assert not destination.exists()
+
+
+class TestBrepFailureProtocol:
+    @pytest.mark.parametrize(
+        "failure,expected",
+        [
+            pytest.param("dependency", 7, id="missing-native-dependency"),
+            pytest.param("geometry_work_limit", 3, id="triangle-budget"),
+            pytest.param("invalid_step", 4, id="invalid-document"),
+            pytest.param("native", 4, id="unexpected-native-error"),
+        ],
+    )
+    def test_classifies_native_failure(self, tmp_path, monkeypatch, failure, expected):
+        from app.modules.media import step_geometry
+
+        def failed_tessellation(*args, **kwargs):
+            if failure == "dependency":
+                raise ImportError("OCP unavailable")
+            if failure == "native":
+                raise RuntimeError("native library failure")
+            raise step_geometry.StepGeometryError(failure)
+
+        monkeypatch.setattr(step_geometry, "tessellate", failed_tessellation)
+        destination = tmp_path / "result.npz"
+
+        assert (
+            step_worker._write_brep(tmp_path / "input.step", destination, 12)
+            == expected
+        )
+        assert not destination.exists()
+        assert not destination.with_suffix(".json").exists()

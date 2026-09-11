@@ -81,6 +81,17 @@ def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestStorageComposition:
+    def test_invalid_provider_keeps_storage_unavailable(self, monkeypatch):
+        monkeypatch.setitem(
+            _overlay, "storage_provider_error", "invalid_provider_config"
+        )
+
+        backend = lifecycle._compose_storage_backend()
+
+        assert backend.backend_name == "unavailable"
+        with pytest.raises(StorageConfigurationError, match="storage_unavailable"):
+            backend.create_stream(BytesIO(b"must not publish"), "never-created.stl")
+
     @pytest.mark.parametrize(
         "provider",
         [

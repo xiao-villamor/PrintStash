@@ -6,6 +6,24 @@ from sqlmodel import select
 from app.db.models import SimilarityRun
 
 
+@pytest.fixture
+def current_pair(
+    make_model,
+    make_file,
+    make_geometry_fingerprint,
+    make_similarity_candidate,
+    make_similarity_observation,
+):
+    first, second = make_model(), make_model()
+    candidate = make_similarity_candidate(first, second)
+    make_similarity_observation(
+        candidate,
+        make_geometry_fingerprint(make_file(first), state="ready"),
+        make_geometry_fingerprint(make_file(second), state="ready"),
+    )
+    return candidate
+
+
 class TestSimilarity:
     @pytest.mark.parametrize(
         "method,path,payload",
@@ -160,6 +178,87 @@ class TestSimilarity:
         assert candidate.review_state == "open"
         assert candidate.version == 1
         assert db_session.exec(select(SimilarityRun)).all() == []
+
+
+class TestPersistedResults:
+    def test_reads_run_progress(self, client, auth_headers, app, monkeypatch):
+        # Persisted work remains available when a process has no local wakeup.
+        monkeypatch.delattr(app.state, "similarity_wakeup", raising=False)
+        client.patch(
+            "/api/v1/similarity/settings", json={"enabled": True}, headers=auth_headers
+        ).raise_for_status()
+        started = client.post("/api/v1/similarity/runs", json={}, headers=auth_headers)
+        assert started.status_code == 202
+        expected = started.json()
+        listed = client.get("/api/v1/similarity/runs", headers=auth_headers)
+        detail = client.get(
+            f"/api/v1/similarity/runs/{expected['id']}", headers=auth_headers
+        )
+
+        assert listed.status_code == detail.status_code == 200
+        assert listed.json() == {"items": [expected], "next_cursor": None}
+        assert detail.json() == expected
+        assert "lease_token" not in expected
+        assert "active_scope_key" not in expected
+        assert expected["state"] == "queued"
+
+    def test_reads_comparison_evidence(self, client, auth_headers, current_pair):
+        response = client.get(
+            f"/api/v1/similarity/candidates/{current_pair.id}", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["model_a"]["id"] == current_pair.model_a_id
+        assert result["model_b"]["id"] == current_pair.model_b_id
+        assert len(result["observations"]) == 1
+        assert result["exact_equivalence"] is True
+
+    def test_scopes_cached_candidates_to_model(
+        self, client, auth_headers, current_pair, make_model, make_similarity_candidate
+    ):
+        make_similarity_candidate(make_model(), make_model())
+        response = client.get(
+            f"/api/v1/models/{current_pair.model_a_id}/similar", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        assert [row["id"] for row in response.json()["items"]] == [current_pair.id]
+
+    def test_schedules_model_query(
+        self, client, auth_headers, current_pair, db_session
+    ):
+        client.patch(
+            "/api/v1/similarity/settings", json={"enabled": True}, headers=auth_headers
+        ).raise_for_status()
+        response = client.post(
+            f"/api/v1/models/{current_pair.model_a_id}/similar/query",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert [row["id"] for row in result["items"]] == [current_pair.id]
+        assert result["run"]["scope"] == "models"
+        assert result["run"]["scope_ids"] == [current_pair.model_a_id]
+        assert db_session.exec(select(SimilarityRun)).one().id == result["run"]["id"]
+
+    def test_refuses_semantic_work_during_maintenance(self, client, auth_headers):
+        from app.runtime.maintenance import (
+            end_restore_maintenance,
+            hold_restore_maintenance,
+        )
+
+        hold_restore_maintenance()
+        try:
+            response = client.post(
+                "/api/v1/similarity/search", json={"text": "cup"}, headers=auth_headers
+            )
+        finally:
+            end_restore_maintenance()
+
+        assert response.status_code == 503
+        assert response.json()["detail"] == "restore_in_progress"
 
 
 class TestRunScopeInput:
