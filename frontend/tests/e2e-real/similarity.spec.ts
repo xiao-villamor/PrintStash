@@ -1,6 +1,7 @@
 /** Standalone similarity retains the independently printable Models after human review. */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import type { SimilarityRun } from "../../src/types/similarity";
 import { silhouetteOverlap } from "../similarity-pixels";
 import { test, expect } from "./helpers";
 import { modelCard } from "./util";
@@ -103,6 +104,29 @@ test.describe("Standalone similarity", () => {
       await page.getByRole("button", { name: "Find similar", exact: true }).click();
       const pair = page.getByRole("listitem").filter({ hasText: models[1].name });
       await expect(pair.getByRole("link", { name: "Compare" })).toBeVisible({ timeout: 60_000 });
+      // The first cached/whole match can precede component observations. Review
+      // the finished Run so this happy path does not race legitimate version changes.
+      await expect(page.getByRole("status").filter({ hasText: /^Completed ·/ })).toBeVisible({
+        timeout: 60_000,
+      });
+      // Upload-triggered Runs can still publish evidence for either Model after
+      // the manually requested Run finishes. Wait for those real jobs too.
+      await expect
+        .poll(
+          async () => {
+            const response = await page.request.get(`${API}/api/v1/similarity/runs?limit=100`);
+            expect(response.ok()).toBe(true);
+            const { items }: { items: SimilarityRun[] } = await response.json();
+            return models.map((model) => {
+              const related = items.filter(
+                (run) => run.scope === "models" && run.scope_ids.includes(model.id),
+              );
+              return related.length > 0 && related.every((run) => run.state === "completed");
+            });
+          },
+          { timeout: 60_000, message: "Both Models finish analysis before evidence review" },
+        )
+        .toEqual([true, true]);
       await test.step("Similarity Saved View survives navigation", async () => {
         const viewName = `Review similar ${Date.now()}`;
         await page.goto("/");
