@@ -12,9 +12,8 @@ import { test, expect } from "./helpers";
 import { modelCard, uploadGcodeModel } from "./util";
 
 // Portable library migration (0.10.0): export the whole vault as a
-// `printstash-library-v1` ZIP from Settings, then import that same archive back
-// in — the model that was already there (plus the reimport of itself) both end
-// up visible, proving the round trip preserves the library.
+// `printstash-library-v2` ZIP from Settings, then import that same archive back
+// in. Content-hash deduplication preserves the original Model and its identity.
 
 test.describe("library transfer", () => {
   test("export a library archive and import it back in", async ({ page }) => {
@@ -30,7 +29,7 @@ test.describe("library transfer", () => {
     ]);
     const archivePath = await download.path();
     expect(archivePath).toBeTruthy();
-    expect(download.suggestedFilename()).toMatch(/printstash-library-v1.*\.zip$/);
+    expect(download.suggestedFilename()).toMatch(/printstash-library-v2.*\.zip$/);
     // `download.path()` saves under an internal temp name with no extension —
     // re-wrap the bytes with the real filename so the app's client-side ".zip"
     // check (and the input's `accept`) see a proper archive.

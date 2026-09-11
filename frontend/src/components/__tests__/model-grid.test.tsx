@@ -238,7 +238,8 @@ describe("ModelBrowser", () => {
       expect(screen.getByRole("combobox", { name: "Group variations" })).toHaveValue(
         "families_collapsed",
       );
-    });
+      // Two complete library mounts exceed five seconds in the instrumented suite.
+    }, 10_000);
 
     it("gives the explicit URL mode priority over a saved preference", async () => {
       localStorage.setItem("ps-vault-family-browse", "families_collapsed");

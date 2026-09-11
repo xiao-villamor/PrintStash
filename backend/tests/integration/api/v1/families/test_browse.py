@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.db.models import CollectionRole
+from app.db.models import CollectionRole, FileType
 
 
 def _drain_pages(client, headers, url, params):
@@ -21,6 +21,130 @@ def _drain_pages(client, headers, url, params):
 
 
 class TestFamilyBrowse:
+    @pytest.mark.parametrize(
+        "query", ["printer_id=1", "printer_presence=any", "printer_presence=none"]
+    )
+    def test_restricts_printer_filters_to_admins(
+        self,
+        client,
+        make_user,
+        headers_for,
+        query,
+    ):
+        response = client.get(
+            f"/api/v1/families/browse?{query}",
+            headers=headers_for(make_user()),
+        )
+
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "admin_required"
+
+    @pytest.mark.parametrize("query", ["in_family=false", "family_id"])
+    def test_applies_membership_filters_to_collapsed_cards(
+        self,
+        client,
+        auth_headers,
+        make_family,
+        make_family_member,
+        make_model,
+        query,
+    ):
+        wanted, other = make_family(), make_family()
+        make_family_member(wanted, make_model(), canonical=True)
+        make_family_member(other, make_model(), canonical=True)
+        ungrouped = make_model()
+        query = f"family_id={wanted.id}" if query == "family_id" else query
+
+        response = client.get(f"/api/v1/families/browse?{query}", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        kind, identity = (
+            ("model", ungrouped.id)
+            if query == "in_family=false"
+            else ("family", wanted.id)
+        )
+        assert [
+            (item["kind"], item[item["kind"]]["id"])
+            for item in response.json()["items"]
+        ] == [(kind, identity)]
+        assert response.json()["total"] == 1
+
+    def test_filters_collapsed_cards_by_the_actors_family_favorites(
+        self,
+        client,
+        make_user,
+        headers_for,
+        make_family,
+        make_family_star,
+        make_family_member,
+        make_model,
+    ):
+        actor, other = make_user(superuser=True), make_user(superuser=True)
+        wanted, private_star = make_family(), make_family()
+        make_family_star(actor, wanted)
+        make_family_star(other, private_star)
+        for family in (wanted, private_star):
+            make_family_member(family, make_model(), canonical=True)
+        make_model()
+
+        response = client.get(
+            "/api/v1/families/browse?favorites=true", headers=headers_for(actor)
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 1
+        assert response.json()["items"][0]["family"]["id"] == wanted.id
+
+    @pytest.mark.parametrize(
+        "endpoint", ["/api/v1/families", "/api/v1/families/browse"]
+    )
+    @pytest.mark.parametrize("sort", ["duration-asc", "filament-asc"])
+    def test_sorts_only_by_visible_canonical_measurements(
+        self,
+        client,
+        make_user,
+        headers_for,
+        make_collection,
+        grant_role,
+        make_model,
+        make_family,
+        make_family_member,
+        make_file,
+        make_metadata,
+        endpoint,
+        sort,
+    ):
+        actor = make_user()
+        shared, hidden = make_collection(), make_collection()
+        grant_role(actor, shared, CollectionRole.VIEW)
+        families = []
+        for amount, collection in [(200, shared), (100, shared), (50, hidden)]:
+            family = make_family()
+            canonical = make_model(collection=collection)
+            make_family_member(family, canonical, canonical=True)
+            make_family_member(family, make_model(collection=shared))
+            make_metadata(
+                make_file(canonical, file_type=FileType.GCODE),
+                estimated_time_s=amount,
+                filament_weight_g=amount,
+            )
+            families.append(family)
+
+        items, totals = _drain_pages(
+            client, headers_for(actor), endpoint, {"sort": sort, "limit": 1}
+        )
+
+        assert totals == {3}
+        cards = (
+            [item["family"] for item in items] if endpoint.endswith("browse") else items
+        )
+        assert [item["id"] for item in cards] == [
+            families[1].id,
+            families[0].id,
+            families[2].id,
+        ]
+        assert cards[-1]["canonical_model_id"] is None
+
     @pytest.mark.parametrize("limit", [17, 200], ids=["small-pages", "full-pages"])
     def test_paginates_collapsed_families(
         self, client, auth_headers, make_model, make_family, make_family_member, limit
@@ -256,6 +380,35 @@ class TestFamilyBrowse:
 
 
 class TestListFamilies:
+    def test_lists_only_editable_trashed_families(
+        self,
+        client,
+        make_user,
+        headers_for,
+        make_collection,
+        grant_role,
+        make_model,
+        make_family,
+        make_family_member,
+    ):
+        actor = make_user()
+        editable, readonly = make_collection(), make_collection()
+        grant_role(actor, editable, CollectionRole.EDIT)
+        grant_role(actor, readonly, CollectionRole.VIEW)
+        wanted = make_family(trashed=True)
+        make_family_member(wanted, make_model(collection=editable))
+        inaccessible = make_family(trashed=True)
+        make_family_member(inaccessible, make_model(collection=readonly))
+        make_family()
+
+        response = client.get(
+            "/api/v1/families?trashed=true", headers=headers_for(actor)
+        )
+
+        assert response.status_code == 200, response.text
+        assert [item["id"] for item in response.json()["items"]] == [wanted.id]
+        assert response.json()["total"] == 1
+
     @pytest.mark.parametrize("filter_name", ["q", "collection_id", "favorites", "tag"])
     def test_lists_families_with_own_filters(
         self,

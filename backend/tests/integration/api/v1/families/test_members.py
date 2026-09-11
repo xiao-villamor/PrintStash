@@ -19,6 +19,30 @@ from app.db.models import (
 
 
 class TestAddMember:
+    def test_rejects_an_existing_reservation_in_another_family(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        source, destination, model = make_family(), make_family(), make_model()
+        member = make_family_member(source, model)
+        before = member.model_dump()
+
+        response = client.post(
+            f"/api/v1/families/{destination.id}/members",
+            headers=auth_headers,
+            json={"model_id": model.id, "version": destination.version},
+        )
+        db_session.refresh(member)
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "family_membership_conflict"
+        assert member.model_dump() == before
+
     def test_replays_identical_member_add(
         self,
         client,
@@ -308,6 +332,31 @@ class TestChangeCanonical:
 
 
 class TestDetachMember:
+    def test_clears_a_detached_cover_reference(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        model = make_model()
+        family = make_family(cover_model_id=model.id)
+        member = make_family_member(family, model)
+
+        response = client.delete(
+            f"/api/v1/families/{family.id}/members/{member.id}",
+            params={"version": family.version},
+            headers=auth_headers,
+        )
+        db_session.refresh(family)
+        db_session.refresh(model)
+
+        assert response.status_code == 204, response.text
+        assert family.cover_model_id is None
+        assert model.deleted_at is None
+
     def test_detaches_canonical_to_vacancy(
         self,
         client,
@@ -331,6 +380,112 @@ class TestDetachMember:
         assert family.canonical_member_id is None
         assert selected.detach_reason == "removed"
         assert model.deleted_at is None
+
+
+class TestUpdateMember:
+    @pytest.mark.parametrize("reservation", ["foreign", "detached"])
+    def test_rejects_a_member_outside_the_active_family(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+        reservation,
+    ):
+        family = make_family()
+        member = make_family_member(
+            make_family() if reservation == "foreign" else family,
+            make_model(),
+            detached="removed" if reservation == "detached" else None,
+        )
+        before = member.model_dump()
+
+        response = client.patch(
+            f"/api/v1/families/{family.id}/members/{member.id}",
+            headers=auth_headers,
+            json={"version": family.version, "transformation_note": "Attempt"},
+        )
+        db_session.refresh(member)
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == "family_member_not_found"
+        assert member.model_dump() == before
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"role": "repaired"},
+            {"scale_factor": 2},
+            {"mirrored": True},
+        ],
+    )
+    def test_preserves_canonical_identity_during_member_edits(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+        changes,
+    ):
+        family = make_family()
+        member = make_family_member(family, make_model(), canonical=True)
+        before = member.model_dump()
+
+        response = client.patch(
+            f"/api/v1/families/{family.id}/members/{member.id}",
+            headers=auth_headers,
+            json={"version": family.version, **changes},
+        )
+        db_session.refresh(member)
+
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "family_canonical_invalid"
+        assert member.model_dump() == before
+
+    @pytest.mark.parametrize("vacant", [False, True])
+    def test_records_the_reference_for_explicit_relative_edits(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+        vacant,
+    ):
+        family = make_family()
+        canonical = (
+            None if vacant else make_family_member(family, make_model(), canonical=True)
+        )
+        member = make_family_member(family, make_model())
+
+        response = client.patch(
+            f"/api/v1/families/{family.id}/members/{member.id}",
+            headers=auth_headers,
+            json={
+                "version": family.version,
+                "role": "rescaled",
+                "scale_factor": 2,
+                "mirrored": True,
+                "mirror_verified": True,
+            },
+        )
+        db_session.refresh(member)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["role"] == "rescaled"
+        assert member.scale_factor == 2
+        assert member.mirrored is True
+        assert member.mirror_verified is True
+        assert member.relative_to_member_id == (canonical.id if canonical else None)
+        assert member.mirror_reference_member_id == (
+            canonical.id if canonical else None
+        )
+        assert member.relative_review_required is vacant
 
 
 class TestListMembers:

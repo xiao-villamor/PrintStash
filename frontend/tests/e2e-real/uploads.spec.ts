@@ -107,21 +107,15 @@ test.describe("uploads", () => {
       `endsolid ${name}`,
     ].join("\n");
 
-    await page.goto("/");
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Upload model" });
-    await dialog.locator('input[accept=".stl,.3mf,.obj,.step,.stp"]').setInputFiles({
-      name: `${name}.stl`,
-      mimeType: "model/stl",
-      buffer: Buffer.from(stl),
+    await uploadModel(page, name, {
+      mesh: true,
+      gcode: false,
+      meshFile: {
+        name: `${name}.stl`,
+        mimeType: "model/stl",
+        buffer: Buffer.from(stl),
+      },
     });
-    await page.getByPlaceholder("e.g. Bracket v2").fill(name);
-    await page.getByRole("button", { name: /upload to vault/i }).click();
-    await expect(dialog).toHaveCount(0);
-    await expect(async () => {
-      await page.goto("/");
-      await expect(modelCard(page, name)).toBeVisible({ timeout: 2_000 });
-    }).toPass({ timeout: 60_000 });
 
     const preview = modelCard(page, name).getByRole("img", { name });
     await expect
@@ -163,23 +157,13 @@ test.describe("uploads", () => {
 
   test("@critical upload a BGCODE model; its slicer metadata is available", async ({ page }) => {
     const name = `e2e-bgcode-${Date.now()}`;
-    await page.goto("/");
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Upload model" });
-
-    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
-      name: `${name}.bgcode`,
-      mimeType: "application/octet-stream",
-      buffer: bgcodeFor(name),
+    await uploadModel(page, name, {
+      gcodeFile: {
+        name: `${name}.bgcode`,
+        mimeType: "application/octet-stream",
+        buffer: bgcodeFor(name),
+      },
     });
-    await page.getByPlaceholder("e.g. Bracket v2").fill(name);
-    await dialog.getByRole("button", { name: /upload to vault/i }).click();
-    await expect(dialog).toHaveCount(0);
-
-    await expect(async () => {
-      await page.goto("/");
-      await expect(modelCard(page, name)).toBeVisible({ timeout: 2_000 });
-    }).toPass({ timeout: 60_000 });
 
     await modelCard(page, name).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();

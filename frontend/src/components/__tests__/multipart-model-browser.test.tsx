@@ -1248,7 +1248,8 @@ describe("ModelPicker", () => {
     await user.click(screen.getByRole("button", { name: "Add parts (2)" }));
 
     expect(screen.getAllByLabelText("Part name")).toHaveLength(2);
-  });
+    // This complete 48-card round trip across pages takes over five seconds with V8 coverage.
+  }, 10_000);
 
   it("cancels selection without editing the composition", async () => {
     const user = userEvent.setup();

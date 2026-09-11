@@ -14,7 +14,7 @@ from app.modules.media.fingerprints import FingerprintResult
 
 class TestOptionalFeatures:
     @pytest.mark.parametrize("missing", ["similarity", "inference"])
-    def test_absent_feature_leaves_manual_models_and_ingestion_available(
+    def test_absent_feature_preserves_manual_library_work(
         self, monkeypatch, db_session, make_user, make_model, missing
     ):
         actor = make_user()
