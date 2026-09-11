@@ -26,6 +26,15 @@ Changing evidence under the same algorithm requires investigation, not silently
 rewriting the golden. The sample is small: its measured acceptance rates are
 regression gates, not statistical guarantees for arbitrary libraries.
 
+`surface-verification-v3` adds the original coordinate axes as an alignment
+hypothesis before the same full vertex/triangle correspondence proof. This fixes
+the OBJ re-export case `70561-obj`: the v2 golden measured `similar_shape` even
+though its independently assigned label is `identical_geometry`. Its v3 result
+proves exact equivalence; the other 19 labels remain unchanged and all measured
+distance/scale/voxel metrics stay within the existing tolerance. The v2 reference
+is retained. New reference names include both fingerprint and verifier versions.
+No labels, splits, precision/recall requirements or numeric tolerances changed.
+
 Exploratory raw QEM reduction was not labeled automatically as a positive match:
 on these thin/open source files it could close holes, change topology, or fail to
 reach the requested 25% face count. The positive quarter-count fixture uses an

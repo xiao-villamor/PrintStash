@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from printstash_core.mesh.similarity.verification import VERIFICATION_VERSION
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.db.models import (
     File,
@@ -52,6 +52,9 @@ def reusable_pair(
             SimilarityCandidate.model_a_id == fa.model_id,
             SimilarityCandidate.model_b_id == fb.model_id,
         )
+        # Reverification retains the earlier observation. The latest recipe is
+        # the cache candidate; old evidence must not hide a refreshed proof.
+        .order_by(col(observation.id).desc())
         .limit(1)
     ).first()
     if encoded is None:

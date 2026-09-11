@@ -8,7 +8,7 @@ from printstash_core.mesh.similarity.verification import verify_meshes
 from sqlmodel import select
 
 from app.db.models import File, SimilarityCandidateObservation
-from app.modules.similarity import candidates, verification_cache
+from app.modules.similarity import candidates, review, verification_cache
 from tests.factories.geometry import tetrahedron
 
 
@@ -31,6 +31,53 @@ def verified_pair(
 
 
 class TestVerificationCache:
+    @pytest.mark.parametrize("previous_version", [None, "surface-verification-v2"])
+    def test_retains_refreshed_recipe_for_reuse(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_user,
+        make_geometry_fingerprint,
+        exact_proof,
+        previous_version,
+    ):
+        pair = [
+            make_geometry_fingerprint(make_file(make_model()), state="ready")
+            for _ in range(2)
+        ]
+        prior = (
+            replace(exact_proof, version=previous_version)
+            if previous_version is not None
+            else exact_proof
+        )
+        candidate = candidates.publish(db_session, *pair, prior)
+        review.decide(
+            db_session,
+            make_user(superuser=True),
+            candidate.id,
+            review.DecisionRequest(
+                request_id="preserve-rejection",
+                version=candidate.version,
+                action="reject",
+            ),
+        )
+        original = db_session.exec(select(SimilarityCandidateObservation)).one()
+        snapshot = original.evidence_json
+        mesh = tetrahedron()
+        refreshed = verify_meshes(
+            mesh.vertices, mesh.faces, mesh.vertices, mesh.faces, sample_points=512
+        )
+
+        candidates.publish(db_session, *pair, refreshed)
+
+        assert verification_cache.reusable_pair(db_session, *pair, sample_points=512)
+        assert len(db_session.exec(select(SimilarityCandidateObservation)).all()) == 2
+        db_session.refresh(original)
+        db_session.refresh(candidate)
+        assert original.evidence_json == snapshot
+        assert candidate.review_state == "rejected"
+
     @pytest.mark.parametrize("side", [0, 1])
     def test_rechecks_deleted_artifact(self, db_session, verified_pair, side):
         fingerprint = verified_pair[side]

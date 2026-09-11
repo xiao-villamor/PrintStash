@@ -40,7 +40,7 @@ EvidenceClass = Literal[
     "component_of",
     "plate_of",
 ]
-VERIFICATION_VERSION = "surface-verification-v2"
+VERIFICATION_VERSION = "surface-verification-v3"
 
 
 @dataclass(frozen=True)

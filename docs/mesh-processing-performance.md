@@ -87,16 +87,16 @@ compiled with Rust 1.75 at optimization level 3. Its source is retained in
 a production parser or accelerator. The same 225,143 valid Benchy
 triangles and 5,000 offset surface queries were supplied to both implementations.
 Maximum distance error was `2.3e-16` and coordinate error `3.6e-15`. Under the same
-busy development host, NumPy tree construction/query took 5.72/15.66 seconds;
-Rust took 1.56/0.68 seconds, with 1,554,198 triangle tests. File serialization and
-process startup brought the Rust prototype to 2.63 seconds including input
+busy development host, NumPy tree construction/query took 3.44/7.58 seconds;
+Rust took 0.79/0.41 seconds, with 1,554,198 triangle tests. File serialization and
+process startup brought the Rust prototype to 1.47 seconds including input
 serialization. This is kernel evidence, not a claim that the whole application
 gets the same speedup.
 
 A second experiment substituted the prototype into complete verification:
-82.63 seconds with NumPy versus 47.01 seconds with the Rust subprocess, preserving
+46.09 seconds with NumPy versus 31.65 seconds with the Rust subprocess, preserving
 exact classification, distances and voxel overlap. Both timings include
-concurrent frontend coverage work and should not be compared directly with the
+concurrent development checks and should not be compared directly with the
 idle profiling table above. The prototype rebuilt its tree per query, so a
 persistent per-comparison tree remains a concrete opportunity.
 
@@ -128,3 +128,12 @@ An explicitly stored 200,000-face limit is preserved. Increase it in Similar
 Models settings and start a manual analysis to retry previously partial
 Artifacts. Ready fingerprints and human review decisions remain valid; no
 Artifact, Revision or canonical Model is replaced by this work.
+
+Verification evidence uses `surface-verification-v3`. An original-axis alignment
+hypothesis now proves equivalent exports whose PCA axes differ through rounding;
+the full correspondence proof remains mandatory. The previous calibration
+reference is retained, and the new reference records all 20 cases with their
+unchanged independent labels. Older pair proofs are reverified before entering
+the exact-proof cache under this recipe. A changed verifier or sample count gets
+its own observation, preserving earlier evidence and human review decisions;
+the latest compatible exact proof can then serve repeated runs.

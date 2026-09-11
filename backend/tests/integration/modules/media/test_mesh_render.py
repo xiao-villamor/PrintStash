@@ -21,8 +21,17 @@ class TestMeshRender:
             Image.open(FIXTURES_DIR / "benchy-preview.png") as expected,
         ):
             assert actual.size == expected.size == (640, 480)
-            # One channel level accommodates native floating-point variation;
-            # geometry, silhouette and lighting remain pixel-aligned.
-            np.testing.assert_allclose(
-                np.asarray(actual).astype(int), np.asarray(expected).astype(int), atol=1
-            )
+            rendered = np.asarray(actual).astype(float)
+            reference = np.asarray(expected).astype(float)
+            np.testing.assert_array_equal(rendered[..., 3], reference[..., 3])
+            # Compare displayed colors on both theme extremes. Lanczos stores
+            # unpremultiplied RGB: a 22-level channel difference at alpha=11
+            # changes the visible pixel by less than one level. Raw RGB alone
+            # overstates rounding in nearly transparent silhouette pixels.
+            for background in (0, 255):
+                alpha = rendered[..., 3:] / 255
+                np.testing.assert_allclose(
+                    rendered[..., :3] * alpha + background * (1 - alpha),
+                    reference[..., :3] * alpha + background * (1 - alpha),
+                    atol=1,
+                )

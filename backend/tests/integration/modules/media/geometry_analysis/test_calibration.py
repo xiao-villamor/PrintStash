@@ -112,7 +112,11 @@ class TestFrozenCorpus:
         assert evidence.evidence_class not in ("identical_geometry", "rescaled")
 
     def test_preserves_versioned_evaluation_golden(self, evaluation):
-        golden = json.loads((ROOT / f"{ALGORITHM_VERSION}-evaluation.json").read_text())
+        golden = json.loads(
+            (
+                ROOT / f"{ALGORITHM_VERSION}-{VERIFICATION_VERSION}-evaluation.json"
+            ).read_text()
+        )
         assert golden["verification_version"] == VERIFICATION_VERSION
         expected = {row["case_id"]: row["evidence"] for row in golden["cases"]}
         assert set(expected) == {row["case_id"] for row in evaluation}

@@ -436,6 +436,8 @@ def publish(
                 second.source_sha256,
                 kind,
                 contained_side,
+                evidence.version,
+                evidence.sample_points,
             ]
         ).encode()
     ).hexdigest()

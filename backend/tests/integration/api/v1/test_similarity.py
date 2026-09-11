@@ -82,7 +82,7 @@ class TestSimilarity:
         [
             {"max_candidates": 101},
             {"sample_points": 5001},
-            {"triangle_cap": 200001},
+            {"triangle_cap": 2000001},
             {"minimum_confidence": 0.1},
             {"class_overrides": {"made_up": 0.9}},
             {"surprise": True},
