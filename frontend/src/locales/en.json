@@ -1,4 +1,8 @@
 {
+  "families.archiveFormat": "Archive format",
+  "families.archiveCurrent": "Includes Families (v2)",
+  "families.archiveLegacy": "Older installations (v1)",
+  "families.archiveLegacyWarning": "This export excludes Families, their relationships, and saved views filtered by Family. Choose v2 to keep them.",
   "auditSchedule.deferMaintenance": "Maintenance is active",
   "auditSchedule.deferStorage": "Storage is unavailable",
   "auditSchedule.deferWindow": "Waiting for the next allowed window",

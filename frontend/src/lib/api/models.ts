@@ -167,8 +167,8 @@ export async function downloadModelExport(format: "json" | "csv"): Promise<void>
   URL.revokeObjectURL(url);
 }
 
-export async function downloadLibraryArchive(): Promise<void> {
-  const res = await fetch(getUrl("/api/v1/models/library-archive"), {
+export async function downloadLibraryArchive(version: 1 | 2 = 2): Promise<void> {
+  const res = await fetch(getUrl(`/api/v1/models/library-archive?version=${version}`), {
     headers: authHeaders(),
     cache: "no-store",
   });
@@ -177,7 +177,7 @@ export async function downloadLibraryArchive(): Promise<void> {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "printstash-library-v1.zip";
+  link.download = `printstash-library-v${version}.zip`;
   document.body.appendChild(link);
   link.click();
   link.remove();

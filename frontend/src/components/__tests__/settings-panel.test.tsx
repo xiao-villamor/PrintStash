@@ -1772,6 +1772,26 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("explains the Family omission before a legacy export", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        routes: { "GET /api/v1/models/library-archive": json([]) },
+      });
+      const format = await screen.findByRole("combobox", { name: "Archive format" });
+      expect(format).toHaveValue("2");
+      await user.selectOptions(format, "1");
+      expect(format).toHaveAccessibleDescription(
+        "This export excludes Families, their relationships, and saved views filtered by Family. Choose v2 to keep them.",
+      );
+      expect(requests().some((call) => call.url.includes("library-archive"))).toBe(false);
+      await user.click(screen.getByRole("button", { name: /Export full library/ }));
+      await waitFor(() =>
+        expect(requests().some((call) => call.url.includes("library-archive?version=1"))).toBe(
+          true,
+        ),
+      );
+    });
+
     it("surfaces an export the server refused", async () => {
       const user = userEvent.setup();
       renderSettings({

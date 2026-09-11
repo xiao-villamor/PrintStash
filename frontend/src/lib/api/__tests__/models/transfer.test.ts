@@ -97,6 +97,15 @@ describe("downloadLibraryArchive", () => {
 
     // A fixed name, because the archive is meant to be recognisable on another
     // machine.
+    expect(clicked).toEqual(["printstash-library-v2.zip"]);
+    expect(lastCall().url).toBe("/api/v1/models/library-archive?version=2");
+  });
+
+  it("requests the explicit legacy archive format", async () => {
+    fetchMock.mockResolvedValue(new Response("zip", { status: 200 }));
+    const { clicked } = stubBrowserSave();
+    await downloadLibraryArchive(1);
+    expect(lastCall().url).toBe("/api/v1/models/library-archive?version=1");
     expect(clicked).toEqual(["printstash-library-v1.zip"]);
   });
 

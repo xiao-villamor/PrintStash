@@ -8,6 +8,8 @@
   variant roles, an explicit canonical selection and relative measurements.
   Membership moves and Family restoration are atomic; Model trash reserves its
   membership, and purging a Model explicitly clears its Family references.
+  Portable v2 preserves Families and their covers, with idempotent reimport,
+  explicit membership conflicts, and a v1 export option for older installations.
 - **Similar Models** offers opt-in local geometry analysis, resumable library scans,
   a filtered review queue and synchronized comparisons at shared physical scale.
   Evidence confirmation keeps each Model, Artifact and Revision separate; verified

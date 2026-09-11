@@ -1,4 +1,8 @@
 {
+  "families.archiveFormat": "Formato del archivo",
+  "families.archiveCurrent": "Incluye familias (v2)",
+  "families.archiveLegacy": "Instalaciones antiguas (v1)",
+  "families.archiveLegacyWarning": "Esta exportación excluye las familias, sus relaciones y las vistas guardadas filtradas por familia. Elige v2 para conservarlas.",
   "auditSchedule.deferMaintenance": "Hay un mantenimiento activo",
   "auditSchedule.deferStorage": "El almacenamiento no está disponible",
   "auditSchedule.deferWindow": "Esperando a la siguiente ventana permitida",

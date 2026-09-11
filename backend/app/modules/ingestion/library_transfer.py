@@ -53,7 +53,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.modules.identity import rbac
-from app.modules.ingestion import ingestion
+from app.modules.ingestion import family_transfer, ingestion
 from app.modules.library import (
     part_options,
     provenance,
@@ -65,11 +65,12 @@ from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.jobs import registry
+from app.schemas.family_transfer import PortableFamily
 from app.schemas.models import PartGroupWrite, PartOptionWrite
 
-FORMAT = "printstash-library-v1"
-# The library manifest remains v1 for compatibility; the provenance sidecar
-# has its own explicit version because it carries a richer, exact snapshot.
+FORMAT = "printstash-library-v2"
+LEGACY_FORMAT = "printstash-library-v1"
+# Provenance has its own independent version; legacy readers remain supported.
 PROVENANCE_FORMAT = "printstash-provenance-v2"
 LEGACY_PROVENANCE_FORMAT = "printstash-provenance-v1"
 # A portable archive contains one entry per Artifact plus manifest.json. The
@@ -248,7 +249,7 @@ class PortableMultipartModel(BaseModel):
 class PortableManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    format: Literal["printstash-library-v1"]
+    format: Literal["printstash-library-v1", "printstash-library-v2"]
     exported_at: str | None = None
     models: list[PortableModel]
     print_jobs: list[dict[str, Any]] = PydanticField(default_factory=list)
@@ -256,9 +257,23 @@ class PortableManifest(BaseModel):
     # Optional keeps archives produced before standalone multipart models fully
     # readable.
     multipart_models: list[PortableMultipartModel] = PydanticField(default_factory=list)
+    families: list[PortableFamily] = PydanticField(
+        default_factory=list, max_length=100_000
+    )
 
     @model_validator(mode="after")
     def unique_source_ids(self) -> "PortableManifest":
+        for saved in self.saved_views:
+            identity = saved.get("family_export_id")
+            if identity is not None and (
+                not isinstance(identity, str) or str(uuid.UUID(identity)) != identity
+            ):
+                raise ValueError("invalid saved Family identity")
+        if self.format == LEGACY_FORMAT and "families" in self.model_fields_set:
+            raise ValueError("legacy manifest cannot contain Families")
+        family_ids = [family.export_id for family in self.families]
+        if len(family_ids) != len(set(family_ids)):
+            raise ValueError("duplicate Family export identity")
         model_ids = [model.source_id for model in self.models]
         if len(model_ids) != len(set(model_ids)):
             raise ValueError("duplicate model source_id")
@@ -341,7 +356,7 @@ def _json_value(value: object) -> object:
     return value
 
 
-def create_archive(session: Session, user: User) -> Path:
+def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) -> Path:
     visible_ids = models_access.accessible_live_model_ids_stmt(session, user)
     models = session.exec(
         select(Model)
@@ -446,13 +461,13 @@ def create_archive(session: Session, user: User) -> Path:
     saved = session.exec(select(SavedView).where(SavedView.user_id == user.id)).all()
 
     manifest: dict[str, object] = {
-        "format": FORMAT,
+        "format": LEGACY_FORMAT if version == 1 else FORMAT,
         "exported_at": utcnow().isoformat(),
         "models": [],
         "print_jobs": [],
-        "saved_views": [
-            {"name": row.name, "filters": json.loads(row.filters_json)} for row in saved
-        ],
+        "saved_views": family_transfer.export_saved_views(
+            session, user, list(saved), version=version
+        ),
         "multipart_models": [],
     }
     files_by_model: dict[int, list[File]] = {}
@@ -645,6 +660,14 @@ def create_archive(session: Session, user: User) -> Path:
             }
         )
 
+    family_covers: list[family_transfer.ExportCover] = []
+    if version == 2:
+        portable_families, family_covers = family_transfer.export_families(
+            session, user, list(models)
+        )
+        manifest["families"] = [
+            family.model_dump(mode="json") for family in portable_families
+        ]
     manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     provenance_models: list[dict[str, object]] = []
     cover_entries: list[tuple[ModelSourceCover, str]] = []
@@ -781,9 +804,10 @@ def create_archive(session: Session, user: User) -> Path:
         + len(provenance_bytes)
         + sum(row.size_bytes for row, _ in file_entries)
         + sum(row.size_bytes for row, _ in cover_entries)
+        + sum(cover.size_bytes for cover in family_covers)
     )
     if (
-        len(file_entries) + len(cover_entries) + 2 > MAX_ENTRIES
+        len(file_entries) + len(cover_entries) + len(family_covers) + 2 > MAX_ENTRIES
         or expected_size > MAX_UNCOMPRESSED
     ):
         raise ValueError("archive_too_large")
@@ -845,6 +869,14 @@ def create_archive(session: Session, user: User) -> Path:
                         ):
                             raise ValueError("archive_blob_hash_mismatch")
                         archive.writestr(entry, data)
+                        actual_size += len(data)
+                        if actual_size > MAX_UNCOMPRESSED:
+                            raise ValueError("archive_too_large")
+                    for cover in family_covers:
+                        data = family_transfer.read_cover(cover.key, cover.size_bytes)
+                        if hashlib.sha256(data).hexdigest() != cover.sha256:
+                            raise ValueError("archive_blob_hash_mismatch")
+                        archive.writestr(cover.entry, data)
                         actual_size += len(data)
                         if actual_size > MAX_UNCOMPRESSED:
                             raise ValueError("archive_too_large")
@@ -1749,12 +1781,16 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
             raise ValueError("portable_manifest_invalid") from exc
         except (KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ValueError("portable_manifest_invalid") from exc
-        if manifest.get("format") != FORMAT or not isinstance(
+        if manifest.get("format") not in {FORMAT, LEGACY_FORMAT} or not isinstance(
             manifest.get("models"), list
         ):
             raise ValueError("unsupported_archive_format")
         sidecar = _read_provenance_sidecar(archive, manifest)
         _validate_provenance_cover_members(archive, sidecar)
+        portable_families = [
+            PortableFamily.model_validate(row) for row in manifest["families"]
+        ]
+        family_transfer.validate_covers(archive, portable_families)
 
         # Validate every blob before first database/storage write.
         for model_data in manifest["models"]:
@@ -2250,20 +2286,6 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                 )
             )
             imported_jobs += 1
-        for saved_data in manifest.get("saved_views", []):
-            existing = session.exec(
-                select(SavedView).where(
-                    SavedView.user_id == user.id, SavedView.name == saved_data["name"]
-                )
-            ).first()
-            if existing is None:
-                session.add(
-                    SavedView(
-                        user_id=user.id,
-                        name=saved_data["name"],
-                        filters_json=json.dumps(saved_data.get("filters", {})),
-                    )
-                )
         cover_writes = _restore_portable_covers(
             session, archive, sidecar, source_models, user
         )
@@ -2287,6 +2309,18 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
         # override actually lost to an existing local override.
         if provenance_conflicts:
             result["provenance_conflicts"] = provenance_conflicts
+        family_models = {model.hash: model for model in source_models.values()}
+        for portable_family in portable_families:
+            counts = family_transfer.import_family(
+                session, user, portable_family, family_models, archive
+            )
+            for key, value in counts.items():
+                result[key] = result.get(key, 0) + value
+        saved_view_conflicts = family_transfer.import_saved_views(
+            session, user, manifest.get("saved_views", [])
+        )
+        if saved_view_conflicts:
+            result["family_saved_view_conflicts"] = saved_view_conflicts
         return result
 
 

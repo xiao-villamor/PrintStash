@@ -1059,7 +1059,7 @@ class TestImportArchive:
         try:
             with zipfile.ZipFile(archive_path) as archive:
                 manifest = json.loads(archive.read("manifest.json"))
-                assert manifest["format"] == "printstash-library-v1"
+                assert manifest["format"] == "printstash-library-v2"
                 artifact = manifest["models"][0]["artifacts"][0]
                 assert artifact["sha256"] == file_row.sha256
                 assert (
@@ -2864,7 +2864,7 @@ class TestCreateArchive:
         with zipfile.ZipFile(downloaded) as archive:
             assert (
                 json.loads(archive.read("manifest.json"))["format"]
-                == "printstash-library-v1"
+                == "printstash-library-v2"
             )
 
     @pytest.mark.parametrize(
@@ -2948,7 +2948,7 @@ class TestCreateArchive:
             with zipfile.ZipFile(archive_path) as archive:
                 assert (
                     json.loads(archive.read("manifest.json"))["format"]
-                    == "printstash-library-v1"
+                    == "printstash-library-v2"
                 )
                 sidecar = json.loads(archive.read("provenance.json"))
             assert sidecar["format"] == "printstash-provenance-v2"

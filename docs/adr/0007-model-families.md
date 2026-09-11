@@ -24,3 +24,20 @@ members identified by content hash. The reader retains v1 support; users can
 explicitly export v1 without Families for older installations. Slug collisions
 never merge identities, and reimport never replaces a local canonical selection
 or moves a member out of another Family.
+
+Reimport treats an existing export UUID as an already-applied Family, retaining
+its local metadata, cover, member edits and trash state as well as its canonical
+selection. A conflict skips the complete incoming Family; independently imported
+Models remain available. Missing references are reported without inventing a
+representative.
+
+Saved Views also carry the stable Family identity and resolve its destination ID
+after import. If the target is absent, import reports and skips that view rather
+than broadening its filter. Legacy v1 export omits Family-filtered Saved Views
+along with Families and explains both omissions before download.
+
+Uploaded covers use the stable UUID as their storage namespace. Their owner can
+publish a bounded, normalized image with a durable creation receipt before a new
+Family has a database ID, then commit membership, metadata and ownership together.
+Failure compensates only the exact newly created image. The shared ownership
+census includes both live and trashed Family covers for backup and vault migration.

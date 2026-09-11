@@ -538,11 +538,14 @@ def export_models(
     summary="Export a portable full-library archive",
 )
 def export_library_archive(
+    version: int = Query(2, ge=1, le=2),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> FileResponse:
     try:
-        path = library_transfer.create_archive(session, current_user)
+        path = library_transfer.create_archive(
+            session, current_user, version=1 if version == 1 else 2
+        )
     except ValueError as exc:
         detail = str(exc)
         if detail == "archive_too_large":
@@ -559,7 +562,10 @@ def export_library_archive(
     return FileResponse(
         path,
         media_type="application/zip",
-        filename="printstash-library-v1.zip",
+        filename=f"printstash-library-v{version}.zip",
+        headers={"X-PrintStash-Export-Warning": "model_families_omitted"}
+        if version == 1
+        else None,
         background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
