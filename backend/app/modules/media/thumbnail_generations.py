@@ -441,6 +441,10 @@ def ensure_thumbnail(
         session.commit()
         return ThumbnailEnsureResult(ThumbnailEnsureOutcome.COALESCED, generation.id)
 
+    # Claiming a shared permit commits and expires the generation. Keep its
+    # reload inside the same bounded contention policy as the recipe claim.
+    _retry_sqlite_lock(session, lambda: session.refresh(generation))
+
     try:
         capacity_claim = CapacityManager(
             session_factory or get_session_factory()

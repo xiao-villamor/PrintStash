@@ -14,6 +14,9 @@
 
 ### Fixed
 
+- Concurrent thumbnail requests recover from transient SQLite contention after
+  reserving shared compute capacity.
+
 - Active print jobs no longer remain paused indefinitely after an out-of-band
   emergency stop. Authoritative idle printer updates now close interrupted jobs,
   with an operator recovery action for stale history when no update arrives.

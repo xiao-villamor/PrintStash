@@ -68,6 +68,65 @@ class _SuccessfulEngine:
 
 
 class TestThumbnailGenerations:
+    def test_survives_generation_contention_after_compute_claim(
+        self, db_session, monkeypatch
+    ):
+        from sqlalchemy import event, text
+
+        from app.modules.media import thumbnail_generations
+
+        model = build_model(db_session)
+        file_row = build_file(db_session, model, file_type=FileType.STL)
+        backend = get_backend()
+        backend.write_bytes(b"mesh", file_row.path)
+        bind = db_session.get_bind()
+        engine = _SuccessfulEngine()
+        claiming = False
+        contended = False
+
+        with get_session_factory().scoped_session() as blocker:
+
+            def notice_claim(_connection, _cursor, statement, *_args):
+                nonlocal claiming
+                if statement.startswith("UPDATE thumbnail_render_slots "):
+                    claiming = True
+
+            def contend_after_commit(_session):
+                nonlocal contended
+                if claiming and not contended:
+                    contended = True
+                    # A competing request writes the table just after our permit
+                    # commits. This is a real SQLite lock, with controlled ordering.
+                    blocker.execute(
+                        text("UPDATE thumbnail_generations SET attempts = attempts")
+                    )
+
+            monkeypatch.setattr(
+                thumbnail_generations.time, "sleep", lambda _: blocker.rollback()
+            )
+            event.listen(bind, "after_cursor_execute", notice_claim)
+            event.listen(db_session, "after_commit", contend_after_commit)
+            try:
+                result = ensure_thumbnail(
+                    db_session, file_row, backend=backend, engine=engine
+                )
+            finally:
+                event.remove(bind, "after_cursor_execute", notice_claim)
+                event.remove(db_session, "after_commit", contend_after_commit)
+                blocker.rollback()
+
+        assert contended
+        assert result.outcome == ThumbnailEnsureOutcome.GENERATED
+        assert engine.calls == 1
+        generation = db_session.get(ThumbnailGeneration, result.generation_id)
+        assert generation.state == ThumbnailGenerationState.READY
+        assert generation.storage_key is not None
+        assert backend.exists(generation.storage_key)
+        assert all(
+            slot.lease_token is None
+            for slot in db_session.exec(select(ThumbnailRenderSlot)).all()
+        )
+
     @staticmethod
     def test_ready_generation_is_reused_without_calling_the_renderer(
         db_session: Session,
