@@ -1,5 +1,39 @@
 import type { Page } from "@playwright/test";
 
+/** Compare projected mesh area in equally sized preview canvases. */
+export async function silhouetteAreaRatio(page: Page, first: Buffer, second: Buffer) {
+  return page.evaluate(
+    async ([a, b]) => {
+      const areas = await Promise.all(
+        [a, b].map(async (bytes) => {
+          const bitmap = await createImageBitmap(
+            new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+          );
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 256;
+          const context = canvas.getContext("2d")!;
+          context.drawImage(bitmap, 0, 0, 256, 256);
+          bitmap.close();
+          const pixels = context.getImageData(0, 0, 256, 256).data;
+          let area = 0;
+          for (let at = 0; at < pixels.length; at += 4) {
+            if (
+              Math.max(
+                ...[0, 1, 2].map((channel) => Math.abs(pixels[at + channel] - pixels[channel])),
+              ) > 30
+            )
+              area++;
+          }
+          return area;
+        }),
+      );
+      if (Math.min(...areas) < 100) throw new Error("Preview has no visible geometry");
+      return areas[0] / areas[1];
+    },
+    [[...first], [...second]],
+  );
+}
+
 /** Compare the rendered mesh silhouette, allowing subpixel canvas positioning. */
 export async function silhouetteOverlap(page: Page, first: Buffer, second: Buffer) {
   return page.evaluate(

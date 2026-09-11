@@ -64,6 +64,10 @@ function modelListSearch(params?: ListModelsParams): URLSearchParams {
   if (params?.has_similar_candidates !== undefined)
     search.set("has_similar_candidates", String(params.has_similar_candidates));
   if (params?.printed !== undefined) search.set("printed", String(params.printed));
+  if (params?.family_id) search.set("family_id", String(params.family_id));
+  if (params?.family_role) search.set("family_role", params.family_role);
+  if (params?.in_family !== undefined) search.set("in_family", String(params.in_family));
+  if (params?.browse) search.set("browse", params.browse);
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
 
@@ -98,30 +102,7 @@ export async function listOutlinerModels(
 export async function getModelFacets(
   params?: Omit<ListModelsParams, "limit" | "offset">,
 ): Promise<ModelFacetsRead> {
-  const search = new URLSearchParams();
-  if (params?.collection) search.set("collection", params.collection);
-  if (params?.direct) search.set("direct", "true");
-  if (params?.q) search.set("q", params.q);
-  if (params?.printer_id) search.set("printer_id", String(params.printer_id));
-  if (params?.printer_presence) search.set("printer_presence", params.printer_presence);
-  if (params?.favorites) search.set("favorites", "true");
-  for (const tag of params?.tag ?? []) search.append("tag", tag);
-  for (const key of [
-    "file_type",
-    "material_type",
-    "slicer_name",
-    "printer_model",
-    "revision_status",
-    "print_outcome",
-    "storage",
-  ] as const) {
-    for (const value of params?.[key] ?? []) search.append(key, String(value));
-  }
-  if (params?.has_similar_candidates !== undefined)
-    search.set("has_similar_candidates", String(params.has_similar_candidates));
-  if (params?.printed !== undefined) search.set("printed", String(params.printed));
-  if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
-  if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
+  const search = modelListSearch(params);
   const query = search.toString();
   return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {
     fresh: true,

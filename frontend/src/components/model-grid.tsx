@@ -1,5 +1,11 @@
 "use client";
 
+import { CreateFamilyDialog } from "@/components/families/create-dialog";
+import { MEMBER_ROLES } from "@/types/families";
+import { FamilyTrashDialog } from "@/components/families/trash-dialog";
+import { FamilyBrowseGrid } from "@/components/families/browse";
+import { FamilyFilters, type FamilyFilterKey } from "@/components/families/filters";
+
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
 import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
@@ -114,6 +120,14 @@ import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { TabBar } from "@/components/ui/tabs";
+
+function viewFilterSignature(filters: SavedViewRead["filters"]): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(filters).sort(([left], [right]) => left.localeCompare(right)),
+    ),
+  );
+}
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -530,6 +544,9 @@ export interface BrowserInitialData {
 export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useUiLocale();
   const { locale, t } = useI18n();
+  const [familyCreateOpen, setFamilyCreateOpen] = useState(false);
+  const [familyTrashOpen, setFamilyTrashOpen] = useState(false);
+  const [familySeed, setFamilySeed] = useState<ModelListItem[]>([]);
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -850,9 +867,37 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
 
+  const familyMode =
+    searchParams.get("browse") === "families_collapsed" ? "families_collapsed" : "models";
+  const rawFamilyId = Number(searchParams.get("family_id"));
+  const familyId = Number.isSafeInteger(rawFamilyId) && rawFamilyId > 0 ? rawFamilyId : undefined;
+  const familyRole = (["canonical", ...MEMBER_ROLES] as const).find(
+    (role) => role === searchParams.get("family_role"),
+  );
+  const inFamily =
+    searchParams.get("in_family") === "yes"
+      ? true
+      : searchParams.get("in_family") === "no"
+        ? false
+        : undefined;
+  function setFamilyFilter(key: FamilyFilterKey, value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value && !(key === "browse" && value === "models")) params.set(key, value);
+    else params.delete(key);
+    if (key === "browse") {
+      clearSelection();
+      setSelectMode(false);
+    }
+    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+  }
+
   // Filters shared by the grid + outliner queries; only the search query and
   // pagination differ between them.
   const baseFilters: ModelListFilters = {
+    family_id: familyId,
+    family_role: familyRole,
+    in_family: inFamily,
+    browse: familyMode,
     tag: selectedTags.length ? selectedTags : undefined,
     printer_id: canViewPrinters ? (selectedPrinterId ?? undefined) : undefined,
     printer_presence:
@@ -883,6 +928,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
     const params = new URLSearchParams();
+    if (filters.browse === "families_collapsed") params.set("browse", filters.browse);
+    if (filters.family_id) params.set("family_id", String(filters.family_id));
+    if (filters.family_role) params.set("family_role", filters.family_role);
+    if (filters.in_family != null) params.set("in_family", filters.in_family ? "yes" : "no");
     if (filters.collection) params.set("c", filters.collection);
     if (filters.q) params.set("q", filters.q);
     filters.tag.forEach((tag) => params.append("tag", tag));
@@ -939,6 +988,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function currentViewFilters(): SavedViewRead["filters"] {
     return {
+      family_id: familyId ?? null,
+      family_role: familyRole ?? null,
+      in_family: inFamily ?? null,
+      browse: familyMode,
       collection: selectedCollection,
       direct: !searchQuery,
       tag: selectedTags,
@@ -965,8 +1018,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const activeSavedView = savedViews.find((view) => view.id === activeSavedViewId) ?? null;
   const savedViewModified =
     activeSavedView !== null &&
-    JSON.stringify({
+    viewFilterSignature({
       ...activeSavedView.filters,
+      family_id: activeSavedView.filters.family_id ?? null,
+      family_role: activeSavedView.filters.family_role ?? null,
+      in_family: activeSavedView.filters.in_family ?? null,
+      browse: activeSavedView.filters.browse ?? "models",
       has_similar_candidates: activeSavedView.filters.has_similar_candidates ?? null,
       collection: activeSavedView.filters.collection ?? null,
       q: activeSavedView.filters.q ?? null,
@@ -974,7 +1031,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       printer_presence: activeSavedView.filters.printer_presence ?? null,
       tag: [...activeSavedView.filters.tag].sort(),
     }) !==
-      JSON.stringify({
+      viewFilterSignature({
         ...currentViewFilters(),
         tag: [...selectedTags].sort(),
       });
@@ -1015,6 +1072,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     },
     PAGE_SIZE,
     sortKey,
+    familyMode === "models",
   );
   const multipartQuery = useMultipartModels(
     {
@@ -1025,11 +1083,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       favorites: favoritesOnly || undefined,
       limit: 500,
     },
-    { enabled: libraryView !== "components" },
+    { enabled: familyMode === "models" && libraryView !== "components" },
   );
   const multipartMembershipQuery = useMultipartModels(
     { limit: 500 },
-    { enabled: libraryView === "components" },
+    { enabled: familyMode === "models" && libraryView === "components" },
   );
   const multipartGroupingQuery = useMultipartModels(
     {
@@ -1037,7 +1095,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       favorites: favoritesOnly || undefined,
       limit: 500,
     },
-    { enabled: libraryView === "organized" && !searchQuery },
+    { enabled: familyMode === "models" && libraryView === "organized" && !searchQuery },
   );
   const multipartOutlinerQuery = useMultipartModels(
     {
@@ -1754,6 +1812,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           preloadItems={dropPreload?.items ?? null}
           initialMode={dropPreload?.mode}
         />
+        {familyTrashOpen && <FamilyTrashDialog onClose={() => setFamilyTrashOpen(false)} />}
+        {familyCreateOpen && (
+          <CreateFamilyDialog
+            models={familySeed}
+            onClose={() => setFamilyCreateOpen(false)}
+            onCreated={(family) => {
+              setFamilyCreateOpen(false);
+              clearSelection();
+              refresh();
+              router.push(`/families/${family.id}`);
+            }}
+          />
+        )}
         <NewMultipartModelModal
           key={selectedCollectionRow?.id ?? "vault"}
           open={multipartCreateOpen}
@@ -1949,11 +2020,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     {selectedName ?? uiText("All Models")}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {loading
-                      ? uiText("Loading...")
-                      : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
-                          count: displayCount,
-                        })}
+                    {familyMode === "families_collapsed"
+                      ? t("families.browseDescription")
+                      : loading
+                        ? uiText("Loading...")
+                        : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
+                            count: displayCount,
+                          })}
                     {refreshing && (
                       <span className="ml-2 font-mono text-xs text-muted-foreground">
                         {uiText("Updating...")}
@@ -2369,7 +2442,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {docView === "models" && selectMode && (
+          {docView === "models" && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 sm:px-6">
+              <FamilyFilters
+                mode={familyMode}
+                familyId={familyId}
+                role={familyRole}
+                membership={inFamily}
+                onChange={setFamilyFilter}
+              />
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={!auth.isAuthenticated}
+                onClick={() => setFamilyTrashOpen(true)}
+              >
+                {t("families.trash")}
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!auth.isAuthenticated || selectedCollectionIds.size > 0}
+                onClick={() => {
+                  setFamilySeed(
+                    [...selectedModelSnapshot.current.values()].filter((model) =>
+                      selectedIds.has(model.id),
+                    ),
+                  );
+                  setFamilyCreateOpen(true);
+                }}
+              >
+                <Boxes className="h-3.5 w-3.5" aria-hidden />
+                {t("families.create")}
+              </Button>
+            </div>
+          )}
+
+          {docView === "models" && familyMode === "models" && selectMode && (
             <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex items-center gap-3 text-xs">
               <span className="font-mono text-muted-foreground">
                 {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
@@ -2411,6 +2520,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               collectionId={selectedCollectionRow?.id ?? null}
               collectionPath={selectedCollection}
               canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+            />
+          ) : familyMode === "families_collapsed" ? (
+            <FamilyBrowseGrid
+              params={{
+                ...baseFilters,
+                collection: selectedCollection ?? undefined,
+                direct: !searchQuery,
+                q: searchQuery,
+                sort: sortKey,
+              }}
             />
           ) : (
             <div className="flex-1 flex flex-col bg-background">
@@ -2572,7 +2691,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
         </main>
 
-        {docView === "models" && (
+        {docView === "models" && familyMode === "models" && (
           <BatchToolbar
             modelCount={selectedIds.size}
             selectedCollections={selectedCollections}

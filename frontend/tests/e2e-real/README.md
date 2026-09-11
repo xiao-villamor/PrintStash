@@ -88,6 +88,11 @@ purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,
 status, compare) · public share links (view-only vs downloadable, revoke → 404) ·
 multipart sets (empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·
+Model Families (complete real Benchy variants and independent Revisions, explicit
+canonical selection, shared physical scale, isolated preview failures,
+desktop/mobile layouts, collapsed Saved Views, grouping-only trash,
+Model-detail creation, explicit member moves, local Multipart Choice drafts,
+and canonical Revision delivery to the printer emulator) ·
 RBAC (create user, grant collection access, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management
 (promote/disable/reset password) · API keys · settings overview (system status

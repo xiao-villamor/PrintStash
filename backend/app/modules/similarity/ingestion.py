@@ -5,13 +5,14 @@ from __future__ import annotations
 from app.core.errors import OperationError
 from app.db.models import File, User
 from app.db.session import SessionFactory
+from app.modules.ingestion.extensions import MeshExtractionOptions
 from app.modules.media.fingerprints import FingerprintResult
 from app.modules.similarity.configuration import read_settings
 from app.modules.similarity.fingerprints import publish_precomputed
 from app.modules.similarity.runs import start
 
 
-def extraction_options(sessions: SessionFactory) -> dict:
+def extraction_options(sessions: SessionFactory) -> MeshExtractionOptions:
     with sessions.scoped_session() as session:
         try:
             config = read_settings(session)

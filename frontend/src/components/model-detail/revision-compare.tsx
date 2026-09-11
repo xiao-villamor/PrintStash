@@ -15,6 +15,7 @@ import {
 import { ArtifactOutcomeRead, FileRead } from "@/types";
 
 import { revisionStatusLabel } from "./presentation";
+import { MetadataComparison } from "@/components/metadata-comparison";
 import { Localized } from "@/components/ui/localized";
 
 export function RevisionCompare({
@@ -33,7 +34,7 @@ export function RevisionCompare({
     [left.metadata?.slicer_name, left.metadata?.slicer_version].filter(Boolean).join(" ") || "—";
   const rightSlicer =
     [right.metadata?.slicer_name, right.metadata?.slicer_version].filter(Boolean).join(" ") || "—";
-  const rows = [
+  const rows: [string, string, string][] = [
     [uiText("Type"), left.file_type.toUpperCase(), right.file_type.toUpperCase()],
     [uiText("Version"), String(left.version), String(right.version)],
     [
@@ -162,39 +163,13 @@ export function RevisionCompare({
 
   return (
     <Localized>
-      <div className="bg-surface border border-outline-variant rounded overflow-hidden">
-        <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
-          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-            {uiText("Field")}
-          </span>
-          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
-            {uiText("Rev ")}
-            {left.gcode_revision_number ?? left.version}
-          </span>
-          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
-            {uiText("Rev ")}
-            {right.gcode_revision_number ?? right.version}
-          </span>
-        </div>
-        {rows.map(([label, leftValue, rightValue], index) => (
-          <div
-            key={label}
-            className={`grid grid-cols-[1fr_1fr_1fr] ${index === rows.length - 1 ? "" : "border-b border-surface-container-high"}`}
-          >
-            <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-              {label}
-            </span>
-            <span className="px-2 py-2 font-mono text-2xs text-on-surface break-words">
-              {leftValue}
-            </span>
-            <span
-              className={`px-2 py-2 font-mono text-2xs break-words ${leftValue === rightValue ? "text-on-surface" : "text-primary font-semibold"}`}
-            >
-              {rightValue}
-            </span>
-          </div>
-        ))}
-      </div>
+      <MetadataComparison
+        headings={[
+          `${uiText("Rev ")}${left.gcode_revision_number ?? left.version}`,
+          `${uiText("Rev ")}${right.gcode_revision_number ?? right.version}`,
+        ]}
+        rows={rows}
+      />
     </Localized>
   );
 }

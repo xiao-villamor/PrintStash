@@ -92,30 +92,42 @@ export async function createCollectionViaVault(
   }
 }
 
-type UploadOpts = { mesh?: boolean; gcode?: boolean; collection?: string; tag?: string };
+type FixtureUpload = { name: string; mimeType: string; buffer: Buffer };
+type UploadOpts = {
+  mesh?: boolean;
+  gcode?: boolean;
+  collection?: string;
+  tag?: string;
+  meshFile?: FixtureUpload;
+  gcodeFile?: FixtureUpload;
+};
 
 // Upload a model through the real upload flow and wait for async ingestion to
 // surface it. With a collection it lands inside that collection, not at root.
 export async function uploadModel(page: Page, name: string, opts: UploadOpts = {}): Promise<void> {
-  const { mesh = false, gcode = true, collection, tag } = opts;
+  const { mesh = Boolean(opts.meshFile), gcode = true, collection, tag } = opts;
   await page.goto("/");
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Upload model" });
   await expect(dialog).toBeVisible();
 
   if (gcode) {
-    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
-      name: `${name}.gcode`,
-      mimeType: "text/plain",
-      buffer: Buffer.from(gcodeFor(name)),
-    });
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles(
+      opts.gcodeFile ?? {
+        name: `${name}.gcode`,
+        mimeType: "text/plain",
+        buffer: Buffer.from(gcodeFor(name)),
+      },
+    );
   }
   if (mesh) {
-    await page.locator('input[accept=".stl,.3mf,.obj,.step,.stp"]').setInputFiles({
-      name: `${name}.stl`,
-      mimeType: "model/stl",
-      buffer: Buffer.from(stlFor(name)),
-    });
+    await page.locator('input[accept=".stl,.3mf,.obj,.step,.stp"]').setInputFiles(
+      opts.meshFile ?? {
+        name: `${name}.stl`,
+        mimeType: "model/stl",
+        buffer: Buffer.from(stlFor(name)),
+      },
+    );
   }
   await page.getByPlaceholder("e.g. Bracket v2").fill(name);
 

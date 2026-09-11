@@ -1035,7 +1035,7 @@ def run_ingestion_pipeline(
         model_id, file_id = durable_ids
         fingerprint_result = getattr(meta, "fingerprint_result", None)
         if fingerprint_result is not None:
-            from app.modules.similarity.ingestion import after_commit
+            from app.modules.ingestion.extensions import after_commit
 
             try:
                 fingerprint_status = after_commit(
@@ -1161,7 +1161,7 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
     def process(
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
-        from app.modules.similarity.ingestion import extraction_options
+        from app.modules.ingestion.extensions import extraction_options
 
         # Single mesh load for geometry, thumbnail and opted-in fingerprints.
         options = extraction_options(get_session_factory())

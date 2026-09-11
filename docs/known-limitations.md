@@ -307,8 +307,9 @@ active deletion safety tier.
 ## Similar Models (Unreleased)
 
 - Analysis defaults off. Similarity is review evidence, not byte deduplication,
-  printable compatibility or automatic grouping. Family resolution is unavailable;
-  evidence-only review and existing Multipart composition remain independent.
+  printable compatibility or automatic grouping. Similarity-driven Family
+  resolution is unavailable; manual Families and Multipart composition remain
+  independent of evidence review.
 - Complete STL/OBJ/3MF geometry is available in lite; STEP and local ONNX require
   the full profile. Sources beyond the geometry budget remain explicitly partial
   or unavailable. The default ceiling is 2,000,000 faces; the repository Benchy

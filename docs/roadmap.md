@@ -8,6 +8,16 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
+## Unreleased: Model Families
+
+Issue #155 adds manual variation relationships between independent Models,
+explicit canonical selection, shared-scale comparison, permission-filtered
+collapsed browsing and Saved Views, Multipart Choice selection, and portable
+v2 transfer with legacy v1 support. It is implemented independently of optional
+similarity and inference packages. See the [Family guide](model-families.md) and
+[behavior coverage matrix](model-families-coverage.md) for scope and validation.
+This work does not change the published 0.13.0 release.
+
 ## Published: 0.13.0, storage safety and capture provenance
 
 [Version 0.13.0 is published](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0),

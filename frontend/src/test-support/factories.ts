@@ -257,6 +257,7 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     updated_at: FROZEN_NOW,
     print_summary: null,
     starred: false,
+    family: null,
     similarity: { open_candidates: 0, confirmed: 0 },
     ...override,
   };
@@ -282,6 +283,7 @@ export function aModel(
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    family: null,
     similarity: { open_candidates: 0, confirmed: 0 },
     ...override,
   };

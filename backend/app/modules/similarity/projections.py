@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sqlalchemy import func, union_all
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, or_, select
 
 from app.db.models import Model, SimilarityCandidate, User
@@ -52,7 +53,7 @@ def summaries(
     return result
 
 
-def has_open_candidates(session: Session, actor: User):
+def has_open_candidates(session: Session, actor: User) -> ColumnElement[bool]:
     return (
         visible_query(session, actor)
         .with_only_columns(SimilarityCandidate.id)

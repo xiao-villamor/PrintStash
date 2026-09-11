@@ -41,3 +41,11 @@ publish a bounded, normalized image with a durable creation receipt before a new
 Family has a database ID, then commit membership, metadata and ownership together.
 Failure compensates only the exact newly created image. The shared ownership
 census includes both live and trashed Family covers for backup and vault migration.
+
+Application composition installs optional Model annotations and mesh derivatives
+through explicit library and ingestion ports. The library owner does not import
+Similarity or inference/search code. When either related package is absent,
+composition omits its routes and scheduler; manual ingestion, Family identity,
+search, Saved Views, Multipart Choices and portable transfer remain available.
+The normal installation still installs its annotations when analysis is disabled,
+so existing review badges and filters keep their established behavior.

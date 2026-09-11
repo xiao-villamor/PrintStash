@@ -31,7 +31,6 @@ from app.modules.printing.costing import (
     cost_profiles,
     match_cost_profile,
 )
-from app.modules.similarity.projections import summaries as similarity_summaries
 from app.schemas.models import (
     FileRead,
     MetadataRead,
@@ -40,6 +39,7 @@ from app.schemas.models import (
     PrintSummaryRead,
 )
 
+from .extensions import similarity_summaries
 from .families import family_summaries
 from .thumbnails import thumb_url
 

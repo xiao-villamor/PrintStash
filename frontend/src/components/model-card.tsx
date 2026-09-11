@@ -373,6 +373,11 @@ function ModelCardInner({
             />
           </div>
 
+          {model.family && (
+            <p className="truncate px-3 pb-1 text-xs text-muted-foreground">
+              {model.family.name} · {uiText(`families.role.${model.family.role}`)}
+            </p>
+          )}
           {Boolean(model.similarity?.open_candidates) && (
             <p className="flex items-center gap-1 px-3 pb-2 text-xs text-primary">
               <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />

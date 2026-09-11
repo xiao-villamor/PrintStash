@@ -58,11 +58,12 @@ from app.runtime.work_wakeup import LocalWorkWakeup
 logger = get_logger(__name__)
 
 
-async def _cancel_tasks(*tasks: asyncio.Task) -> None:
-    for task in tasks:
+async def _cancel_tasks(*tasks: asyncio.Task | None) -> None:
+    active = [task for task in tasks if task is not None]
+    for task in active:
         task.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+    if active:
+        await asyncio.gather(*active, return_exceptions=True)
 
 
 async def _close_outbound_clients() -> None:
@@ -362,12 +363,16 @@ async def lifespan(app: FastAPI):
     from app.runtime.vault_migrations import run_migrations as run_vault_migrations
 
     app.state.vault_migration_task = asyncio.create_task(run_vault_migrations())
-    from app.runtime.similarity import run_similarity
+    from app.bootstrap.optional_features import similarity_available
 
     app.state.similarity_wakeup = LocalWorkWakeup()
-    app.state.similarity_task = asyncio.create_task(
-        run_similarity(app.state.similarity_wakeup)
-    )
+    app.state.similarity_task = None
+    if similarity_available():
+        from app.runtime.similarity import run_similarity
+
+        app.state.similarity_task = asyncio.create_task(
+            run_similarity(app.state.similarity_wakeup)
+        )
     app.state.fleet_scheduler_task = asyncio.create_task(
         run_fleet_scheduler(work_wakeup, provider_builder)
     )

@@ -133,7 +133,7 @@ def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
                 Model.id.in_(memberships.with_only_columns(ModelFamilyMember.model_id))
             )
     if filters.has_similar_candidates is not None:
-        from app.modules.similarity.projections import has_open_candidates
+        from .extensions import has_open_candidates
 
         predicate = has_open_candidates(session, user)
         stmt = stmt.where(predicate if filters.has_similar_candidates else ~predicate)

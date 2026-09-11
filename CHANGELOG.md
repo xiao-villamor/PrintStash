@@ -10,6 +10,9 @@
   membership, and purging a Model explicitly clears its Family references.
   Portable v2 preserves Families and their covers, with idempotent reimport,
   explicit membership conflicts, and a v1 export option for older installations.
+  The library adds collapsed Family browsing, Saved Views, paginated member
+  selection, shared-scale comparison and explicit Multipart Choice drafts.
+  Manual Family workflows also work without similarity or inference packages.
 - **Similar Models** offers opt-in local geometry analysis, resumable library scans,
   a filtered review queue and synchronized comparisons at shared physical scale.
   Evidence confirmation keeps each Model, Artifact and Revision separate; verified

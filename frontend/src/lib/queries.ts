@@ -325,7 +325,12 @@ export function useModelFacets(filters: ModelListFilters) {
 /** Opaque page cursor as issued by the API; `null` requests the first page. */
 type ModelPageCursor = ModelPageRead["next_cursor"];
 
-export function useModelList(filters: ModelListFilters, pageSize: number, sort: ModelSort) {
+export function useModelList(
+  filters: ModelListFilters,
+  pageSize: number,
+  sort: ModelSort,
+  enabled = true,
+) {
   const api = useQueryApi();
   return useInfiniteQuery<
     ModelPageRead,
@@ -334,6 +339,7 @@ export function useModelList(filters: ModelListFilters, pageSize: number, sort: 
     QueryKey,
     ModelPageCursor
   >({
+    enabled,
     queryKey: [...queryKeys.models, "list", filters, sort],
     queryFn: ({ pageParam }) =>
       api.listModelPage({
