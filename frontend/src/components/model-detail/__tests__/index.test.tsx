@@ -129,7 +129,7 @@ describe("ModelDetail", () => {
     ])("returns to $label", async ({ collection, expected }) => {
       renderDetail({ model: aModel({ collection }) });
 
-      expect(await screen.findByRole("link", { name: "" })).toHaveAttribute("href", expected);
+      expect(await screen.findByRole("link", { name: "Back" })).toHaveAttribute("href", expected);
     });
   });
 
