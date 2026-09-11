@@ -11,16 +11,24 @@ Select Models in the library and choose **Create Family**, or start from an
 individual Model. Search and load more results without losing your selection.
 Choose the canonical Model explicitly before creating the Family. It is the
 reference variation and the default Model offered for printing.
+Choosing it suggests a name when the name field is blank. **Add to Family** on
+Model detail searches existing Families and lets you choose the variation role;
+joining preserves that Family's canonical choice.
 
 Use **Group variations** to switch between individual Models and one card per
 matching Family, alongside ungrouped Models. Membership and variation filters
 can be saved in Saved Views. Family name and description search also works;
 member counts and cover choices reflect your current access.
+The grouping choice is remembered locally. An explicit URL or Saved View takes
+priority, and switching to a Multipart view preserves that view's semantics.
 
-The detail page shows source files, Revisions, known-good counts and the latest
+The detail page shows dimensions, source files, Revisions, known-good counts and the latest
 print result for each member. Filter or sort this list before comparing or
 editing a variation. A Family's own tags, Collection, star and cover are separate
 from those of its members.
+Model overview also links to the authorized canonical Model, visible siblings
+and **Manage Family**. Family pages accept their readable slug as well as the
+existing numeric link.
 
 ## Variations and comparison
 
@@ -32,6 +40,8 @@ Select exactly two members to compare their geometry and print metadata. The
 previews share a physical scale and camera, so resizing differences remain
 visible. STL and OBJ do not declare units; the comparison says when units are
 unknown. Unsupported or failed previews retain their metadata.
+Missing stored dimensions do not prevent comparison: the loaded geometry supplies
+the common framing size while the metadata table continues to show missing values.
 
 Changing the canonical Model requires choosing the previous canonical's role.
 Known relative measurements can be rebased; uncertain relationships need review.

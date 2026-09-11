@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
-import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import type { ModelRead } from "@/types/models";
 import { CreateFamilyDialog } from "./create-dialog";
+import { JoinFamilyDialog } from "./join-dialog";
+import { FamilyMembershipSummary } from "./membership-summary";
 
 export function ModelFamilyMembership({
   model,
@@ -17,25 +18,27 @@ export function ModelFamilyMembership({
   const { t } = useI18n();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
-  if (model.family)
-    return (
-      <Link
-        href={`/families/${model.family.id}`}
-        className="mt-1 inline-flex max-w-full items-center gap-1.5 text-xs text-primary hover:underline"
-      >
-        <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span className="truncate">
-          {model.family.name} · {t(`families.role.${model.family.role}`)}
-        </span>
-      </Link>
-    );
+  const [joining, setJoining] = useState(false);
+  if (model.family) return <FamilyMembershipSummary family={model.family} model={model} />;
   if (!editable) return null;
   return (
     <>
-      <Button variant="ghost" size="xs" className="mt-1" onClick={() => setCreating(true)}>
-        <Boxes className="h-3.5 w-3.5" aria-hidden />
-        {t("families.create")}
-      </Button>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        <Button variant="ghost" size="xs" onClick={() => setJoining(true)}>
+          <Boxes className="h-3.5 w-3.5" aria-hidden />
+          {t("families.join")}
+        </Button>
+        <Button variant="ghost" size="xs" onClick={() => setCreating(true)}>
+          {t("families.create")}
+        </Button>
+      </div>
+      {joining && (
+        <JoinFamilyDialog
+          modelId={model.id}
+          onClose={() => setJoining(false)}
+          onJoined={(family) => router.push(`/families/${family.id}`)}
+        />
+      )}
       {creating && (
         <CreateFamilyDialog
           models={[model]}

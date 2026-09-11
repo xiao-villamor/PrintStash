@@ -1,3 +1,4 @@
+/** Family metadata and owned covers use current versions without changing member content. */
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";

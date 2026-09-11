@@ -51,7 +51,9 @@ describe("Family detail", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByRole("row", { name: "Variation Rescaled Canonical" })).toBeVisible();
     expect(within(table).getByRole("row", { name: "Scale 2 1" })).toBeVisible();
-  });
+    // The instrumented refetch + dialog scenario measures about 4.5s by itself;
+    // allow the same scenario to complete when full-suite workers share the CPU.
+  }, 10_000);
   it("shows member metadata without combining Revisions", async () => {
     const member = aFamilyMember({
       gcode_revision_count: 4,

@@ -3461,7 +3461,10 @@
   "families.browseModels": "Modelos individuales",
   "families.browseFamilies": "Agrupar Familias",
   "families.members": "Miembros",
-  "families.memberCount": "{count} Modelos",
+  "families.memberCount": {
+    "one": "{count} Modelo",
+    "other": "{count} Modelos"
+  },
   "families.matchingCount": "Coinciden {matching} de {total} Modelos",
   "families.canonical": "Modelo canónico",
   "families.vacancy": "Modelo canónico no disponible",
@@ -3588,5 +3591,15 @@
   "families.purge": "Eliminar Familia permanentemente",
   "families.purgeHelp": "¿Eliminar permanentemente {name} y su portada propia? Sus Modelos, archivos e historial permanecerán.",
   "families.restoreMissing": "Familia restaurada. No se han podido recuperar como miembros {count} Modelos eliminados permanentemente.",
-  "families.moreFilters": "Más filtros"
+  "families.moreFilters": "Más filtros",
+  "families.join": "Añadir a Familia",
+  "families.searchFamilies": "Buscar Familias…",
+  "families.selectedFamily": "Seleccionada: {name}",
+  "families.viewOnly": "Solo lectura",
+  "families.manage": "Gestionar Familia",
+  "families.siblings": "Otras variantes",
+  "families.siblingsUnavailable": "No se pudieron cargar las otras variantes.",
+  "families.millimeters": "mm",
+  "families.unknownUnits": "(unidades desconocidas)",
+  "families.noFamilyMatches": "Ninguna Familia coincide con esta búsqueda."
 }

@@ -1,7 +1,9 @@
 """Public-API scenario run in an installation with related packages removed."""
 
+import hashlib
 import io
 import json
+import struct
 import zipfile
 from importlib.util import find_spec
 
@@ -9,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import ensure_dirs, settings
 from app.main import app
-from tests.paths import TESTDATA_DIR, require_fixtures
+from tests.paths import BACKEND_DIR, TESTDATA_DIR, require_fixtures
 
 
 def run() -> None:
@@ -46,6 +48,7 @@ def run() -> None:
         ).json()
         client.headers["Authorization"] = f"Bearer {setup['access_token']}"
         model_ids = []
+        revisions = {}
         for mesh in meshes:
             uploaded = request(
                 "POST",
@@ -58,6 +61,23 @@ def run() -> None:
             job = request("GET", f"/ingest/jobs/{uploaded['job_id']}").json()
             assert job["state"] == "completed", job
             model_ids.append(job["model_id"])
+            gcode = (
+                (
+                    BACKEND_DIR / "tests/fixtures/real_orca_ender3_benchy.gcode"
+                ).read_bytes()
+                + f"\n; Independent Family Model {job['model_id']}\n".encode()
+            )
+            sliced = request(
+                "POST",
+                "/ingest/orca",
+                status=202,
+                data={"source_hash": hashlib.sha256(mesh.read_bytes()).hexdigest()},
+                files={"file": (f"{mesh.stem}.gcode", gcode, "text/plain")},
+            ).json()
+            revision = request("GET", f"/ingest/jobs/{sliced['job_id']}").json()
+            assert revision["state"] == "completed", revision
+            assert revision["model_id"] == job["model_id"]
+            revisions[job["model_id"]] = (revision["file_id"], gcode)
 
         family = request(
             "POST",
@@ -75,10 +95,15 @@ def run() -> None:
         assert len(members) == 2
         for member, mesh in zip(members, meshes, strict=True):
             assert member["source_file_count"] == 1
+            assert member["gcode_revision_count"] == 1
             preview = member["preview_file"]
             assert preview["metadata"]["triangle_count"] > 6000
             download = request("GET", f"/files/{preview['id']}/download")
             assert download.content == mesh.read_bytes()
+            converted = request("GET", f"/files/{preview['id']}/stl").content
+            faces = struct.unpack_from("<I", converted, 80)[0]
+            assert faces > 6000
+            assert len(converted) == 84 + faces * 50
         family = request(
             "POST",
             f"{path}/canonical",
@@ -124,13 +149,14 @@ def run() -> None:
                 ],
             },
         ).json()
-        assert [
-            choice["id"] for choice in multipart["parts"][0]["models"]
-        ] == model_ids
+        assert [choice["id"] for choice in multipart["parts"][0]["models"]] == model_ids
         request("DELETE", path, params={"version": family["version"]}, status=204)
         request("GET", path, status=404)
         for mid in model_ids:
-            request("GET", f"/models/{mid}")
+            model = request("GET", f"/models/{mid}").json()
+            assert len(model["files"]) == 2
+            revision_id, original = revisions[mid]
+            assert request("GET", f"/files/{revision_id}/download").content == original
         restored = request(
             "POST", f"{path}/restore", json={"version": family["version"] + 1}
         ).json()

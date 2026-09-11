@@ -42,7 +42,10 @@ function FamilyCard({ family, onChange }: { family: FamilyRead; onChange: () => 
         </div>
       </Link>
       <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-2">
-        <Link href={`/?family_id=${family.id}`} className="text-xs text-primary hover:underline">
+        <Link
+          href={`/?family_id=${family.id}&browse=models`}
+          className="text-xs text-primary hover:underline"
+        >
           {t("families.viewMembers")}
         </Link>
         <Button

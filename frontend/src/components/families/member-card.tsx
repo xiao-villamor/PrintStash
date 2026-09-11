@@ -34,7 +34,7 @@ export function FamilyMemberCard({
   actions.push("detach");
   const metric = (label: string, value: string | number) => (
     <div className="min-w-0">
-      <dt className="truncate text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="truncate text-sm font-medium tabular-nums">{value}</dd>
     </div>
   );
@@ -127,6 +127,23 @@ export function FamilyMemberCard({
               : t("families.noPrint"),
           )}
         </div>
+      </dl>
+      <dl className="mt-2 text-xs">
+        <dt className="text-muted-foreground">{t("families.dimensions")}</dt>
+        <dd className="tabular-nums">
+          {[
+            member.preview_file?.metadata?.bbox_x_mm,
+            member.preview_file?.metadata?.bbox_y_mm,
+            member.preview_file?.metadata?.bbox_z_mm,
+          ]
+            .map((value) =>
+              value == null
+                ? "—"
+                : new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value),
+            )
+            .join(" × ")}{" "}
+          {member.units === "mm" ? t("families.millimeters") : t("families.unknownUnits")}
+        </dd>
       </dl>
       {member.relative_review_required && (
         <p className="mt-2 text-xs font-medium text-warning">{t("families.reviewRelative")}</p>

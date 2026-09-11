@@ -45,6 +45,8 @@ export interface STLViewerProps {
   url: string;
   onControlsReady?: (api: STLViewerControls) => void;
   onReadyChange?: (ready: boolean) => void;
+  /** Largest loaded dimension, before viewer normalization, in source units. */
+  onGeometrySize?: (size: number) => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
@@ -69,12 +71,14 @@ function Mesh({
   url,
   displayMode,
   onSized,
+  onGeometrySize,
   comparison,
   overlay = false,
 }: {
   url: string;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
+  onGeometrySize?: (size: number) => void;
   comparison?: MeshComparison;
   overlay?: boolean;
 }) {
@@ -83,6 +87,10 @@ function Mesh({
     loader.setRequestHeader(authHeaders());
   });
   const meshRef = useRef<THREE.Mesh>(null);
+  const geometrySizeRef = useRef(onGeometrySize);
+  useEffect(() => {
+    geometrySizeRef.current = onGeometrySize;
+  }, [onGeometrySize]);
 
   useEffect(() => {
     if (!meshRef.current) return;
@@ -101,6 +109,7 @@ function Mesh({
     box.getSize(sizeVec);
 
     const maxDim = Math.max(sizeVec.x, sizeVec.y, sizeVec.z);
+    if (Number.isFinite(maxDim) && maxDim > 0) geometrySizeRef.current?.(maxDim);
     const scale = comparison
       ? sharedScale(comparison.referenceSizeMm)
       : maxDim > 0
@@ -137,6 +146,7 @@ function Scene({
   url,
   onControlsReady,
   onLoadedChange,
+  onGeometrySize,
   displayMode,
   showGrid,
   screenshotName,
@@ -147,12 +157,18 @@ function Scene({
 }: Required<
   Omit<
     STLViewerProps,
-    "onControlsReady" | "onReadyChange" | "comparison" | "comparisonCamera" | "overlay"
+    | "onControlsReady"
+    | "onReadyChange"
+    | "onGeometrySize"
+    | "comparison"
+    | "comparisonCamera"
+    | "overlay"
   >
 > &
   Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay"> & {
     onControlsReady?: (api: STLViewerControls) => void;
     onLoadedChange?: (loaded: boolean) => void;
+    onGeometrySize?: (size: number) => void;
     screenshotScale: ScreenshotScale;
   }) {
   useUiLocale();
@@ -328,6 +344,7 @@ function Scene({
           url={url}
           displayMode={displayMode}
           onSized={handleSized}
+          onGeometrySize={onGeometrySize}
           comparison={comparison}
         />
         {overlay && (
@@ -401,6 +418,7 @@ export function STLViewer({
   url,
   onControlsReady,
   onReadyChange,
+  onGeometrySize,
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
@@ -431,6 +449,7 @@ export function STLViewer({
             url={url}
             onControlsReady={onControlsReady}
             onLoadedChange={setMeshLoaded}
+            onGeometrySize={onGeometrySize}
             displayMode={displayMode}
             showGrid={showGrid}
             screenshotName={screenshotName}

@@ -34,6 +34,7 @@ import type {
   TagRead,
 } from "@/types";
 import { aModelListItem, aPrinter } from "@/test-support/factories";
+import { aFamily } from "@/test-support/families";
 import {
   adminSession,
   json,
@@ -214,6 +215,82 @@ afterEach(() => {
 });
 
 describe("ModelBrowser", () => {
+  describe("Family grouping preferences", () => {
+    it("remembers the chosen grouping when returning to the library", async () => {
+      const user = userEvent.setup();
+      const routes = {
+        "GET /api/v1/families/browse": json({
+          items: [{ kind: "family", family: aFamily() }],
+          total: 1,
+          next_cursor: null,
+        }),
+      };
+      const first = renderVault({ routes });
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Group variations" }),
+        "families_collapsed",
+      );
+      expect(await screen.findByRole("heading", { name: "Benchy variations" })).toBeVisible();
+      expect(localStorage.getItem("ps-vault-family-browse")).toBe("families_collapsed");
+      first.unmount();
+      renderVault({ routes });
+      expect(await screen.findByRole("heading", { name: "Benchy variations" })).toBeVisible();
+      expect(screen.getByRole("combobox", { name: "Group variations" })).toHaveValue(
+        "families_collapsed",
+      );
+    });
+
+    it("gives the explicit URL mode priority over a saved preference", async () => {
+      localStorage.setItem("ps-vault-family-browse", "families_collapsed");
+      const { requests } = renderVault({
+        at: "/?browse=models",
+        models: [aModelListItem({ name: "Single boat" })],
+      });
+      expect(await screen.findByText("Single boat")).toBeVisible();
+      expect(screen.getByRole("combobox", { name: "Group variations" })).toHaveValue("models");
+      expect(requests().some(({ url }) => url.includes("/families/browse"))).toBe(false);
+    });
+
+    it("applies a Saved View's ungrouped mode over the local preference", async () => {
+      const user = userEvent.setup();
+      localStorage.setItem("ps-vault-family-browse", "families_collapsed");
+      const { requests } = renderVault({
+        models: [aModelListItem({ name: "Single boat" })],
+        routes: {
+          "GET /api/v1/families/browse": json({ items: [], total: 0, next_cursor: null }),
+          "GET /api/v1/saved-views": json([
+            aSavedView({
+              name: "Individual Models",
+              filters: { ...EMPTY_VIEW_FILTERS, browse: "models" },
+            }),
+          ]),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: "Individual Models" }));
+      expect(await screen.findByText("Single boat")).toBeVisible();
+      expect(lastModelsQuery(requests).get("browse")).toBe("models");
+      expect(localStorage.getItem("ps-vault-family-browse")).toBe("families_collapsed");
+    });
+
+    it.each(["multipart", "components"])(
+      "preserves the %s view with a collapsed preference",
+      async (mode) => {
+        localStorage.setItem("ps-vault-family-browse", "families_collapsed");
+        const { requests } = renderVault({
+          at: `/?type=${mode}`,
+          multipartModels: [aMultipartSet()],
+        });
+        await waitFor(() =>
+          expect(requests().some(({ url }) => url.startsWith("/api/v1/multipart-models"))).toBe(
+            true,
+          ),
+        );
+        expect(screen.getByRole("combobox", { name: "Group variations" })).toHaveValue("models");
+        expect(requests().some(({ url }) => url.includes("/families/browse"))).toBe(false);
+      },
+    );
+  });
   describe("listing", () => {
     it("renders a card for every model", async () => {
       renderVault({

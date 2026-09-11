@@ -3461,7 +3461,10 @@
   "families.browseModels": "Individual Models",
   "families.browseFamilies": "Group Families",
   "families.members": "Members",
-  "families.memberCount": "{count} Models",
+  "families.memberCount": {
+    "one": "{count} Model",
+    "other": "{count} Models"
+  },
   "families.matchingCount": "{matching} of {total} Models match",
   "families.canonical": "Canonical Model",
   "families.vacancy": "Canonical Model unavailable",
@@ -3588,5 +3591,15 @@
   "families.purge": "Delete Family permanently",
   "families.purgeHelp": "Permanently delete {name} and its owned cover? Its Models, files and print history will remain.",
   "families.restoreMissing": "Family restored. {count} permanently deleted Models could not be restored as members.",
-  "families.moreFilters": "More filters"
+  "families.moreFilters": "More filters",
+  "families.join": "Add to Family",
+  "families.searchFamilies": "Search Families…",
+  "families.selectedFamily": "Selected: {name}",
+  "families.viewOnly": "View only",
+  "families.manage": "Manage Family",
+  "families.siblings": "Other variations",
+  "families.siblingsUnavailable": "Could not load the other variations.",
+  "families.millimeters": "mm",
+  "families.unknownUnits": "(units unknown)",
+  "families.noFamilyMatches": "No Families match this search."
 }

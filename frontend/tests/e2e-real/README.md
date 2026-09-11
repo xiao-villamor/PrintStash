@@ -91,7 +91,9 @@ multipart sets (empty-set first action, external cover, tags, favorites, reusabl
 Model Families (complete real Benchy variants and independent Revisions, explicit
 canonical selection, shared physical scale, isolated preview failures,
 desktop/mobile layouts, collapsed Saved Views, grouping-only trash,
-Model-detail creation, explicit member moves, local Multipart Choice drafts,
+Model-detail creation, existing-Family selection, slug navigation, missing stored
+dimensions, a real G-code-only member beside a working preview, visible sibling
+context, explicit member moves, local Multipart Choice drafts,
 and canonical Revision delivery to the printer emulator) ·
 RBAC (create user, grant collection access, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management

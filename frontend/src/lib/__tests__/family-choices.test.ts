@@ -1,10 +1,11 @@
+/** Multipart Choices append only new visible Family Models in selection order. */
 import { describe, expect, it } from "vitest";
 import { newFamilyChoices } from "../family-choices";
 import { aModelListItem } from "@/test-support/factories";
 import { aFamilyMember } from "@/test-support/families";
 
 describe("Family Choices", () => {
-  it("preserves explicit selection order and excludes duplicates across Parts", () => {
+  it("appends only new selected Models in selection order", () => {
     const existing = aFamilyMember();
     const second = aFamilyMember({
       id: 12,

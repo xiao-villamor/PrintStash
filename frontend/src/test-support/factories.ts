@@ -310,6 +310,39 @@ export function aRevision(
   };
 }
 
+/** Unknown measurements stay unknown until a parser supplies them. */
+export function aMetadata(
+  override: Partial<import("@/types").MetadataRead> = {},
+): import("@/types").MetadataRead {
+  return {
+    slicer_name: null,
+    slicer_version: null,
+    printer_model: null,
+    nozzle_diameter_mm: null,
+    layer_height_mm: null,
+    first_layer_height_mm: null,
+    infill_percent: null,
+    wall_loops: null,
+    top_shell_layers: null,
+    bottom_shell_layers: null,
+    support_material: null,
+    nozzle_temperature_c: null,
+    bed_temperature_c: null,
+    estimated_time_s: null,
+    filament_weight_g: null,
+    filament_length_mm: null,
+    filament_cost: null,
+    material_type: null,
+    material_brand: null,
+    bbox_x_mm: null,
+    bbox_y_mm: null,
+    bbox_z_mm: null,
+    volume_mm3: null,
+    triangle_count: null,
+    ...override,
+  };
+}
+
 export function aBuildAttempt(
   override?: Partial<import("@/types/multipart-builds").MultipartBuildAttempt>,
 ): import("@/types/multipart-builds").MultipartBuildAttempt {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { MetadataComparison } from "@/components/metadata-comparison";
 import { getAssetUrl } from "@/lib/api/request";
 import { createComparisonCamera } from "@/lib/comparison-camera";
@@ -19,13 +19,16 @@ export function FamilyComparison({
 }) {
   const { t, locale } = useI18n();
   const camera = useMemo(() => createComparisonCamera(), []);
-  const referenceSizeMm = Math.max(
-    1,
-    ...members.flatMap((member) => {
-      const metadata = member.preview_file?.metadata;
-      return [metadata?.bbox_x_mm ?? 0, metadata?.bbox_y_mm ?? 0, metadata?.bbox_z_mm ?? 0];
-    }),
-  );
+  const [loadedSizes, setLoadedSizes] = useState<Record<number, number>>({});
+  const referenceSizeMm =
+    Math.max(
+      ...members.flatMap((member) => {
+        const actual = member.preview_file && loadedSizes[member.preview_file.id];
+        if (actual) return [actual];
+        const metadata = member.preview_file?.metadata;
+        return [metadata?.bbox_x_mm ?? 0, metadata?.bbox_y_mm ?? 0, metadata?.bbox_z_mm ?? 0];
+      }),
+    ) || 1;
   const comparison = useMemo(() => ({ referenceSizeMm }), [referenceSizeMm]);
   const number = (value: number | null | undefined) =>
     value == null ? "—" : new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value);
@@ -65,6 +68,7 @@ export function FamilyComparison({
       number(right.gcode_revision_count),
     ],
     [t("families.knownGood"), number(left.known_good_count), number(right.known_good_count)],
+    [t("families.source"), left.model.source_url || "—", right.model.source_url || "—"],
     [
       t("families.latestPrint"),
       left.latest_print_outcome
@@ -106,6 +110,12 @@ export function FamilyComparison({
                     url={getAssetUrl(`/api/v1/files/${member.preview_file.id}/stl`)}
                     comparison={comparison}
                     comparisonCamera={camera}
+                    onGeometrySize={(size) => {
+                      const id = member.preview_file!.id;
+                      setLoadedSizes((current) =>
+                        current[id] === size ? current : { ...current, [id]: size },
+                      );
+                    }}
                     showGrid={false}
                   />
                 </Suspense>

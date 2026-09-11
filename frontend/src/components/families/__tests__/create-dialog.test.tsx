@@ -10,6 +10,22 @@ import { json, memberSession, renderApp } from "@/test-support/render";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Create Family", () => {
+  it("suggests the chosen canonical name without replacing a custom name", async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <CreateFamilyDialog
+        models={[aModelListItem({ name: "Benchy" }), aModelListItem({ id: 2, name: "Spatula" })]}
+        onClose={() => {}}
+        onCreated={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole("radio", { name: "Benchy" }));
+    expect(screen.getByLabelText("Family name")).toHaveValue("Benchy");
+    await user.clear(screen.getByLabelText("Family name"));
+    await user.type(screen.getByLabelText("Family name"), "Workshop tools");
+    await user.click(screen.getByRole("radio", { name: "Spatula" }));
+    expect(screen.getByLabelText("Family name")).toHaveValue("Workshop tools");
+  });
   it("requires an explicit canonical selection", async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn<(family: ReturnType<typeof aFamily>) => void>();

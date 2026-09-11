@@ -145,7 +145,7 @@ export function FamilyMetadataDialog({
                   maxLength={2048}
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
-                  placeholder="https://"
+                  placeholder={t("multipart.coverImagePlaceholder")}
                 />
               )}
               {coverMode === "upload" && (

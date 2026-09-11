@@ -1,3 +1,4 @@
+/** Family Choices preserve explicit selection in a draft until Multipart save. */
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +18,7 @@ const second = aFamilyMember({
 const base = { "GET /api/v1/models/1": json(aModel({ family: aFamilySummary() })) };
 
 describe("Family Choices picker", () => {
-  it("searches members and keeps explicit selection in a local draft", async () => {
+  it("preserves explicit selection across member searches", async () => {
     const user = userEvent.setup();
     const select = vi.fn<(members: ReturnType<typeof aFamilyMember>[]) => void>();
     const close = vi.fn<() => void>();
@@ -45,7 +46,7 @@ describe("Family Choices picker", () => {
     expect(requestsWithMethod("PUT")).toEqual([]);
   });
 
-  it("explains existing Choices and pages through the remaining members", async () => {
+  it("keeps existing Choices unavailable while paging", async () => {
     const user = userEvent.setup();
     renderApp(
       <FamilyChoicesDialog

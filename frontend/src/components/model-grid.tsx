@@ -607,6 +607,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const requestedLibraryView = searchParams.get("type");
   const [libraryView, setLibraryView] = useState<LibraryViewMode>(() => {
+    if (!requestedLibraryView && searchParams.get("browse") === "families_collapsed") return "all";
     if (
       requestedLibraryView === "all" ||
       requestedLibraryView === "multipart" ||
@@ -814,6 +815,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());
     params.delete("v");
+    if (
+      params.has("browse") ||
+      readVaultPreference("ps-vault-family-browse") === "families_collapsed"
+    ) {
+      params.set("browse", "models");
+    }
     if (view === "organized") params.delete("type");
     else params.set("type", view);
     router.replace(params.size ? `/?${params}` : "/", { scroll: false });
@@ -868,7 +875,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   const familyMode =
-    searchParams.get("browse") === "families_collapsed" ? "families_collapsed" : "models";
+    libraryView === "all" &&
+    (searchParams.get("browse") ?? readVaultPreference("ps-vault-family-browse")) ===
+      "families_collapsed"
+      ? "families_collapsed"
+      : "models";
   const rawFamilyId = Number(searchParams.get("family_id"));
   const familyId = Number.isSafeInteger(rawFamilyId) && rawFamilyId > 0 ? rawFamilyId : undefined;
   const familyRole = (["canonical", ...MEMBER_ROLES] as const).find(
@@ -882,9 +893,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         : undefined;
   function setFamilyFilter(key: FamilyFilterKey, value: string) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value && !(key === "browse" && value === "models")) params.set(key, value);
+    if (value) params.set(key, value);
     else params.delete(key);
     if (key === "browse") {
+      localStorage.setItem("ps-vault-family-browse", value);
+      if (value === "families_collapsed") {
+        setLibraryView("all");
+        localStorage.setItem(LIBRARY_VIEW_KEY, "all");
+        params.set("type", "all");
+      }
       clearSelection();
       setSelectMode(false);
     }
@@ -928,7 +945,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
     const params = new URLSearchParams();
-    if (filters.browse === "families_collapsed") params.set("browse", filters.browse);
+    if (filters.browse === "families_collapsed") {
+      setLibraryView("all");
+      params.set("type", "all");
+    }
+    params.set("browse", filters.browse === "families_collapsed" ? filters.browse : "models");
     if (filters.family_id) params.set("family_id", String(filters.family_id));
     if (filters.family_role) params.set("family_role", filters.family_role);
     if (filters.in_family != null) params.set("in_family", filters.in_family ? "yes" : "no");

@@ -112,7 +112,10 @@ export function CreateFamilyDialog({
                         name={`${id}-canonical`}
                         value={model.id}
                         checked={canonical === model.id}
-                        onChange={() => setCanonical(model.id)}
+                        onChange={() => {
+                          setCanonical(model.id);
+                          if (!name.trim()) setName(model.name.slice(0, 255));
+                        }}
                         className="accent-primary"
                       />
                       <span className="truncate">{model.name}</span>
