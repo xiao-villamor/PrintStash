@@ -75,7 +75,9 @@ def _collection_path_for(raw_path: str) -> str:
     return "/".join(segments)
 
 
-def star_model(model_id: int, current_user: User, session: Session) -> ModelStarRead:
+def star_model(
+    model_id: int, current_user: User, session: Session, *, commit: bool = True
+) -> ModelStarRead:
     with rollback_on_failure(session):
         if not current_user.is_active:
             raise OperationError(
@@ -89,7 +91,10 @@ def star_model(model_id: int, current_user: User, session: Session) -> ModelStar
         ).first()
         if existing is None:
             session.add(ModelStar(user_id=current_user.id, model_id=model_id))
-            session.commit()
+            if commit:
+                session.commit()
+            else:
+                session.flush()
         return ModelStarRead(model_id=model_id, starred=True)
 
 
@@ -177,7 +182,11 @@ def _require_all_editable_models(
 
 
 def batch_move_models(
-    payload: ModelBatchMove, current_user: User, session: Session
+    payload: ModelBatchMove,
+    current_user: User,
+    session: Session,
+    *,
+    commit: bool = True,
 ) -> ModelBatchResult:
     with rollback_on_failure(session):
         if not current_user.is_active:
@@ -229,7 +238,10 @@ def batch_move_models(
             session.add(m)
             succeeded.append(m.id)  # type: ignore[arg-type]
 
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return ModelBatchResult(
             succeeded_ids=succeeded,
             failed=[],
@@ -239,7 +251,11 @@ def batch_move_models(
 
 
 def batch_tag_models(
-    payload: ModelBatchTags, current_user: User, session: Session
+    payload: ModelBatchTags,
+    current_user: User,
+    session: Session,
+    *,
+    commit: bool = True,
 ) -> ModelBatchResult:
     with rollback_on_failure(session):
         if not current_user.is_active:
@@ -295,7 +311,10 @@ def batch_tag_models(
             session.add(m)
             succeeded.append(model_id)
 
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         return ModelBatchResult(
             succeeded_ids=succeeded,
             failed=[],

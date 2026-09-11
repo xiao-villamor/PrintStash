@@ -13,6 +13,7 @@ from app.db.models import FileType, ModelFamily, User
 from app.db.session import get_session
 from app.modules.library.families import (
     access,
+    bulk,
     canonical,
     lifecycle,
     members,
@@ -23,6 +24,8 @@ from app.modules.library.model_views import family_browse, family_members
 from app.modules.library.model_views.families import family_reads
 from app.schemas.families import (
     FamilyBrowsePage,
+    FamilyBulkCollection,
+    FamilyBulkTags,
     FamilyCanonicalChange,
     FamilyCreate,
     FamilyMemberAdd,
@@ -38,7 +41,7 @@ from app.schemas.families import (
     FamilyVersion,
 )
 from app.schemas.family_types import VariantRole
-from app.schemas.models import ModelFilters, ModelSort
+from app.schemas.models import ModelBatchResult, ModelFilters, ModelSort
 
 from .family_filters import family_browse_filters
 
@@ -346,3 +349,51 @@ def unstar_family(
     with _transaction(session):
         metadata.star(session, user, family_id, False)
     return Response(status_code=204)
+
+
+@router.post(
+    "/{family_id}/members/tags",
+    response_model=ModelBatchResult,
+    dependencies=[Depends(require_auth)],
+)
+def bulk_tags(
+    family_id: int,
+    data: FamilyBulkTags,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> ModelBatchResult:
+    with _transaction(session):
+        result = bulk.apply_tags(session, user, family_id, data)
+    return result
+
+
+@router.post(
+    "/{family_id}/members/collection",
+    response_model=ModelBatchResult,
+    dependencies=[Depends(require_auth)],
+)
+def bulk_collection(
+    family_id: int,
+    data: FamilyBulkCollection,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> ModelBatchResult:
+    with _transaction(session):
+        result = bulk.move_collection(session, user, family_id, data)
+    return result
+
+
+@router.post(
+    "/{family_id}/members/star",
+    response_model=ModelBatchResult,
+    dependencies=[Depends(require_auth)],
+)
+def bulk_star(
+    family_id: int,
+    data: FamilyVersion,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_user),
+) -> ModelBatchResult:
+    with _transaction(session):
+        result = bulk.star_visible(session, user, family_id, data.version)
+    return result

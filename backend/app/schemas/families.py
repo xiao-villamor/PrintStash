@@ -2,14 +2,25 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole
 from app.schemas.family_types import MemberRole, VariantRole
 from app.schemas.models import FileRead, ModelListItem
+
+FamilyTagName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
+]
 
 
 class FamilyMemberInput(BaseModel):
@@ -59,7 +70,7 @@ class FamilyUpdate(FamilyVersion):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1_000_000)
     collection_id: int | None = Field(default=None, gt=0)
-    tags: list[str] | None = Field(default=None, max_length=100)
+    tags: list[FamilyTagName] | None = Field(default=None, max_length=100)
     cover_model_id: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
@@ -201,3 +212,12 @@ class FamilyMemberPage(BaseModel):
     items: list[FamilyMemberItem]
     total: int
     next_cursor: str | None = None
+
+
+class FamilyBulkTags(FamilyVersion):
+    add: list[FamilyTagName] = Field(default_factory=list, max_length=100)
+    remove: list[FamilyTagName] = Field(default_factory=list, max_length=100)
+
+
+class FamilyBulkCollection(FamilyVersion):
+    collection: str = Field(max_length=1024)

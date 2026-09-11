@@ -76,6 +76,158 @@ class TestAddMember:
 
 
 class TestChangeCanonical:
+    def test_preserves_current_canonical_selection(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        family = make_family()
+        canonical = make_family_member(family, make_model(), canonical=True)
+        sibling = make_family_member(
+            family, make_model(), mirrored=True, mirror_verified=False
+        )
+        before = db_session.get(ModelFamilyMember, sibling.id).model_dump()
+
+        response = client.post(
+            f"/api/v1/families/{family.id}/canonical",
+            json={
+                "version": family.version,
+                "member_id": canonical.id,
+                "previous_role": "identical",
+            },
+            headers=auth_headers,
+        )
+        db_session.expire_all()
+
+        assert response.status_code == 200, response.text
+        assert family.version == 1
+        assert db_session.get(ModelFamilyMember, sibling.id).model_dump() == before
+
+    def test_clears_unreliable_relative_scale(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        family = make_family()
+        original = make_family_member(family, make_model(), canonical=True)
+        replacement = make_family_member(family, make_model(), scale_factor=None)
+        sibling = make_family_member(
+            family,
+            make_model(),
+            role="repaired",
+            scale_factor=2,
+            relative_to_member_id=original.id,
+            transformation_note="Preserve this note",
+        )
+
+        response = client.post(
+            f"/api/v1/families/{family.id}/canonical",
+            json={
+                "version": 1,
+                "member_id": replacement.id,
+                "previous_role": "identical",
+            },
+            headers=auth_headers,
+        )
+        db_session.expire_all()
+
+        assert response.status_code == 200, response.text
+        assert original.scale_factor is None
+        assert sibling.scale_factor is None
+        assert sibling.relative_to_member_id is None
+        assert replacement.scale_factor == 1
+        assert sibling.transformation_note == "Preserve this note"
+        assert sibling.role == "repaired"
+
+    def test_recomposes_verified_mirror_relation(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        family = make_family()
+        original = make_family_member(family, make_model(), canonical=True)
+        replacement = make_family_member(
+            family,
+            make_model(),
+            mirrored=True,
+            mirror_verified=True,
+            mirror_reference_member_id=original.id,
+        )
+        sibling = make_family_member(
+            family,
+            make_model(),
+            mirrored=True,
+            mirror_verified=True,
+            mirror_reference_member_id=original.id,
+        )
+
+        response = client.post(
+            f"/api/v1/families/{family.id}/canonical",
+            json={
+                "version": 1,
+                "member_id": replacement.id,
+                "previous_role": "mirrored",
+            },
+            headers=auth_headers,
+        )
+        db_session.expire_all()
+
+        assert response.status_code == 200, response.text
+        assert original.mirrored is True
+        assert sibling.mirrored is False
+        assert sibling.mirror_reference_member_id == replacement.id
+        assert sibling.mirror_verified is True
+        assert sibling.relative_review_required is False
+
+    def test_preserves_unverified_mirror_provenance(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        family = make_family()
+        original = make_family_member(family, make_model(), canonical=True)
+        replacement = make_family_member(family, make_model())
+        sibling = make_family_member(
+            family,
+            make_model(),
+            mirrored=True,
+            mirror_verified=False,
+            mirror_reference_member_id=original.id,
+        )
+
+        response = client.post(
+            f"/api/v1/families/{family.id}/canonical",
+            json={
+                "version": 1,
+                "member_id": replacement.id,
+                "previous_role": "identical",
+            },
+            headers=auth_headers,
+        )
+        db_session.expire_all()
+
+        assert response.status_code == 200, response.text
+        assert sibling.mirrored is True
+        assert sibling.mirror_reference_member_id == original.id
+        assert sibling.mirror_verified is False
+        assert sibling.relative_review_required is True
+
     def test_changes_canonical_atomically(
         self,
         client,

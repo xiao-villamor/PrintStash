@@ -148,6 +148,30 @@ class TestRestoreFamily:
 
 
 class TestModelFamilyLifecycle:
+    def test_restores_member_to_family(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        make_family,
+        make_model,
+        make_family_member,
+    ):
+        family = make_family()
+        canonical = make_family_member(family, make_model(), canonical=True)
+        model = make_model(trashed=True)
+        member = make_family_member(family, model, role="print_variant")
+
+        trash.restore_model(db_session, model)
+        db_session.commit()
+        response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["family"]["id"] == family.id
+        assert response.json()["family"]["member_id"] == member.id
+        assert response.json()["family"]["role"] == "print_variant"
+        assert response.json()["family"]["canonical_model_id"] == canonical.model_id
+
     def test_reserves_membership_during_model_trash(
         self,
         client,

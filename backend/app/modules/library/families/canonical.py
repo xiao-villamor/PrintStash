@@ -29,6 +29,10 @@ def choose(
     if chosen is None or chosen.model_id is None:
         raise OperationError("family_canonical_invalid", kind=ErrorKind.UNPROCESSABLE)
     require_models(session, user, [chosen.model_id])
+    if family.version != data.version:
+        raise OperationError("family_revision_conflict", kind=ErrorKind.CONFLICT)
+    if family.canonical_member_id == chosen.id:
+        return family
     touch(session, user, family, data.version)
     previous_id = family.canonical_member_id
     reference_scale = chosen.scale_factor
