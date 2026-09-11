@@ -56,13 +56,18 @@ These profiles were collected before the final smaller render chunks and exact
 pair cache. They describe individual operations, not cold-library throughput.
 The complete 640 × 480 Benchy preview is pixel-identical to the baseline on this
 host. `tests/integration/modules/media/test_mesh_render.py` retains a baseline
-image with a one-channel-level tolerance for native floating-point variation.
+image, asserts its exact alpha silhouette, and compares colors composited on
+light and dark backgrounds within one channel level. This measures visible
+variation without amplifying rounding in nearly transparent edge pixels.
 
 The standalone `tests.fakes.similarity_resource_probe` analyzes and renders the
 full Benchy, verifies geometry with 5,000 samples, and requests a second thumbnail
-under an actual 1 GiB cgroup. The measured cgroup peak was 483,688,448 bytes; the
-probe asserts ready, complete geometry, an image, exact comparison and cleanup.
-This is a resource-limit test, not an emulation of a particular NAS processor.
+under an actual 1 GiB cgroup and a one-CPU quota. On `ff47a943`, the measured
+cgroup peak was 484,212,736 bytes and peak process RSS was 542,371,840 bytes
+(517 MiB). The complete probe took 62.32 seconds, including 21.76 seconds for
+analysis. It asserts ready, complete geometry, an image, exact comparison and
+cleanup. This is a resource-limit test, not an emulation of a particular NAS
+processor. Both Benchy and the original Spatula preview were also inspected.
 
 `tests.fakes.similarity_cold_benchmark` builds a new library from byte-distinct
 exports of repository designs. It seeds no fingerprints, restarts its worker
@@ -74,10 +79,22 @@ uv run python -m tests.fakes.similarity_cold_benchmark \
   --root /tmp/new-mesh-library --count 1001 --batch 250
 ```
 
-Its report distinguishes cold fingerprint time, total worker time, process peak
-RSS, complete/partial counts and query latency. It deliberately records the
-number of source designs and reduced candidate/sample settings; 1,001 exports
-are not 1,001 independent designs, and a warmed index is not a cold backfill.
+The completed 1,001-Artifact run used nine repository designs, including 11
+Benchy and 125 Spatula exports, under an actual 1 GiB cgroup and one-CPU quota.
+All 1,001 whole-Artifact fingerprints were ready and complete, with one attempt
+each and every source digest preserved. Cold fingerprint preparation took
+1,095.45 seconds (18.26 minutes); total worker time was 5,283.45 seconds
+(88.06 minutes), across 36 worker processes. Candidate processing traversed
+3,877 whole/component fingerprints, performed 3,852 verifications and reused
+25 exact proofs. Peak process RSS was 511,004,672 bytes (487 MiB). The final
+database occupied 28,286,976 bytes; an authorized cached candidate read took
+50.44 milliseconds and returned ten results.
+
+This run used one candidate per fingerprint and 256 verification samples;
+default settings cost more. Its byte-distinct exports exercise ingestion,
+restarts and bounded retention, but are not 1,001 independent designs. The
+report keeps cold fingerprint time separate from candidate verification and
+cached reads, and does not certify a Raspberry Pi or NAS processor.
 
 ## Partial Rust implementation assessment
 
