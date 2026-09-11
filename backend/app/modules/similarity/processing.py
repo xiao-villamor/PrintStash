@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from contextlib import ExitStack
+from collections.abc import Callable
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 
 from printstash_core.mesh.similarity import GeometryError
 from sqlmodel import Session, col, select
@@ -27,9 +28,16 @@ from app.modules.storage.storage_backend.contracts import StorageBackend
 
 
 class SimilarityProcessor:
-    def __init__(self, sessions: SessionFactory, backend: StorageBackend):
+    def __init__(
+        self,
+        sessions: SessionFactory,
+        backend: StorageBackend,
+        *,
+        retain_storage: Callable[[], AbstractContextManager[None]] = nullcontext,
+    ):
         self.sessions = sessions
         self.backend = backend
+        self._retain_storage = retain_storage
 
     def work_one(self) -> bool:
         """A mesh, shortlist or pair, with the checkpoint committed before return."""
@@ -71,28 +79,31 @@ class SimilarityProcessor:
             counters = json.loads(run.counters_json)
             config = SimilaritySettings.model_validate_json(run.settings_json)
             try:
-                if run.phase == "fingerprint":
-                    self._fingerprint(
-                        session, run, token, actor, config, progress, counters
-                    )
-                elif run.phase == "embeddings":
-                    from app.modules.similarity import embeddings
+                # Idle/cancellation bookkeeping never reads Artifact bytes.
+                # Retain sources only after an authorized work unit is claimed.
+                with self._retain_storage():
+                    if run.phase == "fingerprint":
+                        self._fingerprint(
+                            session, run, token, actor, config, progress, counters
+                        )
+                    elif run.phase == "embeddings":
+                        from app.modules.similarity import embeddings
 
-                    embeddings.work_one(
-                        self.sessions,
-                        session,
-                        self.backend,
-                        actor,
-                        run,
-                        token,
-                        config,
-                        progress,
-                        counters,
-                    )
-                else:
-                    self._candidates(
-                        session, run, token, actor, config, progress, counters
-                    )
+                        embeddings.work_one(
+                            self.sessions,
+                            session,
+                            self.backend,
+                            actor,
+                            run,
+                            token,
+                            config,
+                            progress,
+                            counters,
+                        )
+                    else:
+                        self._candidates(
+                            session, run, token, actor, config, progress, counters
+                        )
             except OperationError as exc:
                 if exc.kind.value in ("busy", "capacity", "unavailable"):
                     runs.checkpoint(session, run, token)

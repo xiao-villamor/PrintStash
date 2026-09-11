@@ -19,8 +19,11 @@ def process_one() -> bool:
     if not maintenance.begin_mutating_operation():
         return False
     try:
-        with maintenance.retain_storage_objects():
-            return SimilarityProcessor(get_session_factory(), get_backend()).work_one()
+        return SimilarityProcessor(
+            get_session_factory(),
+            get_backend(),
+            retain_storage=maintenance.retain_storage_objects,
+        ).work_one()
     except OperationError as exc:
         if exc.kind is ErrorKind.BUSY:
             return False

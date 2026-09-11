@@ -48,5 +48,7 @@ keeps bounded work and memory. Explicit operator limits remain enforceable.
 | P039 | preserves_versioned_evaluation_golden | Happy | Frozen design-separated real corpus; versioned verifier | Measured metrics/classes match reviewed versioned reference; precision/recall gates remain independent | Integration | ✅ `backend/tests/integration/modules/media/geometry_analysis/test_calibration.py::TestFrozenCorpus::test_preserves_versioned_evaluation_golden` |
 | P040 | retains_refreshed_recipe_for_reuse | Happy | Existing proof from older verifier or fewer samples; human rejection | New measured recipe cached, previous observation immutable, review decision retained | Integration | ✅ `backend/tests/integration/modules/similarity/test_verification_cache.py::TestVerificationCache::test_retains_refreshed_recipe_for_reuse` |
 
+| P041 | idle_poll_does_not_retain_storage | Error | Disabled worker polls while restore admission runs | Idle poll permits destructive storage admission | Integration | ✅ `backend/tests/integration/runtime/test_similarity.py::TestSimilarityRuntime::test_idle_poll_does_not_retain_storage` |
+
 Measured baselines and the Python/Rust decision will be recorded separately;
 profiling numbers are evidence about execution cost, not test assertions.

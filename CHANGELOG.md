@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- Idle similarity polling no longer transiently blocks backup restoration with a storage-retention conflict.
+
 - Ordinary dense meshes such as the repository Benchy now receive complete
   similarity analysis at the default budget. Geometry ordering, convex hulls,
   nearest-surface queries and thumbnail allocation use less work and memory;

@@ -33,6 +33,9 @@ The repository Spatula 3MF has 6,704 faces and complete solid descriptors.
   same Artifacts, Models, components, algorithm, verifier and sufficient sampling.
   Approximate evidence is still rechecked. Changing bytes, moving an Artifact or
   requesting more samples cannot use an incompatible cached proof.
+- Idle similarity polling no longer retains storage objects. The runtime still
+  drains every admitted unit for restore, but source retention starts only after
+  an authorized analysis unit is claimed; active analysis still excludes deletion.
 - Linux service and parent-slice memory limits participate in RAM admission, as
   container-root limits already did. STEP capacity reservations now account for
   the admitted triangle output instead of a fixed 32 MiB allocation.

@@ -7,11 +7,30 @@ import threading
 import pytest
 
 from app.core.errors import ErrorKind, OperationError
+from app.modules.similarity import configuration, runs
 from app.runtime import maintenance, similarity
 from app.runtime.work_wakeup import LocalWorkWakeup
 
 
 class TestSimilarityRuntime:
+    def test_idle_poll_does_not_retain_storage(self, db_session, monkeypatch):
+        from app.modules.similarity import processing
+
+        read_settings = processing.read_settings
+
+        def read_while_cleanup_is_available(session):
+            admitted = maintenance.begin_destructive_operation()
+            if admitted:
+                maintenance.end_destructive_operation()
+            assert admitted, "An idle settings poll must not retain stored objects"
+            return read_settings(session)
+
+        monkeypatch.setattr(
+            processing, "read_settings", read_while_cleanup_is_available
+        )
+
+        assert similarity.process_one() is False
+
     def test_defers_work_during_restore(self):
         maintenance.hold_restore_maintenance()
         try:
@@ -19,7 +38,10 @@ class TestSimilarityRuntime:
         finally:
             maintenance.end_restore_maintenance()
 
-    def test_defers_work_during_storage_cleanup(self):
+    def test_defers_work_during_storage_cleanup(self, db_session, make_user):
+        actor = make_user(superuser=True)
+        configuration.update_settings(db_session, actor, {"enabled": True})
+        runs.start(db_session, actor)
         assert maintenance.begin_destructive_operation()
         try:
             assert similarity.process_one() is False
@@ -29,12 +51,20 @@ class TestSimilarityRuntime:
         maintenance.begin_restore_maintenance()
         maintenance.end_restore_maintenance()
 
-    def test_retains_storage_while_worker_executes(self, db_session, monkeypatch):
-        def check_retention(_worker):
+    def test_retains_storage_while_worker_executes(
+        self, db_session, monkeypatch, make_user
+    ):
+        actor = make_user(superuser=True)
+        configuration.update_settings(db_session, actor, {"enabled": True})
+        runs.start(db_session, actor)
+
+        def check_retention(_worker, *_args):
             assert maintenance.begin_destructive_operation() is False
             return True
 
-        monkeypatch.setattr(similarity.SimilarityProcessor, "work_one", check_retention)
+        monkeypatch.setattr(
+            similarity.SimilarityProcessor, "_fingerprint", check_retention
+        )
         assert similarity.process_one() is True
         assert maintenance.begin_destructive_operation()
         maintenance.end_destructive_operation()
