@@ -11,6 +11,7 @@ from app.api.v1 import (
     config,
     documents,
     external_libraries,
+    families,
     filaments,
     files,
     fleet,
@@ -52,6 +53,7 @@ api_router.include_router(ingest.router)
 api_router.include_router(inbox.router)
 api_router.include_router(maintenance.router)
 api_router.include_router(models.router)
+api_router.include_router(families.router)
 api_router.include_router(similarity.router)
 api_router.include_router(multipart_models.router)
 api_router.include_router(multipart_builds.router)

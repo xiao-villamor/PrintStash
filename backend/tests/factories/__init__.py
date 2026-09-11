@@ -69,6 +69,12 @@ from tests.factories.capture import (
     capture_source,
     manifest_for_source,
 )
+from tests.factories.families import (
+    build_family,
+    build_family_member,
+    build_family_star,
+    tag_family,
+)
 from tests.factories.identity import (
     PASSWORD,
     bearer,
@@ -170,6 +176,10 @@ from tests.factories.vault_migrations import (
 )
 
 __all__ = [
+    "build_family",
+    "build_family_member",
+    "build_family_star",
+    "tag_family",
     "build_vault_generation",
     "build_vault_migration",
     "build_vault_migration_object",

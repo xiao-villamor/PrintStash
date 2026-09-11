@@ -19,6 +19,30 @@ _Avoid_: asset, item, part
 One physical stored blob (STL/3MF/OBJ/G-code) at a version under a Model.
 _Avoid_: upload, attachment
 
+**Family**:
+A grouping of Models that are variations of one design, each retaining its own
+Artifacts, Revisions, print history and identity. Membership describes variation,
+while a Multipart Model describes composition.
+_Avoid_: merged Model, Multipart Model, collection, duplicate group
+
+**Family Member**:
+A Model's relationship to one Family, with a human Variant Role and optional
+relative measurements or notes. Trashing the Model reserves its membership;
+trashing the Family releases membership while retaining restorable history.
+_Avoid_: Revision, Model Choice, copy
+
+**Variant Role**:
+A person's description of a Family Member: canonical, identical, rescaled,
+mirrored, repaired or print_variant. It is separate from machine Evidence Class
+and does not change a Model's print results or recommended Revision.
+_Avoid_: evidence, classification, known-good status
+
+**Canonical Model**:
+The Family's explicitly chosen representative, which may be unavailable or
+vacant. No replacement is chosen automatically; restoring a trashed selection
+recovers it only while no person has chosen a replacement.
+_Avoid_: master file, recommended Revision, original Model
+
 **Multipart Model**:
 An independent library grouping that describes one object made from several
 printable Models. It references Models without moving or owning them and has

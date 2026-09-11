@@ -40,6 +40,10 @@ from app.db.models import (
     InboxSourceKind,
     IndexGeneration,
     Model,
+    ModelFamily,
+    ModelFamilyMember,
+    ModelFamilyStar,
+    ModelFamilyTagLink,
     ModelProvenanceSource,
     ModelSourceCover,
     MultipartBuild,
@@ -145,6 +149,42 @@ class MakeModel(Protocol):
         trashed: bool | datetime = False,
         **overrides: Any,
     ) -> Model: ...
+
+
+class MakeFamily(Protocol):
+    def __call__(
+        self,
+        name: str = "Bracket variations",
+        *,
+        collection: Collection | None = None,
+        trashed: bool | datetime = False,
+        **overrides: Any,
+    ) -> ModelFamily: ...
+
+
+class MakeFamilyMember(Protocol):
+    def __call__(
+        self,
+        family: ModelFamily,
+        model: Model | None,
+        *,
+        canonical: bool = False,
+        detached: str | None = None,
+        **overrides: Any,
+    ) -> ModelFamilyMember: ...
+
+
+class MakeFamilyStar(Protocol):
+    def __call__(
+        self,
+        user: User,
+        family: ModelFamily,
+        **overrides: Any,
+    ) -> ModelFamilyStar: ...
+
+
+class TagFamily(Protocol):
+    def __call__(self, family: ModelFamily, tag: Tag) -> ModelFamilyTagLink: ...
 
 
 class MakeMultipartModel(Protocol):

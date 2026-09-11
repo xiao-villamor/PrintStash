@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional
+from uuid import uuid4
 
 from sqlalchemy import (
     CheckConstraint,
@@ -441,6 +442,152 @@ class Model(SQLModel, table=True):
             "lazy": "selectin",
         },
     )
+
+
+class ModelFamily(SQLModel, table=True):
+    """Human grouping of variations; never an owner of Model content."""
+
+    __tablename__ = "model_families"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="version_positive"),
+        Index("ix_model_families_deleted_updated_id", "deleted_at", "updated_at", "id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=255, index=True)
+    slug: str = Field(max_length=255, unique=True, index=True)
+    export_id: str = Field(
+        default_factory=lambda: str(uuid4()), max_length=36, unique=True, index=True
+    )
+    description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", index=True
+    )
+    cover_model_id: Optional[int] = Field(
+        default=None, foreign_key="models.id", ondelete="SET NULL", index=True
+    )
+    cover_image_url: Optional[str] = Field(default=None, max_length=2083)
+    cover_filename: Optional[str] = Field(default=None, max_length=255)
+    cover_content_type: Optional[str] = Field(default=None, max_length=64)
+    cover_size_bytes: Optional[int] = Field(default=None, ge=0)
+    canonical_member_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey(
+                "model_family_members.id",
+                name="fk_model_families_canonical_member_id_model_family_members",
+                ondelete="SET NULL",
+                use_alter=True,
+            ),
+            nullable=True,
+        ),
+    )
+    version: int = Field(
+        default=1, sa_column=Column(Integer, nullable=False, server_default="1")
+    )
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
+
+
+class ModelFamilyMember(SQLModel, table=True):
+    """Reserved membership or detached history, with independent human intent."""
+
+    __tablename__ = "model_family_members"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('canonical', 'identical', 'rescaled', 'mirrored', "
+            "'repaired', 'print_variant')",
+            name="role_valid",
+        ),
+        CheckConstraint(
+            "scale_factor IS NULL OR "
+            "(scale_factor > 0 AND scale_factor <= 1.7976931348623157e308)",
+            name="scale_positive_finite",
+        ),
+        CheckConstraint(
+            "model_id IS NOT NULL OR "
+            "(detached_at IS NOT NULL AND detach_reason = 'model_purged')",
+            name="missing_model_is_purged",
+        ),
+        CheckConstraint(
+            "(detached_at IS NULL AND detach_reason IS NULL) OR "
+            "(detached_at IS NOT NULL AND detach_reason IS NOT NULL AND detach_reason IN "
+            "('removed', 'moved', 'family_trashed', 'model_purged'))",
+            name="detach_state_valid",
+        ),
+        Index(
+            "uq_model_family_members_active_model",
+            "model_id",
+            unique=True,
+            sqlite_where=text("detached_at IS NULL"),
+            postgresql_where=text("detached_at IS NULL"),
+        ),
+        Index(
+            "uq_model_family_members_active_canonical",
+            "family_id",
+            unique=True,
+            sqlite_where=text("detached_at IS NULL AND role = 'canonical'"),
+            postgresql_where=text("detached_at IS NULL AND role = 'canonical'"),
+        ),
+        Index(
+            "ix_model_family_members_family_detached_order",
+            "family_id",
+            "detached_at",
+            "sort_order",
+            "id",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    family_id: int = Field(foreign_key="model_families.id", ondelete="CASCADE")
+    model_id: Optional[int] = Field(default=None, foreign_key="models.id", index=True)
+    role: str = Field(default="identical", max_length=32)
+    transformation_note: Optional[str] = Field(default=None, sa_column=Column(Text))
+    scale_factor: Optional[float] = None
+    mirrored: bool = False
+    relative_to_member_id: Optional[int] = Field(
+        default=None, foreign_key="model_family_members.id", ondelete="SET NULL"
+    )
+    mirror_reference_member_id: Optional[int] = Field(
+        default=None, foreign_key="model_family_members.id", ondelete="SET NULL"
+    )
+    mirror_verified: bool = False
+    relative_review_required: bool = False
+    joined_via: str = Field(default="manual", max_length=32)
+    sort_order: int = Field(default=0)
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    detached_at: Optional[datetime] = None
+    detached_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    detach_reason: Optional[str] = Field(default=None, max_length=32)
+
+
+class ModelFamilyTagLink(SQLModel, table=True):
+    """Family tags, independent of every member's tags."""
+
+    __tablename__ = "model_family_tags"
+    family_id: int = Field(
+        foreign_key="model_families.id", primary_key=True, ondelete="CASCADE"
+    )
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True, ondelete="CASCADE")
+
+
+class ModelFamilyStar(SQLModel, table=True):
+    """A personal Family favorite, independent of Model favorites."""
+
+    __tablename__ = "model_family_stars"
+    family_id: int = Field(
+        foreign_key="model_families.id", primary_key=True, ondelete="CASCADE"
+    )
+    user_id: int = Field(foreign_key="users.id", primary_key=True, ondelete="CASCADE")
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class MultipartModel(SQLModel, table=True):

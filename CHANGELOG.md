@@ -4,6 +4,10 @@
 
 ### Added
 
+- Model Families preserve independent Models and Revisions while recording human
+  variant roles, an explicit canonical selection and relative measurements.
+  Membership moves and Family restoration are atomic; Model trash reserves its
+  membership, and purging a Model explicitly clears its Family references.
 - **Similar Models** offers opt-in local geometry analysis, resumable library scans,
   a filtered review queue and synchronized comparisons at shared physical scale.
   Evidence confirmation keeps each Model, Artifact and Revision separate; verified

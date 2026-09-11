@@ -39,6 +39,9 @@ from tests.factories.protocols import (
     MakeDocument,
     MakeEmbeddingSpace,
     MakeExternalLibrary,
+    MakeFamily,
+    MakeFamilyMember,
+    MakeFamilyStar,
     MakeFile,
     MakeGeometryFingerprint,
     MakeInboxItem,
@@ -69,6 +72,7 @@ from tests.factories.protocols import (
     MakeVaultMigration,
     MakeVaultMigrationObject,
     TagCollection,
+    TagFamily,
     TagFile,
     UserHeaders,
 )
@@ -148,6 +152,26 @@ def grant_printer_role(db_session: Session) -> Any:
 def make_model(db_session: Session) -> MakeModel:
     """A library model. `trashed=True` puts it in the trash."""
     return _bound(factories.build_model, db_session)
+
+
+@pytest.fixture
+def make_family(db_session: Session) -> MakeFamily:
+    return _bound(factories.build_family, db_session)
+
+
+@pytest.fixture
+def make_family_member(db_session: Session) -> MakeFamilyMember:
+    return _bound(factories.build_family_member, db_session)
+
+
+@pytest.fixture
+def make_family_star(db_session: Session) -> MakeFamilyStar:
+    return _bound(factories.build_family_star, db_session)
+
+
+@pytest.fixture
+def tag_family(db_session: Session) -> TagFamily:
+    return _bound(factories.tag_family, db_session)
 
 
 @pytest.fixture
@@ -409,6 +433,10 @@ def a_member_who_can_see_one_collection(db_session: Session) -> Any:
 # Re-exported for the tests that annotate a fixture parameter: importing the
 # protocol from the conftest that provides the fixture keeps the two together.
 __all__ = [
+    "make_family",
+    "make_family_member",
+    "make_family_star",
+    "tag_family",
     "AGcodeArtifact",
     "APrinterWithAQueue",
     "GrantRole",
