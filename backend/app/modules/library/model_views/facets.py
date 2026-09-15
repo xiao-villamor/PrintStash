@@ -24,7 +24,7 @@ from app.schemas.models import (
     ModelFilters,
 )
 
-from .filters import _filtered_stmt
+from .filters import _filtered_stmt, print_job_predicates
 
 
 def facets(session: Session, user: User, filters: ModelFilters) -> ModelFacetsRead:
@@ -65,7 +65,7 @@ def facets(session: Session, user: User, filters: ModelFilters) -> ModelFacetsRe
     jobs = (
         select(PrintJob.model_id, PrintJob.state)
         .join(filtered, filtered.c.id == PrintJob.model_id)
-        .where(live(PrintJob))
+        .where(*print_job_predicates(filters))
         .cte("facet_jobs")
     )
 

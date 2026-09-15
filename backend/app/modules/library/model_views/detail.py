@@ -149,7 +149,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         is not None
     )
 
-    from .families import family_summaries
+    from .extensions import family_summaries
 
     return ModelRead(
         family=family_summaries(session, user, [model_id]).get(model_id),

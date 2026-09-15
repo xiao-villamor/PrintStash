@@ -5,11 +5,11 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.models import ModelFilters
+from app.schemas.models import ModelFilters, ModelSort
 
 
 class SavedViewFilters(ModelFilters):
-    pass
+    sort: ModelSort | None = None
 
 
 class SavedViewCreate(BaseModel):

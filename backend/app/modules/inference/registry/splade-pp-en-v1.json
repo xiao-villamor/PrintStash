@@ -1,0 +1,65 @@
+{
+  "schema_version": 4,
+  "model_key": "splade-pp-en-v1",
+  "model_revision": "762be6a7206e2f299182705972a65e5c46e62be2",
+  "repository": "prithivida/Splade_PP_en_v1",
+  "license": "Apache-2.0",
+  "language": [
+    "en"
+  ],
+  "family": "splade",
+  "graph": {
+    "filename": "model.onnx",
+    "sha256": "0934583a27a031a66b2e847cbc260fbbef29689e969f500436460ef5146a43f2"
+  },
+  "tokenizer": {
+    "filename": "tokenizer.json",
+    "sha256": "2fc687b11de0bc1b3d8348f92e3b49ef1089a621506c7661fbf3248fcd54947e"
+  },
+  "vocabulary_size": 30522,
+  "input_name": "input_ids",
+  "attention_mask_name": "input_mask",
+  "token_type_ids_name": "segment_ids",
+  "output_name": "output",
+  "opset": 14,
+  "max_tokens": 512,
+  "max_terms": 64,
+  "pooling": "max-log1p-relu-attention-v1",
+  "term_recipe": "whole-unicode-words-top-weight-v1",
+  "canary_text": "A bracket for attaching a bicycle light to the handlebar.",
+  "canary": [
+    {
+      "term": "bracket",
+      "weight": 2.199486255645752
+    },
+    {
+      "term": "light",
+      "weight": 1.9113109111785889
+    },
+    {
+      "term": "bicycle",
+      "weight": 1.7783339023590088
+    },
+    {
+      "term": "handle",
+      "weight": 1.6598546504974365
+    },
+    {
+      "term": "bike",
+      "weight": 1.5950977802276611
+    },
+    {
+      "term": "brackets",
+      "weight": 1.4453812837600708
+    },
+    {
+      "term": "lights",
+      "weight": 1.3963984251022339
+    },
+    {
+      "term": "attach",
+      "weight": 1.2369941473007202
+    }
+  ],
+  "canary_tolerance": 0.0001
+}

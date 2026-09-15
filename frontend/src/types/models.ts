@@ -594,11 +594,16 @@ export interface ListModelsParams {
   storage?: ("vault" | "external")[];
   uploaded_after?: string;
   uploaded_before?: string;
+  printed_after?: string;
+  printed_before?: string;
+  print_duration_min_s?: number;
+  print_duration_max_s?: number;
   limit?: number;
   offset?: number;
 }
 
 export type ModelSort =
+  | "relevance"
   | "date-desc"
   | "date-asc"
   | "name-asc"
@@ -628,6 +633,7 @@ export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
 }
 
 export interface SavedViewFilters {
+  sort?: ModelSort | null;
   family_id?: number | null;
   family_role?: VariantRole | null;
   in_family?: boolean | null;
@@ -650,6 +656,10 @@ export interface SavedViewFilters {
   storage?: ("vault" | "external")[];
   uploaded_after?: string | null;
   uploaded_before?: string | null;
+  printed_after?: string | null;
+  printed_before?: string | null;
+  print_duration_min_s?: number | null;
+  print_duration_max_s?: number | null;
 }
 
 export type ArtifactFileType = "stl" | "3mf" | "gcode" | "obj" | "step";

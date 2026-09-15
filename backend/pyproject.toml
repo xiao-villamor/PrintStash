@@ -5,6 +5,7 @@ description = "PrintStash — self-hosted 3D printing asset manager"
 requires-python = ">=3.11"
 dependencies = [
     "printstash-core[network,printers-all]",
+    "printstash-mesh-native==0.1.0",
     "cryptography>=50,<51",
     "alembic>=1.19,<2",
     "boto3>=1.43,<2",
@@ -38,6 +39,7 @@ dependencies = [
     "uvicorn[standard]>=0.52,<1",
     "watchfiles>=1.2,<2",
     "pycentauri==0.9.1",
+    "jsonschema>=4.26,<5",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,8 @@ step = [
     "cadquery-ocp-novtk==7.9.3.1.1",
 ]
 full = [
+    "sqlite-vec==0.1.6",
+    "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
     "asyncssh>=2.21,<3",
@@ -94,8 +98,15 @@ dev = [
     "cheroot>=11,<12",
     "ty>=0.0.1",
 ]
+ai = [
+    "sqlite-vec==0.1.6",
+    "onnx>=1.22,<2",
+    "onnxruntime>=1.30,<2",
+    "tokenizers>=0.23,<0.24",
+]
 
 [tool.pytest.ini_options]
+pythonpath = ["packages/printstash-core/tests/reference"]
 # -ra surfaces every skip and xfail reason in the summary, so a resource-gated subset
 # that silently stopped running is visible rather than invisible.
 addopts = "--capture=sys --strict-markers -ra"
@@ -193,6 +204,7 @@ output = "coverage.json"
 
 [tool.uv.sources]
 printstash-core = { workspace = true }
+printstash-mesh-native = { path = "rust" }
 
 [tool.uv.workspace]
 members = ["packages/printstash-core"]

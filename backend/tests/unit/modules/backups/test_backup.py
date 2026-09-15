@@ -1627,10 +1627,10 @@ class TestBackupStorageHelpers:
 
         assert backup_catalogue.get_backup("shared", source_ref="unknown-source") is None
 
-    def test_rejects_a_non_sqlite_database_backup(
+    def test_rejects_an_unsupported_database_backup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setitem(_overlay, "db_url", "postgresql://db.example/vault")
+        monkeypatch.setitem(_overlay, "db_url", "mysql://db.example/vault")
 
         with pytest.raises(
             backup_contracts.DatabaseBackupNotSupportedError,

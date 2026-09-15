@@ -16,6 +16,7 @@ export default defineConfig({
   // Storage-provider setup owns a separate throwaway backend and WebDAV
   // server; including it here would point it at this already-configured app.
   testIgnore: [
+    "ai-search/**/*.spec.ts",
     "storage/**/*.spec.ts",
     "storage-presets/**/*.spec.ts",
     "critical/**/*.spec.ts",

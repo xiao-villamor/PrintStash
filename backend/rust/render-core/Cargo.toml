@@ -1,0 +1,13 @@
+[package]
+name = "printstash-render-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+fast_image_resize = { version = "=6.1.0", default-features = false, features = ["std"] }
+image = { version = "=0.25.9", default-features = false, features = ["png", "webp", "jpeg"] }

@@ -11,6 +11,124 @@ import { test, expect } from "./helpers";
 import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("settings", () => {
+  test("cache GB limits persist after reloading settings", async ({ page }) => {
+    await page.goto("/settings?section=storage");
+    const enabled = page.getByRole("checkbox", { name: "Keep downloaded files on this machine" });
+    const wasEnabled = await enabled.isChecked();
+    if (!wasEnabled) await enabled.click();
+    const limit = page.getByRole("spinbutton", { name: "Cache size limit (GB)" });
+    const free = page.getByRole("spinbutton", { name: "Keep free on disk (GB)" });
+    const originalLimit = await limit.inputValue();
+    const originalFree = await free.inputValue();
+    await expect(page.getByText("Maximum cached files", { exact: true })).not.toBeVisible();
+    await limit.fill("2.5");
+    await free.fill("0.5");
+    await page.getByRole("button", { name: "Save cache settings" }).click();
+    await expect(page.getByText("Artifact cache settings updated.")).toBeVisible();
+    await page.reload();
+    await expect(limit).toHaveValue("2.5");
+    await expect(free).toHaveValue("0.5");
+    await page.getByText("Advanced cache settings", { exact: true }).click();
+    await expect(page.getByRole("spinbutton", { name: "Maximum cached files" })).toBeVisible();
+    await limit.fill(originalLimit);
+    await free.fill(originalFree);
+    if (!wasEnabled) await enabled.click();
+    await page.getByRole("button", { name: "Save cache settings" }).click();
+    await expect(page.getByText("Artifact cache settings updated.")).toBeVisible();
+  });
+
+  test("guides settings across screen sizes", async ({ page }, testInfo) => {
+    for (const theme of ["light", "dark"]) {
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.goto("/settings?section=storage");
+        await expect(page.getByRole("heading", { name: "Library storage" })).toBeVisible();
+        await page.evaluate(
+          (dark) => document.documentElement.classList.toggle("dark", dark),
+          theme === "dark",
+        );
+        await expect(page.getByText("Library files", { exact: true })).toBeVisible();
+        await expect(page.getByText("Growth forecast", { exact: true })).not.toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Clear cached files", exact: true }),
+        ).toHaveCount(0);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        ).toBeLessThanOrEqual(0);
+        await page.screenshot({
+          path: testInfo.outputPath(`storage-${theme}-${width}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.goto("/settings?section=ai-search");
+        await expect(
+          page.getByRole("heading", { name: "Where should AI Search run?" }),
+        ).toBeVisible();
+        await page.evaluate(
+          (dark) => document.documentElement.classList.toggle("dark", dark),
+          theme === "dark",
+        );
+        await expect(page.getByRole("combobox")).toHaveCount(0);
+        await page.screenshot({
+          path: testInfo.outputPath(`ai-${theme}-${width}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.getByRole("button", { name: "Use this machine" }).click();
+        await expect(page.getByRole("button", { name: "Change location" })).toBeVisible();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        ).toBeLessThanOrEqual(0);
+        await page.getByRole("button", { name: "Change location" }).click();
+        await page.getByRole("button", { name: "Connect another server" }).click();
+        await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
+        await page.getByRole("button", { name: "Advanced AI controls" }).click();
+        await expect(
+          page.getByRole("checkbox", { name: "Enable AI Search", exact: true }),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Back to guided setup" }).click();
+        await expect(
+          page.getByRole("heading", { name: "Where should AI Search run?" }),
+        ).toBeVisible();
+      }
+    }
+    await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Move storage with a verified migration" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Move Vault storage", exact: true }),
+    ).toBeVisible();
+  });
+
+  test("returns from advanced AI controls without searching the page", async ({
+    page,
+  }, testInfo) => {
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/settings?section=ai-search");
+      await page.getByRole("button", { name: "Connect another server" }).click();
+      await page.getByRole("button", { name: "Advanced AI controls" }).click();
+      await page
+        .getByRole("checkbox", { name: "Enable AI Search", exact: true })
+        .scrollIntoViewIfNeeded();
+      const back = page.getByRole("button", { name: "Back to guided setup" });
+      await expect(back).toBeInViewport();
+      await expect(back).toBeFocused();
+      await page.screenshot({
+        path: testInfo.outputPath(`advanced-${width}.png`),
+        animations: "disabled",
+      });
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("heading", { name: "Where should AI Search run?" }),
+      ).toBeInViewport();
+      await expect(page.getByRole("button", { name: "Advanced AI controls" })).toBeFocused();
+      await page.screenshot({
+        path: testInfo.outputPath(`guided-return-${width}.png`),
+        animations: "disabled",
+      });
+    }
+  });
+
   test("create and revoke an API key", async ({ page }) => {
     const keyName = `e2e-key-${Date.now()}`;
     await page.goto("/settings");

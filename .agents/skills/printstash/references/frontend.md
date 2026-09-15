@@ -49,8 +49,13 @@ unknown>` dictionaries, `typeof` narrowing instead of boundary parsing, and
 blanket `SAFETY:` comment, or a rule suppression to get past it. A `SAFETY:`
 comment must state the specific checked invariant for that one site.
 
-To see edits live: `:3000` is the prebuilt Docker image (no HMR) — run
-`pnpm dev` on a spare port instead.
+For visible UI changes, inspect the affected flow in a browser served from the
+edited checkout. `:3000` is the prebuilt Docker image (no HMR) — run `pnpm dev`
+on a spare port instead. Exercise changed interactions and relevant viewport,
+theme, keyboard, loading, empty, or error states; inspect screenshots when
+layout is part of the change. Use the existing Playwright harness for repeatable
+flows. Report the URL and observations, or the concrete reason browser
+verification could not run. Visual inspection supplements the required tests.
 
 ## Design history
 

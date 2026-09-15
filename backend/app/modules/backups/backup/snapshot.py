@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from sqlalchemy import text
 from sqlalchemy.engine.url import make_url
 from sqlmodel import Session, create_engine
 
@@ -29,7 +30,9 @@ logger = get_logger(__name__)
 def database_backup_capability() -> _contracts_module.DatabaseBackupCapability:
     """Describe the integrated database snapshot contract without exposing its URL."""
     backend = make_url(settings.db_url).get_backend_name()
-    supported = backend == "sqlite" and _db_path() is not None
+    supported = backend == "postgresql" or (
+        backend == "sqlite" and _db_path() is not None
+    )
     return _contracts_module.DatabaseBackupCapability(
         database_backend=backend,
         create_supported=supported,
@@ -57,6 +60,23 @@ def _db_path() -> Path | None:
     return resolve_db(settings.db_url)
 
 
+def _database_snapshot_size() -> int:
+    """Conservative durable DB size for admission before building a snapshot."""
+    db_path = _db_path()
+    if db_path is not None:
+        wal = Path(str(db_path) + "-wal")
+        return db_path.stat().st_size + (wal.stat().st_size if wal.exists() else 0)
+    if make_url(settings.db_url).get_backend_name() == "postgresql":
+        with get_session_factory().scoped_session() as session:
+            size = session.execute(
+                text(
+                    "SELECT COALESCE(SUM(pg_total_relation_size(quote_ident(schemaname)||'.'||quote_ident(tablename))),0) FROM pg_tables WHERE schemaname=current_schema()"
+                )
+            ).scalar_one()
+        return int(size) * 2
+    return 0
+
+
 def _validate_sqlite_snapshot(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         result = connection.execute("PRAGMA integrity_check").fetchone()
@@ -66,11 +86,12 @@ def _validate_sqlite_snapshot(path: Path) -> None:
 
 @contextmanager
 def _sqlite_snapshot_file() -> Iterator[Path]:
-    """Yield a self-cleaning, transactionally consistent SQLite snapshot."""
+    """Yield a portable SQLite snapshot from either supported database engine."""
     db_path = _db_path()
-    if db_path is None:
+    postgres = make_url(settings.db_url).get_backend_name() == "postgresql"
+    if db_path is None and not postgres:
         raise RuntimeError("database is not a file-based SQLite database")
-    if not db_path.is_file():
+    if db_path is not None and not db_path.is_file():
         raise FileNotFoundError(db_path)
 
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
@@ -82,6 +103,21 @@ def _sqlite_snapshot_file() -> Iterator[Path]:
     os.close(fd)
     snapshot_path = Path(raw_name)
     try:
+        if postgres:
+            from app.modules.administration.database_transfer import snapshot_postgres
+
+            destination = create_engine(
+                f"sqlite:///{snapshot_path}", hide_parameters=True
+            )
+            try:
+                with get_session_factory().scoped_session() as session:
+                    source = session.get_bind()
+                snapshot_postgres(source, destination)
+            finally:
+                destination.dispose()
+            _validate_sqlite_snapshot(snapshot_path)
+            yield snapshot_path
+            return
         with (
             sqlite3.connect(db_path, timeout=30) as source,
             sqlite3.connect(snapshot_path, timeout=30) as destination,
@@ -275,7 +311,8 @@ def _dispose_session_engine() -> None:
 
 def _restore_database_from_path(source_path: Path) -> None:
     db_path = _db_path()
-    if db_path is None:
+    postgres = make_url(settings.db_url).get_backend_name() == "postgresql"
+    if db_path is None and not postgres:
         raise RuntimeError("cannot restore to non-file database")
     _validate_sqlite_snapshot(source_path)
 
@@ -284,6 +321,17 @@ def _restore_database_from_path(source_path: Path) -> None:
     # transaction instead of replaying a stale sidecar over a raw file swap.
     _dispose_session_engine()
     try:
+        if postgres:
+            from app.modules.administration.database_transfer import restore_postgres
+
+            source = create_engine(f"sqlite:///{source_path}", hide_parameters=True)
+            try:
+                with get_session_factory().scoped_session() as session:
+                    target = session.get_bind()
+                restore_postgres(source, target)
+            finally:
+                source.dispose()
+            return
         with (
             sqlite3.connect(source_path, timeout=30) as source,
             sqlite3.connect(db_path, timeout=30) as destination,
@@ -298,7 +346,10 @@ def _restore_database_from_path(source_path: Path) -> None:
 
 def _restore_database(db_data: bytes) -> None:
     """Compatibility wrapper for callers/tests that still provide bytes."""
-    if _db_path() is None:
+    if (
+        _db_path() is None
+        and make_url(settings.db_url).get_backend_name() != "postgresql"
+    ):
         raise RuntimeError("cannot restore to non-file database")
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     fd, raw_name = tempfile.mkstemp(

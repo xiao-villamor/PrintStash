@@ -23,7 +23,6 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.modules.library import taxonomy
-from app.modules.library.families import access, covers, mutations
 from app.modules.media.source_cover_processing import (
     MAX_SOURCE_COVER_BYTES,
     process_source_cover_upload,
@@ -47,6 +46,8 @@ class ExportCover:
 def export_saved_views(
     session: Session, user: User, rows: list[SavedView], *, version: int
 ) -> list[dict]:
+    from app.modules.library.families import access
+
     identities = dict(
         session.exec(
             select(ModelFamily.id, ModelFamily.export_id).where(
@@ -76,6 +77,8 @@ def export_saved_views(
 
 def import_saved_views(session: Session, user: User, rows: list[dict]) -> int:
     """Resolve Family filters after import; a missing target must not broaden a view."""
+    from app.modules.library.families import access
+
     identities = dict(
         session.exec(
             select(ModelFamily.export_id, ModelFamily.id).where(
@@ -137,6 +140,8 @@ def read_cover(key: str, expected_size: int) -> bytes:
 def export_families(
     session: Session, user: User, included_models: list[Model]
 ) -> tuple[list[PortableFamily], list[ExportCover]]:
+    from app.modules.library.families import access, covers
+
     families = session.exec(
         select(ModelFamily)
         .where(live(ModelFamily), access.visible_clause(session, user))
@@ -267,6 +272,8 @@ def validate_covers(archive: zipfile.ZipFile, families: list[PortableFamily]) ->
 def _existing_or_conflicting(
     session: Session, user: User, data: PortableFamily, models: dict[str, Model]
 ) -> str | None:
+    from app.modules.library.families import access
+
     existing = session.exec(
         select(ModelFamily)
         .where(ModelFamily.export_id == data.export_id)
@@ -308,6 +315,8 @@ def import_family(
     models: dict[str, Model],
     archive: zipfile.ZipFile,
 ) -> dict[str, int]:
+    from app.modules.library.families import covers, mutations
+
     outcome = _existing_or_conflicting(session, user, data, models)
     if outcome is not None:
         session.rollback()

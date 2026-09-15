@@ -27,6 +27,7 @@ backup_operation_lock = threading.RLock()
 _mutation_condition = threading.Condition()
 
 _active_mutations = 0
+_active_foreground_mutations = 0
 _mutation_observer: Callable[[], None] | None = None
 
 
@@ -49,30 +50,38 @@ def restore_in_progress() -> bool:
     return _restore_gate.is_set()
 
 
-def begin_mutating_operation() -> bool:
+def begin_mutating_operation(*, foreground: bool = False) -> bool:
     """Register a write-capable operation unless restore maintenance is active."""
-    global _active_mutations
+    global _active_mutations, _active_foreground_mutations
     with _mutation_condition:
         if _restore_gate.is_set():
             return False
         _active_mutations += 1
+        _active_foreground_mutations += int(foreground)
     try:
         if _mutation_observer is not None:
             _mutation_observer()
     except Exception:
-        end_mutating_operation()
+        end_mutating_operation(foreground=foreground)
         raise
     return True
 
 
-def end_mutating_operation() -> None:
-    global _active_mutations
+def end_mutating_operation(*, foreground: bool = False) -> None:
+    global _active_mutations, _active_foreground_mutations
     with _mutation_condition:
-        if _active_mutations <= 0:
+        if _active_mutations <= 0 or (foreground and _active_foreground_mutations <= 0):
             raise RuntimeError("unbalanced_mutating_operation")
         _active_mutations -= 1
+        _active_foreground_mutations -= int(foreground)
         if _active_mutations == 0:
             _mutation_condition.notify_all()
+
+
+def foreground_mutations_pending() -> bool:
+    """Local priority hint; durable work and maintenance admission stay separate."""
+    with _mutation_condition:
+        return _active_foreground_mutations > 0
 
 
 def begin_restore_maintenance() -> None:

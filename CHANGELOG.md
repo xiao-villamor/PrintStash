@@ -2,8 +2,100 @@
 
 ## Unreleased
 
+### Performance
+
+- Backend mesh processing requires Rust. Removed renderer, loader and geometry
+  engine selectors, Python rendering callbacks, and optional native fallbacks.
+  Independent reference algorithms live only in test fixtures.
+
+- Backend preview rendering now runs as complete Rust jobs: camera selection,
+  lighting, mesh preparation, rasterization, image processing and encoding.
+  Streamed and sampled STL previews use the same standalone Rust crate. The
+  application transfers inputs and results; the browser keeps Three.js.
+- AI comparison views share one prepared mesh across their Rust render batch and
+  return RGB directly, avoiding repeated preparation and PNG round trips.
+  Geometry fingerprints and multiview embedding recipes have new identities so
+  cached results from the previous renderer are not reused under the new recipe.
+  Existing thumbnail embedding recipe identities are preserved.
+- Native previews resize and encode images in Rust, including depth shading and
+  final PNG/JPEG/WebP thumbnail normalization. Lossless codecs retain decoded
+  pixels; resized edges can differ slightly from Pillow.
+- Import computation uses a bounded Rayon executor and native memory admission
+  when available. Running work drains before staged inputs are removed, and
+  completed results retain their memory reservation until publication.
+
+- Large STL files that must use bounded recovery reserve that route's memory
+  estimate, allowing concurrent recovery when the import budget has room.
+- Binary STL recovery validates and samples source blocks in Rust, then projects
+  into one retained depth buffer without Python callbacks per block. Bounded
+  fallback sampling also uses Rust. Source identity checks reject changed files.
+- Ordinary native previews now own centering, position grouping, projection,
+  culling and crease normals, transferring the mesh once instead of passing
+  triangle and normal arrays through Python for every drawing batch.
+- Mesh previews retain depth and color buffers across batches in Rust, prepare
+  vertex normals natively and reuse compact face indices. Budgeted STL recovery
+  also uses native depth calculation while retaining its existing limits.
+  Connected-component extraction uses `petgraph` with canonical ordering.
+- Artifact publication coalesces repeated search projection updates before its
+  existing commit. Slow mesh preparation reports activity while work continues;
+  unchanged intermediate job states avoid redundant writes within one second.
+- Preview-only processing checks whether the mesh was released before requesting
+  a full garbage collection, including meshes loaded from scenes and ASCII STL.
+- Stored and DEFLATE 3MF model parts now decompress directly into the Rust XML
+  parser using `zip` and `zlib-rs`, without Python read callbacks. Reads retain
+  byte limits and CRC checks. Bzip2 and LZMA also use native decompression.
+- ZIP imports compute mesh geometry and previews ahead of the ordered writer.
+  Worker counts adapt to CPU and memory limits; `VAULT_IMPORT_WORKERS=1` keeps
+  serial execution. Shared memory reservations bound outstanding mesh work.
+- Both Docker variants include the required Rust extension for binary STL and
+  streamed 3MF mesh loading, geometry measurements, rasterization and canonical
+  lighting. Python reference stages are restricted to test fixtures.
+- Preview rendering culls back faces and avoids empty raster regions. Lossless
+  WebP method 0 reduces encoding work while preserving decoded pixels; encoded
+  thumbnails can be larger. The shared preview recipe advances to version 3.
+- ZIP imports publish originals, geometry and previews before queuing optional
+  similarity fingerprints. Progress reports the current file and completed,
+  failed and skipped counts. A full-archive benchmark checks source hashes,
+  geometry and previews while measuring elapsed time, CPU and sampled RAM.
+
 ### Added
 
+- Rust mesh previews now interpolate visible-pixel normals and apply the
+  canonical lighting without allocating NumPy arrays for each shading step.
+  Full-ZIP
+  comparisons verify geometry and encoded previews against the reference.
+
+- Rust can now read binary STL geometry and calculate mesh dimensions and
+  volume. Geometry measurements use bounded triangle batches and avoid unused
+  inertia calculations. Native STL previews verify memory release before
+  requesting a full garbage collection. Full-ZIP comparisons check saved geometry too.
+- 3MF previews stream mesh XML through the Rust extension, preserving
+  component placements and repeated instances. The renderer culls back-facing triangles
+  before allocating per-corner shading arrays.
+- Mesh previews use a Rust rasterization extension, included in both Docker
+  variants. The full-ZIP benchmark compares revisions with matching imported files.
+- AI Search adds transactional text indexing for Models, Collections, Multipart
+  Models and Documents, authorized lexical suggestions, hybrid results with match
+  evidence, and local image/geometry search. Image queries support file selection,
+  drag-and-drop and device camera capture. Pinned BGE, CLIP and OpenShape models
+  use one bounded CPU runtime; acquisition and activation require explicit action.
+  AI inference is optional and off by default; library features and ordinary
+  keyword search require no model, inference server or OpenAI account.
+- AI Search settings manage encrypted compatible endpoints, model provenance,
+  capacity estimates and resumable index rebuilds. Serving generations remain
+  available during replacement; float, int8/binary and approved MRL transforms
+  preserve native vectors. SQLite/PostgreSQL derivatives can fall back to portable
+  retrieval and rebuild after restore. Local models warm after restart while
+  lexical search remains available.
+- Separate captions preserve human descriptions and require explicit render
+  consent. Editable print-history filters use actual duration and timezone-aware
+  calendar bounds; optional personal natural-language consent enables parsing and
+  Saved Views. Optional local SPLADE expansion stores bounded weighted terms
+  separately from original text. The AI master disables these inference consumers;
+  query text and images stay out of durable search data and request/error logs.
+- PostgreSQL supports the existing backup API through verified portable snapshots.
+  A dry-run-first SQLite-to-PostgreSQL command preserves encrypted fields, IDs,
+  cyclic library references and native vector bytes without re-embedding.
 - Model Families preserve independent Models and Revisions while recording human
   variant roles, an explicit canonical selection and relative measurements.
   Membership moves and Family restoration are atomic; Model trash reserves its
@@ -22,6 +114,49 @@
   separate from verified geometry, and analysis never downloads model weights.
 
 ### Fixed
+
+- Mobile startup ships smaller translation bundles by sharing message keys across
+  languages and compacting translations identical to their keys.
+
+- First-time visits no longer reload the page when offline support installs,
+  avoiding duplicate startup work on mobile. Updates to an existing service
+  worker still refresh the application once.
+
+- Clearing an AI search returns to the library immediately; abandoned queries cannot restore old results, and stalled searches offer a retry after 30 seconds. Search results now use a thumbnail grid with an optional list view, on-demand match details, and fewer duplicated controls.
+
+- Local AI model downloads accept Hugging Face’s current CDN redirects while
+  retaining exact host checks and pinned file verification.
+
+- AI Search keeps the return to guided setup above the advanced controls, including
+  when settings fail to refresh. Switching views preserves keyboard focus.
+
+- Storage settings use GB cache limits, a simpler usage summary and expandable
+  diagnostics. AI Search now guides users through choosing local or server processing,
+  explicit downloads, library preparation, and a ready-to-search action. Server tuning
+  and the complete advanced controls remain available. Storage leads with used and
+  free space and hides empty cleanup actions. Library archive actions use consistent buttons.
+
+- Search backfill yields to complete user write requests, including upload staging
+  and cleanup, without holding a database transaction while waiting.
+- AI Search bounds permission checks and Model-card loading to result identities,
+  avoids repeated full top-k sorting during portable vector scans, and keeps
+  periodic SQLite projection-repair transactions short during browsing.
+- Search backfill drains bounded batches between periodic pauses, removing the
+  one-second delay per embedding batch while preserving maintenance and shutdown
+  coordination. Settled active generations stop a burst without inference.
+- Family browsing uses recent changes when relevance scores are unavailable,
+  preserving valid cursors for collapsed cards and the Families list.
+
+- Restoring AI Search backups no longer requires optional vector extensions to
+  inspect unversioned databases. Durable vectors remain searchable through the
+  portable backend while native acceleration is disabled.
+
+- AI Search activation acquires the SQLite writer lock before verification, so
+  concurrent worker commits cannot invalidate the cutover snapshot. Search and
+  ordinary Model results start without the optional Families annotation package.
+
+- Caption text and unsaved edits now clear when the signed-in account changes,
+  including account changes received from another browser tab.
 
 - Idle similarity polling no longer transiently blocks backup restoration with a storage-retention conflict.
 

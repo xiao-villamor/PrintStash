@@ -20,6 +20,7 @@ from sqlmodel import Session, col, select
 
 from app.core.time import utcnow
 from app.db.models import CollectionRole, File, Model, User
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.modules.library.trash import record_source_tombstone
@@ -114,6 +115,7 @@ class SQLRevisionUnitOfWork:
             self.model.thumbnail_path = None
         self.model.updated_at = now
         self.session.add(self.model)
+        content_changed(self.session, "model", [self.model.id])
 
     def commit(self) -> None:
         self.session.commit()

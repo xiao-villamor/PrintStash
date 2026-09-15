@@ -16,14 +16,14 @@
  * on.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopBar } from "@/components/top-bar";
-import { AuthContext, type AuthState } from "@/lib/auth-context";
-import { I18nProvider } from "@/lib/i18n";
+import { type AuthState } from "@/lib/auth-context";
+import { json, renderApp } from "@/test-support/render";
+import { searchStatus } from "@/test-support/search";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -46,15 +46,19 @@ function CurrentLocation() {
 }
 
 function renderTopBar({ at = "/", auth = session() }: { at?: string; auth?: AuthState } = {}) {
-  return render(
-    <MemoryRouter initialEntries={[at]}>
-      <AuthContext.Provider value={auth}>
-        <I18nProvider>
-          <TopBar />
-          <CurrentLocation />
-        </I18nProvider>
-      </AuthContext.Provider>
-    </MemoryRouter>,
+  return renderApp(
+    <>
+      <TopBar />
+      <CurrentLocation />
+    </>,
+    {
+      at,
+      auth,
+      routes: {
+        "GET /api/v1/search/status": json(searchStatus()),
+        "GET /api/v1/ingest/jobs": json([]),
+      },
+    },
   );
 }
 
@@ -81,26 +85,26 @@ describe("TopBar", () => {
     it("shows the search box on the vault", () => {
       renderTopBar();
 
-      expect(screen.getByRole("textbox", { name: "Search models" })).toBeInTheDocument();
+      expect(screen.getByRole("searchbox", { name: "Search library" })).toBeInTheDocument();
     });
 
     it("hides the search box away from the vault", () => {
       renderTopBar({ at: "/settings" });
 
-      expect(screen.queryByRole("textbox", { name: "Search models" })).toBeNull();
+      expect(screen.queryByRole("searchbox", { name: "Search library" })).toBeNull();
     });
 
     it("starts from the term already in the URL", () => {
       renderTopBar({ at: "/?q=benchy" });
 
-      expect(screen.getByRole("textbox", { name: "Search models" })).toHaveValue("benchy");
+      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("benchy");
     });
 
     it("writes what the user typed back to the URL", async () => {
       const user = userEvent.setup();
       renderTopBar();
 
-      await user.type(screen.getByRole("textbox", { name: "Search models" }), "benchy");
+      await user.type(screen.getByRole("searchbox", { name: "Search library" }), "benchy");
 
       await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/?q=benchy"));
     });
@@ -118,7 +122,7 @@ describe("TopBar", () => {
       await user.click(screen.getByRole("button", { name: "Clear search" }));
 
       await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/"));
-      expect(screen.getByRole("textbox", { name: "Search models" })).toHaveValue("");
+      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("");
     });
 
     it("focuses the box when the user presses slash", async () => {
@@ -127,7 +131,7 @@ describe("TopBar", () => {
 
       await user.keyboard("/");
 
-      expect(screen.getByRole("textbox", { name: "Search models" })).toHaveFocus();
+      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveFocus();
     });
 
     it("leaves slash alone while the user is typing in the box", async () => {
@@ -135,7 +139,7 @@ describe("TopBar", () => {
       // meant to serve.
       const user = userEvent.setup();
       renderTopBar();
-      const box = screen.getByRole("textbox", { name: "Search models" });
+      const box = screen.getByRole("searchbox", { name: "Search library" });
       await user.click(box);
 
       await user.keyboard("a/b");

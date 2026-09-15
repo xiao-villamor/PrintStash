@@ -30,6 +30,47 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  mesh-native:
+    name: Rust mesh loading and rendering (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component clippy,rustfmt
+      - name: Build the native extension
+        working-directory: backend
+        run: |
+          RUSTUP_TOOLCHAIN=1.91.0 uv sync --extra dev --frozen
+          RUSTUP_TOOLCHAIN=1.91.0 uv pip install ./rust
+          uv run python -c 'import printstash_mesh_native'
+          uv run ruff check rust/tests scripts/bench_import.py
+          cargo +1.91.0 fmt --manifest-path rust/Cargo.toml --check
+          cargo +1.91.0 clippy --manifest-path rust/Cargo.toml --locked -- -D warnings
+          cargo +1.91.0 fmt --manifest-path rust/render-core/Cargo.toml --check
+          cargo +1.91.0 clippy --manifest-path rust/render-core/Cargo.toml --locked --all-targets -- -D warnings
+          cargo +1.91.0 test --manifest-path rust/render-core/Cargo.toml --locked
+      - name: Check native visibility and Python parity
+        working-directory: backend
+        run: uv run pytest -q rust/tests packages/printstash-core/tests/mesh
+      - name: Check application previews and complete ZIP ingestion
+        working-directory: backend
+        run: uv run pytest -q tests/integration/modules/media/test_mesh_render.py tests/integration/modules/media/test_mesh_processing.py::TestLoadMesh tests/e2e/test_ingest.py::TestArchiveImport
+
   similarity-native:
     name: Similarity native (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -146,15 +187,17 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install autonomous package
+      - name: Install autonomous package with required Rust engine
         run: |
+          rustup toolchain install 1.91.0 --profile minimal
           uv venv --python ${{ matrix.python }}
-          uv pip install --python .venv/bin/python \
+          RUSTUP_TOOLCHAIN=1.91.0 uv pip install --python .venv/bin/python \
             --resolution ${{ matrix.resolution }} \
-            --editable ".[dev,mesh,printers-all,testkit]"
+            --editable ".[dev,mesh,printers-all,testkit]" ../../rust
+          .venv/bin/python -c 'import printstash_mesh_native'
 
       - name: Test autonomous package
-        run: .venv/bin/pytest tests -q -m "not coverage_gate"
+        run: .venv/bin/pytest tests ../../rust/tests -q -m "not coverage_gate"
 
       # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
       # The gate reads the report the measured pass writes, so it cannot run inside

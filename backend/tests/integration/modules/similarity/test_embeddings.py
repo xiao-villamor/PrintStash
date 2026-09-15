@@ -10,9 +10,9 @@ from sqlmodel import select
 from app.core.config import _overlay
 from app.db.models import FileType, PassageVector, SimilarityCandidate
 from app.db.session import get_session_factory
-from app.modules.inference.search import SearchRequest, capabilities, search
 from app.modules.similarity import configuration, runs
 from app.modules.similarity.processing import SimilarityProcessor
+from app.modules.similarity.semantic_search import SearchRequest, capabilities, search
 from app.modules.storage.storage_backend.runtime import get_backend
 from tests.factories.embeddings import local_embedding_assets
 from tests.factories.geometry import tetrahedron
@@ -102,8 +102,8 @@ def embedding_unit(
     tmp_path,
     monkeypatch,
 ):
-    from app.modules.inference import store
     from app.modules.inference.local import configured_provider
+    from app.modules.similarity import vector_sources as store
     from tests.paths import TESTDATA_DIR
 
     directory = local_embedding_assets(tmp_path / "assets")

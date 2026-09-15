@@ -163,6 +163,16 @@ class TestImports:
 
 
 class TestArchitecture:
+    def test_keeps_native_sessions_in_the_inference_owner(self):
+        consumers = set()
+        for path in (BACKEND_DIR / "app").rglob("*.py"):
+            name = ".".join(path.relative_to(BACKEND_DIR).with_suffix("").parts)
+            for dependency in imports(path.read_text(), name):
+                if dependency.target.split(".")[0] == "onnxruntime":
+                    consumers.add(dependency.source)
+        assert consumers
+        assert all(name.startswith("app.modules.inference.") for name in consumers)
+
     @pytest.mark.parametrize(
         "dependency",
         ["fastapi", "fastapi.responses", "starlette.exceptions", "app.api.errors"],

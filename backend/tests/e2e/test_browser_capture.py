@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import shutil
 from pathlib import Path
@@ -136,6 +137,12 @@ class TestBrowserCapture:
         assert completed.json()["state"] == "completed", completed.text
         file_id = completed.json()["results"][0]["file_id"]
         file = e2e_db.get(File, file_id)
+        assert get_backend().read_bytes(file.path) == source
+        assert e2e_db.exec(select(GeometryFingerprint)).all() == []
+        from app.runtime import similarity
+
+        assert await asyncio.to_thread(similarity.process_one) is True
+        e2e_db.expire_all()
         fingerprint = e2e_db.exec(
             select(GeometryFingerprint).where(
                 GeometryFingerprint.file_id == file_id,

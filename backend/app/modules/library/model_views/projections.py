@@ -39,8 +39,7 @@ from app.schemas.models import (
     PrintSummaryRead,
 )
 
-from .extensions import similarity_summaries
-from .families import family_summaries
+from .extensions import family_summaries, similarity_summaries
 from .thumbnails import thumb_url
 
 # ---------------------------------------------------------------------------

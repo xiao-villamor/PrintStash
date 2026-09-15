@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import resource
 import time
+import weakref
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -119,6 +120,13 @@ class ThumbnailEngine:
     metrics: ThumbnailMetricsSink = field(default_factory=NoopThumbnailMetrics)
 
     def generate(self, request: ThumbnailRequest) -> ThumbnailResult:
+        from app.modules.media import mesh_processing
+
+        # Hold admission through cleanup as well as loading and rendering.
+        with mesh_processing._render_semaphore():
+            return self._generate(request)
+
+    def _generate(self, request: ThumbnailRequest) -> ThumbnailResult:
         # Lazy import prevents a module cycle: mesh_processing exposes the
         # backwards-compatible public entry points that delegate back here.
         from app.modules.media import mesh_processing
@@ -411,8 +419,14 @@ class ThumbnailEngine:
         finally:
             prepared = None
             if mesh is not None:
+                released_mesh = (
+                    weakref.ref(mesh) if not request.include_fingerprint else None
+                )
                 del mesh
-                mesh_processing._reclaim_memory()
+                if released_mesh is None:
+                    mesh_processing._reclaim_memory()
+                else:
+                    mesh_processing._reclaim_memory(released_mesh=released_mesh)
 
         if image is not None:
             failure = None

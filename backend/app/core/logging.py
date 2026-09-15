@@ -17,11 +17,11 @@ class SensitiveQueryFilter(logging.Filter):
         record.msg = _QUERY_URL.sub(r"\1?[redacted]", str(record.msg))
 
         def scrub(value):
-            return (
-                _QUERY_URL.sub(r"\1?[redacted]", value)
-                if isinstance(value, str)
-                else value
-            )
+            # HTTP clients pass URL objects, not necessarily strings. Preserve
+            # numeric formatter arguments while scrubbing their rendered URLs.
+            rendered = str(value)
+            clean = _QUERY_URL.sub(r"\1?[redacted]", rendered)
+            return clean if clean != rendered else value
 
         if isinstance(record.args, tuple):
             record.args = tuple(scrub(value) for value in record.args)
@@ -40,7 +40,7 @@ def _configure_root() -> None:
         return
     handler = logging.StreamHandler(sys.stdout)
     handler.addFilter(SensitiveQueryFilter())
-    for name in ("uvicorn.access", "uvicorn.error"):
+    for name in ("uvicorn.access", "uvicorn.error", "httpx", "httpx2"):
         logging.getLogger(name).addFilter(SensitiveQueryFilter())
     handler.setFormatter(
         logging.Formatter(

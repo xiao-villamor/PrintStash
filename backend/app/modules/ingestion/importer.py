@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -55,6 +55,7 @@ from app.core.url_safety import (
 from app.db.models import SUFFIX_TO_FILE_TYPE
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.ingestion.ingestion import ingest_mesh, ingest_orca_gcode
+from app.modules.ingestion.mesh_prefetch import Analysis, PreparedImports
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.runtime.jobs import registry
 
@@ -339,6 +340,8 @@ def _ingest_one_file(
     actor_user_id: Optional[int],
     session_factory: SessionFactory,
     provenance_context: ProvenanceContext | None = None,
+    on_progress: Callable[[float], None] | None = None,
+    prepared_analysis: Analysis | None = None,
 ) -> Optional[dict]:
     """Ingest one staged file under its own child job.
 
@@ -369,6 +372,7 @@ def _ingest_one_file(
                 session_factory=session_factory,
                 source_url=source_url,
                 provenance_context=provenance_context,
+                on_progress=on_progress,
             )
         else:
             file_type = SUFFIX_TO_FILE_TYPE.get(suffix)
@@ -388,6 +392,13 @@ def _ingest_one_file(
                 session_factory=session_factory,
                 source_url=source_url,
                 provenance_context=provenance_context,
+                on_progress=on_progress,
+                defer_fingerprint=True,
+                **(
+                    {"prepared_analysis": prepared_analysis.process}
+                    if prepared_analysis is not None
+                    else {}
+                ),
             )
         child_status = registry.get(child)
         if child_status and child_status.state == "completed":
@@ -441,51 +452,86 @@ def import_assets(
     )
     results: list[dict] = []
     done = 0
-    for staged_file in staged_files:
-        if isinstance(staged_file, StagedAsset):
-            staged, rel_name = (
-                staged_file.staged_path,
-                staged_file.resolved.source_filename,
-            )
-            file_source_url = staged_file.resolved.member_url or source_url
-            provenance_context = _provenance_context(
-                staged=staged_file,
-                inbox_item_id=inbox_item_id,
-                actor_user_id=actor_user_id,
-            )
-        else:
-            staged, rel_name = staged_file
-            file_source_url = source_url
-            provenance_context = None
-        file_collection = collection
-        if nest_subdirs:
-            subdir = _safe_subdir(rel_name)
-            if subdir:
-                base = (collection or "").rstrip("/")
-                file_collection = f"{base}/{subdir}" if base else subdir
-        res = _ingest_one_file(
-            staged,
-            rel_name,
-            collection=file_collection,
-            tags=tags,
-            source_url=file_source_url,
-            model_name=override,
-            actor_user_id=actor_user_id,
-            session_factory=session_factory,
-            provenance_context=provenance_context,
-        )
-        if res is None:
-            continue
-        if isinstance(staged_file, StagedAsset):
-            res = {
-                **res,
-                "source_selection_id": staged_file.source_selection_id,
-                "result_key": staged_file.result_key,
-            }
-        results.append(res)
-        done += 1
-        registry.update(job_id, step=done, progress=done / total * 100)
+    succeeded = failed = skipped = duplicates = 0
 
+    def report_file_progress(progress: float) -> None:
+        registry.update(job_id, progress=(done + progress / 100) / total * 100)
+
+    with PreparedImports(
+        staged_files,
+        report_file_progress,
+        lambda name: registry.update(job_id, current_item=name),
+    ) as prepared:
+        for staged_file, prepared_analysis in prepared:
+            if isinstance(staged_file, StagedAsset):
+                staged, rel_name = (
+                    staged_file.staged_path,
+                    staged_file.resolved.source_filename,
+                )
+                file_source_url = staged_file.resolved.member_url or source_url
+                provenance_context = _provenance_context(
+                    staged=staged_file,
+                    inbox_item_id=inbox_item_id,
+                    actor_user_id=actor_user_id,
+                )
+            else:
+                staged, rel_name = staged_file
+                file_source_url = source_url
+                provenance_context = None
+            file_collection = collection
+            if nest_subdirs:
+                subdir = _safe_subdir(rel_name)
+                if subdir:
+                    base = (collection or "").rstrip("/")
+                    file_collection = f"{base}/{subdir}" if base else subdir
+            registry.update(job_id, current_item=rel_name)
+            res = _ingest_one_file(
+                staged,
+                rel_name,
+                collection=file_collection,
+                tags=tags,
+                source_url=file_source_url,
+                model_name=override,
+                actor_user_id=actor_user_id,
+                session_factory=session_factory,
+                provenance_context=provenance_context,
+                on_progress=report_file_progress,
+                **(
+                    {"prepared_analysis": prepared_analysis}
+                    if prepared_analysis is not None
+                    else {}
+                ),
+            )
+            done += 1
+            if res is None:
+                skipped += 1
+                registry.update(
+                    job_id,
+                    step=done,
+                    processed=done,
+                    skipped=skipped,
+                    progress=done / total * 100,
+                )
+                continue
+            if isinstance(staged_file, StagedAsset):
+                res = {
+                    **res,
+                    "source_selection_id": staged_file.source_selection_id,
+                    "result_key": staged_file.result_key,
+                }
+            results.append(res)
+            succeeded += bool(res.get("model_id"))
+            failed += bool(res.get("error"))
+            duplicates += bool(res.get("deduplicated"))
+            registry.update(
+                job_id,
+                step=done,
+                processed=done,
+                succeeded=succeeded,
+                failed=failed,
+                deduplicated=duplicates,
+                progress=done / total * 100,
+            )
     imported = [r for r in results if r.get("model_id")]
     failures = [r for r in results if r.get("error")]
     deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
@@ -494,7 +540,7 @@ def import_assets(
         state="completed" if imported else "failed",
         model_id=imported[0]["model_id"] if imported else None,
         result={"imported": len(imported), "total": total, "items": results},
-        processed=len(results),
+        processed=done,
         total=total,
         succeeded=len(imported),
         deduplicated=deduplicated,

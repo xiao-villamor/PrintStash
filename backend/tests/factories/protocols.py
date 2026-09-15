@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from printstash_core.search.passages import SearchSubject, SubjectType
+
 from app.db.models import (
     ArtifactProvenanceLink,
     CaptureUploadSlot,
@@ -39,6 +41,7 @@ from app.db.models import (
     InboxItemState,
     InboxSourceKind,
     IndexGeneration,
+    InferenceEndpoint,
     Model,
     ModelFamily,
     ModelFamilyMember,
@@ -62,6 +65,11 @@ from app.db.models import (
     PrintJob,
     PrintJobState,
     ProvenanceCapture,
+    SearchGenerationLease,
+    SearchIndexFailure,
+    SearchLexicalPosting,
+    SearchLexicalState,
+    SearchLexicalTerm,
     ShareLink,
     SimilarityCandidate,
     SimilarityCandidateObservation,
@@ -69,9 +77,11 @@ from app.db.models import (
     SimilarityRun,
     StorageConnection,
     StorageConnectionPurpose,
+    SubjectCaption,
     SystemConfig,
     Tag,
     User,
+    UserSearchPreferences,
     VaultAuditEvent,
     VaultAuditPolicy,
     VaultAuditRun,
@@ -79,6 +89,13 @@ from app.db.models import (
     VaultMigrationObject,
     VaultMigrationRun,
 )
+from app.db.models.search import (
+    SearchDependency,
+    SearchPassage,
+    SearchReconciliationState,
+)
+from app.db.models.search_expansion import SearchExpansion, SearchExpansionTerm
+from app.db.projections import ContentSource
 
 
 class MakeUser(Protocol):
@@ -544,12 +561,81 @@ class MakeIndexGeneration(Protocol):
     ) -> IndexGeneration: ...
 
 
+class MakeInferenceEndpoint(Protocol):
+    def __call__(
+        self, *, kind: str = "embedding", **overrides: Any
+    ) -> InferenceEndpoint: ...
+
+
+class MakeSearchPassage(Protocol):
+    def __call__(self, subject: SearchSubject, **overrides: Any) -> SearchPassage: ...
+
+
+class MakeSearchExpansion(Protocol):
+    def __call__(self, passage: SearchPassage, **overrides: Any) -> SearchExpansion: ...
+
+
+class MakeSearchExpansionTerm(Protocol):
+    def __call__(
+        self, expansion: SearchExpansion, term: str = "bike", **overrides: Any
+    ) -> SearchExpansionTerm: ...
+
+
+class MakeSubjectCaption(Protocol):
+    def __call__(self, subject: SearchSubject, **overrides: Any) -> SubjectCaption: ...
+
+
 class MakePassageVector(Protocol):
     def __call__(
         self,
         generation: IndexGeneration,
-        file: File,
+        file: File | None = None,
         *,
         component_index: int = 0,
+        passage: SearchPassage | None = None,
         **overrides: Any,
     ) -> PassageVector: ...
+
+
+class MakeSearchIndexFailure(Protocol):
+    def __call__(
+        self, generation: IndexGeneration, passage: SearchPassage, **overrides: Any
+    ) -> SearchIndexFailure: ...
+
+
+class MakeSearchGenerationLease(Protocol):
+    def __call__(
+        self, generation: IndexGeneration, **overrides: Any
+    ) -> SearchGenerationLease: ...
+
+
+class MakeSearchDependency(Protocol):
+    def __call__(
+        self, subject: SearchSubject, source: ContentSource, **overrides: Any
+    ) -> SearchDependency: ...
+
+
+class MakeSearchReconciliationState(Protocol):
+    def __call__(
+        self, kind: SubjectType, **overrides: Any
+    ) -> SearchReconciliationState: ...
+
+
+class MakeSearchLexicalState(Protocol):
+    def __call__(self, **overrides: Any) -> SearchLexicalState: ...
+
+
+class MakeSearchLexicalTerm(Protocol):
+    def __call__(
+        self, term: str = "bracket", **overrides: Any
+    ) -> SearchLexicalTerm: ...
+
+
+class MakeSearchLexicalPosting(Protocol):
+    def __call__(
+        self, passage: SearchPassage, term: str = "bracket", **overrides: Any
+    ) -> SearchLexicalPosting: ...
+
+
+class MakeUserSearchPreferences(Protocol):
+    def __call__(self, user: User, **overrides: Any) -> UserSearchPreferences: ...

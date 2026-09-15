@@ -16,7 +16,10 @@ logger = get_logger(__name__)
 
 
 def process_one() -> bool:
-    if not maintenance.begin_mutating_operation():
+    if (
+        maintenance.foreground_mutations_pending()
+        or not maintenance.begin_mutating_operation()
+    ):
         return False
     try:
         return SimilarityProcessor(

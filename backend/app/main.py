@@ -96,10 +96,15 @@ app.add_middleware(VaultGenerationMiddleware)
 async def validation_exception_handler(
     _request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    errors = exc.errors()
+    if _request.url.path.startswith("/api/v1/config/ai-search"):
+        # Pydantic includes the entire submitted object for a model validator.
+        # This boundary accepts credentials, so even invalid inputs stay secret.
+        errors = [{"type": error["type"], "loc": error["loc"]} for error in errors]
     return JSONResponse(
         status_code=422,
         content=jsonable_encoder(
-            {"detail": "request_validation_failed", "errors": exc.errors()}
+            {"detail": "request_validation_failed", "errors": errors}
         ),
     )
 
@@ -125,6 +130,30 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "internal_server_error"},
     )
+
+
+@app.middleware("http")
+async def protect_search_error_details(request: Request, call_next):
+    # Starlette re-raises unexpected exceptions after its 500 handler; uvicorn
+    # would then format the original traceback, including SQL/query arguments.
+    # Terminate that path here even in DEBUG. Provider prompts are never logged.
+    sensitive = (
+        request.url.path.startswith("/api/v1/search") or "q" in request.query_params
+    )
+    if not sensitive:
+        return await call_next(request)
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.error(
+            "search request failed method=%s path=%s error=%s",
+            request.method,
+            request.url.path,
+            type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=500, content={"detail": "internal_server_error"}
+        )
 
 
 @app.middleware("http")

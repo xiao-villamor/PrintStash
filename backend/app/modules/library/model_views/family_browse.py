@@ -93,6 +93,10 @@ def collapsed_page(
     cursor: str | None,
     limit: int,
 ) -> FamilyBrowsePage:
+    # Family cards have no shared relevance score. Match ordinary browsing's
+    # fallback when no ranking leg supplies one, including the cursor type.
+    if sort == ModelSort.RELEVANCE:
+        sort = ModelSort.DATE_DESC
     filtered = _filtered_stmt(session, user, filters)
     memberships = membership_rows(session, user).cte("visible_memberships")
     ungrouped = filtered.where(col(Model.id).not_in(select(memberships.c.model_id)))
@@ -218,6 +222,8 @@ def family_page(
     cursor: str | None,
     limit: int,
 ) -> FamilyPageRead:
+    if sort == ModelSort.RELEVANCE:
+        sort = ModelSort.DATE_DESC
     stmt = select(ModelFamily).where(
         trashed(ModelFamily) if include_trashed else live(ModelFamily),
         visible_clause(session, user),

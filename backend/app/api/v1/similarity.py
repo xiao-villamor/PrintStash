@@ -12,8 +12,8 @@ from sqlmodel import Session
 from app.core.security import require_auth, require_superuser, require_user
 from app.db.models import FileType, User
 from app.db.session import get_session
-from app.modules.inference.search import SearchRequest
 from app.modules.similarity import candidates, configuration, review, runs, service
+from app.modules.similarity.semantic_search import SearchRequest
 from app.runtime.work_wakeup import WorkNotice
 
 router = APIRouter(tags=["similarity"])
@@ -207,7 +207,7 @@ def search_similar(
 ):
     from app.core.errors import ErrorKind, OperationError
     from app.db.session import get_session_factory
-    from app.modules.inference.search import search
+    from app.modules.similarity.semantic_search import search
     from app.runtime.maintenance import begin_mutating_operation, end_mutating_operation
 
     if not begin_mutating_operation():

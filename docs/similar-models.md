@@ -57,8 +57,13 @@ Advanced settings provide per-class thresholds, a triangle cap (2,000,000),
 verification samples (5,000), candidates per shortlist (20), an optional scan
 interval, and local embeddings. These controls have enforced upper bounds.
 
-Analysis on upload is a separate opt-in. A derivative failure leaves a successful
-upload intact. Runs keep their checkpoints across restarts and can be cancelled
+Analysis on upload is a separate opt-in. ZIP imports save
+files, geometry and previews first, then queue similarity fingerprints in the
+database. Similarity workers start no new work during uploads or imports; a
+running analysis step can finish before it yields. Import completion means the
+Models are available; their similarity
+analysis may still be pending. A derivative failure leaves a successful upload
+intact. Runs keep their checkpoints across restarts and can be cancelled
 between work units. Maintenance and storage garbage collection share the normal
 application admission and retention controls. Truncated buckets, partial inputs,
 and unsupported Artifacts are reported in progress instead of implying a complete

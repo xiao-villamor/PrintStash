@@ -28,19 +28,14 @@ unrecognisable edge-on sliver. Flat meshes are framed face-on; solid ones get th
 
 from __future__ import annotations
 
-import ast
-import builtins
 import io
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-import pytest
 from PIL import Image
 
 from printstash_core.mesh import rasterizer, render_mesh_thumbnail
-from printstash_core.mesh.rasterizer import RasterBudget
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 # 25°, the tilt a flat mesh is viewed at so recesses read.
@@ -204,28 +199,6 @@ class TestRenderMeshThumbnail:
         assert one_chunk is not None and many_chunks is not None
         np.testing.assert_array_equal(pixels(one_chunk), pixels(many_chunks))
 
-    def test_never_hands_the_rasterizer_more_faces_than_the_chunk_size(self) -> None:
-        seen: list[int] = []
-
-        def spy(*args: Any) -> None:
-            seen.append(int(args[2].shape[0]))
-            rasterizer._rasterise_triangles(*args)
-
-        png = render_mesh_thumbnail(
-            box_mesh(),
-            "box.stl",
-            width=48,
-            height=48,
-            face_chunk_size=2,
-            rasterise_triangles=spy,
-        )
-
-        # The per-face arrays are the largest allocation in the process; the
-        # chunk size is what keeps a million-triangle mesh from materialising
-        # them whole.
-        assert png is not None
-        assert seen and max(seen) <= 2
-
     def test_renders_a_single_triangle(self) -> None:
         mesh = SimpleNamespace(
             vertices=np.array(
@@ -274,36 +247,18 @@ class TestRenderMeshThumbnail:
         # an upload fail because a thumbnail could not be produced.
         assert render_mesh_thumbnail(None, "gone.stl") is None
 
-    def test_reports_a_missing_numpy_or_pillow_as_an_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        log = RecordingLogger()
-        real_import = builtins.__import__
-
-        def without_numpy(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "numpy":
-                raise ImportError("no numpy in this environment")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", without_numpy)
-
-        assert render_mesh_thumbnail(box_mesh(), "box.stl", logger=log) is None
-        assert log.errors == [
-            "mesh_render: numpy/Pillow unavailable; cannot render thumbnail"
-        ]
-
-    def test_returns_nothing_when_the_rasterizer_raises(self) -> None:
+    def test_returns_nothing_when_the_rasterizer_raises(self, monkeypatch) -> None:
         log = RecordingLogger()
 
         def explode(*_args: Any, **_kwargs: Any) -> None:
             raise MemoryError("candidate-pixel expansion failed")
 
+        monkeypatch.setattr(rasterizer.native_rasterizer, "render_preview", explode)
         result = render_mesh_thumbnail(
             box_mesh(),
             "box.stl",
             width=32,
             height=32,
-            rasterise_triangles=explode,
             logger=log,
         )
 
@@ -323,17 +278,6 @@ class TestRenderMeshThumbnail:
         assert png is not None and png.startswith(PNG_MAGIC)
         assert pixels(png)[:, :, 3].max() == 255
 
-    def test_names_the_file_when_it_falls_back_to_a_silhouette(self) -> None:
-        log = RecordingLogger()
-
-        render_mesh_thumbnail(
-            inverted_plate(), "inverted.stl", width=48, height=48, logger=log
-        )
-
-        assert log.warnings == [
-            "mesh_render: no visible triangles for inverted.stl — using silhouette"
-        ]
-
     def test_still_produces_a_png_for_a_mesh_of_zero_area_triangles(self) -> None:
         log = RecordingLogger()
         collinear = SimpleNamespace(
@@ -349,227 +293,3 @@ class TestRenderMeshThumbnail:
         # than an exception out of the barycentric divide.
         assert png is not None and png.startswith(PNG_MAGIC)
         assert pixels(png)[:, :, 3].max() == 0
-
-
-class TestSelectViewRotation:
-    def test_frames_a_solid_mesh_with_z_up_on_screen(self) -> None:
-        rotation = rasterizer._select_view_rotation(box_mesh().vertices)
-
-        # 3D-print models are Z-up because they sit flat on the bed. A view that
-        # stared down the Z axis showed the top of an upright model instead of
-        # its face.
-        z_on_screen = rotation @ np.array([0.0, 0.0, 1.0])
-        assert z_on_screen[1] > 0.8
-        assert abs(z_on_screen[0]) < 0.2
-
-    def test_returns_a_proper_rotation_for_a_solid_mesh(self) -> None:
-        rotation = rasterizer._select_view_rotation(box_mesh().vertices)
-
-        # Orthonormal with positive determinant: no reflection, no scaling, so
-        # the model is not mirrored or stretched in the thumbnail.
-        np.testing.assert_allclose(rotation @ rotation.T, np.eye(3), atol=1e-9)
-        assert np.linalg.det(rotation) > 0.99
-
-    def test_views_a_flat_mesh_face_on(self) -> None:
-        rotation = rasterizer._select_view_rotation(flat_mesh(thin_axis=2))
-
-        cosine, sine = np.cos(FLAT_TILT), np.sin(FLAT_TILT)
-        expected = np.array(
-            [[1, 0, 0], [0, cosine, -sine], [0, sine, cosine]], dtype=np.float64
-        ) @ np.diag([1.0, 1.0, -1.0])
-        # A badge or a sign viewed at the hero angle renders as an
-        # unrecognisable edge-on sliver.
-        np.testing.assert_allclose(rotation, expected, atol=1e-12)
-
-    @pytest.mark.parametrize("thin_axis", [0, 1, 2])
-    def test_looks_along_whichever_axis_is_thin(self, thin_axis: int) -> None:
-        rotation = rasterizer._select_view_rotation(flat_mesh(thin_axis))
-
-        # The thin axis has to end up pointing at the camera (screen Z) whether
-        # the model was exported lying down, standing up, or on its side.
-        thin_direction = np.zeros(3)
-        thin_direction[thin_axis] = 1.0
-        assert abs((rotation @ thin_direction)[2]) > 0.9
-
-    def test_uses_the_hero_view_for_a_mesh_with_no_extent(self) -> None:
-        degenerate = np.zeros((3, 3), dtype=np.float64)
-
-        rotation = rasterizer._select_view_rotation(degenerate)
-
-        # A single point has no broad face to frame, so the flat-mesh branch
-        # must not divide by its zero extent.
-        assert np.linalg.det(rotation) > 0.99
-
-
-class TestFrontRotationForThinAxis:
-    @pytest.mark.parametrize("thin_axis", [0, 1, 2])
-    def test_returns_a_proper_rotation_for_every_axis(self, thin_axis: int) -> None:
-        rotation = rasterizer._front_rotation_for_thin_axis(thin_axis)
-
-        np.testing.assert_allclose(rotation @ rotation.T, np.eye(3), atol=1e-12)
-
-    @pytest.mark.parametrize("thin_axis", [0, 1])
-    def test_keeps_the_model_upright_for_a_standing_plate(self, thin_axis: int) -> None:
-        rotation = rasterizer._front_rotation_for_thin_axis(thin_axis)
-
-        # A plate standing on the bed is thin in X or Y; object Z must stay
-        # screen-up or the thumbnail is sideways.
-        assert (rotation @ np.array([0.0, 0.0, 1.0]))[1] > 0.8
-
-
-class TestRasteriseTriangles:
-    def paint(
-        self,
-        tri: np.ndarray,
-        *,
-        size: int = 16,
-        budget: RasterBudget | None = None,
-    ) -> tuple[int, np.ndarray]:
-        img = np.zeros((size, size, 3), dtype=np.uint8)
-        zbuf = np.full((size, size), np.inf, dtype=np.float64)
-        normals = np.tile(np.array([0.0, 0.0, -1.0]), (tri.shape[0], 3, 1))
-
-        def shade(n: np.ndarray) -> np.ndarray:
-            return np.ones_like(n)
-
-        painted = rasterizer._rasterise_triangles(
-            img,
-            zbuf,
-            tri,
-            normals,
-            shade,
-            # White on the 8-bit scale: `shade` returns absolute colour in
-            # [0, 1] and the rasterizer's multiply only scales it up.
-            np.array([255.0, 255.0, 255.0]),
-            size,
-            size,
-            budget=budget,
-        )
-        return int(painted or 0), img
-
-    def test_paints_the_pixels_a_triangle_covers(self) -> None:
-        tri = np.array([[[2.0, 2.0, 0.0], [12.0, 2.0, 0.0], [2.0, 12.0, 0.0]]])
-
-        painted, img = self.paint(tri)
-
-        assert painted > 0
-        assert img[4, 4].tolist() == [255, 255, 255]
-
-    def test_leaves_pixels_outside_the_triangle_alone(self) -> None:
-        tri = np.array([[[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 4.0, 0.0]]])
-
-        _painted, img = self.paint(tri)
-
-        assert img[15, 15].tolist() == [0, 0, 0]
-
-    def test_paints_nothing_for_an_empty_batch(self) -> None:
-        painted, img = self.paint(np.empty((0, 3, 3), dtype=np.float64))
-
-        assert painted == 0
-        assert img.max() == 0
-
-    def test_skips_a_triangle_with_no_area(self) -> None:
-        # Three collinear points. Tessellated meshes contain these, and the
-        # barycentric denominator is zero for them — dividing would produce
-        # NaN coordinates and paint garbage across the frame.
-        tri = np.array([[[1.0, 1.0, 0.0], [5.0, 5.0, 0.0], [9.0, 9.0, 0.0]]])
-
-        painted, img = self.paint(tri)
-
-        assert painted == 0
-        assert img.max() == 0
-
-    def test_keeps_the_nearer_of_two_overlapping_triangles(self) -> None:
-        near = [[2.0, 2.0, -1.0], [12.0, 2.0, -1.0], [2.0, 12.0, -1.0]]
-        far = [[2.0, 2.0, 5.0], [12.0, 2.0, 5.0], [2.0, 12.0, 5.0]]
-        img = np.zeros((16, 16, 3), dtype=np.uint8)
-        zbuf = np.full((16, 16), np.inf, dtype=np.float64)
-        tri = np.array([near, far])
-        normals = np.tile(np.array([0.0, 0.0, -1.0]), (2, 3, 1))
-
-        rasterizer._rasterise_triangles(
-            img,
-            zbuf,
-            tri,
-            normals,
-            lambda n: np.ones_like(n),
-            np.array([255.0, 255.0, 255.0]),
-            16,
-            16,
-        )
-
-        # Painted back-to-front in array order, so only a working z-buffer
-        # keeps the near surface visible.
-        assert zbuf[4, 4] < 0
-
-    def test_stops_when_a_shared_budget_is_exhausted(self) -> None:
-        tri = np.array([[[2.0, 2.0, 0.0], [12.0, 2.0, 0.0], [2.0, 12.0, 0.0]]])
-
-        painted, img = self.paint(tri, budget=RasterBudget(limit=0, used=0))
-
-        # The budget is cumulative across every rasterizer call in one render,
-        # so an exhausted one has to stop rather than allocate anyway.
-        assert painted == 0
-        assert img.max() == 0
-
-    def test_charges_the_pixels_it_paints_to_the_shared_budget(self) -> None:
-        tri = np.array([[[2.0, 2.0, 0.0], [12.0, 2.0, 0.0], [2.0, 12.0, 0.0]]])
-        budget = RasterBudget(limit=10_000)
-
-        self.paint(tri, budget=budget)
-
-        assert budget.used > 0
-
-    def test_renders_a_giant_triangle_as_a_centered_tile(self) -> None:
-        # One triangle covering the whole frame, with a budget too small for it.
-        # Dropping the face outright would leave a hole; a centered tile of the
-        # affordable size keeps the silhouette readable within the cap.
-        tri = np.array([[[32.0, 0.0, 0.0], [0.0, 63.0, 0.0], [63.0, 63.0, 0.0]]])
-
-        painted, img = self.paint(tri, size=64, budget=RasterBudget(limit=64))
-
-        assert 0 < painted <= 64
-        assert img.max() > 0
-
-    def test_preserves_full_face_when_only_allocation_chunk_is_small(self) -> None:
-        tri = np.array([[[0.0, 0.0, 0.0], [511.0, 0.0, 0.0], [0.0, 511.0, 0.0]]])
-        budget = RasterBudget(limit=1_000_000)
-
-        painted, img = self.paint(tri, size=512, budget=budget)
-
-        assert painted == budget.used == 512 * 512
-        assert img[10, 10].tolist() == [255, 255, 255]
-
-
-class TestRasterBudget:
-    def test_preserves_default_cumulative_pixel_budget(self) -> None:
-        budget = RasterBudget()
-
-        assert budget.used == 0
-        assert budget.limit == 1_000_000
-
-
-class TestModuleDependencies:
-    def test_imports_no_framework_storage_or_tessellation_package(self) -> None:
-        tree = ast.parse(Path(rasterizer.__file__).read_text(encoding="utf-8"))
-        roots: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                roots.update(alias.name.split(".", 1)[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                roots.add(node.module.split(".", 1)[0])
-
-        # This module is documented as installable with nothing but NumPy and
-        # Pillow, across two dependency profiles, and as movable wholesale into
-        # a separate thumbnail worker. Any of these imports breaks both claims.
-        assert roots.isdisjoint(
-            {
-                "app",
-                "cascadio",
-                "fastapi",
-                "sqlalchemy",
-                "sqlmodel",
-                "storage",
-                "trimesh",
-            }
-        )

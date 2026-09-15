@@ -27,7 +27,7 @@ from app.schemas.models import (
     ModelSort,
 )
 
-from .filters import _filtered_stmt
+from .filters import filtered_with_rank
 from .projections import _hydrate_list_rows
 
 
@@ -84,7 +84,9 @@ def _latest_gcode_metadata():
     )
 
 
-def _sort_value_and_statement(stmt, sort: ModelSort):
+def _sort_value_and_statement(stmt, sort: ModelSort, rank=None):
+    if sort == ModelSort.RELEVANCE:
+        return stmt, rank if rank is not None else Model.updated_at
     if sort in (ModelSort.DATE_DESC, ModelSort.DATE_ASC):
         return stmt, Model.updated_at
     if sort in (ModelSort.NAME_ASC, ModelSort.NAME_DESC):
@@ -185,6 +187,7 @@ def _apply_model_cursor(
     cursor: tuple[object, int, int] | None,
 ):
     descending = sort in (
+        ModelSort.RELEVANCE,
         ModelSort.DATE_DESC,
         ModelSort.NAME_DESC,
         ModelSort.SUCCESS_DESC,
@@ -216,7 +219,11 @@ def page_items(
     limit: int = 60,
 ) -> ModelPageRead:
     """Globally sorted keyset page; the browser never drains the full library."""
-    filtered = _filtered_stmt(session, user, filters)
+    filtered, rank = filtered_with_rank(session, user, filters)
+    if rank is not None and sort == ModelSort.DATE_DESC:
+        sort = ModelSort.RELEVANCE
+    elif rank is None and sort == ModelSort.RELEVANCE:
+        sort = ModelSort.DATE_DESC
     filter_key = _model_filter_key(filters, user)
     decoded_cursor = _decode_model_cursor(cursor, sort, filter_key) if cursor else None
     if decoded_cursor is None:
@@ -229,7 +236,7 @@ def page_items(
         )
     else:
         total = decoded_cursor[2]
-    stmt, sort_value = _sort_value_and_statement(filtered, sort)
+    stmt, sort_value = _sort_value_and_statement(filtered, sort, rank)
     stmt = _apply_model_cursor(stmt, sort_value, sort, decoded_cursor)
     raw_rows = session.execute(stmt.add_columns(sort_value).limit(limit + 1)).all()
     has_more = len(raw_rows) > limit
@@ -246,3 +253,23 @@ def page_items(
         next_cursor=next_cursor,
         total=total,
     )
+
+
+def ordered_ids(
+    session: Session,
+    user: User,
+    filters: ModelFilters,
+    sort: ModelSort,
+    *,
+    ids: list[int] | None = None,
+    limit: int = 2049,
+) -> list[int]:
+    """Bounded canonical ordering for the heterogeneous search materializer."""
+    filtered, rank = filtered_with_rank(session, user, filters)
+    if ids is not None:
+        if len(ids) > 2048:
+            raise ValueError("model_projection_limit")
+        filtered = filtered.where(Model.id.in_(ids))
+    statement, expression = _sort_value_and_statement(filtered, sort, rank)
+    statement = _apply_model_cursor(statement, expression, sort, None)
+    return list(session.exec(statement.with_only_columns(Model.id).limit(limit)).all())

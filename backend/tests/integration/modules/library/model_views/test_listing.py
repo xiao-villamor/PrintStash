@@ -370,3 +370,21 @@ class TestListTrashed:
         )
         assert created <= set(seen)
         assert sum(1 for i in seen if i in created) == 20
+
+
+class TestReadItemsByIds:
+    def test_bounds_card_work_to_requested_identities(self, db_session, make_user, make_model):
+        from tests.fakes.sqlite_work import sqlite_work
+
+        actor = make_user(superuser=True)
+        target = make_model("Requested model")
+        db_session.commit()
+        with sqlite_work(db_session) as small:
+            before = models_listing.read_items_by_ids(db_session, actor, [target.id])
+        for index in range(1000):
+            make_model(f"Unrelated model {index}")
+        db_session.commit()
+        with sqlite_work(db_session) as large:
+            after = models_listing.read_items_by_ids(db_session, actor, [target.id])
+        assert [row.id for row in before] == [row.id for row in after] == [target.id]
+        assert large.instructions <= max(1000, small.instructions * 2)

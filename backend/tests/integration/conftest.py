@@ -46,6 +46,7 @@ from tests.factories.protocols import (
     MakeGeometryFingerprint,
     MakeInboxItem,
     MakeIndexGeneration,
+    MakeInferenceEndpoint,
     MakeModel,
     MakeMultipartBuild,
     MakeMultipartBuildAttempt,
@@ -60,14 +61,26 @@ from tests.factories.protocols import (
     MakePrinterFile,
     MakePrintJob,
     MakeProvenanceSource,
+    MakeSearchDependency,
+    MakeSearchExpansion,
+    MakeSearchExpansionTerm,
+    MakeSearchGenerationLease,
+    MakeSearchIndexFailure,
+    MakeSearchLexicalPosting,
+    MakeSearchLexicalState,
+    MakeSearchLexicalTerm,
+    MakeSearchPassage,
+    MakeSearchReconciliationState,
     MakeShareLink,
     MakeSimilarityCandidate,
     MakeSimilarityDecision,
     MakeSimilarityObservation,
     MakeSimilarityRun,
     MakeStorageConnection,
+    MakeSubjectCaption,
     MakeSystemConfig,
     MakeUser,
+    MakeUserSearchPreferences,
     MakeVaultGeneration,
     MakeVaultMigration,
     MakeVaultMigrationObject,
@@ -613,6 +626,41 @@ def make_passage_vector(db_session: Session) -> MakePassageVector:
     return _bound(factories.build_passage_vector, db_session)
 
 
+@pytest.fixture
+def make_search_expansion(db_session: Session) -> MakeSearchExpansion:
+    return _bound(factories.build_search_expansion, db_session)
+
+
+@pytest.fixture
+def make_search_expansion_term(db_session: Session) -> MakeSearchExpansionTerm:
+    return _bound(factories.build_search_expansion_term, db_session)
+
+
+@pytest.fixture
+def make_search_passage(db_session: Session) -> MakeSearchPassage:
+    return _bound(factories.build_search_passage, db_session)
+
+
+@pytest.fixture
+def make_subject_caption(db_session: Session) -> MakeSubjectCaption:
+    return _bound(factories.build_subject_caption, db_session)
+
+
+@pytest.fixture
+def make_inference_endpoint(db_session: Session) -> MakeInferenceEndpoint:
+    return _bound(factories.build_inference_endpoint, db_session)
+
+
+@pytest.fixture
+def make_search_index_failure(db_session: Session) -> MakeSearchIndexFailure:
+    return _bound(factories.build_search_index_failure, db_session)
+
+
+@pytest.fixture
+def make_search_generation_lease(db_session: Session) -> MakeSearchGenerationLease:
+    return _bound(factories.build_search_generation_lease, db_session)
+
+
 __all__ += [
     "make_geometry_fingerprint",
     "make_similarity_run",
@@ -622,4 +670,51 @@ __all__ += [
     "make_embedding_space",
     "make_index_generation",
     "make_passage_vector",
+    "make_search_passage",
+    "make_search_expansion",
+    "make_search_expansion_term",
+    "make_subject_caption",
+    "make_user_search_preferences",
 ]
+
+
+@pytest.fixture
+def make_search_dependency(db_session: Session) -> MakeSearchDependency:
+    return _bound(factories.build_search_dependency, db_session)
+
+
+@pytest.fixture
+def make_search_reconciliation_state(
+    db_session: Session,
+) -> MakeSearchReconciliationState:
+    return _bound(factories.build_search_reconciliation_state, db_session)
+
+
+__all__ += ["make_search_dependency", "make_search_reconciliation_state"]
+
+
+@pytest.fixture
+def make_search_lexical_state(db_session: Session) -> MakeSearchLexicalState:
+    return _bound(factories.build_search_lexical_state, db_session)
+
+
+@pytest.fixture
+def make_search_lexical_term(db_session: Session) -> MakeSearchLexicalTerm:
+    return _bound(factories.build_search_lexical_term, db_session)
+
+
+@pytest.fixture
+def make_search_lexical_posting(db_session: Session) -> MakeSearchLexicalPosting:
+    return _bound(factories.build_search_lexical_posting, db_session)
+
+
+__all__ += [
+    "make_search_lexical_state",
+    "make_search_lexical_term",
+    "make_search_lexical_posting",
+]
+
+
+@pytest.fixture
+def make_user_search_preferences(db_session: Session) -> MakeUserSearchPreferences:
+    return _bound(factories.build_user_search_preferences, db_session)

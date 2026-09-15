@@ -93,6 +93,37 @@ class TestVerifyPaths:
 
 
 class TestEmbeddingViews:
+    def test_loads_the_mesh_once_for_a_complete_visual_pass(
+        self, mesh_path, monkeypatch
+    ):
+        from printstash_core.inference import EmbeddingSpace
+        from printstash_core.search.visual_inputs import VisualRecipe
+
+        loads = []
+        original = geometry_analysis._load
+
+        def observed(*args, **kwargs):
+            loads.append(args[0])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(geometry_analysis, "_load", observed)
+        recipe = VisualRecipe.for_space(
+            VisualRecipe.space(
+                EmbeddingSpace("clip", "v1", 3, "text_image", "test"),
+                image_size=32,
+                profile="multiview",
+            )
+        )
+        result = geometry_analysis.visual_views(
+            mesh_path, file_type="stl", recipe=recipe, triangle_cap=100
+        )
+
+        assert loads == [mesh_path]
+        assert len(result.views) == 6
+        assert result.thumbnail.modality == "image"
+        assert len(result.thumbnail.rgb) == 32 * 32 * 3
+        assert all(view.width == 32 for view in result.views)
+
     def test_produces_distinct_opaque_rgb_views(self, mesh_path):
         views = geometry_analysis.embedding_views(
             mesh_path,

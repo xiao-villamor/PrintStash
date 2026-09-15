@@ -119,6 +119,10 @@ export function invalidateQueriesForPath(path: string, method: ApiMethod = "POST
     bust(queryKeys.multipartModels);
   };
 
+  if (has("ai-search", "inference") && !segments.includes("estimate")) {
+    bust(["ai-search"]);
+  }
+
   if (has("families")) {
     bust(queryKeys.families);
     multipartAffected();

@@ -41,14 +41,15 @@ import pytest
 # SeaweedFS in `mini` mode: master, volume server and S3 gateway in one process.
 # Pinned by digest so a green run here and a green run in CI are the same run, and
 # given a development-sized volume limit so it allocates in seconds rather than
-# reserving gigabytes.
+# reserving gigabytes. Mini derives its volume-slot count from free disk space;
+# 8 MiB leaves room for the suite's many isolated buckets on small CI disks.
 SEAWEEDFS_IMAGE = (
     "chrislusf/seaweedfs:4.41"
     "@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d"
 )
 SEAWEEDFS_S3_PORT = 8333
 SEAWEEDFS_COMMAND = (
-    "mini -dir=/data -master.volumeSizeLimitMB=64 -master.telemetry=false"
+    "mini -dir=/data -master.volumeSizeLimitMB=8 -master.telemetry=false"
 )
 # The gateway's own readiness line. SeaweedFS binds the port before the S3 API can
 # answer, so a port check races and the first request comes back as a connection
@@ -232,6 +233,26 @@ def _start_seaweedfs() -> str:
 def postgres_url() -> str:
     """A real PostgreSQL URL. Raises when Docker is not running."""
     return _resolve("postgres", POSTGRES_RESOURCE, _start_postgres)
+
+
+def pgvector_url() -> str:
+    """Real optional pgvector capability, independent of plain PostgreSQL tests."""
+
+    def start() -> str:
+        from testcontainers.community.postgres import PostgresContainer
+
+        container = _start_container(
+            lambda: PostgresContainer(
+                "pgvector/pgvector:0.8.0-pg16@sha256:a132765ec351c65111b5b675928a3a0515a466a40f97277329db8b8209ad8bc9",
+                username=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                dbname=POSTGRES_DB,
+            )
+        )
+        _started.append(container)
+        return container.get_connection_url(driver=None)
+
+    return _resolve("pgvector", "PostgreSQL with pgvector", start)
 
 
 def s3_endpoint() -> str:

@@ -33,6 +33,7 @@ from app.db.models import (
     StorageObjectState,
     User,
 )
+from app.db.projections import batch_content_changes, content_changed
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.identity import rbac
@@ -289,6 +290,7 @@ def _apply_taxonomy(
             if overwrite_collection or model.collection_id is None:
                 model.collection_id = cat.id
             session.add(model)
+            content_changed(session, "model", [model.id])
             session.commit()
 
     tag_names = taxonomy.parse_tag_input(tags_raw)
@@ -304,6 +306,7 @@ def _apply_taxonomy(
             if tag.id not in existing_ids:
                 session.add(ModelTagLink(model_id=model.id, tag_id=tag.id))
         session.add(model)
+        content_changed(session, "model", [model.id])
         session.commit()
 
 
@@ -334,6 +337,7 @@ def resolve_or_create_model(
         )
         session.add(model)
         try:
+            content_changed(session, "model", (row.id for row in (model,)))
             session.commit()
         except IntegrityError:
             # Another upload of the same bytes won the race between the SELECT
@@ -359,6 +363,7 @@ def resolve_or_create_model(
     existing.deleted_by = None
     existing.updated_at = utcnow()
     session.add(existing)
+    content_changed(session, "model", [existing.id])
     session.commit()
     session.refresh(existing)
     return existing, False
@@ -575,34 +580,36 @@ def persist_artifact(
         # Metadata is a model that renders with no print time, filament or cost and
         # no error to explain it. flush() allocates the id the thumbnail key needs
         # without ending the transaction.
-        session.add(file_row)
-        session.flush()
-        assert file_row.id is not None
-        if provenance_context is not None:
-            # The File id exists, but the Artifact has not yet become visible.
-            # A provenance failure therefore follows the established rollback
-            # path for both its link and the bytes/row it describes.
-            _attach_ingested_artifact(session, file_row, provenance_context)
-        # The parser may carry detection-only keys (e.g. printer_preset_name)
-        # that have no Metadata column.
-        md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
-        session.add(Metadata(file_id=file_row.id, **md_fields))
-        requirements = meta.get("material_requirements")
-        if isinstance(requirements, list):
-            for requirement in requirements:
-                if not isinstance(requirement, dict):
-                    continue
-                material_type = requirement.get("material_type")
-                if not isinstance(material_type, str) or not material_type.strip():
-                    continue
-                session.add(
-                    ArtifactMaterialRequirement(
-                        file_id=file_row.id,
-                        tool_index=int(requirement.get("tool_index") or 0),
-                        material_type=material_type.strip(),
-                        color_hex=requirement.get("color_hex"),
+        with batch_content_changes(session):
+            session.add(file_row)
+            session.flush()
+            assert file_row.id is not None
+            if provenance_context is not None:
+                # The File id exists, but the Artifact has not yet become visible.
+                # A provenance failure therefore follows the established rollback
+                # path for both its link and the bytes/row it describes.
+                _attach_ingested_artifact(session, file_row, provenance_context)
+            # The parser may carry detection-only keys (e.g. printer_preset_name)
+            # that have no Metadata column.
+            md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
+            session.add(Metadata(file_id=file_row.id, **md_fields))
+            requirements = meta.get("material_requirements")
+            if isinstance(requirements, list):
+                for requirement in requirements:
+                    if not isinstance(requirement, dict):
+                        continue
+                    material_type = requirement.get("material_type")
+                    if not isinstance(material_type, str) or not material_type.strip():
+                        continue
+                    session.add(
+                        ArtifactMaterialRequirement(
+                            file_id=file_row.id,
+                            tool_index=int(requirement.get("tool_index") or 0),
+                            material_type=material_type.strip(),
+                            color_hex=requirement.get("color_hex"),
+                        )
                     )
-                )
+            content_changed(session, "model", [model_id])
         # A driver may acknowledge a committed transaction as an exception
         # (for example, a connection loss after COMMIT). From here onward the
         # blob must be preserved until a fresh session resolves the outcome.
@@ -821,6 +828,8 @@ def run_ingestion_pipeline(
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
     provenance_context: ProvenanceContext | None = None,
+    on_progress: Callable[[float], None] | None = None,
+    defer_fingerprint: bool = False,
 ) -> None:
     """Full ingestion pipeline.
 
@@ -857,6 +866,9 @@ def run_ingestion_pipeline(
             ),
             current_item=original_filename,
         )
+
+        if on_progress is not None and step is not None:
+            on_progress((step - 1) / total_steps * 100)
 
     registry.update(job_id, state="running", total_steps=total_steps)
 
@@ -1034,7 +1046,7 @@ def run_ingestion_pipeline(
         assert durable_ids is not None
         model_id, file_id = durable_ids
         fingerprint_result = getattr(meta, "fingerprint_result", None)
-        if fingerprint_result is not None:
+        if fingerprint_result is not None or defer_fingerprint:
             from app.modules.ingestion.extensions import after_commit
 
             try:
@@ -1156,15 +1168,23 @@ def _gcode_strategy() -> IngestionStrategy:
     )
 
 
-def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
+def _mesh_strategy(
+    file_type: FileType, *, defer_fingerprint: bool = False
+) -> IngestionStrategy:
 
     def process(
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
-        from app.modules.ingestion.extensions import extraction_options
+        from app.modules.ingestion.extensions import (
+            MeshExtractionOptions,
+            extraction_options,
+        )
 
-        # Single mesh load for geometry, thumbnail and opted-in fingerprints.
-        options = extraction_options(get_session_factory())
+        # Bulk imports queue optional fingerprints after the Artifact is durable.
+        # Direct uploads can reuse this mesh load for inline fingerprints.
+        options: MeshExtractionOptions = (
+            {} if defer_fingerprint else extraction_options(get_session_factory())
+        )
         return mesh_operations.analyze_mesh(
             path,
             report=report,
@@ -1202,6 +1222,7 @@ def ingest_orca_gcode(
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
     provenance_context: ProvenanceContext | None = None,
+    on_progress: Callable[[float], None] | None = None,
 ) -> None:
     """Public entry point for G-code ingestion (called from the OrcaSlicer router)."""
     run_ingestion_pipeline(
@@ -1218,6 +1239,7 @@ def ingest_orca_gcode(
         source_url=source_url,
         target_library_id=target_library_id,
         provenance_context=provenance_context,
+        on_progress=on_progress,
     )
 
 
@@ -1236,8 +1258,15 @@ def ingest_mesh(
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
     provenance_context: ProvenanceContext | None = None,
+    on_progress: Callable[[float], None] | None = None,
+    defer_fingerprint: bool = False,
+    prepared_analysis: Callable[[Path, ProgressFn], tuple[dict[str, Any], bytes | None]]
+    | None = None,
 ) -> None:
     """Public entry point for mesh ingestion (called from the model upload router)."""
+    strategy = _mesh_strategy(file_type, defer_fingerprint=defer_fingerprint)
+    if prepared_analysis is not None:
+        strategy = replace(strategy, process=prepared_analysis)
     run_ingestion_pipeline(
         job_id=job_id,
         staged_path=staged_path,
@@ -1246,12 +1275,14 @@ def ingest_mesh(
         collection=collection,
         tags=tags,
         source_hash=source_hash,
-        strategy=_mesh_strategy(file_type),
+        strategy=strategy,
         actor_user_id=actor_user_id,
         session_factory=session_factory,
         source_url=source_url,
         target_library_id=target_library_id,
         provenance_context=provenance_context,
+        on_progress=on_progress,
+        defer_fingerprint=defer_fingerprint,
     )
 
 
@@ -1314,6 +1345,7 @@ def add_gcode_revision_to_model(
 
     model.updated_at = utcnow()
     session.add(model)
+    content_changed(session, "model", [model.id])
     session.commit()
     session.refresh(file_row)
     return file_row

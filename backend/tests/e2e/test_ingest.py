@@ -367,3 +367,190 @@ class TestMetadata:
             np.asarray([[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]),
             atol=1e-5,
         )
+
+
+class TestArchiveImport:
+    @pytest.mark.asyncio
+    async def test_imported_models_are_available_before_deferred_similarity(
+        self, api, tmp_path, e2e_db
+    ):
+        from app.db.models import File, GeometryFingerprint, SimilarityRun
+        from app.runtime import similarity
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        enabled = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=headers,
+            json={"enabled": True, "fingerprint_on_ingest": True},
+        )
+        assert enabled.status_code == 200, enabled.text
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("first.stl", source)
+            writer.writestr("second.stl", source)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["first.stl", "second.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 2, 2)
+        files = e2e_db.exec(select(File).order_by(File.id)).all()
+        assert len(files) == 2
+        preview = await api.get(
+            f"/api/v1/files/{files[0].id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        assert e2e_db.exec(select(GeometryFingerprint)).all() == []
+        queued = e2e_db.exec(select(SimilarityRun)).all()
+        assert len(queued) == 2
+        assert {run.phase for run in queued} == {"fingerprint"}
+
+        assert await asyncio.to_thread(similarity.process_one) is True
+
+        e2e_db.expire_all()
+        fingerprints = e2e_db.exec(select(GeometryFingerprint)).all()
+        assert fingerprints
+        assert {row.state for row in fingerprints} == {"ready"}
+
+    @pytest.mark.asyncio
+    async def test_archive_3mf_streams_to_a_complete_import(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        import hashlib
+
+        import printstash_mesh_native as native
+        import trimesh
+
+        from app.db.models import File
+        from tests.factories.geometry import three_mf
+
+        headers = await _setup_and_login(api, tmp_path)
+        source = three_mf()
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("model.3mf", source)
+
+        def forbid_legacy(*args, **kwargs):
+            raise AssertionError("legacy mesh loading was used")
+
+        monkeypatch.setattr(trimesh, "load_scene", forbid_legacy)
+        monkeypatch.setattr(native, "parse_3mf_xml", forbid_legacy)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["model.3mf"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 1, 1)
+        imported = e2e_db.exec(select(File)).one()
+        assert imported.sha256 == hashlib.sha256(source).hexdigest()
+        preview = await api.get(
+            f"/api/v1/files/{imported.id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.getbbox() is not None
+
+    @pytest.mark.asyncio
+    async def test_archive_stl_import_retains_geometry(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        import hashlib
+
+        from app.db.models import File, Metadata
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("model.stl", source)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["model.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 1, 1)
+        imported = e2e_db.exec(select(File)).one()
+        assert imported.sha256 == hashlib.sha256(source).hexdigest()
+        geometry = e2e_db.exec(
+            select(Metadata).where(Metadata.file_id == imported.id)
+        ).one()
+        assert (geometry.bbox_x_mm, geometry.bbox_y_mm, geometry.bbox_z_mm) == (
+            10,
+            20,
+            30,
+        )
+        assert geometry.volume_mm3 == 1000
+        assert geometry.triangle_count == 4
+        preview = await api.get(
+            f"/api/v1/files/{imported.id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.getbbox() is not None
+
+    @pytest.mark.asyncio
+    async def test_parallel_archive_preserves_duplicate_publication_order(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        from app.db.models import File
+        from app.modules.media import render_budget
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        monkeypatch.setitem(_overlay, "import_workers", 2)
+        monkeypatch.setattr(render_budget, "effective_cpus", lambda: 4)
+        monkeypatch.setattr(render_budget, "memory_budget", lambda: 1024**3)
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("first.stl", source)
+            writer.writestr("duplicate.stl", source)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("parallel.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["first.stl", "duplicate.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 2, 2)
+        rows = e2e_db.exec(select(File).order_by(File.id)).all()
+        assert [row.original_filename for row in rows] == ["first.stl", "duplicate.stl"]
+        assert [row.version for row in rows] == [1, 2]
+        assert rows[0].model_id == rows[1].model_id
+        assert all(row.thumbnail_path for row in rows)

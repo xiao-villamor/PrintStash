@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
+from printstash_core.inference import EmbeddingInput
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import ExpandedScene
 from printstash_core.mesh.similarity.verification import Verification, verify_meshes
+from printstash_core.search.point_inputs import PointRecipe
+from printstash_core.search.visual_inputs import VisualRecipe
 
 from app.modules.media import mesh_processing, stl_fallback
 from app.modules.media.mesh_resources import PreparedMesh, load_3mf, prepare_loaded_mesh
 
 
-def _load(path: Path, file_type: str, *, triangle_cap: int) -> PreparedMesh:
+def _load(
+    path: Path, file_type: str, *, triangle_cap: int, include_brep: bool = True
+) -> PreparedMesh:
     import numpy as np
     import trimesh
 
@@ -49,7 +55,7 @@ def _load(path: Path, file_type: str, *, triangle_cap: int) -> PreparedMesh:
         prepared = load_3mf(path)
     else:
         mesh = (
-            mesh_processing._load_step_mesh_isolated(path, include_brep=True)
+            mesh_processing._load_step_mesh_isolated(path, include_brep=include_brep)
             if file_type == "step"
             else mesh_processing._load_mesh(path, file_type=file_type)
         )
@@ -109,13 +115,7 @@ def embedding_views(
     triangle_cap: int,
 ):
     """Six opaque RGB views, sharing the mesh loader and interactive render cap."""
-    import io
-
-    import numpy as np
     import trimesh
-    from PIL import Image
-    from printstash_core.inference import EmbeddingInput
-    from printstash_core.mesh.rasterizer import render_mesh_thumbnail
 
     if not 32 <= image_size <= 512:
         raise GeometryError("invalid_view_budget")
@@ -125,32 +125,94 @@ def embedding_views(
             raise GeometryError("embedding_requires_complete_geometry")
         vertices, faces = _component(prepared, component_index)
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-        views = []
-        frames = (
-            ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-            ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
-            ((0, 0, -1), (0, 1, 0), (1, 0, 0)),
-            ((0, 0, 1), (0, 1, 0), (-1, 0, 0)),
-            ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
-            ((1, 0, 0), (0, 0, 1), (0, -1, 0)),
-        )
-        for frame in frames:
-            rendered = render_mesh_thumbnail(
-                mesh,
-                "",
-                width=image_size,
-                height=image_size,
-                view_rotation=np.asarray(frame, dtype=np.float64),
-                matte=True,
+        return _render_views(mesh, image_size, canonical_frames())
+
+
+def canonical_frames():
+    return (
+        ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
+        ((0, 0, -1), (0, 1, 0), (1, 0, 0)),
+        ((0, 0, 1), (0, 1, 0), (-1, 0, 0)),
+        ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
+        ((1, 0, 0), (0, 0, 1), (0, -1, 0)),
+    )
+
+
+def _render_views(mesh, image_size, frames):
+    from printstash_core.mesh.native_rasterizer import render_views
+
+    try:
+        images = render_views(mesh, image_size, image_size, frames)
+    except (ValueError, RuntimeError) as exc:
+        raise GeometryError("embedding_view_failed") from exc
+    return tuple(
+        EmbeddingInput("image", rgb=rgb, width=image_size, height=image_size)
+        for rgb in images
+    )
+
+
+@dataclass(frozen=True)
+class VisualViews:
+    thumbnail: EmbeddingInput | None
+    views: tuple[EmbeddingInput, ...]
+
+
+def visual_views(
+    path: Path,
+    *,
+    file_type: str,
+    recipe: VisualRecipe | PointRecipe,
+    triangle_cap: int = MAX_ANALYSIS_FACES,
+) -> VisualViews:
+    """One source load and render permit for the thumbnail and canonical views."""
+    prepared = None
+    try:
+        with mesh_processing._render_semaphore():
+            # Visual encoding needs triangles only. The parent owns temporary
+            # capacity; this isolated renderer never connects to the database.
+            prepared = _load(
+                path, file_type, triangle_cap=triangle_cap, include_brep=False
             )
-            if rendered is None:
+            if not prepared.complete:
+                raise GeometryError("embedding_requires_complete_geometry")
+            if isinstance(recipe, PointRecipe):
+                from printstash_core.inference.points import point_input
+
+                points = point_input(
+                    prepared.whole_mesh.vertices, prepared.whole_mesh.faces
+                )
+                return VisualViews(None, (points,))
+            from app.modules.media import mesh_render, thumbnail
+
+            encoded = mesh_render.render_mesh_thumbnail(
+                prepared.whole_mesh, "", width=640, height=480, output_format="WEBP"
+            )
+            if encoded is None:
                 raise GeometryError("embedding_view_failed")
-            with Image.open(io.BytesIO(rendered)) as image:
-                rgba = image.convert("RGBA")
-                background = Image.new("RGBA", rgba.size, "white")
-                background.alpha_composite(rgba)
-                rgb = background.convert("RGB").tobytes()
-            views.append(
-                EmbeddingInput("image", rgb=rgb, width=image_size, height=image_size)
+            preview = thumbnail_input(
+                thumbnail.to_webp(encoded, width=640), recipe.image_size
             )
-        return tuple(views)
+            rendered = (
+                _render_views(
+                    prepared.whole_mesh, recipe.image_size, canonical_frames()
+                )
+                if recipe.profile == "multiview"
+                else (preview,)
+            )
+            return VisualViews(preview, rendered)
+    finally:
+        prepared = None
+        mesh_processing._reclaim_memory()
+
+
+def thumbnail_input(encoded: bytes, size: int) -> EmbeddingInput:
+    from PIL import Image
+    from printstash_core.inference.images import decode_image
+
+    source = decode_image(encoded, "image/webp")
+    # Match the pinned v1 encoder's bicubic resize exactly. Keeping the pipe's
+    # frames at native size avoids carrying a large cached image to the worker.
+    image = Image.frombytes("RGB", (source.width, source.height), source.rgb)
+    image = image.resize((size, size), Image.Resampling.BICUBIC)
+    return EmbeddingInput("image", rgb=image.tobytes(), width=size, height=size)

@@ -8,7 +8,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
 import {
   Bell,
@@ -40,6 +40,7 @@ import {
   RefreshCw,
   RotateCcw,
   Trash2,
+  Search,
   Server,
   Tag,
   UserPlus,
@@ -69,6 +70,7 @@ import { ProviderConnectionsPanel } from "@/components/provider-connections-pane
 import { NotificationsPanel } from "@/components/notifications-panel";
 import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
+import { AiSearchSettings } from "@/components/ai-search-settings";
 import { SimilaritySettingsPanel } from "@/components/similarity-settings-panel";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BrandMark } from "@/components/brand-mark";
@@ -189,6 +191,7 @@ type SettingsSection =
   | "remote-storage"
   | "imports"
   | "maintenance"
+  | "ai-search"
   | "libraries"
   | "notifications"
   | "sso"
@@ -209,6 +212,7 @@ const SETTINGS_SECTIONS: {
   { id: "backup", labelKey: "settings.backup", icon: Database },
   { id: "remote-storage", labelKey: "settings.remoteStorage", icon: Cloud },
   { id: "imports", labelKey: "settings.imports", icon: Download },
+  { id: "ai-search", labelKey: "aiSearch.settingsTitle", icon: Search },
   { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
   { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
   { id: "notifications", labelKey: "settings.notifications", icon: Bell },
@@ -457,6 +461,7 @@ export function SettingsPanel() {
   const stats = useVaultStats().data ?? null;
   const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [archiveBusy, setArchiveBusy] = useState<"export" | "import" | null>(null);
+  const archiveInput = useRef<HTMLInputElement>(null);
   const [archiveVersion, setArchiveVersion] = useState<1 | 2>(2);
   const [loadedApiKeys, setApiKeys] = useState<ApiKeyRead[]>([]);
   // A signed-out visitor has no keys to list, so that is derived rather than cleared
@@ -551,7 +556,7 @@ export function SettingsPanel() {
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [restartBusy, setRestartBusy] = useState(false);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
-    (section) => !["sso", "maintenance"].includes(section.id) || user?.is_superuser,
+    (section) => !["sso", "maintenance", "ai-search"].includes(section.id) || user?.is_superuser,
   );
 
   function changeSection(section: SettingsSection) {
@@ -1976,26 +1981,33 @@ export function SettingsPanel() {
                             <option value="1">{t("families.archiveLegacy")}</option>
                           </select>
                         </label>
-                        <button
+                        <Button
                           type="button"
                           onClick={() => void exportArchive()}
                           disabled={archiveBusy !== null}
-                          className={BTN_SECONDARY}
+                          variant="outline"
                         >
                           <Download className="h-3.5 w-3.5" />{" "}
                           {archiveBusy === "export"
                             ? uiText("Exporting")
                             : uiText("Export full library")}
-                        </button>
+                        </Button>
                         {user?.is_superuser && (
-                          <label
-                            className={`${BTN_SECONDARY} ${archiveBusy !== null ? "pointer-events-none opacity-50" : "cursor-pointer"}`}
-                          >
-                            <Download className="h-3.5 w-3.5 rotate-180" />{" "}
-                            {archiveBusy === "import"
-                              ? uiText("Importing")
-                              : uiText("Import archive")}
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={archiveBusy !== null}
+                              onClick={() => archiveInput.current?.click()}
+                            >
+                              <Download className="h-3.5 w-3.5 rotate-180" />
+                              {archiveBusy === "import"
+                                ? uiText("Importing")
+                                : uiText("Import archive")}
+                            </Button>
                             <input
+                              ref={archiveInput}
+                              aria-label={uiText("Import archive")}
                               type="file"
                               accept=".zip,application/zip"
                               className="sr-only"
@@ -2006,7 +2018,7 @@ export function SettingsPanel() {
                                 event.target.value = "";
                               }}
                             />
-                          </label>
+                          </>
                         )}
                       </div>
                       {archiveVersion === 1 && (
@@ -2731,10 +2743,17 @@ export function SettingsPanel() {
 
             {activeSection === "storage" && (
               <div className="space-y-6 animate-panel-in">
-                <StorageConfigCard storageHealth={storageHealth} migrationManaged />
                 {user?.is_superuser && <StorageInventoryPanel />}
+                <StorageConfigCard storageHealth={storageHealth} migrationManaged />
                 {user?.is_superuser && <ArtifactCacheCard />}
-                {user?.is_superuser && <VaultMigrationPanel />}
+                {user?.is_superuser && (
+                  <details>
+                    <summary className="cursor-pointer py-3 text-sm font-medium">
+                      {uiText("Move library files to another location")}
+                    </summary>
+                    <VaultMigrationPanel />
+                  </details>
+                )}
               </div>
             )}
 
@@ -3391,6 +3410,8 @@ export function SettingsPanel() {
                 <ProviderConnectionsPanel />
               </div>
             )}
+
+            {activeSection === "ai-search" && user?.is_superuser && <AiSearchSettings />}
 
             {activeSection === "maintenance" && user?.is_superuser && (
               <>

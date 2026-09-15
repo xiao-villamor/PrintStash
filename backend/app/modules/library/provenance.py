@@ -31,6 +31,7 @@ from app.db.models import (
     ProvenanceCapture,
     User,
 )
+from app.db.projections import content_changed
 from app.modules.identity.rbac import effective_collection_role, role_allows
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import enqueue_owned_key
@@ -452,6 +453,7 @@ def upsert_capture(
     # back unrelated caller work.
     session.flush()
 
+    content_changed(session, "model", [model_id])
     digest = snapshot_sha256(manifest)
     capture = session.exec(
         select(ProvenanceCapture).where(
@@ -539,6 +541,7 @@ def set_user_override(
     row.user_override_set = True
     row.user_updated_by = actor_id
     row.user_updated_at = now
+    content_changed(session, "provenance", [provenance_source_id])
     return row
 
 
@@ -564,6 +567,7 @@ def clear_user_override(
     row.user_override_set = False
     row.user_updated_by = actor_id
     row.user_updated_at = utcnow()
+    content_changed(session, "provenance", [provenance_source_id])
     return row
 
 

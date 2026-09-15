@@ -28,7 +28,9 @@ if TYPE_CHECKING:
     FloatArray = NDArray[np.float64]
 
 SH_RECIPE = "occupancy64-shells32-degree16-pca64-v1"
-VIEW_RECIPE = "pca-six-orthographic64-matte-dct8-v1"
+# Resampling changes can change thresholded view hashes. Record the actual
+# renderer so native views never masquerade as the legacy NumPy/Pillow recipe.
+VIEW_RECIPE = "pca-six-orthographic64-matte-dct8-rust-v2"
 
 
 @dataclass(frozen=True)

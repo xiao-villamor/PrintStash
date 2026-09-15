@@ -1,5 +1,21 @@
 ARG PRINTSTASH_VARIANT=full
 
+FROM rust:1.91-slim-bookworm AS mesh-native-builder
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-venv \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /tmp/maturin \
+ && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6'
+WORKDIR /src/mesh-native
+COPY rust/Cargo.toml rust/Cargo.lock rust/pyproject.toml ./
+COPY rust/src ./src
+COPY rust/render-core/Cargo.toml ./render-core/Cargo.toml
+COPY rust/render-core/src ./render-core/src
+RUN /tmp/maturin/bin/maturin build --release --locked --out /wheels
+
+FROM scratch AS mesh-native-wheel
+COPY --from=mesh-native-builder /wheels /
+
 FROM rust:1.91-slim-bookworm AS opendal-builder
 
 ARG OPENDAL_SOURCE_VERSION=0.58.2
@@ -66,9 +82,14 @@ COPY --from=bgcode-builder /opt/libbgcode/share/licenses/libbgcode /usr/local/sh
 COPY --chmod=0644 pyproject.toml uv.lock ./
 COPY --chmod=0644 packages/printstash-core/pyproject.toml ./packages/printstash-core/pyproject.toml
 COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
+COPY --chmod=0644 rust/pyproject.toml ./rust/pyproject.toml
+COPY --from=mesh-native-builder /wheels /tmp/mesh-native-wheels
 
 FROM base AS dependencies-lite
-RUN uv sync --frozen --no-dev --no-editable \
+RUN uv sync --frozen --no-dev --no-editable --no-install-package printstash-mesh-native \
+ && uv pip install /tmp/mesh-native-wheels/*.whl \
+ && .venv/bin/python -c 'import printstash_mesh_native' \
+ && rm -rf /tmp/mesh-native-wheels \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
 
@@ -77,7 +98,10 @@ COPY --from=opendal-builder /wheels /tmp/opendal-wheels
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-client \
  && rm -rf /var/lib/apt/lists/* \
- && uv sync --frozen --no-dev --no-editable --extra full \
+ && uv sync --frozen --no-dev --no-editable --no-install-package printstash-mesh-native --extra full \
+ && uv pip install /tmp/mesh-native-wheels/*.whl \
+ && .venv/bin/python -c 'import printstash_mesh_native' \
+ && rm -rf /tmp/mesh-native-wheels \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
  && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh' \
  && rm -rf /tmp/opendal-wheels \

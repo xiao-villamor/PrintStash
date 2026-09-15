@@ -48,6 +48,7 @@ from app.db.models import (
     Metadata,
     Model,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.ingestion.ingestion import (
@@ -499,6 +500,7 @@ def _remove_external_file(session: Session, file_row: File) -> None:
     now = utcnow()
     file_row.deleted_at = now
     session.add(file_row)
+    content_changed(session, "model", [file_row.model_id])
     session.commit()
 
     remaining = session.exec(
@@ -510,6 +512,7 @@ def _remove_external_file(session: Session, file_row: File) -> None:
             model.deleted_at = now
             model.updated_at = now
             session.add(model)
+            content_changed(session, "model", [model.id])
             session.commit()
 
 
@@ -1321,6 +1324,7 @@ def purge_library_index(session: Session, library_id: int) -> int:
         session.add(f)
         if f.model_id is not None:
             affected_models.add(f.model_id)
+    content_changed(session, "model", affected_models)
     session.commit()
 
     for model_id in affected_models:
@@ -1333,6 +1337,7 @@ def purge_library_index(session: Session, library_id: int) -> int:
                 model.deleted_at = now
                 model.updated_at = now
                 session.add(model)
+    content_changed(session, "model", affected_models)
     session.commit()
     return len(files)
 

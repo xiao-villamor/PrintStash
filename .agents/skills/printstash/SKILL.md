@@ -56,6 +56,20 @@ and changelog instead of reconstructing their contents.
 | Implement work from a named private plan | The named file in `reports/`; read only its shared constraints and the relevant work card |
 | "What's next" / roadmap planning | `reports/14-implementation-plan-to-1.0.0.md` when present (needed section only), otherwise `docs/roadmap.md` + `CHANGELOG.md` |
 
+## Long tasks and recovery
+
+For work spanning context windows, keep a short checkpoint in the task's
+available notes, or a task-specific gitignored file under `reports/`. Record
+the objective, accepted corrections, branch/worktree, owned files, decisions
+with evidence, failed approaches, check commands/results, and next action.
+Keep private material local and credentials out of notes.
+
+On resuming, read the checkpoint and inspect the current diff. Retrieve earlier
+tool results or conversation history when that capability is available; otherwise
+use saved evidence and targeted checks to recover missing facts. Revalidate
+anything affected by intervening edits. A checkpoint records progress; it does
+not authorize new work or turn an unfinished check into a pass.
+
 ## Workflow for any change
 
 1. For a new standalone change, branch from an up-to-date `main` and name the
@@ -75,6 +89,10 @@ and changelog instead of reconstructing their contents.
    - Browser extension: use [references/capture.md](references/capture.md).
    PostgreSQL-affecting changes also run the supported-server contract suite.
    Report only checks actually run and preserve failure output.
+   Once applicable gates pass, repeat or broaden checks only for new edits,
+   failures, or a specific unresolved concern. Documentation-only changes use
+   link, instruction-consistency, and skill validation as applicable; production
+   changes retain the mandatory test matrix and runtime gates.
 4. For every production-code implementation, run
    `codex-security:security-diff-scan` over the exact branch diff before marking
    the PR ready or merging it. Resolve and reverify validated findings. When the
@@ -106,3 +124,13 @@ and changelog instead of reconstructing their contents.
   or silently widening an assigned file set.
 - Committing gitignored material (`reports/`, `docs/internal/`) or generated
   files; bumping versions outside a release commit.
+
+## Instruction maintenance
+
+When changing these instructions, preserve repository invariants and remove
+duplicate or conflicting guidance. The execution and recovery guidance was
+adapted for Astra from the [OpenAI announcement](https://openai.com/es-ES/index/gpt-6-astra/)
+and [prompting guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra#prompting-best-practices),
+reviewed 2026-09-12. These are local workflow choices, not a requirement to use
+a particular model. Native context recovery depends on the installed runtime;
+this skill does not enable experimental features or change model settings.

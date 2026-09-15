@@ -311,3 +311,78 @@ class TestReclaimMemory:
     def test_reclaim_memory_is_safe_to_call(self) -> None:
         # Must never raise, regardless of libc/platform — it's best-effort cleanup.
         mesh_processing._reclaim_memory()
+
+    def test_releases_young_mesh_without_full_collection(self, monkeypatch):
+        import gc
+        import weakref
+
+        class Cycle:
+            pass
+
+        original = gc.collect
+        generations = []
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            mesh = Cycle()
+            mesh.self = mesh
+            reference = weakref.ref(mesh)
+            del mesh
+
+            def collect(generation=2):
+                generations.append(generation)
+                return original(generation)
+
+            monkeypatch.setattr(gc, "collect", collect)
+
+            mesh_processing._reclaim_memory(released_mesh=reference)
+
+            assert reference() is None
+            assert generations == [1]
+        finally:
+            if enabled:
+                gc.enable()
+
+    def test_releases_promoted_mesh_with_full_collection(self, monkeypatch):
+        import gc
+        import weakref
+
+        class Cycle:
+            pass
+
+        original = gc.collect
+        generations = []
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            mesh = Cycle()
+            mesh.self = mesh
+            reference = weakref.ref(mesh)
+            original(2)
+            del mesh
+
+            def collect(generation=2):
+                generations.append(generation)
+                return original(generation)
+
+            monkeypatch.setattr(gc, "collect", collect)
+
+            mesh_processing._reclaim_memory(released_mesh=reference)
+
+            assert reference() is None
+            assert generations == [1, 2]
+        finally:
+            if enabled:
+                gc.enable()
+
+    def test_unknown_ownership_retains_full_collection(self, monkeypatch):
+        generations = []
+        monkeypatch.setattr(
+            mesh_processing.gc,
+            "collect",
+            lambda generation=2: generations.append(generation),
+        )
+
+        mesh_processing._reclaim_memory()
+
+        assert generations == [2]

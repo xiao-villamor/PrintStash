@@ -7,6 +7,7 @@ from typing import Iterable, List, Optional
 from sqlmodel import Session, select
 
 from app.db.models import Collection, Tag
+from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.modules.storage.storage import slugify
 
@@ -43,6 +44,7 @@ def resolve_or_create_collection(
                 path=path,
             )
             session.add(existing)
+            content_changed(session, "collection", (row.id for row in (existing,)))
             session.commit()
             session.refresh(existing)
         elif existing.deleted_at is not None:
@@ -50,6 +52,7 @@ def resolve_or_create_collection(
             existing.deleted_at = None
             existing.deleted_by = None
             session.add(existing)
+            content_changed(session, "collection", (row.id for row in (existing,)))
             session.commit()
             session.refresh(existing)
         parent = existing
@@ -84,11 +87,13 @@ def resolve_or_create_collection_in_transaction(
                 path=path,
             )
             session.add(existing)
+            content_changed(session, "collection", (row.id for row in (existing,)))
             session.flush()
         elif existing.deleted_at is not None:
             existing.deleted_at = None
             existing.deleted_by = None
             session.add(existing)
+            content_changed(session, "collection", (row.id for row in (existing,)))
             session.flush()
         parent = existing
     return parent

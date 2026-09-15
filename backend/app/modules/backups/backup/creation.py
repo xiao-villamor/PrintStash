@@ -61,12 +61,7 @@ def create_backup(
         with get_session_factory().scoped_session() as capacity_session:
             estimate = inventory(capacity_session).unique_owned_bytes
         # The database file and WAL overlap the archive while snapshotting.
-        db_path = _snapshot_module._db_path()
-        if db_path is not None:
-            estimate += db_path.stat().st_size
-            wal = Path(str(db_path) + "-wal")
-            if wal.exists():
-                estimate += wal.stat().st_size
+        estimate += _snapshot_module._database_snapshot_size()
         with CapacityManager(get_session_factory()).hold(
             f"backup:{backup_id}",
             capacity_estimates.backup_create(estimate, Path(selected.local_directory)),

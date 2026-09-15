@@ -45,6 +45,7 @@ from app.db.models import (
     Tag,
     User,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import rbac
@@ -258,6 +259,7 @@ def create_collection(
         existing.name = name
         existing.parent_id = parent_id
         session.add(existing)
+        content_changed(session, "collection", [existing.id])
         session.commit()
         session.refresh(existing)
         return _collection_read(
@@ -269,6 +271,7 @@ def create_collection(
 
     collection = Collection(name=name, slug=slug, parent_id=parent_id, path=path)
     session.add(collection)
+    content_changed(session, "collection", (row.id for row in (collection,)))
     session.commit()
     session.refresh(collection)
     return _collection_read(session, current_user, collection, model_count=0)
@@ -346,6 +349,7 @@ def move_collection(
     col.slug = new_slug
     col.path = new_path
     session.add(col)
+    content_changed(session, "collection", [col.id])
     session.commit()
     session.refresh(col)
     return _collection_read(
@@ -384,6 +388,7 @@ def replace_collection_tags(
     tags = taxonomy.resolve_or_create_tags_in_transaction(session, payload.tags)
     for tag in tags:
         session.add(CollectionTagLink(collection_id=collection_id, tag_id=tag.id))
+    content_changed(session, "collection", [collection_id])
     session.commit()
     return _collection_read(
         session,
@@ -427,6 +432,7 @@ def set_collection_readme(
     col.readme = readme
     col.updated_by = current_user.id
     session.add(col)
+    content_changed(session, "collection", [col.id])
     session.commit()
     return CollectionReadmeRead(readme=readme)
 
@@ -603,6 +609,7 @@ def delete_collection(
 
     cat.deleted_at = now
     session.add(cat)
+    content_changed(session, "collection", [cat.id])
     session.commit()
     return Response(status_code=204)
 
@@ -724,6 +731,7 @@ def delete_tag(
     )
     tag.deleted_at = utcnow()
     session.add(tag)
+    content_changed(session, "tag", [tag_id])
     session.commit()
     return Response(status_code=204)
 

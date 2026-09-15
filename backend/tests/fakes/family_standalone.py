@@ -47,6 +47,7 @@ def run() -> None:
             },
         ).json()
         client.headers["Authorization"] = f"Bearer {setup['access_token']}"
+        request("GET", "/models/1/similar-text", status=503)
         model_ids = []
         revisions = {}
         for mesh in meshes:

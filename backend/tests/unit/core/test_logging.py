@@ -75,3 +75,22 @@ class TestSensitiveQueryFilter:
             logging.Formatter().format(record)
             == "request /download?[redacted] status 307"
         )
+
+
+class TestQueryUrlObjects:
+    def test_redacts_an_http_client_url_object(self):
+        import httpx
+
+        record = logging.LogRecord(
+            "httpx",
+            logging.INFO,
+            "",
+            1,
+            "HTTP Request: %s %s %d",
+            ("GET", httpx.URL("http://local/search?q=private-marker"), 422),
+            None,
+        )
+        SensitiveQueryFilter().filter(record)
+        output = logging.Formatter().format(record)
+        assert "private-marker" not in output
+        assert "http://local/search?[redacted] 422" in output

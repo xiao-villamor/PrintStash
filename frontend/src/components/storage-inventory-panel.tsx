@@ -41,6 +41,7 @@ export function StorageInventoryPanel() {
   const [activity, setActivity] = useState<StorageCapacityActivity | null>(null);
   const [collections, setCollections] = useState<CollectionStorageRow[]>([]);
   const [cleanupPreviews, setCleanupPreviews] = useState<CleanupOpportunity[]>([]);
+  const [cleanupState, setCleanupState] = useState<"loading" | "ready" | "error">("loading");
   const [collectionOffset, setCollectionOffset] = useState(0);
   const [models, setModels] = useState<ModelStorageRow[]>([]);
   const [modelOffset, setModelOffset] = useState(0);
@@ -79,6 +80,10 @@ export function StorageInventoryPanel() {
       }
       if (nextCleanup.status === "fulfilled" && Array.isArray(nextCleanup.value)) {
         setCleanupPreviews(nextCleanup.value);
+        setCleanupState("ready");
+      } else {
+        setCleanupPreviews([]);
+        setCleanupState("error");
       }
     } catch {
       setError(true);
@@ -157,9 +162,9 @@ export function StorageInventoryPanel() {
         <div className="flex min-w-0 items-center gap-3">
           <HardDrive className="h-8 w-8 rounded-md bg-muted p-2" />
           <div>
-            <h2 className="text-sm font-semibold">{t("Storage insights")}</h2>
+            <h2 className="text-sm font-semibold">{t("Library storage")}</h2>
             <p className="text-xs text-muted-foreground">
-              {t("Recorded usage, capacity evidence, reservations, and bounded growth history.")}
+              {t("See how much space your library uses and free up space when needed.")}
             </p>
           </div>
         </div>
@@ -180,37 +185,63 @@ export function StorageInventoryPanel() {
       )}
       {current && (
         <>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-b p-4 text-sm sm:grid-cols-4">
-            {[
-              [t("Logical references"), current.logical_bytes],
-              [t("Unique owned objects"), current.unique_owned_bytes],
-              [t("External references"), current.external_referenced_bytes],
-              [t("Temporary staging"), current.temporary_bytes],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd className="mt-1 font-medium tabular-nums">{bytes(Number(value), locale)}</dd>
-              </div>
-            ))}
-          </dl>
-          <div className="border-b px-4 py-3 text-xs text-muted-foreground">
-            <p>
-              {t("Usage includes known sizes only. {count} objects have no recorded size.", {
-                count: current.unknown_object_count,
-              })}
+          <div className="grid gap-6 p-5 sm:grid-cols-2">
+            <div>
+              <p className="text-sm text-muted-foreground">{t("Library files")}</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">
+                {bytes(current.unique_owned_bytes, locale)}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("Space used by files stored in your library.")}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">{t("Free space")}</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums">
+                {bytes(
+                  current.volumes.find((volume) => volume.roles.includes("vault"))?.free_bytes ??
+                    null,
+                  locale,
+                )}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("Available where your library files are stored.")}
+              </p>
+            </div>
+          </div>
+          {current.unknown_object_count > 0 && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">
+              {t("Some file sizes are unknown, so usage may be higher.")}
             </p>
-            <p className="mt-1">
-              {t("Provider measurement")}:{" "}
-              {current.provider_capacity.measured_at
-                ? new Date(current.provider_capacity.measured_at).toLocaleString(locale)
-                : t("Not yet measured")}
-              .{" "}
-              {t("Capacity evidence is {status} ({method}, {reliability}).", {
-                status: current.provider_capacity.status,
-                method: current.provider_capacity.method,
-                reliability: current.provider_capacity.reliability,
-              })}
-            </p>
+          )}
+          <div className="divide-y divide-border">
+            {current.volumes
+              .filter((volume) => volume.status !== "available")
+              .map((volume) => (
+                <div
+                  key={volume.domain_id}
+                  className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 text-sm"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {t("Free space")}: {bytes(volume.free_bytes, locale)}
+                    </p>
+                  </div>
+                  <p
+                    className={
+                      volume.status === "blocked" ? "text-destructive" : "text-muted-foreground"
+                    }
+                  >
+                    {volume.status === "blocked"
+                      ? t("Storage is full — free up space to continue")
+                      : volume.status === "available"
+                        ? t("Space available")
+                        : t("Free space is unknown")}
+                  </p>
+                </div>
+              ))}
+          </div>
+          <div className="px-4 text-xs text-muted-foreground">
             {current.latest_audit && current.latest_audit.unclaimed_object_count > 0 && (
               <p className="mt-2 text-warning">
                 {t(
@@ -227,274 +258,308 @@ export function StorageInventoryPanel() {
               </p>
             )}
           </div>
-          <div className="divide-y divide-border">
+          <details className="border-t">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+              {t("Storage breakdown and diagnostics")}
+            </summary>
+            <dl className="grid gap-3 border-b p-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt>{t("Linked files")}</dt>
+                <dd>{bytes(current.external_referenced_bytes, locale)}</dd>
+              </div>
+              <div>
+                <dt>{t("Temporary files")}</dt>
+                <dd>{bytes(current.temporary_bytes, locale)}</dd>
+              </div>
+            </dl>
             {current.volumes.map((volume) => (
-              <div
-                key={volume.domain_id}
-                className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 text-sm"
-              >
-                <div>
-                  <p className="font-medium capitalize">{volume.roles.join(" · ")}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("Free: {free} · Reserved: {reserved} · Headroom: {headroom}", {
-                      free: bytes(volume.free_bytes, locale),
-                      reserved: bytes(volume.reserved_bytes, locale),
-                      headroom: bytes(volume.headroom_bytes, locale),
-                    })}
-                  </p>
-                </div>
-                <p
-                  className={
-                    volume.status === "blocked" ? "text-destructive" : "text-muted-foreground"
-                  }
-                >
-                  {volume.status === "blocked"
-                    ? t("New allocations blocked")
-                    : volume.status === "available"
-                      ? t("Capacity available")
-                      : t("Capacity unknown")}
-                </p>
-              </div>
+              <p key={volume.domain_id} className="px-4 py-2 text-xs text-muted-foreground">
+                {t("Set aside for running tasks: {reserved} · Kept free: {headroom}", {
+                  reserved: bytes(volume.reserved_bytes, locale),
+                  headroom: bytes(volume.headroom_bytes, locale),
+                })}
+              </p>
             ))}
-          </div>
-          <section className="border-t px-4 py-3">
-            <h3 className="text-sm font-semibold">{t("Usage by category")}</h3>
-            <div className="mt-2 divide-y divide-border">
-              {current.buckets
-                .filter((bucket) => bucket.logical_bytes > 0)
-                .map((bucket) => (
-                  <div
-                    key={`${bucket.category}-${bucket.lifecycle}`}
-                    className="flex flex-wrap justify-between gap-2 py-2 text-xs"
-                  >
-                    <span>
-                      {knownUiText(bucket.category, locale)} ·{" "}
-                      {knownUiText(bucket.lifecycle, locale)}
-                    </span>
-                    <span className="tabular-nums">{bytes(bucket.logical_bytes, locale)}</span>
-                  </div>
-                ))}
-              {current.logical_bytes === 0 && (
-                <p className="py-2 text-sm text-muted-foreground">
-                  {t("No recorded library bytes.")}
-                </p>
-              )}
+            <div className="border-b px-4 py-3 text-xs text-muted-foreground">
+              <p>
+                {t("Usage includes known sizes only. {count} objects have no recorded size.", {
+                  count: current.unknown_object_count,
+                })}
+              </p>
+              <p className="mt-1">
+                {t("Provider measurement")}:{" "}
+                {current.provider_capacity.measured_at
+                  ? new Date(current.provider_capacity.measured_at).toLocaleString(locale)
+                  : t("Not yet measured")}
+                .{" "}
+                {t("Capacity evidence is {status} ({method}, {reliability}).", {
+                  status: current.provider_capacity.status,
+                  method: current.provider_capacity.method,
+                  reliability: current.provider_capacity.reliability,
+                })}
+              </p>
             </div>
-          </section>
-          <section className="border-t px-4 py-3">
-            <h3 className="text-sm font-semibold">{t("Growth forecast")}</h3>
-            {samples.length > 1 && (
-              <figure className="mt-3">
-                <svg
-                  role="img"
-                  aria-label={t("Recorded owned storage over time")}
-                  viewBox="0 0 600 120"
-                  className="h-28 w-full text-primary"
-                >
-                  <title>{t("Recorded owned storage over time")}</title>
-                  <polyline
-                    points={historyPoints}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  />
-                </svg>
-                <figcaption className="flex justify-between text-xs text-muted-foreground">
-                  <span>{new Date(samples[0].sampled_at).toLocaleDateString(locale)}</span>
-                  <span>{t("{size} maximum", { size: bytes(largestSample, locale) })}</span>
-                  <span>
-                    {new Date(samples[samples.length - 1].sampled_at).toLocaleDateString(locale)}
-                  </span>
-                </figcaption>
-              </figure>
-            )}
-            <p className="mt-1 text-xs text-muted-foreground">
-              {report.forecast.days_remaining !== null
-                ? t("Estimated {days} days of headroom at recent growth.", {
-                    days: Math.floor(report.forecast.days_remaining),
-                  })
-                : t(
-                    "A forecast needs seven daily samples spanning at least seven days, stable positive growth, and known capacity.",
-                  )}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t(
-                "{count} samples over {days} days · {confidence} confidence. Forecasts do not authorize writes.",
-                {
-                  count: report.forecast.sample_count,
-                  days: Math.floor(report.forecast.window_days),
-                  confidence: report.forecast.confidence,
-                },
-              )}
-            </p>
-          </section>
-          <section className="grid gap-4 border-t p-4 lg:grid-cols-2">
-            <div>
-              <h3 className="text-sm font-semibold">{t("Capacity activity")}</h3>
-              <h4 className="mt-3 text-xs font-medium">{t("Active reservations")}</h4>
-              {activity?.active_reservations.length ? (
-                <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                  {activity.active_reservations.map((reservation, index) => (
-                    <li key={`${reservation.operation_kind}-${reservation.created_at}-${index}`}>
-                      {t("{operation} · {size}", {
-                        operation: reservation.operation_kind,
-                        size: bytes(reservation.required_bytes, locale),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">{t("No active reservations.")}</p>
-              )}
-              <h4 className="mt-3 text-xs font-medium">{t("Recent blocked operations")}</h4>
-              {activity?.recent_denials.length ? (
-                <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
-                  {activity.recent_denials.map((denial, index) => (
-                    <li key={`${denial.operation_kind}-${denial.occurred_at}-${index}`}>
-                      {t("{operation} · {size}", {
-                        operation: denial.operation_kind,
-                        size: bytes(denial.required_bytes, locale),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t("No recent blocked operations.")}
-                </p>
-              )}
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold">{t("Collection storage")}</h3>
-              {collections.length ? (
-                <div className="mt-2 divide-y divide-border">
-                  {collections.map((collection) => (
-                    <div
-                      key={collection.collection_id ?? "uncollected"}
-                      className="flex items-center justify-between gap-3 py-2 text-xs"
-                    >
-                      <span className="min-w-0 truncate">
-                        {collection.name} · {bytes(collection.logical_bytes, locale)}
-                      </span>
-                      <Button variant="ghost" size="sm" onClick={() => void showModels(collection)}>
-                        {t("View Models")}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t("No visible Collection storage.")}
-                </p>
-              )}
-              <div className="mt-2 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={collectionOffset === 0}
-                  onClick={() => void loadCollectionPage(Math.max(0, collectionOffset - PAGE_SIZE))}
-                >
-                  {t("Back")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={collections.length < PAGE_SIZE}
-                  onClick={() => void loadCollectionPage(collectionOffset + PAGE_SIZE)}
-                >
-                  {t("Next")}
-                </Button>
-              </div>
-            </div>
-          </section>
-          {selectedCollection && (
             <section className="border-t px-4 py-3">
-              <h3 className="text-sm font-semibold">
-                {t("Model storage")} · {selectedCollection.name}
-              </h3>
-              {models.length ? (
-                <div className="mt-2 divide-y divide-border">
-                  {models.map((model) => (
-                    <div key={model.model_id} className="flex justify-between gap-3 py-2 text-xs">
-                      <span className="min-w-0 truncate">{model.name}</span>
-                      <span className="tabular-nums">{bytes(model.logical_bytes, locale)}</span>
+              <h3 className="text-sm font-semibold">{t("Usage by category")}</h3>
+              <div className="mt-2 divide-y divide-border">
+                {current.buckets
+                  .filter((bucket) => bucket.logical_bytes > 0)
+                  .map((bucket) => (
+                    <div
+                      key={`${bucket.category}-${bucket.lifecycle}`}
+                      className="flex flex-wrap justify-between gap-2 py-2 text-xs"
+                    >
+                      <span>
+                        {knownUiText(bucket.category, locale)} ·{" "}
+                        {knownUiText(bucket.lifecycle, locale)}
+                      </span>
+                      <span className="tabular-nums">{bytes(bucket.logical_bytes, locale)}</span>
                     </div>
                   ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t("No visible Models on this page.")}
-                </p>
-              )}
-              <div className="mt-2 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={modelOffset === 0}
-                  onClick={() =>
-                    void showModels(selectedCollection, Math.max(0, modelOffset - PAGE_SIZE))
-                  }
-                >
-                  {t("Back")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={models.length < PAGE_SIZE}
-                  onClick={() => void showModels(selectedCollection, modelOffset + PAGE_SIZE)}
-                >
-                  {t("Next")}
-                </Button>
+                {current.logical_bytes === 0 && (
+                  <p className="py-2 text-sm text-muted-foreground">
+                    {t("No recorded library bytes.")}
+                  </p>
+                )}
               </div>
             </section>
-          )}
+            <section className="border-t px-4 py-3">
+              <h3 className="text-sm font-semibold">{t("Growth forecast")}</h3>
+              {samples.length > 1 && (
+                <figure className="mt-3">
+                  <svg
+                    role="img"
+                    aria-label={t("Recorded owned storage over time")}
+                    viewBox="0 0 600 120"
+                    className="h-28 w-full text-primary"
+                  >
+                    <title>{t("Recorded owned storage over time")}</title>
+                    <polyline
+                      points={historyPoints}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                  <figcaption className="flex justify-between text-xs text-muted-foreground">
+                    <span>{new Date(samples[0].sampled_at).toLocaleDateString(locale)}</span>
+                    <span>{t("{size} maximum", { size: bytes(largestSample, locale) })}</span>
+                    <span>
+                      {new Date(samples[samples.length - 1].sampled_at).toLocaleDateString(locale)}
+                    </span>
+                  </figcaption>
+                </figure>
+              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                {report.forecast.days_remaining !== null
+                  ? t("Estimated {days} days of headroom at recent growth.", {
+                      days: Math.floor(report.forecast.days_remaining),
+                    })
+                  : t(
+                      "A forecast needs seven daily samples spanning at least seven days, stable positive growth, and known capacity.",
+                    )}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "{count} samples over {days} days · {confidence} confidence. Forecasts do not authorize writes.",
+                  {
+                    count: report.forecast.sample_count,
+                    days: Math.floor(report.forecast.window_days),
+                    confidence: report.forecast.confidence,
+                  },
+                )}
+              </p>
+            </section>
+            <section className="grid gap-4 border-t p-4 lg:grid-cols-2">
+              <div>
+                <h3 className="text-sm font-semibold">{t("Capacity activity")}</h3>
+                <h4 className="mt-3 text-xs font-medium">{t("Active reservations")}</h4>
+                {activity?.active_reservations.length ? (
+                  <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                    {activity.active_reservations.map((reservation, index) => (
+                      <li key={`${reservation.operation_kind}-${reservation.created_at}-${index}`}>
+                        {t("{operation} · {size}", {
+                          operation: reservation.operation_kind,
+                          size: bytes(reservation.required_bytes, locale),
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("No active reservations.")}
+                  </p>
+                )}
+                <h4 className="mt-3 text-xs font-medium">{t("Recent blocked operations")}</h4>
+                {activity?.recent_denials.length ? (
+                  <ul className="mt-1 space-y-1 text-xs text-muted-foreground">
+                    {activity.recent_denials.map((denial, index) => (
+                      <li key={`${denial.operation_kind}-${denial.occurred_at}-${index}`}>
+                        {t("{operation} · {size}", {
+                          operation: denial.operation_kind,
+                          size: bytes(denial.required_bytes, locale),
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("No recent blocked operations.")}
+                  </p>
+                )}
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold">{t("Collection storage")}</h3>
+                {collections.length ? (
+                  <div className="mt-2 divide-y divide-border">
+                    {collections.map((collection) => (
+                      <div
+                        key={collection.collection_id ?? "uncollected"}
+                        className="flex items-center justify-between gap-3 py-2 text-xs"
+                      >
+                        <span className="min-w-0 truncate">
+                          {collection.name} · {bytes(collection.logical_bytes, locale)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void showModels(collection)}
+                        >
+                          {t("View Models")}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("No visible Collection storage.")}
+                  </p>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={collectionOffset === 0}
+                    onClick={() =>
+                      void loadCollectionPage(Math.max(0, collectionOffset - PAGE_SIZE))
+                    }
+                  >
+                    {t("Back")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={collections.length < PAGE_SIZE}
+                    onClick={() => void loadCollectionPage(collectionOffset + PAGE_SIZE)}
+                  >
+                    {t("Next")}
+                  </Button>
+                </div>
+              </div>
+            </section>
+            {selectedCollection && (
+              <section className="border-t px-4 py-3">
+                <h3 className="text-sm font-semibold">
+                  {t("Model storage")} · {selectedCollection.name}
+                </h3>
+                {models.length ? (
+                  <div className="mt-2 divide-y divide-border">
+                    {models.map((model) => (
+                      <div key={model.model_id} className="flex justify-between gap-3 py-2 text-xs">
+                        <span className="min-w-0 truncate">{model.name}</span>
+                        <span className="tabular-nums">{bytes(model.logical_bytes, locale)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("No visible Models on this page.")}
+                  </p>
+                )}
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={modelOffset === 0}
+                    onClick={() =>
+                      void showModels(selectedCollection, Math.max(0, modelOffset - PAGE_SIZE))
+                    }
+                  >
+                    {t("Back")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={models.length < PAGE_SIZE}
+                    onClick={() => void showModels(selectedCollection, modelOffset + PAGE_SIZE)}
+                  >
+                    {t("Next")}
+                  </Button>
+                </div>
+              </section>
+            )}
+          </details>
           <section className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/30 p-4">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold">{t("Cleanup opportunities")}</h3>
-              <p className="mt-1 text-sm font-medium">{t("Expired staging")}</p>
+              <h3 className="text-sm font-semibold">{t("Free up space")}</h3>
+
               <p className="mt-1 text-xs text-muted-foreground">
-                {t("Remove only expired files whose ownership can still be verified.")}
+                {t(
+                  "Remove temporary files that are no longer needed, or review trash and backups.",
+                )}
               </p>
-              <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                {cleanupPreviews
-                  .filter((preview) => preview.available)
-                  .map((preview) => (
-                    <div key={preview.owner}>
-                      <dt className="inline capitalize">{knownUiText(preview.owner, locale)}: </dt>
-                      <dd className="inline tabular-nums">
-                        {preview.candidate_count} · {bytes(preview.candidate_bytes, locale)}
-                      </dd>
-                    </div>
-                  ))}
-              </dl>
+              {cleanupState === "error" && (
+                <p className="mt-2 text-sm text-warning">
+                  {t("Cleanup could not be checked. Refresh the measurement to try again.")}
+                </p>
+              )}
+              {cleanupState === "loading" && (
+                <p role="status" className="mt-2 text-sm">
+                  {t("Checking for unused files…")}
+                </p>
+              )}
+              {cleanupState === "ready" &&
+                !cleanupPreviews.some(
+                  (preview) => preview.available && preview.candidate_count > 0,
+                ) && <p className="mt-2 text-sm">{t("No files need cleaning up right now.")}</p>}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCleanupTarget("staging")}
-                disabled={busy}
-              >
-                {t("Clean up expired staging")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCleanupTarget("cache")}
-                disabled={
-                  busy ||
-                  !cleanupPreviews.some(
-                    (preview) => preview.owner === "cache" && preview.candidate_count > 0,
-                  )
-                }
-              >
-                {t("Clear derived cache")}
-              </Button>
+              {cleanupPreviews.some(
+                (preview) =>
+                  preview.owner === "staging" && preview.available && preview.candidate_count > 0,
+              ) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCleanupTarget("staging")}
+                  disabled={busy}
+                >
+                  {t("Clean up temporary files")}
+                </Button>
+              )}
+              {cleanupPreviews.some(
+                (preview) =>
+                  preview.owner === "cache" && preview.available && preview.candidate_count > 0,
+              ) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCleanupTarget("cache")}
+                  disabled={
+                    busy ||
+                    !cleanupPreviews.some(
+                      (preview) => preview.owner === "cache" && preview.candidate_count > 0,
+                    )
+                  }
+                >
+                  {t("Clear derived cache")}
+                </Button>
+              )}
               <Button asChild variant="outline" size="sm">
                 <Link to="/settings?section=trash">{t("Review eligible trash")}</Link>
               </Button>
               <Button asChild variant="outline" size="sm">
-                <Link to="/settings?section=backups">{t("Review retained backups")}</Link>
+                <Link to="/settings?section=backup">{t("Review retained backups")}</Link>
               </Button>
             </div>
           </section>

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.time import ensure_utc
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
 from app.schemas.family_types import VariantRole
 from app.schemas.printers import (
@@ -267,6 +268,7 @@ class ModelListItem(BaseModel):
 
 
 class ModelSort(str, Enum):
+    RELEVANCE = "relevance"
     DATE_DESC = "date-desc"
     DATE_ASC = "date-asc"
     NAME_ASC = "name-asc"
@@ -299,7 +301,7 @@ class ModelFilters(BaseModel):
     collection: Optional[str] = Field(default=None, max_length=512)
     direct: bool = False
     tag: list[str] = Field(default_factory=list, max_length=64)
-    q: Optional[str] = Field(default=None, max_length=255)
+    q: Optional[str] = Field(default=None, max_length=512)
     printer_id: Optional[int] = Field(default=None, gt=0)
     printer_presence: Optional[Literal["any", "none"]] = None
     favorites: bool = False
@@ -313,11 +315,51 @@ class ModelFilters(BaseModel):
     storage: list[Literal["vault", "external"]] = Field(default_factory=list)
     uploaded_after: Optional[datetime] = None
     uploaded_before: Optional[datetime] = None
+    printed_after: datetime | None = Field(
+        default=None,
+        description="Inclusive finished_at lower bound; UTC when no offset is supplied.",
+    )
+    printed_before: datetime | None = Field(
+        default=None, description="Exclusive finished_at upper bound."
+    )
+    print_duration_min_s: int | None = Field(
+        default=None,
+        ge=0,
+        le=2**31 - 1,
+        description="Inclusive actual PrintJob duration; null durations do not match.",
+    )
+    print_duration_max_s: int | None = Field(
+        default=None,
+        ge=1,
+        le=2**31 - 1,
+        description="Exclusive actual PrintJob duration: under three hours is 10800.",
+    )
     has_similar_candidates: Optional[bool] = None
     family_id: int | None = Field(default=None, gt=0)
     family_role: VariantRole | None = None
     in_family: bool | None = None
     browse: Literal["models", "families_collapsed"] = "models"
+
+    @field_validator("printed_after", "printed_before")
+    @classmethod
+    def normalize_printed_date(cls, value):
+        return ensure_utc(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_print_history_range(self):
+        if (
+            self.printed_after is not None
+            and self.printed_before is not None
+            and self.printed_after >= self.printed_before
+        ):
+            raise ValueError("print_date_range_invalid")
+        if (
+            self.print_duration_min_s is not None
+            and self.print_duration_max_s is not None
+            and self.print_duration_min_s >= self.print_duration_max_s
+        ):
+            raise ValueError("print_duration_range_invalid")
+        return self
 
 
 class FacetValueRead(BaseModel):

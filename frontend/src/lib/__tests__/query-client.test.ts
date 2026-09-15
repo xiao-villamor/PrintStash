@@ -64,6 +64,16 @@ describe("invalidateQueriesForPath", () => {
     spy.mockRestore();
   });
 
+  it("refreshes AI capability after a generation activation", () => {
+    invalidateQueriesForPath("/api/v1/config/ai-search/generations/1/activate");
+    expect(bustedKeys(spy.mock.calls)).toEqual(["ai-search"]);
+  });
+
+  it("keeps resource estimates from invalidating configuration", () => {
+    invalidateQueriesForPath("/api/v1/config/ai-search/generations/estimate");
+    expect(bustedKeys(spy.mock.calls)).toEqual([]);
+  });
+
   it("refreshes Family membership after a Family write", () => {
     invalidateQueriesForPath("/api/v1/families/7/move-member");
     expect(bustedKeys(spy.mock.calls)).toEqual(

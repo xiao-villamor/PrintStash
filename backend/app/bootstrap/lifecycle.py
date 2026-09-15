@@ -79,6 +79,23 @@ async def _close_outbound_clients() -> None:
         await close_http_client()
     finally:
         try:
+            from app.bootstrap.optional_features import inference_available
+
+            if inference_available():
+                from app.modules.inference.query import close_queries
+                from app.modules.inference.transport import (
+                    close_client as close_inference_client,
+                )
+                from app.modules.inference.worker_pool import pool as model_workers
+                from app.runtime.model_acquisition import close as close_model_downloads
+
+                await asyncio.to_thread(close_model_downloads)
+                await asyncio.to_thread(close_queries)
+                await asyncio.to_thread(model_workers.close)
+                await asyncio.to_thread(close_inference_client)
+        except Exception:
+            logger.error("failed to close inference transport")
+        try:
             await close_provider_transport()
         except Exception as exc:
             # A provider pool is best-effort shutdown work.  Do not prevent the
@@ -338,6 +355,28 @@ async def lifespan(app: FastAPI):
         _safe_db_url(settings.db_url),
     )
     install_audit_listeners()
+    from app.bootstrap.optional_features import inference_available
+    from app.db.content_search import bind_content_search
+    from app.db.projections import bind_content_projection
+
+    app.state.search_task = app.state.captions_task = app.state.expansion_task = None
+    app.state.model_warmup_task = None
+    previous_search = bind_content_search(None)
+    previous_projection = bind_content_projection(None)
+    if inference_available():
+        from app.modules.search.lexical_query import LibrarySearch
+        from app.modules.search.projection import LibraryProjection
+        from app.runtime.captions import run_captions
+        from app.runtime.expansion import run_expansion
+        from app.runtime.model_warmup import run_model_warmup
+        from app.runtime.search import run_search
+
+        bind_content_search(LibrarySearch())
+        bind_content_projection(LibraryProjection())
+        app.state.search_task = asyncio.create_task(run_search())
+        app.state.captions_task = asyncio.create_task(run_captions())
+        app.state.expansion_task = asyncio.create_task(run_expansion())
+        app.state.model_warmup_task = asyncio.create_task(run_model_warmup())
     printer_provider_registry = build_provider_registry()
     app.state.printer_provider_registry = printer_provider_registry
     provider_builder = partial(get_provider_client, registry=printer_provider_registry)
@@ -383,9 +422,15 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("library watcher failed to start; scheduled scans still run")
     yield
+    bind_content_projection(previous_projection)
+    bind_content_search(previous_search)
     bind_materializer(None)
     logger.info("shutting down printer hub")
     await _cancel_tasks(
+        app.state.search_task,
+        app.state.captions_task,
+        app.state.expansion_task,
+        app.state.model_warmup_task,
         app.state.gc_task,
         app.state.external_scan_task,
         app.state.automatic_backup_task,

@@ -17,13 +17,14 @@ HTTP endpoint or persisted archive format.
 | `backups` | Snapshot creation, catalogue, verification, replicas and journaled restore | `backup.creation`, `backup.catalogue`, `backup.verification`, `backup.adoption`, `backup.deletion`, `backup.restore`, `backup.recovery`, `backup_runs`, `retry_commands`, `backup_schedule` |
 | `printing` | Printers, provider adapters, fleet scheduling, materials and print history | `dispatch`, `costing`, `printer_provider`, `printer_hub`, `fleet`, `materials`, `printer_files`, `printer_jobs`, `print_results`, `multipart_builds` |
 | `similarity` | Versioned geometric evidence, indexed retrieval, durable analysis runs and explicit review | `fingerprints`, `retrieval`, `processing`, `candidates`, `review`, `composition` |
-| `inference` | Local native embedding contracts, immutable index generations and authorized semantic queries | `local`, `manifest`, `store`, `search` |
+| `inference` | Shared provider contracts, model identity and inference runtimes | `local`, `manifest`, `onnx_cpu` |
 | `media` | Mesh processing, thumbnails, source covers and toolpaths | `mesh_operations`, `thumbnail_engine`, `thumbnail_generations`, `thumbnail_repair`, `toolpath`, `source_cover_processing` |
 | `identity` | Product identity, collection/printer authorization, sharing and tickets | `auth`, `oidc`, `rbac`, `printer_rbac`, `share`, `ws_tickets` |
 | `notifications` | Notification preparation and delivery | `notifications`, `notification_renderers` |
 | `administration` | Dynamic OSS settings, setup, audit and operational inspection | `runtime_config`, `setup_bootstrap`, `audit`, `vault_audit`, `release_check` |
 | `runtime` | Local process coordination, maintenance, job tracking and delivery transports | `maintenance`, `jobs`, `work_wakeup`, `realtime` |
 | `db` | Session factories, SQL schema and metadata registration | `session`, `scopes`, `models`, `publication`, `transactions` |
+| `search` | Authorized passage projection, lexical retrieval, immutable embedding spaces and vector generations (AI Search in progress) | `sources`, `passages`, `projection`, `retrieval`, `vector_store` |
 
 The table identifies interfaces, not permission to reach through an operation
 into its implementation. A function prefixed `_` belongs to its owner. Public

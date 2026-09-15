@@ -19,3 +19,15 @@ def rollback_on_failure(session: Session) -> Iterator[None]:
     except BaseException:
         session.rollback()
         raise
+
+
+def begin_write(session: Session) -> None:
+    # sqlite3's legacy mode starts transactions for ordinary DML, but not for
+    # WITH ... INSERT or SAVEPOINT. SQLAlchemy's logical transaction alone does
+    # not protect those writes from committing before a caller rollback.
+    connection = session.connection()
+    if (
+        connection.dialect.name == "sqlite"
+        and not connection.connection.driver_connection.in_transaction
+    ):
+        connection.exec_driver_sql("BEGIN")

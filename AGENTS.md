@@ -4,10 +4,6 @@ Self-hosted 3D print library (models, G-code revisions, printers, filament).
 Local-first: SQLite + local FS default; Postgres/S3 optional. No hard deps on
 Redis/queues/cloud.
 
-Workflow reference (release procedure, roadmap position, plan pointers):
-`.agents/skills/printstash/SKILL.md` — read it before release or roadmap
-work; that detail lives there, not here, so this file stays small.
-
 ## Skill
 
 `.agents/skills/printstash/` is the repository's only public skill;
@@ -15,6 +11,25 @@ work; that detail lives there, not here, so this file stays small.
 `CLAUDE.md` points at. Invoke **`printstash`** at the start of every task. Its
 routing table discloses the relevant database, test-design, test-running,
 frontend, backend, provider, capture, release, and workflow references.
+
+## Execution
+
+Carry implementation requests through edits and applicable verification.
+Resolve routine choices from repository conventions; ask only when missing
+information changes the outcome or an action needs authorization not already
+given. Continue independent, authorized work while awaiting an answer.
+
+Explicit user instructions take precedence over skill guidelines, within
+system and tool permissions. If a skill blocks progress, name its file and
+quote the exact requirement; distinguish that requirement from your own
+interpretation. Prepare the reviewable result before requesting approval for
+the remaining action.
+
+Keep updates brief: the result, evidence, and any remaining blocker. Preserve
+the requested scope when incorporating corrections or answering side questions.
+Completion means the requested result is verified with the required gates.
+When blocked, report the unverified portion and its concrete blocker without
+claiming completion.
 
 ## Agent coordination
 
@@ -83,8 +98,3 @@ executed rather than what was asserted. Playwright is invisible to all of it.
 4. One PR per bug/feature. **Tests are mandatory for any change to production code** — no "too small to test" exception; the test-design coverage matrix is the proof. Tests first on data-integrity/security fixes.
 5. Keep cloud seams clean: StorageBackend and SessionFactory retain explicit contracts; event publication is separate from WebSocket delivery. OSS WorkWakeup is a local scheduler hint, not Cloud's durable task queue. Shared business in printstash-core has no framework, ORM or external-service hard dependencies.
 6. Frontend UI follows `DESIGN.md`. The zero-counts are load-bearing: no `transition-all`, no `ease-in`, no raw durations/cubic-beziers, no arbitrary `[var(--…)]` colors. Nothing animates over 300ms; route navigation never animates.
-
-## Release & roadmap
-Follow `.agents/skills/printstash/SKILL.md` — read it before cutting a
-release, bumping versions, or picking the next roadmap item. Don't
-reconstruct the procedure from memory or git history.

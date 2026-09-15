@@ -25,6 +25,7 @@ from app.db.models import (
     Tag,
     User,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.transactions import rollback_on_failure
 from app.modules.identity import rbac
@@ -238,6 +239,7 @@ def batch_move_models(
             session.add(m)
             succeeded.append(m.id)  # type: ignore[arg-type]
 
+        content_changed(session, "model", succeeded)
         if commit:
             session.commit()
         else:
@@ -311,6 +313,7 @@ def batch_tag_models(
             session.add(m)
             succeeded.append(model_id)
 
+        content_changed(session, "model", succeeded)
         if commit:
             session.commit()
         else:
@@ -357,6 +360,7 @@ def batch_set_revision_labels(
             models_revision_labels.set_revision_labels(
                 session, ordered, payload.revision_label
             )
+            content_changed(session, "model", (row.model_id for row in ordered))
             session.commit()
         except Exception:
             session.rollback()
@@ -446,6 +450,7 @@ def update_model(
 
         m.updated_at = utcnow()
         session.add(m)
+        content_changed(session, "model", [model_id])
         session.commit()
         return None
 
@@ -503,6 +508,7 @@ def update_file_revision(
         m.updated_at = utcnow()
         session.add(file_row)
         session.add(m)
+        content_changed(session, "model", [model_id])
         session.commit()
         return None
 
@@ -536,6 +542,7 @@ def replace_file_tags(
             session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
         model.updated_at = utcnow()
         session.add(model)
+        content_changed(session, "model", [model_id])
         session.commit()
         return None
 

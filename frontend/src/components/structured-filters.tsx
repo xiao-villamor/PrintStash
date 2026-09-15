@@ -1,3 +1,6 @@
+import { PrintHistoryFields } from "@/components/print-history-fields";
+import { historyKeys } from "@/lib/search-filters";
+import type { SavedViewFilters } from "@/types";
 import { filterValueText } from "@/lib/filter-labels";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -77,6 +80,7 @@ export function StructuredFilters({
   onChange,
   uploadedAfter,
   uploadedBefore,
+  history = {},
   onDateChange,
   onClearAll,
   loading = false,
@@ -87,7 +91,11 @@ export function StructuredFilters({
   onChange: (key: FilterKey, values: string[]) => void;
   uploadedAfter?: string;
   uploadedBefore?: string;
-  onDateChange?: (key: "uploaded_after" | "uploaded_before", value: string) => void;
+  history?: Pick<SavedViewFilters, (typeof historyKeys)[number]>;
+  onDateChange?: (
+    key: "uploaded_after" | "uploaded_before" | (typeof historyKeys)[number],
+    value: string,
+  ) => void;
   onClearAll?: () => void;
   loading?: boolean;
   error?: boolean;
@@ -117,7 +125,8 @@ export function StructuredFilters({
   const count =
     Object.values(active).reduce((total, values) => total + (values?.length ?? 0), 0) +
     (uploadedAfter ? 1 : 0) +
-    (uploadedBefore ? 1 : 0);
+    (uploadedBefore ? 1 : 0) +
+    historyKeys.filter((key) => history[key] != null && history[key] !== "").length;
   function clearAll() {
     if (onClearAll) {
       onClearAll();
@@ -127,6 +136,7 @@ export function StructuredFilters({
     onChange("has_similar_candidates", []);
     onDateChange?.("uploaded_after", "");
     onDateChange?.("uploaded_before", "");
+    historyKeys.forEach((key) => onDateChange?.(key, ""));
   }
   return (
     <Localized>
@@ -219,6 +229,12 @@ export function StructuredFilters({
               </div>
             );
           })}
+          <div className="px-2 py-3">
+            <PrintHistoryFields
+              value={history}
+              onChange={(key, value) => onDateChange?.(key, value)}
+            />
+          </div>
           <div className="pt-1">
             <p className="px-2 py-1.5 text-sm font-medium text-foreground">{uiText("Uploaded")}</p>
             <div className="grid grid-cols-2 gap-2 px-2 pb-1">

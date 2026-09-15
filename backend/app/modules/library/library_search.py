@@ -154,10 +154,12 @@ def _text_match_model_ids(query: str):
     )
 
 
-def apply_library_search(stmt, *, query: str | None, tag_slugs: list[str]):
+def apply_library_search(stmt, *, query: str | None, tag_slugs: list[str], matches=None):
     """Apply text and effective-tag filters to a Model select."""
     normalized_query = query.strip() if query else ""
-    if normalized_query:
+    if normalized_query and matches is not None:
+        stmt = stmt.where(Model.id.in_(select(matches.c.model_id)))
+    elif normalized_query:
         matching_ids = _text_match_model_ids(normalized_query)
         pattern = _escaped_like(normalized_query)
         stmt = stmt.where(
