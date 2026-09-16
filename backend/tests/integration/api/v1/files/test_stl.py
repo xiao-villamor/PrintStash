@@ -65,6 +65,9 @@ class TestFileAsStl:
         assert response.status_code == 410, response.text
         assert response.json()["detail"] == "file_blob_missing"
 
+    @pytest.mark.parametrize(
+        "source_key", [None, "external.stl"], ids=["legacy", "indexed"]
+    )
     def test_serves_an_external_stl_without_using_the_active_vault(
         self,
         client: TestClient,
@@ -72,6 +75,8 @@ class TestFileAsStl:
         monkeypatch: pytest.MonkeyPatch,
         make_model,
         make_file,
+        make_external_library,
+        source_key,
         tmp_path: Path,
     ) -> None:
         from app.api.v1 import files as files_api
@@ -81,6 +86,7 @@ class TestFileAsStl:
         source = tmp_path / "nas" / "external.stl"
         source.parent.mkdir()
         source.write_bytes(payload)
+        library = make_external_library(source.parent, root_identity=None)
         row = make_file(
             make_model("stl-external"),
             filename=source.name,
@@ -88,6 +94,8 @@ class TestFileAsStl:
             size_bytes=len(payload),
             sha256=hashlib.sha256(payload).hexdigest(),
             is_external=True,
+            external_library_id=library.id,
+            source_key=source_key,
         )
 
         def active_vault_must_not_be_used():

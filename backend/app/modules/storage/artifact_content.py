@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Iterator
 
 from app.core.errors import ErrorKind, OperationError
-from app.db.models import File
+from app.db.models import ExternalLibrary, File, LibrarySourceKind
 from app.db.session import get_session_factory
 from app.modules.sources.library_source import (
     LibrarySourceError,
@@ -113,6 +113,16 @@ class ArtifactHandle:
             raise ArtifactContentMissingError(self.file.path) from exc
 
     def _verified_external_content(self) -> Path:
+        if self.file.source_key and self.file.external_library_id is not None:
+            # Mounted scans also retain source_key for reconciliation.
+            with get_session_factory().scoped_session() as session:
+                library = session.get(ExternalLibrary, self.file.external_library_id)
+                mounted = (
+                    library is not None
+                    and library.source_kind == LibrarySourceKind.MOUNTED
+                )
+            if mounted:
+                return self._verified_external_copy()
         if self.file.source_key:
             return self._verified_remote_copy()
         return self._verified_external_copy()
