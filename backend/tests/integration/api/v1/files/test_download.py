@@ -161,6 +161,9 @@ class TestDownloadFile:
         assert response.status_code == 200, response.text
         assert response.content == b"remote-bytes"
 
+    @pytest.mark.parametrize(
+        "source_key", [None, "part.stl"], ids=["legacy", "indexed"]
+    )
     def test_serves_an_external_file_without_using_the_active_vault_backend(
         self,
         client: TestClient,
@@ -168,6 +171,8 @@ class TestDownloadFile:
         monkeypatch: pytest.MonkeyPatch,
         make_model,
         make_file,
+        make_external_library,
+        source_key,
         tmp_path: Path,
     ) -> None:
         from app.modules.storage import artifact_content
@@ -176,12 +181,15 @@ class TestDownloadFile:
         source = tmp_path / "mounted-nas" / "part.stl"
         source.parent.mkdir()
         source.write_bytes(payload)
+        library = make_external_library(source.parent, root_identity=None)
         row = make_file(
             make_model("external-on-remote-vault"),
             path=str(source),
             size_bytes=len(payload),
             sha256=hashlib.sha256(payload).hexdigest(),
             is_external=True,
+            external_library_id=library.id,
+            source_key=source_key,
         )
 
         def active_vault_must_not_be_used():

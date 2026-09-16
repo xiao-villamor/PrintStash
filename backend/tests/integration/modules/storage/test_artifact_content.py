@@ -11,12 +11,43 @@ import pytest
 
 from app.core.config import _overlay
 from app.core.errors import OperationError
+from app.db.models import LibrarySourceKind
 from app.modules.sources.library_source import SourceContent, SourceEntry
 from app.modules.storage import artifact_content
 from tests.factories import detached_file
 
 
 class TestRemoteArtifactContent:
+    @pytest.mark.parametrize(
+        "source_kind",
+        [kind for kind in LibrarySourceKind if kind != LibrarySourceKind.MOUNTED],
+        ids=lambda kind: kind.value,
+    )
+    def test_missing_remote_connection_never_falls_back_to_local_bytes(
+        self, tmp_path, make_external_library, make_model, make_file, source_kind
+    ) -> None:
+        path = tmp_path / "remote.stl"
+        path.write_bytes(b"remote")
+        library = make_external_library(
+            tmp_path, source_kind=source_kind, root_identity=None
+        )
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=6,
+            sha256=hashlib.sha256(b"remote").hexdigest(),
+        )
+
+        with pytest.raises(artifact_content.ArtifactContentMissingError) as error:
+            with artifact_content.resolve(row).materialize():
+                pass
+
+        assert str(error.value.__cause__) == "storage_connection_missing"
+
     def test_materializes_remote_content_without_using_the_vault(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -96,6 +127,118 @@ class TestRemoteArtifactContent:
 
 
 class TestMountedArtifactContent:
+    def test_rejects_symlinked_indexed_mounted_content(
+        self, tmp_path, make_external_library, make_model, make_file
+    ) -> None:
+        target = tmp_path / "target.stl"
+        target.write_bytes(b"target")
+        path = tmp_path / "linked.stl"
+        path.symlink_to(target)
+        library = make_external_library(tmp_path, root_identity=None)
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=6,
+            sha256=hashlib.sha256(b"target").hexdigest(),
+        )
+
+        with pytest.raises(artifact_content.ArtifactContentMissingError):
+            with artifact_content.resolve(row).materialize():
+                pass
+
+    def test_reads_indexed_mounted_content(
+        self, tmp_path, make_external_library, make_model, make_file, db_session
+    ) -> None:
+        payload = b"indexed mounted bytes"
+        path = tmp_path / "indexed.stl"
+        path.write_bytes(payload)
+        library = make_external_library(tmp_path, root_identity=None)
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        handle = artifact_content.resolve(row)
+
+        with handle.materialize() as pinned:
+            observed = pinned.read_bytes()
+
+        assert observed == payload
+        db_session.refresh(row)
+        assert row.source_key == path.name
+
+    def test_streams_indexed_mounted_content(
+        self, tmp_path, make_external_library, make_model, make_file
+    ) -> None:
+        payload = b"indexed mounted stream"
+        path = tmp_path / "stream.stl"
+        path.write_bytes(payload)
+        library = make_external_library(tmp_path, root_identity=None)
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+
+        observed = b"".join(artifact_content.resolve(row).stream(chunk_size=3))
+
+        assert observed == payload
+
+    def test_rejects_changed_indexed_mounted_content(
+        self, tmp_path, make_external_library, make_model, make_file
+    ) -> None:
+        path = tmp_path / "changed.stl"
+        path.write_bytes(b"new")
+        library = make_external_library(tmp_path, root_identity=None)
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=3,
+            sha256=hashlib.sha256(b"old").hexdigest(),
+        )
+
+        with pytest.raises(artifact_content.ArtifactContentChangedError):
+            with artifact_content.resolve(row).materialize():
+                pass
+
+    def test_rejects_missing_indexed_mounted_content(
+        self, tmp_path, make_external_library, make_model, make_file
+    ) -> None:
+        path = tmp_path / "missing.stl"
+        library = make_external_library(tmp_path, root_identity=None)
+        row = make_file(
+            make_model(),
+            filename=path.name,
+            external=True,
+            path=str(path),
+            external_library_id=library.id,
+            source_key=path.name,
+            size_bytes=3,
+            sha256=hashlib.sha256(b"old").hexdigest(),
+        )
+
+        with pytest.raises(artifact_content.ArtifactContentMissingError):
+            with artifact_content.resolve(row).materialize():
+                pass
+
     def test_mounted_content_is_stable_across_access_modes(
         self, tmp_path: Path
     ) -> None:

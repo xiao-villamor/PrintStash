@@ -23,6 +23,9 @@
 
 ### Fixed
 
+- Mounted Library sources retain preview and download access when their indexed
+  Artifacts have a source key, without treating them as remote storage connections.
+
 - Idle similarity polling no longer transiently blocks backup restoration with a storage-retention conflict.
 
 - Ordinary dense meshes such as the repository Benchy now receive complete
