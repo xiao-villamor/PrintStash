@@ -157,3 +157,103 @@ class LibrarySearch:
             .group_by(SearchPassage.subject_id)
             .subquery()
         )
+
+
+def name_candidates(session: Session, query: str, allowed_ids, *, limit: int = 2048):
+    """Probe the vocabulary index, then verify authorized canonical title tokens.
+
+    Only single-token name queries need spelling recovery. The dictionary and
+    passage caps bound work independently of library size. Descriptions and tags
+    cannot turn a spelling correction into a name match.
+    """
+    from printstash_core.search.lexical import terms
+    from printstash_core.search.names import candidate_prefixes, one_edit_apart
+
+    if not 1 <= limit <= 2048:
+        raise ValueError("search_candidate_limit")
+    tokens = query_terms(query)
+    if len(tokens) != 1 or len(tokens[0]) < 5:
+        return {}
+    token = tokens[0]
+    prefixes = candidate_prefixes(token)
+    vocabulary = session.exec(
+        select(SearchLexicalTerm.term)
+        .where(
+            SearchLexicalTerm.term.in_(
+                select(SearchLexicalPosting.term).where(
+                    SearchLexicalPosting.passage_id.in_(allowed_ids)
+                )
+            )
+        )
+        .where(
+            or_(
+                *(
+                    (SearchLexicalTerm.term >= prefix)
+                    & (SearchLexicalTerm.term < prefix[:-1] + chr(ord(prefix[-1]) + 1))
+                    for prefix in prefixes
+                )
+            )
+        )
+        .order_by(
+            case((SearchLexicalTerm.term == token, 0), else_=1), SearchLexicalTerm.term
+        )
+        .limit(limit)
+    ).all()
+    matching = [
+        value for value in vocabulary if value == token or one_edit_apart(token, value)
+    ]
+    if not matching:
+        return {}
+    rows = session.exec(
+        select(SearchPassage)
+        .where(
+            passage_in_scope(allowed_ids),
+            canonical_passage(),
+            SearchPassage.id.in_(
+                select(SearchLexicalPosting.passage_id).where(
+                    SearchLexicalPosting.term.in_(matching)
+                )
+            ),
+        )
+        .order_by(
+            case((func.lower(SearchPassage.title) == token, 0), else_=1),
+            SearchPassage.id,
+        )
+        .limit(limit)
+    ).all()
+    matches = {}
+    for row in rows:
+        title = terms(row.title)
+        if token in title:
+            matches[row.id] = 3 if title == (token,) else 2
+        elif any(one_edit_apart(token, word) for word in title):
+            matches[row.id] = 1
+    return matches
+
+
+def concept_candidates(session: Session, query: str, allowed_ids, *, limit: int = 2048):
+    """Retrieve functional metadata through indexed conjunctive domain phrases."""
+    from printstash_core.search.concepts import alternatives
+
+    if not 1 <= limit <= 2048:
+        raise ValueError("search_candidate_limit")
+    phrases = alternatives(query)
+    if not phrases:
+        return ()
+    branches = []
+    for phrase in phrases:
+        postings = (
+            select(SearchLexicalPosting.passage_id)
+            .where(SearchLexicalPosting.term.in_(phrase))
+            .group_by(SearchLexicalPosting.passage_id)
+            .having(func.count(SearchLexicalPosting.term) == len(phrase))
+        )
+        branches.append(SearchPassage.id.in_(postings))
+    return tuple(
+        session.exec(
+            select(SearchPassage.id)
+            .where(passage_in_scope(allowed_ids), canonical_passage(), or_(*branches))
+            .order_by(SearchPassage.id)
+            .limit(limit)
+        ).all()
+    )

@@ -100,6 +100,7 @@ test.describe("AI Search", () => {
       });
       expect(configured.ok()).toBe(true);
       await page.goto("/search");
+      await page.getByText("Search options", { exact: true }).click();
       await page.getByRole("button", { name: "Natural-language search", exact: true }).click();
       await expect(page.getByRole("dialog")).toContainText(
         "submitted searches and available filter choices are sent to 127.0.0.1",
@@ -154,6 +155,7 @@ test.describe("AI Search", () => {
       expect(calls).toBe(1);
       // A persisted normalized view restores without another language-model call.
       await page.goto("/search");
+      await page.getByText("Search options", { exact: true }).click();
       await page.getByRole("button", { name: /^Saved views(?: \d+)?$/ }).click();
       await page.getByRole("button", { name, exact: true }).click();
       await expect(

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import type { SimilarityRun } from "../../src/types/similarity";
 import { silhouetteOverlap } from "../similarity-pixels";
 import { test, expect } from "./helpers";
-import { modelCard } from "./util";
+import { modelCard, openFilters, openLibraryTools } from "./util";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
 
@@ -130,15 +130,18 @@ test.describe("Standalone similarity", () => {
       await test.step("Similarity Saved View survives navigation", async () => {
         const viewName = `Review similar ${Date.now()}`;
         await page.goto("/");
+        await openFilters(page);
         await page.getByRole("checkbox", { name: "Has similar candidates" }).click();
         await expect(page).toHaveURL(/has_similar_candidates=yes/);
         await page.keyboard.press("Escape");
+        await openLibraryTools(page);
         const views = page.locator('main button[data-menu-trigger][aria-haspopup="dialog"]');
         await views.click();
         await page.getByText("Save current view").click();
         await page.getByPlaceholder("Ready to print").fill(viewName);
         await page.getByRole("button", { name: "Save view", exact: true }).click();
         await page.goto("/");
+        await openLibraryTools(page);
         await views.click();
         await page.getByRole("button", { name: viewName, exact: true }).click();
         await expect(page).toHaveURL(/has_similar_candidates=yes/);

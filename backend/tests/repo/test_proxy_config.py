@@ -176,6 +176,13 @@ class TestComposeFiles:
         )
         assert "ports" not in migration_config["services"]["minio"]
 
+    def test_legacy_migration_uses_the_same_pinned_release_from_official_quay(self) -> None:
+        config = yaml.safe_load((_root() / "docker-compose.migrate-minio.yml").read_text())
+        assert config["services"]["minio"]["image"] == (
+            "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@"
+            "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+        )
+
 
 class TestBackendDockerfile:
     def test_backend_uv_toolchain_image_is_immutable(self) -> None:

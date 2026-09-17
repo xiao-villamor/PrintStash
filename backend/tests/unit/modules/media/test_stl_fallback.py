@@ -682,3 +682,15 @@ class TestRenderStlThumbnail:
         )
 
         assert stl_fallback.render_stl_thumbnail(path, width=64, height=48) is None
+
+
+class TestPartialSampling:
+    def test_hostile_ascii_keeps_only_verified_facets(self, tmp_path):
+        source = _write_hostile_ascii(tmp_path / "hostile.stl")
+        result = stl_fallback.sample_stl_geometry(source, max_triangles=10)
+        assert result is not None
+        assert result.complete is False
+        assert result.parsed_triangles == 1
+        assert list(result.coordinates) == [0, 0, 0, 1, 0, 0, 0, 1, 0]
+        assert result.bounds_min == (0, 0, 0)
+        assert result.bounds_max == (1, 1, 0)

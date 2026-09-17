@@ -157,3 +157,31 @@ class TestWebpNormalization:
             ThumbnailValidationError, match="thumbnail_format_unsupported"
         ):
             to_webp(source.getvalue())
+
+
+class TestInvalidThumbnailInput:
+    @pytest.mark.parametrize("width", [0, 1281, True, 640.5])
+    def test_invalid_width_has_a_stable_failure(self, width):
+        with pytest.raises(ValueError, match="thumbnail_too_large") as caught:
+            to_webp(b"not decoded", width=width)
+        assert str(caught.value.__cause__) == "thumbnail_width_invalid"
+
+    def test_native_decoder_failure_is_not_stored_as_raw_bytes(self, monkeypatch):
+        from printstash_core.mesh.native_rasterizer import kernel
+
+        def fail(*args):
+            raise RuntimeError("decoder unavailable")
+
+        monkeypatch.setattr(kernel(), "normalize_thumbnail", fail)
+        with pytest.raises(ValueError, match="thumbnail_too_large"):
+            to_webp(b"untrusted", width=320)
+
+    def test_invalid_base64_has_no_embedded_preview(self, tmp_path):
+        path = tmp_path / "invalid.gcode"
+        path.write_text("; thumbnail begin 16x16 4\n; !!!!\n; thumbnail end\n")
+        assert extract(path) is None
+
+    def test_unterminated_line_has_no_embedded_preview(self, tmp_path):
+        path = tmp_path / "truncated.gcode"
+        path.write_text("; thumbnail begin 16x16 4")
+        assert extract(path) is None

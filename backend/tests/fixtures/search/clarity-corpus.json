@@ -1,0 +1,27 @@
+{
+  "license": "CC0-1.0, original analytic fixtures; existing geometries retain their repository attribution",
+  "calibration": [
+    {"id": "cal-vase", "geometry": "vase", "name": "Vessel A", "description": "A tall decorative flower vase with a narrow neck.", "query": "vase"},
+    {"id": "cal-gear", "geometry": "gear", "name": "Mechanism B", "description": "A toothed wheel transmits rotation between shafts.", "query": "gear"},
+    {"id": "cal-bowl", "geometry": "bowl", "name": "Container C", "description": "A round open dish for serving food.", "query": "bowl"},
+    {"id": "cal-bolt", "geometry": "bolt", "name": "Fastener D", "description": "A threaded screw with a hexagonal head fastens two parts.", "query": "bolt"}
+  ],
+  "validation": [
+    {"id": "spectre", "geometry": "cone", "name": "Spectre_Option_A", "description": "A stylized science fiction miniature."},
+    {"id": "goose", "geometry": "goose", "name": "Export_042", "description": ""},
+    {"id": "holder", "geometry": "phone_stand", "name": "Desktop_07", "description": "An angled cradle supports a mobile phone upright for hands-free viewing, with a retaining lip and cable opening."},
+    {"id": "distractor-ball", "geometry": "ball", "name": "Assembly_03", "description": "A solid decorative sphere."},
+    {"id": "distractor-box", "geometry": "box", "name": "Organization", "description": "A solid calibration block."},
+    {"id": "distractor-washer", "geometry": "washer", "name": "Waterfowl mounting spacer", "description": "A flat mechanical spacer with a central hole; no animal shape."},
+    {"id": "distractor-spool", "geometry": "spool", "name": "Print_12", "description": "An empty filament reel."}
+  ],
+  "calibration_absent": ["elephant", "pineapple", "motorcycle", "crocodile"],
+  "validation_queries": [
+    {"query": "specter", "relevant": ["spectre"]},
+    {"query": "spectre", "relevant": ["spectre"]},
+    {"query": "goose", "relevant": ["goose"]},
+    {"query": "holder", "relevant": ["holder"]},
+    {"query": "giraffe", "relevant": []},
+    {"query": "helicopter", "relevant": []}
+  ]
+}

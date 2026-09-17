@@ -21,6 +21,178 @@ def projection():
 
 
 class TestLexicalQuery:
+    @pytest.mark.parametrize(
+        "query",
+        ["specter", "spectre", "spectr", "spectrre", "spectxe"],
+        ids=["transpose", "exact", "deletion", "insertion", "substitution"],
+    )
+    def test_finds_a_named_model_despite_one_spelling_error(
+        self, db_session, make_user, make_model, query
+    ):
+        actor = make_user(superuser=True)
+        expected = make_model("Spectre_Option_A")
+        other = make_model(
+            "Organization", description="A decorative spectrometer stand"
+        )
+        content_changed(db_session, "model", [expected.id, other.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+
+        result = search(db_session, actor, query, mode="lexical")
+
+        assert [row.subject_id for row in result.items] == [expected.id]
+
+    @pytest.mark.parametrize(
+        "query,name,description",
+        [("specter", "Spectre", ""), ("holder", "Phone base", "A phone cradle")],
+        ids=["spelling", "functional-metadata"],
+    )
+    def test_candidates_respect_access_scope(
+        self,
+        db_session,
+        make_user,
+        make_collection,
+        make_model,
+        query,
+        name,
+        description,
+    ):
+        from app.db.models import CollectionRole, ModelStar
+        from app.schemas.models import ModelFilters
+        from tests.factories import grant_collection_role
+
+        viewer = make_user()
+        shared = make_collection("Shared")
+        private = make_collection("Private")
+        grant_collection_role(db_session, viewer, shared, CollectionRole.VIEW)
+        visible = make_model(
+            name, description=description, collection=shared, starred=True
+        )
+        db_session.add(ModelStar(user_id=viewer.id, model_id=visible.id))
+        db_session.commit()
+        hidden = make_model(
+            name + " secret", description=description, collection=private
+        )
+        deleted = make_model(
+            name + " deleted", description=description, collection=shared, trashed=True
+        )
+        excluded = make_model(
+            name + " other", description=description, collection=shared
+        )
+        content_changed(
+            db_session, "model", [visible.id, hidden.id, deleted.id, excluded.id]
+        )
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+
+        result = search(db_session, viewer, query, filters=ModelFilters(favorites=True))
+
+        assert [row.subject_id for row in result.items] == [visible.id]
+        assert hidden.name not in str(result)
+        assert deleted.name not in str(result)
+
+    def test_exact_names_precede_spelling_recovery_across_pages(
+        self, db_session, make_user, make_model
+    ):
+        actor = make_user(superuser=True)
+        fuzzy = make_model("Spectre")
+        exact = make_model("Specter")
+        content_changed(db_session, "model", [fuzzy.id, exact.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+        first = search(db_session, actor, "specter", limit=1)
+        second = search(db_session, actor, "specter", limit=1, cursor=first.next_cursor)
+        assert [item.subject_id for item in first.items] == [exact.id]
+        assert [item.subject_id for item in second.items] == [fuzzy.id]
+        assert second.next_cursor is None
+
+    @pytest.mark.parametrize("query", ["boat", "specter model", "spxctar"])
+    def test_does_not_broaden_short_multiword_or_distant_names(
+        self, db_session, make_user, make_model, query
+    ):
+        model = make_model("Spectre")
+        actor = make_user(superuser=True)
+        content_changed(db_session, "model", [model.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+        assert search(db_session, actor, query).items == []
+
+    @pytest.mark.parametrize(
+        "query,description,distractor",
+        [
+            (
+                "holder",
+                "An angled cradle for a mobile phone",
+                "A plastic phone figurine",
+            ),
+            (
+                "gear",
+                "A toothed wheel transfers rotation",
+                "A smooth wheel spins freely",
+            ),
+            (
+                "bolt",
+                "A threaded screw fastens the assembly",
+                "A recess for a screw head",
+            ),
+        ],
+    )
+    def test_finds_functional_metadata_without_a_matching_filename(
+        self, db_session, make_user, make_model, query, description, distractor
+    ):
+        actor = make_user(superuser=True)
+        expected = make_model("Export_001", description=description)
+        other = make_model("Export_002", description=distractor)
+        content_changed(db_session, "model", [expected.id, other.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+        assert [item.subject_id for item in search(db_session, actor, query).items] == [
+            expected.id
+        ]
+
+    @pytest.mark.parametrize("limit", [0, -1, 2049])
+    def test_rejects_unbounded_candidate_requests(self, db_session, limit):
+        from sqlmodel import select
+
+        from app.db.models import SearchPassage
+        from app.modules.search.lexical_query import concept_candidates, name_candidates
+
+        with pytest.raises(ValueError, match="search_candidate_limit"):
+            name_candidates(
+                db_session, "specter", select(SearchPassage.id), limit=limit
+            )
+        with pytest.raises(ValueError, match="search_candidate_limit"):
+            concept_candidates(
+                db_session, "holder", select(SearchPassage.id), limit=limit
+            )
+
+    def test_private_vocabulary_cannot_crowd_out_visible_names(
+        self, db_session, make_user, make_collection, make_model
+    ):
+        from app.db.models import CollectionRole
+        from app.modules.search.access import visible_passage_ids
+        from app.modules.search.lexical_query import name_candidates
+        from tests.factories import grant_collection_role
+
+        viewer = make_user()
+        shared = make_collection("Visible collection")
+        grant_collection_role(db_session, viewer, shared, CollectionRole.VIEW)
+        expected = make_model("Spectre", collection=shared)
+        hidden = make_model("Apples", collection=make_collection("Private"))
+        content_changed(db_session, "model", [expected.id, hidden.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+        matches = name_candidates(
+            db_session, "specter", visible_passage_ids(db_session, viewer), limit=1
+        )
+        assert len(matches) == 1
+
     def test_maintains_statistics_through_the_content_lifecycle(
         self, db_session, make_user, make_model
     ):

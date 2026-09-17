@@ -169,7 +169,7 @@ def patch(
 ) -> CaptionRead:
     from app.modules.search.passages import sync_subject
 
-    begin_write(session)
+    begin_write(session, immediate=True)
     require(session, actor, subject, edit=True)
     row = lookup(session, subject, lock=True)
     if value.version_token is not None and (

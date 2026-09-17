@@ -293,7 +293,9 @@ jobs:
     name: Backend compatibility (Python 3.13, advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    # The full lane includes a serial container-contract pass after the ordinary
+    # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: backend

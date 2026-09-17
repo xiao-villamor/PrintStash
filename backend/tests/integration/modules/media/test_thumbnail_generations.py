@@ -21,7 +21,11 @@ from app.db.models import (
     ThumbnailRenderSlot,
 )
 from app.db.session import get_session_factory
-from app.modules.media.thumbnail_engine import ThumbnailResult, ThumbnailStrategy
+from app.modules.media.thumbnail_engine import (
+    ThumbnailFailureReason,
+    ThumbnailResult,
+    ThumbnailStrategy,
+)
 from app.modules.media.thumbnail_generations import (
     ThumbnailEnsureOutcome,
     ensure_thumbnail,
@@ -800,3 +804,37 @@ class TestDeferredPublication:
 
         db_session.refresh(model)
         assert model.thumbnail_file_id == second.id
+
+
+class TestLateThumbnailFailure:
+    def test_lost_worker_cannot_record_failure_for_a_new_owner(
+        self, db_session, make_model, make_file
+    ):
+        from dataclasses import replace
+
+        file = make_file(make_model(), file_type=FileType.STL)
+        backend = get_backend()
+        backend.write_bytes(b"mesh", file.path)
+
+        class FailedLateEngine(_SuccessfulEngine):
+            def generate(self, request):
+                generation = db_session.exec(select(ThumbnailGeneration)).one()
+                generation.lease_token = "new-owner"
+                db_session.add(generation)
+                db_session.commit()
+                return replace(
+                    super().generate(request),
+                    image=None,
+                    failure_reason=ThumbnailFailureReason.INVALID_SOURCE,
+                )
+
+        result = ensure_thumbnail(
+            db_session, file, backend=backend, engine=FailedLateEngine()
+        )
+
+        assert result.failure_reason == "lease_lost"
+        generation = db_session.exec(select(ThumbnailGeneration)).one()
+        assert generation.lease_token == "new-owner"
+        assert generation.state == ThumbnailGenerationState.RUNNING
+        assert generation.failure_reason is None
+        assert file.thumbnail_path is None

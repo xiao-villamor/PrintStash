@@ -2,7 +2,7 @@
 
 import pytest
 from printstash_core.search.passages import SearchSubject, SubjectType
-from sqlalchemy import delete
+from sqlalchemy import delete, union_all
 from sqlmodel import select
 
 from app.db.models import SearchExpansion, SearchExpansionTerm, SearchPassage
@@ -13,6 +13,57 @@ from app.modules.search.retrieval import search
 
 
 class TestExpansion:
+    def test_repeated_query_changes_keep_the_authorized_scope(
+        self,
+        db_session,
+        sparse_setup,
+        make_model,
+        make_search_expansion,
+        make_search_expansion_term,
+    ):
+        from app.modules.search.access import visible_passage_ids
+
+        actor, recipe = sparse_setup
+        bicycle = make_model("bicycle")
+        sync_subject(db_session, SearchSubject(SubjectType.MODEL, bicycle.id))
+        passage = db_session.exec(
+            select(SearchPassage).where(
+                SearchPassage.subject_type == "model",
+                SearchPassage.subject_id == bicycle.id,
+            )
+        ).one()
+        row = make_search_expansion(passage, recipe=recipe.id)
+        make_search_expansion_term(row, "bike")
+        excluded = make_model("bike")
+        sync_subject(db_session, SearchSubject(SubjectType.MODEL, excluded.id))
+        excluded_passage = db_session.exec(
+            select(SearchPassage).where(
+                SearchPassage.subject_type == "model",
+                SearchPassage.subject_id == excluded.id,
+            )
+        ).one()
+        excluded_row = make_search_expansion(excluded_passage, recipe=recipe.id)
+        make_search_expansion_term(excluded_row, "bike")
+
+        for query in ("bike", "bicycle", "unmatchedword") * 12:
+            allowed = visible_passage_ids(db_session, actor).where(
+                SearchPassage.id == passage.id
+            )
+            ranks = db_session.exec(ordered_passages(db_session, query, allowed)).all()
+            assert [item[0] for item in ranks] == (
+                [] if query == "unmatchedword" else [passage.id]
+            )
+
+        readers = [
+            ordered_passages(db_session, query, allowed).subquery()
+            for query in ("bike", "bicycle")
+        ]
+        combined = union_all(*(select(reader.c.passage_id) for reader in readers))
+        assert [item[0] for item in db_session.exec(combined).all()] == [
+            passage.id,
+            passage.id,
+        ]
+
     @pytest.mark.parametrize("like", [False, True])
     def test_ranks_separate_expansion_terms(
         self,

@@ -1,4 +1,4 @@
-/** Typing uses lexical suggestions; submitting enters the explicit search flow. */
+/** Library filtering stays local to the view; AI navigation requires an explicit action. */
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -43,6 +43,12 @@ describe("LibrarySearch", () => {
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/\?$/));
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(screen.getByRole("searchbox")).toHaveFocus();
+  });
+  it("clears only the library query", async () => {
+    searchBox({ at: "/?c=Tools&tag=useful&sort=name_asc&q=boat" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/?c=Tools&tag=useful&sort=name_asc");
+    expect(screen.getByRole("searchbox")).toHaveValue("");
   });
   it("leaves submitted results when the query is erased with the keyboard", async () => {
     const user = userEvent.setup();
@@ -97,12 +103,25 @@ describe("LibrarySearch", () => {
     expect(new URL(requests[0].url, "http://test").searchParams.get("mode")).toBe("lexical");
     expect(requests[0].url).toContain("instant=true");
   });
-  it("submits the query to the results route", async () => {
+  it("keeps Enter in the library with existing filters", async () => {
     const user = userEvent.setup();
-    searchBox();
+    searchBox({ at: "/?c=Tools&favorite=true" });
     await user.type(screen.getByRole("searchbox"), "small boat{Enter}");
-    expect(screen.getByTestId("location")).toHaveTextContent("/search?q=small+boat");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/?c=Tools&favorite=true&q=small+boat",
+    );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+  it("opens AI results only through the labeled action", async () => {
+    const user = userEvent.setup();
+    searchBox({
+      routes: {
+        "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
+      },
+    });
+    await user.type(screen.getByRole("searchbox"), "small boat");
+    await user.click(screen.getByRole("button", { name: "Search with AI" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/search?q=small+boat&parse=1");
   });
   it("shows AI only when the active capability is usable", async () => {
     searchBox({
@@ -110,6 +129,7 @@ describe("LibrarySearch", () => {
         "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
       },
     });
+    await userEvent.setup().type(screen.getByRole("searchbox"), "bracket");
     expect(await screen.findByRole("button", { name: "Search with AI" })).toBeVisible();
   });
   it("hides AI while an index is unavailable", async () => {
@@ -119,6 +139,7 @@ describe("LibrarySearch", () => {
       },
     });
     await waitFor(() => expect(app.requests()).toHaveLength(1));
+    await userEvent.setup().type(screen.getByRole("searchbox"), "bracket");
     expect(screen.queryByRole("button", { name: "Search with AI" })).toBeNull();
   });
   it("keeps keyboard focus through suggestions", async () => {

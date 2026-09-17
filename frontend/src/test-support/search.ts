@@ -2,6 +2,7 @@ import type {
   InferenceEndpoint,
   InferenceModel,
   SearchGeneration,
+  SearchPreferences,
   SearchResponse,
   SearchResult,
   SearchSettings,
@@ -18,6 +19,16 @@ export function searchStatus(overrides: Partial<SearchStatus> = {}): SearchStatu
     degraded: [],
     backlog: false,
     remote_hosts: [],
+    ...overrides,
+  };
+}
+export function searchPreferences(overrides: Partial<SearchPreferences> = {}): SearchPreferences {
+  return {
+    nl_filters_enabled: false,
+    timezone: null,
+    effective_timezone: "UTC",
+    available: false,
+    endpoint_host: null,
     ...overrides,
   };
 }

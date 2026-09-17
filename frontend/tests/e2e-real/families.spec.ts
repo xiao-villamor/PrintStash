@@ -1,4 +1,5 @@
 /** Manual Family decisions preserve full real meshes and independent Revisions. */
+import { openLibraryTools } from "./util";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ModelRead } from "../../src/types/models";
@@ -59,9 +60,11 @@ test.describe("Manual Model Families", () => {
         });
       }
       // ── Explicit multi-selection and canonical decision ──
+      await openLibraryTools(page);
       await page.getByRole("button", { name: "Select", exact: true }).click();
       for (const model of models)
         await page.getByRole("checkbox", { name: `Select ${model.name}`, exact: true }).check();
+      await openLibraryTools(page);
       await page.getByRole("button", { name: "Create Family", exact: true }).click();
       const create = page.getByRole("dialog", { name: "Create Family" });
       await create.getByRole("textbox", { name: "Family name" }).fill(familyName);
@@ -172,6 +175,7 @@ test.describe("Manual Model Families", () => {
       ).toBeVisible();
       for (const model of models) await expect(modelCard(page, model.name)).toHaveCount(0);
       const views = page.locator('main button[data-menu-trigger][aria-haspopup="dialog"]');
+      await openLibraryTools(page);
       await views.click();
       await page.getByText("Save current view").click();
       await page.getByPlaceholder("Ready to print").fill(prefix);
@@ -182,6 +186,7 @@ test.describe("Manual Model Families", () => {
       await page.getByRole("button", { name: "Save view", exact: true }).click();
       savedViewId = (await (await savedResponse).json()).id;
       await page.goto("/");
+      await openLibraryTools(page);
       await views.click();
       await page.getByRole("button", { name: prefix, exact: true }).click();
       await expect(page.getByRole("combobox", { name: "Group variations" })).toHaveValue(

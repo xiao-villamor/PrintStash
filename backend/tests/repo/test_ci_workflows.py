@@ -39,6 +39,15 @@ class TestCriticalCapabilitiesJob:
         )
 
 
+class TestBackendCompatibilityJob:
+    def test_full_lane_has_time_for_serial_provider_contracts(self) -> None:
+        job = _ci_workflow()["jobs"]["backend-python313"]
+        commands = [step.get("run") for step in job["steps"]]
+
+        assert "./scripts/test.sh full -q" in commands
+        assert 60 <= job["timeout-minutes"] <= 90
+
+
 class TestMultiArchWorkflows:
     """The release workflows build each architecture where it is native.
 

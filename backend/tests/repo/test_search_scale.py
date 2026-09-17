@@ -1,10 +1,11 @@
 """Scale replicas remain ordinary searchable Models through a real refresh."""
 
+import pytest
 from printstash_core.search.passages import SearchSubject, SubjectType
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from app.db.models import Model, PassageVector, SearchPassage
+from app.db.models import IndexGeneration, Model, PassageVector, SearchPassage
 from app.db.models.search import (
     SearchLexicalPosting,
     SearchLexicalState,
@@ -22,6 +23,17 @@ from tests.factories import (
 )
 from tests.factories.search_scale import replicate_models
 from tests.fakes.search_scale import index_rows, prepare_indexes
+
+
+@pytest.fixture(autouse=True)
+def native_index_cleanup(db_session):
+    """Native DDL must not outlive the fixture's generation registry rows."""
+    yield
+    db_session.rollback()
+    for generation in db_session.exec(select(IndexGeneration)).all():
+        generation.state = "retired"
+        vector_index.drop(db_session, generation)
+    db_session.commit()
 
 
 class TestReplicateModels:

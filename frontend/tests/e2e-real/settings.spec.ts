@@ -7,8 +7,10 @@
  * a notification channel, and the trash purge. Each is asserted after a reload or against
  * the artefact it produced, because "the toast appeared" is not evidence anything saved.
  */
+import { existsSync } from "node:fs";
+
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
+import { clickModelAction, modelCard, seedExpiredStaging, uploadGcodeModel } from "./util";
 
 test.describe("settings", () => {
   test("cache GB limits persist after reloading settings", async ({ page }) => {
@@ -644,25 +646,37 @@ test.describe("settings", () => {
   });
 
   test("requires explicit cleanup from storage insights", async ({ page }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Storage", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Storage insights" })).toBeVisible();
-    const [measurement] = await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/storage/inventory/sample") &&
-          response.request().method() === "POST",
-      ),
-      page.getByRole("button", { name: "Refresh measurement" }).click(),
-    ]);
-    expect(measurement.status()).toBe(200);
-    await expect(page.getByText(/Provider measurement:.*Capacity evidence is known/)).toBeVisible();
-    await page.getByRole("button", { name: "Clean up expired staging" }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText("Uncertain files are retained");
-    await dialog.getByRole("button", { name: "Clean up", exact: true }).click();
-    await expect(
-      page.getByRole("status").filter({ hasText: "expired leases cleared" }),
-    ).toBeVisible();
+    const staged = await seedExpiredStaging();
+    try {
+      await page.goto("/settings?section=storage");
+      await expect(page.getByRole("heading", { name: "Library storage" })).toBeVisible();
+      const [measurement] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().endsWith("/api/v1/storage/inventory/sample") &&
+            response.request().method() === "POST",
+        ),
+        page.getByRole("button", { name: "Refresh measurement" }).click(),
+      ]);
+      expect(measurement.status()).toBe(200);
+      await page.getByText("Storage breakdown and diagnostics", { exact: true }).click();
+      await expect(
+        page.getByText(/Provider measurement:.*Capacity evidence is known/),
+      ).toBeVisible();
+      expect(existsSync(staged.path)).toBe(true);
+      await page.getByRole("button", { name: "Clean up temporary files", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toContainText("Uncertain files are retained");
+      // Opening the confirmation must not remove bytes.
+      expect(existsSync(staged.path)).toBe(true);
+      await dialog.getByRole("button", { name: "Clean up", exact: true }).click();
+      await expect(
+        page.getByRole("status").filter({ hasText: "expired leases cleared" }),
+      ).toBeVisible();
+      await expect.poll(() => existsSync(staged.path)).toBe(false);
+    } finally {
+      const dismissed = await page.request.delete(`/api/v1/inbox/${staged.itemId}`);
+      expect(dismissed.ok()).toBe(true);
+    }
   });
 });

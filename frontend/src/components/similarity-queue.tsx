@@ -55,8 +55,8 @@ function ModelLabel({ model }: { model: SimilarityModel }) {
 export function SimilarityRow({ candidate }: { candidate: SimilarityCandidate }) {
   const { t } = useI18n();
   return (
-    <li className="grid gap-3 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto] lg:items-center">
-      <div className="grid grid-cols-2 gap-3 lg:contents">
+    <li className="grid gap-3 px-4 py-4 sm:px-5 @3xl/similarity:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto] @3xl/similarity:items-center">
+      <div className="grid gap-3 @lg/similarity:grid-cols-2 @3xl/similarity:contents">
         <ModelLabel model={candidate.model_a} />
         <ModelLabel model={candidate.model_b} />
       </div>
@@ -140,9 +140,9 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
   return (
     <>
       <SimilaritySearch modelId={modelId} />
-      <Card className="overflow-hidden">
+      <Card className="@container/similarity overflow-hidden">
         <div className="flex flex-wrap items-end gap-3 border-b bg-muted/30 p-3">
-          <label className="space-y-1 text-xs">
+          <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
             {t("similarity.review")}
             <select
               className="block w-full rounded-md border border-input bg-background p-2 text-sm"
@@ -161,7 +161,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
               ))}
             </select>
           </label>
-          <label className="space-y-1 text-xs">
+          <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
             {t("similarity.allClasses")}
             <select
               className="block w-full rounded-md border border-input bg-background p-2 text-sm"
@@ -181,7 +181,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
               ))}
             </select>
           </label>
-          <label className="space-y-1 text-xs">
+          <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
             {t("similarity.current")}
             <select
               className="block w-full rounded-md border border-input bg-background p-2 text-sm"
@@ -238,7 +238,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                 />
               </label>
               {!modelId && (
-                <label className="space-y-1 text-xs">
+                <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
                   {t("similarity.collection")}
                   <select
                     className="block rounded-md border border-input bg-background p-2 text-sm"
@@ -259,7 +259,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                   </select>
                 </label>
               )}
-              <label className="space-y-1 text-xs">
+              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
                 {t("similarity.allFormats")}
                 <select
                   className="block rounded-md border border-input bg-background p-2 text-sm"
@@ -276,7 +276,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                   ))}
                 </select>
               </label>
-              <label className="space-y-1 text-xs">
+              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
                 {t("similarity.allSources")}
                 <select
                   className="block rounded-md border border-input bg-background p-2 text-sm"

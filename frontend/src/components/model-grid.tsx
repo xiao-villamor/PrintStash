@@ -574,18 +574,36 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // Printers (superuser-only filter) share the same cache as the printers page
   // and send-to dialog; gated so non-admins don't fetch a list they can't use.
   const printers = usePrinters({ enabled: !!user?.is_superuser }).data ?? initial?.printers ?? [];
-  const [selectedTags, setSelectedTags] = useState<string[]>(() => searchParams.getAll("tag"));
-  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(() => {
-    const value = searchParams.get("printer_id");
-    return value ? Number(value) : null;
-  });
-  const [selectedPrinterPresence, setSelectedPrinterPresence] = useState<"any" | "none" | null>(
-    () => {
-      const value = searchParams.get("printer_presence");
-      return value === "any" || value === "none" ? value : null;
-    },
-  );
-  const [favoritesOnly, setFavoritesOnly] = useState(searchParams.get("favorites") === "true");
+  const filterQuery = searchParams.toString();
+  const selectedTags = useMemo(() => new URLSearchParams(filterQuery).getAll("tag"), [filterQuery]);
+  const selectedPrinterId = searchParams.get("printer_id")
+    ? Number(searchParams.get("printer_id"))
+    : null;
+  const rawPresence = searchParams.get("printer_presence");
+  const selectedPrinterPresence =
+    rawPresence === "any" || rawPresence === "none" ? rawPresence : null;
+  const favoritesOnly = searchParams.get("favorites") === "true";
+  function setSelectedTags(value: string[]) {
+    const params = new URLSearchParams(searchParams.toString());
+    const tags = value;
+    params.delete("tag");
+    tags.forEach((tag) => params.append("tag", tag));
+    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+  }
+  function setSelectedPrinterId(value: number | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("printer_presence");
+    if (value !== null) params.set("printer_id", String(value));
+    else params.delete("printer_id");
+    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+  }
+  function setSelectedPrinterPresence(value: "any" | "none" | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("printer_id");
+    if (value !== null) params.set("printer_presence", value);
+    else params.delete("printer_presence");
+    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+  }
   const [loadedSavedViews, setLoadedSavedViews] = useState<SavedViewRead[]>([]);
   // Saved views belong to an account, so a signed-out session simply has none.
   const savedViews = auth.isAuthenticated ? loadedSavedViews : NO_SAVED_VIEWS;
@@ -600,6 +618,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [libraryToolsOpen, setLibraryToolsOpen] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
@@ -727,12 +747,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useEffect(() => {
     function restoreFiltersFromHistory() {
       const params = new URLSearchParams(window.location.search);
-      setSelectedTags(params.getAll("tag"));
-      const printerId = params.get("printer_id");
-      setSelectedPrinterId(printerId ? Number(printerId) : null);
-      const presence = params.get("printer_presence");
-      setSelectedPrinterPresence(presence === "any" || presence === "none" ? presence : null);
-      setFavoritesOnly(params.get("favorites") === "true");
       const nextLibraryView = params.get("type");
       setLibraryView(
         nextLibraryView === "all" ||
@@ -747,21 +761,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     window.addEventListener("popstate", restoreFiltersFromHistory);
     return () => window.removeEventListener("popstate", restoreFiltersFromHistory);
   }, []);
-
-  // Keep every filter URL-backed. Saved views, reload, Back, and copied links now
-  // restore the same result set instead of only preserving search/folder state.
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("tag");
-    selectedTags.forEach((tag) => params.append("tag", tag));
-    if (selectedPrinterId !== null) params.set("printer_id", String(selectedPrinterId));
-    else params.delete("printer_id");
-    if (selectedPrinterPresence !== null) params.set("printer_presence", selectedPrinterPresence);
-    else params.delete("printer_presence");
-    const next = params.toString();
-    if (next !== searchParams.toString())
-      router.replace(next ? `/?${next}` : "/", { scroll: false });
-  }, [router, searchParams, selectedPrinterId, selectedPrinterPresence, selectedTags]);
 
   useEffect(() => {
     if (!auth.isAuthenticated) return;
@@ -869,16 +868,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete(key);
     values.forEach((value) => params.append(key, value));
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
-  }
-
-  function clearStructuredFilters() {
-    const params = new URLSearchParams(searchParams.toString());
-    STRUCTURED_FILTER_KEYS.forEach((key) => params.delete(key));
-    params.delete("uploaded_after");
-    params.delete("uploaded_before");
-    historyKeys.forEach((key) => params.delete(key));
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
@@ -992,12 +981,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function applySavedView(view: SavedViewRead) {
+    setFiltersExpanded(null);
     setActiveSavedViewId(view.id);
     if (view.filters.sort) setSortKey(view.filters.sort);
-    setSelectedTags(view.filters.tag);
-    setSelectedPrinterId(view.filters.printer_id ?? null);
-    setSelectedPrinterPresence(view.filters.printer_presence ?? null);
-    setFavoritesOnly(view.filters.favorites);
     setSelectedIds(new Set());
     writeFilterUrl(view.filters);
   }
@@ -1212,6 +1198,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
   const [selectMode, setSelectMode] = useState(false);
+  const familyFilterCount =
+    Number(familyMode === "families_collapsed") +
+    Number(familyId !== undefined) +
+    Number(familyRole !== undefined) +
+    Number(inFamily !== undefined);
+  const showLibraryTools = libraryToolsOpen;
+
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<Set<number>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
@@ -1227,11 +1220,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     sortKey,
   );
 
-  const openTagEditor = useCallback((model: ModelListItem) => {
-    setTagTarget(model);
-    setTagDialogSession((session) => session + 1);
-    setTagDialogOpen(true);
-  }, []);
+  const openTagEditor = useCallback(
+    (model: ModelListItem) => {
+      setTagTarget(model);
+      setTagDialogSession((session) => session + 1);
+      setTagDialogOpen(true);
+    },
+    [setTagTarget, setTagDialogOpen],
+  );
 
   const toggleSelect = useCallback(
     (id: number, range = false) => {
@@ -1525,6 +1521,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
   const hasActiveFilters =
     !!selectedCollection ||
+    familyFilterCount > 0 ||
+    favoritesOnly ||
     selectedTags.length > 0 ||
     selectedPrinterId !== null ||
     selectedPrinterPresence !== null ||
@@ -1670,7 +1668,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function toggleFavorites() {
     const next = !favoritesOnly;
-    setFavoritesOnly(next);
     const params = new URLSearchParams(searchParams.toString());
     if (next) params.set("favorites", "true");
     else params.delete("favorites");
@@ -1705,10 +1702,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function clearAllFilters() {
-    setSelectedTags([]);
-    setSelectedPrinterId(null);
-    setSelectedPrinterPresence(null);
-    setFavoritesOnly(false);
     setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());
     params.delete("q");
@@ -1729,15 +1722,41 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       "has_similar_candidates",
       "uploaded_after",
       "uploaded_before",
+      "family_id",
+      "family_role",
+      "in_family",
+      "browse",
       ...historyKeys,
     ])
       params.delete(key);
+    localStorage.removeItem("ps-vault-family-browse");
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
 
   const activeFilterItems: { label: string; onRemove: () => void }[] = (() => {
     const items: { label: string; onRemove: () => void }[] = [];
+    if (familyMode === "families_collapsed")
+      items.push({
+        label: t("families.browseFamilies"),
+        onRemove: () => setFamilyFilter("browse", "models"),
+      });
+    if (familyId !== undefined)
+      items.push({
+        label: `${t("families.family")}: ${familyId}`,
+        onRemove: () => setFamilyFilter("family_id", ""),
+      });
+    if (familyRole !== undefined)
+      items.push({
+        label: t(`families.role.${familyRole}`),
+        onRemove: () => setFamilyFilter("family_role", ""),
+      });
+    if (inFamily !== undefined)
+      items.push({
+        label: t(inFamily ? "families.grouped" : "families.ungrouped"),
+        onRemove: () => setFamilyFilter("in_family", ""),
+      });
+    if (favoritesOnly) items.push({ label: uiText("Favorites"), onRemove: toggleFavorites });
     if (query.trim()) {
       items.push({ label: `${ui("Search")}: ${query.trim()}`, onRemove: clearSearch });
     }
@@ -1745,7 +1764,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const tag = tags.find((item) => item.slug === slug);
       items.push({
         label: `${ui("Tag")}: ${tag?.name ?? slug}`,
-        onRemove: () => setSelectedTags((current) => current.filter((item) => item !== slug)),
+        onRemove: () => setSelectedTags(selectedTags.filter((item) => item !== slug)),
       });
     }
     if (selectedPrinterId !== null) {
@@ -1889,6 +1908,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onCreateCollection={handleOpenCreateCollection}
           canViewPrinters={canViewPrinters}
           loading={facetsLoading || facetQuery.isLoading}
+          familyFilters={
+            <FamilyFilters
+              mode={familyMode}
+              familyId={familyId}
+              role={familyRole}
+              membership={inFamily}
+              onChange={setFamilyFilter}
+            />
+          }
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}
@@ -1905,7 +1933,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 else params.delete(key);
                 router.replace(params.size ? `/?${params}` : "/", { scroll: false });
               }}
-              onClearAll={clearStructuredFilters}
+              onClearAll={clearAllFilters}
             />
           }
           libraryView={libraryView}
@@ -1914,6 +1942,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
         {/* Stitch layout: filter sidebar + main content */}
         <FilterSidebar
+          filtersOpen={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
           collections={collections}
           models={outlinerModels}
           multipartModels={outlinerMultipartModels}
@@ -1933,6 +1962,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onDeleteCollection={handleDeleteCollection}
           canViewPrinters={canViewPrinters}
           loading={facetsLoading || facetQuery.isLoading}
+          familyFilters={
+            <FamilyFilters
+              mode={familyMode}
+              familyId={familyId}
+              role={familyRole}
+              membership={inFamily}
+              onChange={setFamilyFilter}
+            />
+          }
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}
@@ -1949,7 +1987,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 else params.delete(key);
                 router.replace(params.size ? `/?${params}` : "/", { scroll: false });
               }}
-              onClearAll={clearStructuredFilters}
+              onClearAll={clearAllFilters}
             />
           }
           libraryView={libraryView}
@@ -2137,6 +2175,18 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     }
                     contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                   >
+                    <Button
+                      variant="ghost"
+                      role="menuitem"
+                      className="w-full justify-start"
+                      onClick={() => {
+                        setLibraryToolsOpen(!showLibraryTools);
+                        setMoreOpen(false);
+                      }}
+                    >
+                      <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                      {t("vault.libraryTools")}
+                    </Button>
                     {auth.isAuthenticated && (
                       <>
                         <button
@@ -2242,19 +2292,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     {uiText("Filters")}
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     size="xs"
-                    onClick={handleOpenCreateCollection}
-                    disabled={!canAdminSelectedCollection}
-                    title={
-                      canAdminSelectedCollection
-                        ? uiText("Create a collection")
-                        : uiText("Admin access required for this collection")
+                    className="hidden h-8 md:inline-flex"
+                    aria-label={uiText("Filters")}
+                    aria-expanded={
+                      filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())
                     }
-                    className="hidden md:inline-flex"
+                    onClick={() =>
+                      setFiltersExpanded(
+                        !(filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())),
+                      )
+                    }
                   >
-                    <Plus className="w-4 h-4 text-muted-foreground" />
-                    {uiText("New collection")}
+                    <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                    {uiText("Filters")}
+                    {activeFilterItems.length > Number(!!query.trim()) && (
+                      <span className="font-mono tabular-nums">
+                        {activeFilterItems.length - Number(!!query.trim())}
+                      </span>
+                    )}
                   </Button>
                   <Button
                     size="xs"
@@ -2273,79 +2331,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   >
                     {uiText("Upload")}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => setMultipartCreateOpen(true)}
-                    disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
-                    title={
-                      user?.is_superuser || canWriteCollection(selectedCollectionRow)
-                        ? undefined
-                        : t("multipart.editAccess")
-                    }
-                    className="h-10 sm:h-8"
-                  >
-                    <Plus className="h-4 w-4" /> {t("multipart.new")}
-                  </Button>
                 </div>
-                {auth.isAuthenticated && (
-                  <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
-                    <Button
-                      variant={favoritesOnly ? "secondary" : "outline"}
-                      size="xs"
-                      aria-pressed={favoritesOnly}
-                      onClick={toggleFavorites}
-                      className="h-10 sm:h-8"
-                    >
-                      <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />{" "}
-                      {uiText("Favorites")}
-                    </Button>
-                    <SavedViewSelector
-                      views={savedViews}
-                      activeId={activeSavedViewId}
-                      modified={savedViewModified}
-                      onSelect={applySavedView}
-                      onCreate={() => setSaveViewOpen(true)}
-                      onUpdate={(view) =>
-                        manageSavedView(
-                          () => updateSavedView(view.id, { filters: currentViewFilters() }),
-                          "savedView.updateSuccess",
-                        )
-                      }
-                      onRename={(view, name) =>
-                        manageSavedView(
-                          () => updateSavedView(view.id, { name }),
-                          "savedView.renameSuccess",
-                        )
-                      }
-                      onDuplicate={(view) =>
-                        manageSavedView(
-                          () => createSavedView(duplicateViewName(view.name), view.filters),
-                          "savedView.duplicateSuccess",
-                        )
-                      }
-                      onDelete={(view) =>
-                        manageSavedView(async () => {
-                          await deleteSavedView(view.id);
-                          if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                        }, "savedView.deleteSuccess")
-                      }
-                      triggerClassName="h-10 sm:h-8"
-                    />
-                    <Button
-                      variant={selectMode ? "secondary" : "outline"}
-                      size="xs"
-                      aria-pressed={selectMode}
-                      title={uiText("Select Models and folders (S)")}
-                      onClick={toggleSelectMode}
-                      className="h-10 sm:h-8"
-                    >
-                      <CheckSquare className="w-4 h-4" />
-                      {selectMode ? uiText("Done") : uiText("Select")}
-                    </Button>
-                  </div>
-                )}
+                <Button
+                  variant={showLibraryTools ? "secondary" : "outline"}
+                  size="xs"
+                  className="hidden h-8 sm:inline-flex"
+                  aria-expanded={showLibraryTools}
+                  aria-controls="library-tools"
+                  aria-label={t("vault.libraryTools")}
+                  onClick={() => setLibraryToolsOpen(!showLibraryTools)}
+                >
+                  <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                  {t("vault.libraryTools")}
+                </Button>
                 <div className="hidden h-6 w-px bg-muted mx-1 md:block" />
                 <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
                   <SortMenu
@@ -2483,63 +2481,160 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {docView === "models" && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 sm:px-6">
-              <FamilyFilters
-                mode={familyMode}
-                familyId={familyId}
-                role={familyRole}
-                membership={inFamily}
-                onChange={setFamilyFilter}
-              />
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={!auth.isAuthenticated}
-                onClick={() => setFamilyTrashOpen(true)}
-              >
-                {t("families.trash")}
-              </Button>
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={!auth.isAuthenticated || selectedCollectionIds.size > 0}
-                onClick={() => {
-                  setFamilySeed(
-                    [...selectedModelSnapshot.current.values()].filter((model) =>
-                      selectedIds.has(model.id),
-                    ),
-                  );
-                  setFamilyCreateOpen(true);
-                }}
-              >
-                <Boxes className="h-3.5 w-3.5" aria-hidden />
-                {t("families.create")}
-              </Button>
-            </div>
+          {showLibraryTools && (
+            <section
+              id="library-tools"
+              aria-label={t("vault.libraryTools")}
+              className="space-y-3 border-b border-border bg-muted/20 px-4 py-3 sm:px-6"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={handleOpenCreateCollection}
+                  disabled={!canAdminSelectedCollection}
+                  title={
+                    canAdminSelectedCollection
+                      ? uiText("Create a collection")
+                      : uiText("Admin access required for this collection")
+                  }
+                  className="h-9"
+                >
+                  <Plus className="w-4 h-4 text-muted-foreground" />
+                  {uiText("New collection")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setMultipartCreateOpen(true)}
+                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  title={
+                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
+                      ? undefined
+                      : t("multipart.editAccess")
+                  }
+                  className="h-10 sm:h-8"
+                >
+                  <Plus className="h-4 w-4" /> {t("multipart.new")}
+                </Button>{" "}
+                {auth.isAuthenticated && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant={favoritesOnly ? "secondary" : "outline"}
+                      size="xs"
+                      aria-pressed={favoritesOnly}
+                      onClick={toggleFavorites}
+                      className="h-10 sm:h-8"
+                    >
+                      <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />{" "}
+                      {uiText("Favorites")}
+                    </Button>
+                    <SavedViewSelector
+                      views={savedViews}
+                      activeId={activeSavedViewId}
+                      modified={savedViewModified}
+                      onSelect={applySavedView}
+                      onCreate={() => setSaveViewOpen(true)}
+                      onUpdate={(view) =>
+                        manageSavedView(
+                          () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                          "savedView.updateSuccess",
+                        )
+                      }
+                      onRename={(view, name) =>
+                        manageSavedView(
+                          () => updateSavedView(view.id, { name }),
+                          "savedView.renameSuccess",
+                        )
+                      }
+                      onDuplicate={(view) =>
+                        manageSavedView(
+                          () => createSavedView(duplicateViewName(view.name), view.filters),
+                          "savedView.duplicateSuccess",
+                        )
+                      }
+                      onDelete={(view) =>
+                        manageSavedView(async () => {
+                          await deleteSavedView(view.id);
+                          if (activeSavedViewId === view.id) setActiveSavedViewId(null);
+                        }, "savedView.deleteSuccess")
+                      }
+                      triggerClassName="h-10 sm:h-8"
+                    />
+                    {!selectMode && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        aria-pressed={selectMode}
+                        title={uiText("Select Models and folders (S)")}
+                        onClick={toggleSelectMode}
+                        className="h-10 sm:h-8"
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                        {uiText("Select")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={!auth.isAuthenticated}
+                  onClick={() => setFamilyTrashOpen(true)}
+                >
+                  {t("families.trash")}
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!auth.isAuthenticated || selectedCollectionIds.size > 0}
+                  onClick={() => {
+                    setFamilySeed(
+                      [...selectedModelSnapshot.current.values()].filter((model) =>
+                        selectedIds.has(model.id),
+                      ),
+                    );
+                    setFamilyCreateOpen(true);
+                  }}
+                >
+                  <Boxes className="h-3.5 w-3.5" aria-hidden />
+                  {t("families.create")}
+                </Button>
+              </div>
+            </section>
           )}
 
-          {docView === "models" && familyMode === "models" && selectMode && (
-            <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex items-center gap-3 text-xs">
+          {selectMode && (
+            <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex flex-wrap items-center gap-3 text-xs">
               <span className="font-mono text-muted-foreground">
                 {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
               </span>
-              <button
-                type="button"
-                onClick={selectAllVisible}
-                className="font-medium text-primary hover:underline"
-              >
-                {uiText("Select all on screen (")}
-                {sortedModels.length + visibleCollections.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => void selectAllMatching()}
-                disabled={selectingAll}
-                className="font-medium text-primary hover:underline disabled:opacity-50"
-              >
-                {selectingAll ? uiText("Selecting…") : uiText("Select all matching models")}
-              </button>
+              {docView === "models" && familyMode === "models" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={selectAllVisible}
+                    className="font-medium text-primary hover:underline"
+                  >
+                    {uiText("Select all on screen (")}
+                    {sortedModels.length + visibleCollections.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void selectAllMatching()}
+                    disabled={selectingAll}
+                    className="font-medium text-primary hover:underline disabled:opacity-50"
+                  >
+                    {selectingAll ? uiText("Selecting…") : uiText("Select all matching models")}
+                  </button>
+                </>
+              )}
+              <Button size="xs" variant="outline" onClick={toggleSelectMode}>
+                {uiText("Done")}
+              </Button>
               {selectionCount > 0 && (
                 <button
                   type="button"

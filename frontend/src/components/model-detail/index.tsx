@@ -920,10 +920,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               }))}
               active={activeTab}
               onChange={setRequestedTab}
-              indicatorInset={8}
-              className="shrink-0 border-b border-outline-variant bg-surface-container-lowest px-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-              tabClassName="flex-1 px-2 py-3 font-mono text-2xs uppercase tracking-wider whitespace-nowrap transition-colors text-on-surface-variant hover:text-on-surface"
-              activeTabClassName="text-primary"
+              showIndicator={false}
+              className="grid shrink-0 grid-cols-4 gap-1 border-b border-outline-variant bg-surface-container-lowest p-2"
+              tabClassName="min-w-0 rounded-md px-2 py-3 text-xs font-medium transition-colors duration-press text-on-surface-variant hover:bg-muted hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-accent text-accent-foreground"
             />
             <div
               key={activeTab}

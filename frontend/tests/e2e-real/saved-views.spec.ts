@@ -6,6 +6,7 @@
  * from what the user is looking at. Favourites are here for the same reason: starring is
  * a filter, and it has to narrow the same grid.
  */
+import { openLibraryTools, openFilters } from "./util";
 import { test, expect } from "./helpers";
 import { modelCard, uploadModel } from "./util";
 
@@ -35,11 +36,13 @@ test.describe("saved views", () => {
 
     // Filter to the tag, then save that as a view.
     await page.goto("/");
+    await openFilters(page);
     await page.getByRole("button", { name: tag }).click();
     await expect(modelCard(page, tagged)).toBeVisible();
     await expect(modelCard(page, plain)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`tag=${encodeURIComponent(tag)}`));
 
+    await openLibraryTools(page);
     await savedViewsTrigger(page).click();
     await page.getByText("Save current view").click();
     await page.getByPlaceholder("Ready to print").fill(viewName);
@@ -50,6 +53,7 @@ test.describe("saved views", () => {
     // same result set + query string.
     await page.goto("/");
     await expect(modelCard(page, plain)).toBeVisible();
+    await openLibraryTools(page);
     await savedViewsTrigger(page).click();
     await page.getByRole("button", { name: viewName, exact: true }).click();
 
@@ -59,6 +63,7 @@ test.describe("saved views", () => {
 
     // Rename — the trigger now shows the active view's name.
     await expect(savedViewsTrigger(page)).toContainText(viewName);
+    await openLibraryTools(page);
     await savedViewsTrigger(page).click();
     await page.getByLabel(`Rename ${viewName}`).click();
     await page
@@ -70,6 +75,7 @@ test.describe("saved views", () => {
 
     // Duplicate — the duplicate button doesn't close the menu, so the new entry
     // and its own delete control are usable right away.
+    await openLibraryTools(page);
     await savedViewsTrigger(page).click();
     await page.getByLabel(`Duplicate ${renamed}`).click();
     await expect(page.getByText(`${renamed} copy`)).toBeVisible();
@@ -78,6 +84,7 @@ test.describe("saved views", () => {
     await expect(page.getByText(`${renamed} copy`)).toHaveCount(0);
 
     // Delete the original.
+    await openLibraryTools(page);
     await savedViewsTrigger(page).click();
     await page.getByLabel(`Delete ${renamed}`).click();
     await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
@@ -100,13 +107,18 @@ test.describe("saved views", () => {
     await starredArticle.getByLabel(`Add ${starred} to favorites`).click();
     await expect(starredArticle.getByLabel(`Remove ${starred} from favorites`)).toBeVisible();
 
-    await page.getByRole("button", { name: "Favorites", exact: true }).click();
+    await openLibraryTools(page);
+    const favorites = page
+      .getByRole("region", { name: "Library tools", exact: true })
+      .getByRole("button", { name: "Favorites", exact: true });
+    await favorites.click();
     await expect(page).toHaveURL(/favorites=true/);
     await expect(modelCard(page, starred)).toBeVisible();
     await expect(modelCard(page, plain)).toHaveCount(0);
 
     // Toggling off restores the plain model to the grid.
-    await page.getByRole("button", { name: "Favorites", exact: true }).click();
+    await openLibraryTools(page);
+    await favorites.click();
     await expect(modelCard(page, plain)).toBeVisible();
 
     // Cleanup: unstar so the shared DB doesn't drift the favorites facet.

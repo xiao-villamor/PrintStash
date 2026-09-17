@@ -19,8 +19,9 @@ test.describe("structured filters", () => {
     await uploadModel(page, mesh, { mesh: true, gcode: false });
 
     await page.goto("/");
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
     const sidebar = page.locator("aside");
-    await expect(sidebar.getByText("Artifact", { exact: true })).toBeVisible();
+    await sidebar.getByRole("button", { name: "Artifact", exact: true }).click();
     await sidebar.getByText("gcode", { exact: true }).click();
     await expect(page).toHaveURL(/file_type=gcode/);
     await expect(modelCard(page, gcode)).toBeVisible();

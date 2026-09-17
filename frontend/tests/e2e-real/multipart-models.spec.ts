@@ -1,4 +1,5 @@
 /** Multipart groupings link existing Models without taking ownership of their files. */
+import { openLibraryTools } from "./util";
 import { test, expect } from "./helpers";
 import { createCollectionViaVault, modelCard, uploadModel } from "./util";
 
@@ -15,6 +16,7 @@ test.describe("multipart models", () => {
     await uploadModel(page, long, { mesh: true, gcode: true });
 
     await page.goto("/");
+    await openLibraryTools(page);
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();
@@ -108,6 +110,7 @@ test.describe("multipart models", () => {
     await uploadModel(page, first, { collection: folder });
     await uploadModel(page, second, { collection: folder });
     await page.goto("/");
+    await openLibraryTools(page);
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();

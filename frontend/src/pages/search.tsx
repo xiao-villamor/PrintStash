@@ -11,7 +11,7 @@ import {
   hasSearchFilters,
   searchSorts,
 } from "@/lib/search-filters";
-import { SearchEvidenceList, SearchModelPreview } from "@/components/search-evidence";
+import { SearchModelPreview } from "@/components/search-evidence";
 import { SearchImageInput } from "@/components/search-image-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -392,14 +392,6 @@ function SearchContent() {
                       </Link>
                       <Badge variant="outline">{t(`aiSearch.type.${item.subject_type}`)}</Badge>
                     </div>
-                    {item.evidence.length > 0 && (
-                      <details className="mt-2 text-sm">
-                        <summary className="cursor-pointer rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                          {t("aiSearch.matchDetails")}
-                        </summary>
-                        <SearchEvidenceList evidence={item.evidence} />
-                      </details>
-                    )}
                   </div>
                 </li>
               ))}

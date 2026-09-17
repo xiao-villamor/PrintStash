@@ -7,10 +7,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from printstash_core.inference import EmbeddingError, EmbeddingInput
-from sqlmodel import select
+from sqlalchemy import event
+from sqlmodel import SQLModel, create_engine, select
 
 from app.db.models import IndexGeneration
-from app.db.session import get_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+    override_session_factory,
+)
 from app.modules.inference.local import LocalEmbeddingProvider
 from app.modules.inference.query import QueryRunner
 from app.modules.search import configuration
@@ -19,8 +25,24 @@ from tests.paths import BACKEND_DIR
 
 
 @pytest.fixture(autouse=True)
-def _use_threaded_db(threaded_hub_db):
-    """Warmup polls consent while the requesting connection commits it."""
+def _use_threaded_db(tmp_path):
+    """Exercise concurrent consent reads/writes with production SQLite WAL.
+
+    Shared-cache in-memory SQLite uses table locks and cannot enable WAL.
+    """
+    previous = get_session_factory()
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'warmup.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    SQLModel.metadata.create_all(engine)
+    override_session_factory(SQLiteSessionFactory(engine))
+    try:
+        yield
+    finally:
+        override_session_factory(previous)
+        engine.dispose()
 
 
 @pytest.fixture

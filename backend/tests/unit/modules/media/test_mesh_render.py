@@ -211,3 +211,17 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 def _set_chunk_size(monkeypatch, n: int) -> None:
 
     monkeypatch.setitem(_overlay, "mesh_render_face_chunk_size", n)
+
+
+class TestFailedPreview:
+    def test_empty_geometry_has_no_preview(self):
+        assert mesh_render.render_mesh_thumbnail(None, "empty.stl") is None
+
+    def test_native_failure_is_a_missing_derivative(self, monkeypatch):
+        from tests.factories.geometry import tetrahedron
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("native render failed")
+
+        monkeypatch.setattr(mesh_render.native_rasterizer, "render_preview", fail)
+        assert mesh_render.render_mesh_thumbnail(tetrahedron(), "broken.stl") is None

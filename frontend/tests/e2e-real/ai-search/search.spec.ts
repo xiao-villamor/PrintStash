@@ -2,7 +2,7 @@
 import { test, expect } from "../helpers";
 import { modelCard, uploadModel } from "../util";
 import { readFileSync } from "node:fs";
-import type { InferenceModel, SearchSettingsRead } from "../../../src/types/search";
+import type { InferenceModel, SearchResponse, SearchSettingsRead } from "../../../src/types/search";
 import type { ModelRead } from "../../../src/types/models";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
@@ -84,10 +84,7 @@ test.describe("AI Search", () => {
       await transfer.dispose();
       const result = page.getByRole("link", { name: names[0], exact: true });
       await expect(result).toBeVisible();
-      await result.locator("xpath=ancestor::li").getByText("Why this result").click();
-      await expect(
-        result.locator("xpath=ancestor::li").getByText("Shape match", { exact: true }),
-      ).toBeVisible();
+      await expect(page.getByText("Why this result")).toHaveCount(0);
       expect(page.url()).not.toContain("private-query");
       for (const [label, width, height] of [
         ["desktop", 1280, 900],
@@ -192,20 +189,20 @@ test.describe("AI Search", () => {
         if (request.url().includes("/api/v1/search?")) requests.push(request.url());
       });
       const box = page.getByRole("searchbox", { name: "Search library" });
-      await expect(page.getByRole("button", { name: "Search with AI" })).toBeVisible();
       await box.fill("bike lamp attachment");
+      await expect(page.getByRole("button", { name: "Search with AI" })).toBeVisible();
       await expect.poll(() => requests.length).toBeGreaterThan(0);
       expect(requests.every((url) => new URL(url).searchParams.get("mode") === "lexical")).toBe(
         true,
       );
       await box.press("Enter");
+      await expect(page).toHaveURL(/\/\?q=bike\+lamp\+attachment/);
+      await box.click();
+      await page.getByRole("button", { name: "Search with AI" }).click();
       await expect(page).toHaveURL(/\/search\?q=bike\+lamp\+attachment/);
       const link = page.getByRole("link", { name, exact: true });
       await expect(link).toBeVisible();
-      await link.locator("xpath=ancestor::li").getByText("Why this result").click();
-      await expect(
-        link.locator("xpath=ancestor::li").getByText("Related description"),
-      ).toBeVisible();
+      await expect(page.getByText("Why this result")).toHaveCount(0);
       for (const [label, width, height] of [
         ["mobile", 390, 844],
         ["desktop", 1280, 900],
@@ -230,7 +227,8 @@ test.describe("AI Search", () => {
         0,
       );
       await box.fill("bike lamp attachment");
-      await box.press("Enter");
+      await box.click();
+      await page.getByRole("button", { name: "Search with AI" }).click();
       await expect(link).toBeVisible();
       await link.click();
       await expect(page).toHaveURL(new RegExp(`/documents/${documentId}$`));
@@ -313,12 +311,26 @@ test.describe("AI Search", () => {
           { timeout: 90000 },
         )
         .toContain("point_cloud");
+      const searched = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/v1/search" &&
+          url.searchParams.get("q") === "a cube" &&
+          url.searchParams.get("instant") !== "true"
+        );
+      });
       await page.goto("/search?q=a+cube");
       const link = page.getByRole("link", { name, exact: true });
       await expect(link).toBeVisible();
-      await expect(
-        link.locator("xpath=ancestor::li").getByText("Shape match", { exact: true }),
-      ).toBeVisible();
+      const response = await searched;
+      expect(response.ok()).toBe(true);
+      const results: SearchResponse = await response.json();
+      expect(
+        results.items.find((item) => item.subject_type === "model" && item.subject_id === modelId)
+          ?.evidence,
+      ).toEqual(expect.arrayContaining([expect.objectContaining({ leg: "point_cloud" })]));
+      await expect(page.getByText("Shape match", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("Why this result", { exact: true })).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("point-search.png"), fullPage: true });
     } finally {
       await page.request.put(`${API}/api/v1/config/ai-search`, { data: initial.settings });

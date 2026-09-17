@@ -55,11 +55,19 @@ def exercise_search(client):
     assert model["enrichment_pending"] is False
     from tests.search_projection import drain_search
 
-    with get_session_factory().scoped_session() as session:
-        drain_search(session)
-    response = client.get("/api/v1/search", params={"q": "red", "mode": "lexical"})
-    assert response.status_code == 200, response.text
-    assert {row["subject_type"] for row in response.json()["items"]} == expected
+    deadline = time.monotonic() + 30
+    while True:
+        with get_session_factory().scoped_session() as session:
+            drain_search(session)
+        response = client.get("/api/v1/search", params={"q": "red", "mode": "lexical"})
+        assert response.status_code == 200, response.text
+        found = {row["subject_type"] for row in response.json()["items"]}
+        if found == expected or time.monotonic() >= deadline:
+            break
+        # The real runtime may already hold a projection lease. An idle local
+        # drain does not imply that the other worker has published its result.
+        time.sleep(0.05)
+    assert found == expected, response.text
     assert all(
         row.get("model", {}).get("family") is None
         for row in response.json()["items"]

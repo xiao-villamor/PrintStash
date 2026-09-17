@@ -101,17 +101,10 @@ export function StructuredFilters({
   error?: boolean;
 }) {
   useUiLocale();
-  const [open, setOpen] = useState<Set<FilterKey>>(
-    new Set(["file_type", "material_type", "revision_status"]),
-  );
+  const [open, setOpen] = useState<Partial<Record<FilterKey, boolean>>>({});
 
   function toggleGroup(key: FilterKey) {
-    setOpen((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setOpen((current) => ({ ...current, [key]: !(current[key] ?? !!active[key]?.length) }));
   }
 
   function toggleValue(key: FilterKey, value: string) {
@@ -179,7 +172,7 @@ export function StructuredFilters({
           {GROUPS.map(({ key, label }) => {
             const values: FacetValueRead[] = facets?.[key] ?? [];
             const selected = active[key] ?? [];
-            const isOpen = open.has(key);
+            const isOpen = open[key] ?? selected.length > 0;
             const contentId = `model-filter-${key}`;
             if (values.length === 0 && selected.length === 0) return null;
             return (
@@ -229,14 +222,22 @@ export function StructuredFilters({
               </div>
             );
           })}
-          <div className="px-2 py-3">
+          <details
+            className="px-2 py-3"
+            open={historyKeys.some((key) => history[key] != null && history[key] !== "")}
+          >
+            <summary className="cursor-pointer text-sm font-medium">
+              {uiText("Print history")}
+            </summary>
             <PrintHistoryFields
               value={history}
               onChange={(key, value) => onDateChange?.(key, value)}
             />
-          </div>
-          <div className="pt-1">
-            <p className="px-2 py-1.5 text-sm font-medium text-foreground">{uiText("Uploaded")}</p>
+          </details>
+          <details className="pt-1" open={!!uploadedAfter || !!uploadedBefore}>
+            <summary className="cursor-pointer px-2 py-1.5 text-sm font-medium text-foreground">
+              {uiText("Uploaded")}
+            </summary>
             <div className="grid grid-cols-2 gap-2 px-2 pb-1">
               <label className="text-3xs text-muted-foreground">
                 {uiText("After")}
@@ -257,7 +258,7 @@ export function StructuredFilters({
                 />
               </label>
             </div>
-          </div>
+          </details>
         </div>
       </section>
     </Localized>

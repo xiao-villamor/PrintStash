@@ -30,7 +30,11 @@ from app.modules.search import (
 from app.modules.search.access import passage_in_scope, visible_passage_ids
 from app.modules.search.dependencies import SUBJECT_MODELS
 from app.modules.search.lexical_index import capability
-from app.modules.search.lexical_query import ordered_passages
+from app.modules.search.lexical_query import (
+    concept_candidates,
+    name_candidates,
+    ordered_passages,
+)
 from app.schemas.models import ModelFilters, ModelSort
 from app.schemas.search import SearchEvidence, SearchResponse, SearchResult
 
@@ -145,8 +149,10 @@ def search(
             session, user, source_model_id, active, types
         )
         private_query_key = f"model:{source_model_id}:{source_fingerprint}"
+    active = tuple(semantic.for_query(leg, settings, dense_query) for leg in active)
     generations = tuple(leg.generation_id for leg in active)
     query_context = (
+        "name-concepts-short-query-v1",
         tuple(sorted(kind.value for kind in types)),
         tuple(sorted(legs)),
         instant,
@@ -200,6 +206,7 @@ def search(
             if leg.name in legs
             and (image is None or leg.space.profile in visual_sources.PROFILES)
         )
+        active = tuple(semantic.for_query(leg, settings, dense_query) for leg in active)
         generations = tuple(leg.generation_id for leg in active)
         query_context = (
             *query_context[:-1],
@@ -269,8 +276,22 @@ def search(
         ).all()
         backend = "ranked_like"
         degraded.append("search_fts_unavailable")
+    named = (
+        name_candidates(session, query, allowed, limit=MAX_CANDIDATES)
+        if image is None and source_model_id is None and not instant
+        else {}
+    )
+    concepts = (
+        concept_candidates(session, query, allowed, limit=MAX_CANDIDATES)
+        if image is None and source_model_id is None and not instant
+        else ()
+    )
     # Lexical stays present when AI is disabled or a semantic leg fails.
-    ranked_ids = {"lexical": tuple(id for id, _score in ranks)}
+    ranked_ids = {
+        "lexical": tuple(
+            dict.fromkeys([*named, *(id for id, _score in ranks), *concepts])
+        )[:MAX_CANDIDATES]
+    }
     weights = {"lexical": settings.lexical_weight}
     for result in dense:
         if result.degraded:
@@ -354,6 +375,14 @@ def search(
             )
         ]
     fused = fuse(tuple(rank_lists), k=settings.rrf_k)
+    name_strength = {
+        SearchSubject(
+            SubjectType(passages[id].subject_type), passages[id].subject_id
+        ): strength
+        for id, strength in named.items()
+        if id in passages
+    }
+    fused = sorted(fused, key=lambda match: -name_strength.get(match.subject, 0))
     filtered_truncated = filtered_truncated or len(fused) > MAX_CANDIDATES
     fused = fused[:MAX_CANDIDATES]
     if sort != ModelSort.RELEVANCE and fused:
@@ -435,6 +464,8 @@ def search(
         generations=list(generations),
         truncated=filtered_truncated
         or len(ranks) == MAX_CANDIDATES
+        or len(named) == MAX_CANDIDATES
+        or len(concepts) == MAX_CANDIDATES
         or any(result.truncated for result in dense),
         outcome="results"
         if items

@@ -15,7 +15,7 @@ test.describe("vault", () => {
     await uploadGcodeModel(page, name);
 
     // Search narrows the grid to the matching model and reflects in the URL.
-    await page.getByRole("textbox", { name: "Search models" }).fill(name);
+    await page.getByRole("searchbox", { name: "Search library" }).fill(name);
     await expect(page).toHaveURL(/[?&]q=/);
     await expect(modelCard(page, name)).toBeVisible();
 
@@ -84,15 +84,18 @@ test.describe("vault", () => {
     // Click the tag chip in the sidebar; the grid keeps the tagged model and
     // drops the untagged one.
     await page.goto("/");
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
     await page.getByRole("button", { name: tag }).click();
     await expect(modelCard(page, tagged)).toBeVisible();
     await expect(modelCard(page, plain)).toHaveCount(0);
   });
 
-  test("a meshless search term yields the empty state", async ({ page }) => {
+  test("an unmatched search term yields the empty state", async ({ page }) => {
+    await uploadGcodeModel(page, `e2e-model-${Date.now()}`);
     await page.goto("/");
-    await page.getByRole("textbox", { name: "Search models" }).fill(`no-such-model-${Date.now()}`);
+    await page.getByRole("searchbox", { name: "Search library" }).fill(`unmatched${Date.now()}`);
     await expect(page).toHaveURL(/[?&]q=/);
+    await expect(page.getByText("No models found", { exact: true })).toBeVisible();
     await expect(page.locator('a[href^="/models/"]')).toHaveCount(0);
   });
 });

@@ -191,8 +191,7 @@ describe("Search results", () => {
     await waitFor(() => expect(input).toBeEnabled());
     await user.upload(input, image);
     expect(await screen.findByRole("link", { name: "Desk bracket" })).toBeVisible();
-    await user.click(screen.getByText("Why this result"));
-    expect(screen.getByText("Appearance match")).toBeVisible();
+    expect(screen.queryByText("Why this result")).toBeNull();
     expect(screen.getByRole("img", { name: "Image used for this search" })).toHaveAttribute(
       "src",
       "blob:private-query",
@@ -225,7 +224,7 @@ describe("Search results", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("no larger than 8 MB");
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
   });
-  it("shows a shared excerpt once with both match reasons", async () => {
+  it("omits retrieval explanations from result cards", async () => {
     const lexical = {
       leg: "lexical",
       field: "description",
@@ -241,11 +240,9 @@ describe("Search results", () => {
         ),
       },
     });
-    await userEvent.setup().click(await screen.findByText("Why this result"));
-    expect(screen.getByText("Two bolts secure the bracket.")).toBeVisible();
-    expect(screen.getAllByText("Two bolts secure the bracket.")).toHaveLength(1);
-    expect(screen.getByText("Keyword match")).toBeVisible();
-    expect(screen.getByText("Related description")).toBeVisible();
+    expect(await screen.findByRole("link", { name: "Desk bracket" })).toBeVisible();
+    expect(screen.queryByText("Why this result")).toBeNull();
+    expect(screen.queryByText("Two bolts secure the bracket.")).toBeNull();
   });
   it("restarts at the first page after a generation expires the cursor", async () => {
     const user = userEvent.setup();
@@ -269,7 +266,7 @@ describe("Search results", () => {
     expect(screen.queryByRole("link", { name: "Desk bracket" })).toBeNull();
     expect(app.requests().filter((request) => request.url.includes("cursor=")).length).toBe(1);
   });
-  it("renders authorized evidence for every Subject type", async () => {
+  it("links every authorized Subject type", async () => {
     const items = [
       aSearchResult(),
       aSearchResult({
@@ -310,12 +307,8 @@ describe("Search results", () => {
       "/multipart-models/4",
     );
     expect(screen.getByRole("link", { name: "Guide" })).toHaveAttribute("href", "/documents/5");
-    await userEvent.setup().click(screen.getAllByText("Why this result")[3]);
-    expect(screen.getByText("Related description")).toBeVisible();
+    expect(screen.queryByText("Why this result")).toBeNull();
     expect(document.querySelector("script")).toBeNull();
-    expect([...document.querySelectorAll("mark")].map((node) => node.textContent)).toContain(
-      "bracket",
-    );
   });
   it("runs hybrid retrieval only for a submitted route", async () => {
     const app = results();

@@ -73,11 +73,13 @@ class TestSearchPassages:
                     session.add(model)
                     content_changed(session, "model", [model.id])
                 session.commit()
+                drain_search(session)
                 with batch_content_changes(session):
                     model.name = "Rolled back"
                     session.add(model)
                     content_changed(session, "model", [model.id])
                 session.rollback()
+                drain_search(session)
             with Session(engine) as session:
                 assert (
                     session.exec(select(SearchPassage.text)).one() == "Title: Committed"
@@ -196,6 +198,47 @@ class TestSearchPassages:
             ]
             assert subjects == [title.id, body.id]
             assert rows[0][1] > rows[1][1] > 0
+
+    def test_recovers_spelling_using_the_indexed_vocabulary(self, passage_engine):
+        from app.modules.search.lexical_index import rebuild_partition
+        from app.modules.search.lexical_query import name_candidates
+
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        with Session(engine) as session:
+            expected = build_model(session, "Spectre_Option_A")
+            hidden = build_model(session, "Spectre private")
+            for model in (expected, hidden):
+                sync_subject(session, SearchSubject(SubjectType.MODEL, model.id))
+            rebuild_partition(session)
+            session.commit()
+            allowed = select(SearchPassage.id).where(
+                SearchPassage.subject_id == expected.id
+            )
+            matches = name_candidates(session, "specter", allowed)
+            assert [session.get(SearchPassage, id).subject_id for id in matches] == [
+                expected.id
+            ]
+
+    def test_retrieves_functional_metadata_with_indexed_conjunctions(
+        self, passage_engine
+    ):
+        from app.modules.search.lexical_index import rebuild_partition
+        from app.modules.search.lexical_query import concept_candidates
+
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        with Session(engine) as session:
+            expected = build_model(session, "Export", description="A toothed wheel")
+            unrelated = build_model(session, "Sphere", description="A smooth wheel")
+            for model in (expected, unrelated):
+                sync_subject(session, SearchSubject(SubjectType.MODEL, model.id))
+            rebuild_partition(session)
+            session.commit()
+            matches = concept_candidates(session, "gear", select(SearchPassage.id))
+            assert [session.get(SearchPassage, id).subject_id for id in matches] == [
+                expected.id
+            ]
 
     def test_maintains_postgres_statistics_after_delete(self, passage_engine):
         from app.core.time import utcnow

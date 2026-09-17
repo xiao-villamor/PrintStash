@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from printstash_core.inference import EmbeddingError, EmbeddingInput
 from printstash_core.inference import EmbeddingSpace as Space
+from printstash_core.search.lexical import query_terms
 from printstash_core.search.passages import SubjectType
 from sqlalchemy import or_
 from sqlalchemy.exc import DBAPIError
@@ -51,6 +53,32 @@ def score_floor(space: Space, settings: SearchSettings) -> float:
         else settings.semantic_floor
     )
     return settings.semantic_floors.get(space.config_hash, default)
+
+
+def for_query(leg: SemanticLeg, settings: SearchSettings, query) -> SemanticLeg:
+    """Single-word object queries need stricter calibrated native-score floors.
+
+    Calibration negatives plus a 0.01 safety margin, rounded upward to 0.01:
+    BGE 0.6542 -> 0.67; thumbnail CLIP 0.2592 -> 0.27. Multiword benchmarks and
+    other profiles retain their independently measured policies. Overrides win.
+    """
+    if (
+        not isinstance(query, str)
+        or len(query_terms(query)) != 1
+        or leg.space.config_hash in settings.semantic_floors
+    ):
+        return leg
+    space = leg.space
+    floor = leg.floor
+    if (
+        space.provider == "onnx_cpu"
+        and space.model_key == "bge-small-en-v1.5"
+        and space.model_revision == "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+    ):
+        floor = max(floor, 0.67)
+    elif space.profile == "thumbnail" and space.alignment_identity == _CLIP_B32:
+        floor = max(floor, 0.27)
+    return replace(leg, floor=floor)
 
 
 def registry(session: Session, settings: SearchSettings) -> tuple[SemanticLeg, ...]:

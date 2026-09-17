@@ -610,6 +610,8 @@ export function FilterSidebarContent({
   outlinerFilter,
   canViewPrinters = true,
   structuredFilters,
+  filtersOpen = true,
+  familyFilters,
   libraryView,
   onLibraryViewChange,
 }: FilterSidebarProps) {
@@ -988,201 +990,202 @@ export function FilterSidebarContent({
             </div>
           </section>
 
-          {/* Printer */}
-          {canViewPrinters && (
-            <section>
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                {uiText("Printer")}
-              </h3>
-              <div className="space-y-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPrinterChange(null);
-                    onPrinterPresenceChange(null);
-                  }}
-                  className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                    selectedPrinterId === null && selectedPrinterPresence === null
-                      ? "text-accent-foreground bg-accent"
-                      : "text-foreground hover:bg-muted"
-                  }`}
-                >
-                  <svg
-                    className="h-4 w-4 mr-2 text-primary"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                    />
-                  </svg>
-                  {uiText("Any location")}
-                </button>
-                <div className="space-y-0.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onPrinterChange(null);
-                      onPrinterPresenceChange("any");
-                      setPrinterExpanded(!printerExpanded);
-                    }}
-                    className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                      selectedPrinterPresence === "any"
-                        ? "text-accent-foreground bg-accent"
-                        : "text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    <ChevronRight
-                      className={`h-4 w-4 mr-1 text-muted-foreground transition-transform ${printerExpanded ? "rotate-90" : ""}`}
-                    />
-                    <svg
-                      className="h-4 w-4 mr-2 text-primary"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+          {filtersOpen && (
+            <div className="space-y-6" aria-label={uiText("Filters")} role="region">
+              {familyFilters}
+              {/* Printer */}
+              {canViewPrinters && (
+                <section>
+                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+                    {uiText("Printer")}
+                  </h3>
+                  <div className="space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPrinterChange(null);
+                      }}
+                      className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                        selectedPrinterId === null && selectedPrinterPresence === null
+                          ? "text-accent-foreground bg-accent"
+                          : "text-foreground hover:bg-muted"
+                      }`}
                     >
-                      <path
-                        d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="2"
-                      />
-                    </svg>
-                    <span className="font-medium">{uiText("On a printer")}</span>
-                  </button>
-                  {printerExpanded && (
-                    <div className="ml-4 border-l border-border">
-                      {printers.length === 0 ? (
-                        <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
-                          {uiText("No printers configured")}
-                        </p>
-                      ) : (
-                        printers.map((printer) => (
-                          <button
-                            key={printer.id}
-                            type="button"
-                            onClick={() => {
-                              onPrinterChange(printer.id);
-                              onPrinterPresenceChange(null);
-                            }}
-                            className={`w-full flex items-center justify-between px-2 py-1.5 text-sm transition-colors rounded group pl-4 ${
-                              selectedPrinterId === printer.id
-                                ? "text-accent-foreground bg-accent"
-                                : "text-foreground hover:bg-muted"
-                            }`}
-                          >
-                            <span className="flex items-center">
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${statusColor(printer.status)} mr-2`}
-                              />
-                              {printer.name}
-                            </span>
-                            <span
-                              className={`text-3xs font-medium ${statusTextColor(printer.status)}`}
-                            >
-                              {statusLabel(printer.status)}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onPrinterChange(null);
-                    onPrinterPresenceChange("none");
-                  }}
-                  className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                    selectedPrinterPresence === "none"
-                      ? "text-accent-foreground bg-accent"
-                      : "text-foreground hover:bg-muted"
-                  }`}
-                >
-                  <Folder className="h-4 w-4 mr-2 text-primary" />
-                  {uiText("Vault only")}
-                </button>
-              </div>
-            </section>
-          )}
-
-          {/* Tags */}
-          {structuredFilters}
-
-          {/* Tags */}
-          {tags.length > 0 && (
-            <section>
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                {uiText("Tags")}
-              </h3>
-              <div className="relative mb-2">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder={uiText("Filter tags...")}
-                  value={tagFilter}
-                  onChange={(e) => {
-                    setTagFilter(e.target.value);
-                    setShowAllTags(false);
-                  }}
-                  className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
-                />
-                {tagFilter && (
-                  <button
-                    type="button"
-                    onClick={() => setTagFilter("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-              {filteredTags.length === 0 ? (
-                <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
-                  {uiText("No matching tags.")}
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {visibleTags.map((t) => {
-                    const active = selectedTags.includes(t.slug);
-                    return (
+                      <svg
+                        className="h-4 w-4 mr-2 text-primary"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                        />
+                      </svg>
+                      {uiText("Any location")}
+                    </button>
+                    <div className="space-y-0.5">
                       <button
                         type="button"
-                        key={t.id}
-                        onClick={() => toggleTag(t.slug)}
-                        className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-2xs tracking-wider uppercase border transition-colors ${
-                          active
-                            ? "border-primary bg-accent text-accent-foreground"
-                            : "border-border text-muted-foreground hover:border-border hover:bg-muted"
+                        onClick={() => {
+                          onPrinterPresenceChange("any");
+                          setPrinterExpanded(!printerExpanded);
+                        }}
+                        className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                          selectedPrinterPresence === "any"
+                            ? "text-accent-foreground bg-accent"
+                            : "text-foreground hover:bg-muted"
                         }`}
                       >
-                        {t.name}
-                        <span className="opacity-60">
-                          {t.model_count + (t.multipart_model_count ?? 0)}
-                        </span>
-                        {active && <X className="h-3 w-3 ml-0.5" />}
+                        <ChevronRight
+                          className={`h-4 w-4 mr-1 text-muted-foreground transition-transform ${printerExpanded ? "rotate-90" : ""}`}
+                        />
+                        <svg
+                          className="h-4 w-4 mr-2 text-primary"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                        <span className="font-medium">{uiText("On a printer")}</span>
                       </button>
-                    );
-                  })}
-                </div>
+                      {printerExpanded && (
+                        <div className="ml-4 border-l border-border">
+                          {printers.length === 0 ? (
+                            <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
+                              {uiText("No printers configured")}
+                            </p>
+                          ) : (
+                            printers.map((printer) => (
+                              <button
+                                key={printer.id}
+                                type="button"
+                                onClick={() => {
+                                  onPrinterChange(printer.id);
+                                }}
+                                className={`w-full flex items-center justify-between px-2 py-1.5 text-sm transition-colors rounded group pl-4 ${
+                                  selectedPrinterId === printer.id
+                                    ? "text-accent-foreground bg-accent"
+                                    : "text-foreground hover:bg-muted"
+                                }`}
+                              >
+                                <span className="flex items-center">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${statusColor(printer.status)} mr-2`}
+                                  />
+                                  {printer.name}
+                                </span>
+                                <span
+                                  className={`text-3xs font-medium ${statusTextColor(printer.status)}`}
+                                >
+                                  {statusLabel(printer.status)}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPrinterPresenceChange("none");
+                      }}
+                      className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                        selectedPrinterPresence === "none"
+                          ? "text-accent-foreground bg-accent"
+                          : "text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      <Folder className="h-4 w-4 mr-2 text-primary" />
+                      {uiText("Vault only")}
+                    </button>
+                  </div>
+                </section>
               )}
-              {!tagFilter && hiddenCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllTags(!showAllTags)}
-                  className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
-                >
-                  {showAllTags
-                    ? uiText("Show fewer")
-                    : uiText("Show all {value1} tags", { value1: String(filteredTags.length) })}
-                </button>
+
+              {/* Tags */}
+              {structuredFilters}
+
+              {/* Tags */}
+              {tags.length > 0 && (
+                <section>
+                  <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+                    {uiText("Tags")}
+                  </h3>
+                  <div className="relative mb-2">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                    <input
+                      type="text"
+                      placeholder={uiText("Filter tags...")}
+                      value={tagFilter}
+                      onChange={(e) => {
+                        setTagFilter(e.target.value);
+                        setShowAllTags(false);
+                      }}
+                      className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
+                    />
+                    {tagFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setTagFilter("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  {filteredTags.length === 0 ? (
+                    <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
+                      {uiText("No matching tags.")}
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {visibleTags.map((t) => {
+                        const active = selectedTags.includes(t.slug);
+                        return (
+                          <button
+                            type="button"
+                            key={t.id}
+                            onClick={() => toggleTag(t.slug)}
+                            className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-2xs tracking-wider uppercase border transition-colors ${
+                              active
+                                ? "border-primary bg-accent text-accent-foreground"
+                                : "border-border text-muted-foreground hover:border-border hover:bg-muted"
+                            }`}
+                          >
+                            {t.name}
+                            <span className="opacity-60">
+                              {t.model_count + (t.multipart_model_count ?? 0)}
+                            </span>
+                            {active && <X className="h-3 w-3 ml-0.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {!tagFilter && hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllTags(!showAllTags)}
+                      className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
+                    >
+                      {showAllTags
+                        ? uiText("Show fewer")
+                        : uiText("Show all {value1} tags", { value1: String(filteredTags.length) })}
+                    </button>
+                  )}
+                </section>
               )}
-            </section>
+            </div>
           )}
         </div>
       </DndContext>
@@ -1212,6 +1215,8 @@ export interface FilterSidebarProps {
   loading?: boolean;
   outlinerFilter?: string;
   structuredFilters?: React.ReactNode;
+  filtersOpen?: boolean;
+  familyFilters?: React.ReactNode;
   libraryView: LibraryViewMode;
   onLibraryViewChange: (view: LibraryViewMode) => void;
 }

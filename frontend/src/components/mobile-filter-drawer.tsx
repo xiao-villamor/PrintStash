@@ -26,6 +26,7 @@ interface MobileFilterDrawerProps {
   canViewPrinters?: boolean;
   loading?: boolean;
   structuredFilters?: React.ReactNode;
+  familyFilters?: React.ReactNode;
   libraryView: LibraryViewMode;
   onLibraryViewChange: (view: LibraryViewMode) => void;
 }

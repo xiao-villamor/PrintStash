@@ -71,18 +71,21 @@ function renderFilters(over: Partial<Props> = {}) {
 
 describe("StructuredFilters", () => {
   describe("what it offers", () => {
-    it("lists the values the library actually holds", () => {
+    it("lists the values the library actually holds", async () => {
       renderFilters();
+      await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+      await userEvent.setup().click(screen.getByRole("button", { name: "Material" }));
 
       expect(screen.getByText("stl")).toBeInTheDocument();
       expect(screen.getByText("PLA")).toBeInTheDocument();
     });
 
-    it("shows how many models each value matches", () => {
+    it("shows how many models each value matches", async () => {
       // The count is what makes a facet worth clicking; without it the user is
       // guessing which filter narrows anything.
       renderFilters();
 
+      await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
       expect(screen.getByText("12")).toBeInTheDocument();
     });
 
@@ -98,6 +101,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onChange } = renderFilters();
 
+      await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
       await user.click(screen.getByText("stl"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["stl"]);
@@ -127,9 +131,9 @@ describe("StructuredFilters", () => {
   describe("collapsing a group", () => {
     it("hides a group's values when it is collapsed", async () => {
       const user = userEvent.setup();
-      renderFilters();
+      renderFilters({ active: { file_type: ["stl"] } });
 
-      await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+      await user.click(screen.getByRole("button", { name: /Artifact/ }));
 
       expect(screen.queryByText("stl")).toBeNull();
     });
@@ -137,7 +141,6 @@ describe("StructuredFilters", () => {
     it("brings them back when it is expanded again", async () => {
       const user = userEvent.setup();
       renderFilters();
-      await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
 
       await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
 
@@ -157,6 +160,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onDateChange } = renderFilters();
 
+      await user.click(screen.getByText("Uploaded"));
       await user.type(screen.getByLabelText("After"), "2026-01-01");
 
       expect(onDateChange).toHaveBeenCalledWith("uploaded_after", "2026-01-01");
@@ -166,6 +170,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onDateChange } = renderFilters();
 
+      await user.click(screen.getByText("Uploaded"));
       await user.type(screen.getByLabelText("Before"), "2026-02-01");
 
       expect(onDateChange).toHaveBeenCalledWith("uploaded_before", "2026-02-01");

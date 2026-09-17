@@ -249,6 +249,7 @@ test.describe("multipart models", () => {
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await page.getByRole("button", { name: "Library tools", exact: true }).click();
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");

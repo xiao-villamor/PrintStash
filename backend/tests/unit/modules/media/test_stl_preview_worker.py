@@ -268,12 +268,12 @@ class TestMain:
         ],
     )
     def test_refuses_a_budget_the_parent_should_never_send(
-        self, stl, tmp_path: Path, override: dict
+        self, stl, tmp_path: Path, monkeypatch, override: dict
     ) -> None:
         source = stl(_binary_stl([TRIANGLE]))
 
         # Exit 2 is "the parent invoked me wrongly" — distinct from a bad file.
-        assert self._run(self._argv(source, tmp_path, **override)) == 2
+        assert self._run_in_process(source, tmp_path, monkeypatch, **override) == 2
 
     def test_refuses_a_parent_that_is_not_the_launcher(
         self, stl, tmp_path: Path
@@ -320,3 +320,15 @@ class TestMain:
 
         monkeypatch.setattr(native, "render_stl_streaming", exploding)
         assert self._run_in_process(source, tmp_path, monkeypatch) == 4
+
+    def test_success_publishes_a_complete_manifest(self, stl, tmp_path, monkeypatch):
+        import json
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        assert self._run_in_process(source, tmp_path, monkeypatch) == 0
+        manifest = json.loads((tmp_path / "out.json").read_text())
+        assert manifest["status"] == "complete"
+        assert manifest["triangle_count"] == manifest["parsed_triangles"] == 2
+        assert manifest["scanned_bytes"] >= source.stat().st_size
+        assert (tmp_path / "out.png").read_bytes().startswith(b"\x89PNG")
+        assert not (tmp_path / "out.png.tmp").exists()

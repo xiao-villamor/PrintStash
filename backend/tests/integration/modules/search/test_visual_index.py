@@ -166,8 +166,16 @@ class TestVisualIndex:
             == "embedding_render_failed"
         )
 
-    def test_retrieves_visual_matches_from_a_valid_image_upload(
-        self, client, db_session, visual_setup, advance_generation
+    @pytest.mark.parametrize("weak", [False, True], ids=["relevant", "below-floor"])
+    def test_retrieves_only_strong_matches_from_a_valid_image_upload(
+        self,
+        client,
+        db_session,
+        visual_setup,
+        advance_generation,
+        monkeypatch,
+        request,
+        weak,
     ):
         from PIL import Image
 
@@ -176,6 +184,19 @@ class TestVisualIndex:
         actor, encoder, model, _ = visual_setup
         generation = generations.prepare(db_session, actor, proposal(encoder))
         advance_generation(generation.id)
+        if weak:
+            from app.modules.inference.query import close_queries
+            from app.modules.search import visual_query
+            from tests.fakes.embedding_provider import RecordingEmbeddingProvider
+
+            # Contract-only negative: opposite to the nonnegative RGB index.
+            # Measured CLIP quality is evaluated separately in retrieval/.
+            close_queries()
+            request.addfinalizer(close_queries)
+            provider = RecordingEmbeddingProvider(vectors=((-1.0, -1.0, -1.0),))
+            monkeypatch.setattr(
+                visual_query, "embedding_provider", lambda *args: provider
+            )
         body = io.BytesIO()
         Image.new("RGB", (32, 32), "gray").save(body, "PNG")
 
@@ -187,8 +208,15 @@ class TestVisualIndex:
 
         assert response.status_code == 200, response.text
         assert response.headers["Cache-Control"] == "no-store"
-        assert response.json()["items"][0]["subject_id"] == model.id
-        assert response.json()["items"][0]["evidence"]
+        result = response.json()
+        assert result["semantic_ready"] is True
+        assert result["leg_errors"] == {}
+        if weak:
+            assert result["items"] == []
+            assert result["outcome"] == "no_strong_matches"
+        else:
+            assert result["items"][0]["subject_id"] == model.id
+            assert result["items"][0]["evidence"]
 
     def test_respects_an_independent_consumers_render_permit(
         self, db_session, visual_setup, monkeypatch
@@ -311,6 +339,10 @@ class TestVisualIndex:
         )
         if changed is None:
             assert result.rgb == bytes([255, 0, 0]) * 32 * 32
+            served = visual_index.render(
+                get_session_factory(), file, recipe, InferenceContext.bounded(10)
+            )
+            assert served.thumbnail.rgb == result.rgb
         else:
             assert result is None
 
@@ -374,9 +406,11 @@ class TestVisualIndex:
                 get_session_factory(), file, recipe, InferenceContext.bounded(20)
             )
 
-    def test_prepares_a_reusable_thumbnail_fallback(
+    def test_prepares_an_independent_thumbnail_fallback(
         self, db_session, visual_setup, advance_generation, monkeypatch
     ):
+        from printstash_core.search.visual_inputs import VisualRecipe
+
         from app.db.models import EmbeddingSpace
 
         actor, encoder, model, file = visual_setup
@@ -390,7 +424,16 @@ class TestVisualIndex:
         advance_generation(fallback.id)
         db_session.expire_all()
         assert db_session.get(IndexGeneration, fallback.id).state == "active"
-        assert db_session.get(IndexGeneration, fallback.id).copied == 1
+        # The base branch now gives Rust multiview and media thumbnails distinct
+        # render identities. Reusing those incompatible bytes would be wrong.
+        first_recipe = VisualRecipe.for_space(
+            generations.contract(db_session, db_session.get(IndexGeneration, first.id))
+        )
+        fallback_recipe = VisualRecipe.for_space(
+            generations.contract(db_session, fallback)
+        )
+        assert first_recipe.version != fallback_recipe.version
+        assert db_session.get(IndexGeneration, fallback.id).copied == 0
 
         from printstash_core.inference import EmbeddingError
 
@@ -790,3 +833,48 @@ class TestFilteredVisualQuery:
         )
         assert [item.subject_id for item in result.items] == [model.id]
         assert any(evidence.leg == "multiview" for evidence in result.items[0].evidence)
+
+
+class TestThumbnailVectorReuse:
+    def test_reuses_native_thumbnail_vectors_during_rebuild(
+        self, db_session, visual_setup, advance_generation, monkeypatch
+    ):
+        actor, encoder, model, file = visual_setup
+        first = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(
+                local_model_id=encoder.id, index_backend="numpy", profile="thumbnail"
+            ),
+        )
+        advance_generation(first.id)
+        db_session.expire_all()
+        old_vectors = db_session.exec(
+            select(PassageVector).where(PassageVector.generation_id == first.id)
+        ).all()
+        assert len(old_vectors) == 1
+        expected_vector = old_vectors[0].vector_blob
+
+        def never_render(*args, **kwargs):
+            raise AssertionError("current thumbnail vectors must be reused")
+
+        monkeypatch.setattr(visual_index, "render", never_render)
+        second = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(
+                local_model_id=encoder.id,
+                index_backend="numpy",
+                profile="thumbnail",
+            ),
+        )
+        advance_generation(second.id)
+        db_session.expire_all()
+        assert db_session.get(IndexGeneration, second.id).copied == 1
+        vectors = db_session.exec(
+            select(PassageVector).where(PassageVector.generation_id == second.id)
+        ).all()
+        assert len(vectors) == 1
+        assert vectors[0].vector_blob == expected_vector
+        assert vectors[0].subject_id == model.id
+        assert vectors[0].file_id == file.id
