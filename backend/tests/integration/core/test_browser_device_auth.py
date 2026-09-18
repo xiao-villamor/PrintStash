@@ -1,8 +1,11 @@
-"""Authenticating a paired browser — and nothing else in the app.
+"""Integration tests for the browser-device auth dependency and its pairing workflow.
 
-A browser credential is deliberately *not* a login. It is accepted only by the two
-importer routes that opt into it, so a stolen credential can add to somebody's inbox but
-cannot read their library, change their settings, or see their account. That confinement
+The pairing service issues opaque tokens stored only as sha256 hashes in ``browser_devices``.
+This suite verifies that an issued token authenticates exactly its owner on import routes,
+fails everywhere else, cannot be used after revocation, and does not open a route that does
+not explicitly declare ``require_browser_import_user``.
+
+The authorization-surface check is structural: the set of routes accepting browser devices
 is asserted here against the real router, not inferred from the dependency list.
 
 Every rejection answers with the same `invalid_browser_credential`: unknown, revoked, and
@@ -174,6 +177,20 @@ class TestRequireUserOrBrowserImportUser:
             require_user_or_browser_import_user(forged, db_session)
 
         assert exc_info.value.detail == "not_authenticated"
+
+    def test_accepts_a_cookie_session(
+        self, client: TestClient, make_user, headers_for, importable
+    ) -> None:
+        owner = make_user("cookie-user")
+        token = headers_for(owner)["Authorization"].removeprefix("Bearer ")
+
+        response = client.post(
+            "/api/v1/inbox",
+            cookies={"printstash_session": token},
+            json={"url": "https://example.com/model", "title": "Cookie import"},
+        )
+
+        assert response.status_code == 202, response.text
 
 
 class TestBrowserCredentialConfinement:
