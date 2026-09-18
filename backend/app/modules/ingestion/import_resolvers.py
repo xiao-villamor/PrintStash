@@ -372,7 +372,7 @@ _PRINTABLES_LINK_MUTATION = """
 mutation ($printId: ID!, $source: DownloadSourceEnum!, $fileType: DownloadFileTypeEnum, $id: ID, $files: [DownloadFileInput!]) {
   getDownloadLink(printId: $printId, source: $source, fileType: $fileType, id: $id, files: $files) {
     ok
-    output { link files { id fileId link } }
+    output { link files { id link } }
   }
 }
 """
@@ -482,9 +482,8 @@ query ($id: ID!) {
   print(id: $id) {
     id
     name
-    title
-    user { name username }
-    license { name code }
+    user { id handle }
+    license { id name }
     stls { id name fileSize }
     gcodes { id name fileSize }
     slas { id name fileSize }

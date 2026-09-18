@@ -474,6 +474,41 @@ class TestPrintablesDownloadLinks:
             == []
         )
 
+    @pytest.mark.asyncio
+    async def test_printables_download_links_resolves_files(self) -> None:
+        payload = {
+            "data": {
+                "getDownloadLink": {
+                    "ok": True,
+                    "output": {
+                        "link": None,
+                        "files": [
+                            {
+                                "id": "stl-1",
+                                "link": "https://files.printables.test/1.stl",
+                            },
+                            {
+                                "id": "stl-2",
+                                "link": "https://files.printables.test/2.stl",
+                            },
+                        ],
+                    },
+                }
+            }
+        }
+        files = [
+            r.ModelFile(file_id="stl-1", name="1.stl", file_type="stl", size=100),
+            r.ModelFile(file_id="stl-2", name="2.stl", file_type="stl", size=200),
+        ]
+        with patch.object(r, "_printables_graphql", AsyncMock(return_value=payload)):
+            links = await r._printables_download_links(
+                "https://www.printables.com/model/3161-x", files
+            )
+        assert links == [
+            "https://files.printables.test/1.stl",
+            "https://files.printables.test/2.stl",
+        ]
+
 
 class TestResolvePrintablesCollection:
     @pytest.mark.asyncio
