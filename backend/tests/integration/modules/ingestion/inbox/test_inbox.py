@@ -1682,3 +1682,45 @@ class TestRequestedTags:
         assert inbox.requested_tags("not json") == []
         assert inbox.requested_tags("{}") == []  # valid JSON but not a list
         assert inbox.requested_tags(json.dumps(["a", "b"])) == ["a", "b"]
+
+
+class TestInboxRead:
+    def test_read_falls_back_to_empty_manifest_when_missing_or_invalid(
+        self, make_user
+    ) -> None:
+        user = make_user("manifest-fallback-user")
+        item = inbox.InboxItem(
+            id=9999,
+            owner_user_id=user.id,
+            source_kind=inbox.InboxSourceKind.URL,
+            source_url="https://example.com/model",
+            state=inbox.InboxItemState.CAPTURED,
+            manifest_json="{}",
+        )
+        read_item = inbox.read(item)
+        assert read_item.manifest.root == {
+            "kind": "model_files",
+            "files": [],
+            "selected_ids": [],
+            "schema_version": 1,
+        }
+
+    def test_read_falls_back_to_empty_manifest_on_corrupt_v2_json(
+        self, make_user
+    ) -> None:
+        user = make_user("corrupt-manifest-user")
+        item = inbox.InboxItem(
+            id=9998,
+            owner_user_id=user.id,
+            source_kind=inbox.InboxSourceKind.URL,
+            source_url="https://example.com/model",
+            state=inbox.InboxItemState.CAPTURED,
+            manifest_json='{"schema_version": 2}',
+        )
+        read_item = inbox.read(item)
+        assert read_item.manifest.root == {
+            "kind": "model_files",
+            "files": [],
+            "selected_ids": [],
+            "schema_version": 1,
+        }

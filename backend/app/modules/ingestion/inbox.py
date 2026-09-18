@@ -199,6 +199,25 @@ def read(
             .order_by(InboxItemResult.id)  # type: ignore[attr-defined]
         ).all()
     result_reads = [InboxItemResultRead.model_validate(item) for item in results or []]
+    manifest_dict = _json_dict(row.manifest_json)
+    if not manifest_dict.get("kind"):
+        manifest_dict = {
+            "kind": "model_files",
+            "files": [],
+            "selected_ids": [],
+            "schema_version": 1,
+        }
+    try:
+        manifest = _inbox_manifest_adapter.validate_python(manifest_dict)
+    except Exception:
+        manifest = _inbox_manifest_adapter.validate_python(
+            {
+                "kind": "model_files",
+                "files": [],
+                "selected_ids": [],
+                "schema_version": 1,
+            }
+        )
     return InboxItemRead(
         id=row.id,
         owner_user_id=row.owner_user_id,
@@ -207,7 +226,7 @@ def read(
         display_title=row.display_title,
         source_hostname=row.source_hostname,
         state=row.state,
-        manifest=_inbox_manifest_adapter.validate_python(_json_dict(row.manifest_json)),
+        manifest=manifest,
         target_collection_id=row.target_collection_id,
         requested_tags=requested_tags(row.requested_tags_json),
         background_job_id=row.background_job_id,
