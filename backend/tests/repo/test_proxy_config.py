@@ -58,6 +58,13 @@ class TestFrontendNginxConf:
         assert "default_type application/javascript;" in mjs_location
         assert "immutable" not in mjs_location
 
+    def test_frontend_nginx_preserves_upstream_forwarded_proto(self) -> None:
+        """Forwarded HTTPS scheme must not be downgraded to plain HTTP by nginx."""
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+
+        assert "map $http_x_forwarded_proto $ps_forwarded_proto" in conf
+        assert "proxy_set_header X-Forwarded-Proto $ps_forwarded_proto;" in conf
+
     def test_frontend_sets_browser_security_headers(self) -> None:
         conf = (_root() / "frontend" / "security-headers.conf").read_text()
 
