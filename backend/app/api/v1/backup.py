@@ -16,6 +16,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, JSONResponse
+from sqlmodel import Session
 
 import app.modules.backups.backup.adoption as backup_adoption
 import app.modules.backups.backup.caches as backup_caches
@@ -30,6 +31,7 @@ import app.runtime.maintenance as backup_maintenance
 from app.core.errors import OperationError
 from app.core.logging import get_logger
 from app.core.security import require_superuser
+from app.db.session import get_session
 from app.modules.backups.backup_capabilities import backup_operations
 from app.modules.backups.backup_catalogue import BackupIdentityConflictError
 from app.modules.backups.queries import source_view
@@ -477,7 +479,11 @@ def delete_backup(backup_id: str, source_ref: str | None = None) -> dict:
         "files. It is strongly recommended to create a fresh backup first."
     ),
 )
-def restore_backup(backup_id: str, source_ref: str | None = None) -> dict:
+def restore_backup(backup_id: str, source_ref: str | None = None, session: Session = Depends(get_session)) -> dict:
+    # Authorization has completed. Release its read transaction before the
+    # restore coordinator locks/replaces PostgreSQL tables; keeping that same
+    # request's users-table lock until response teardown would deadlock restore.
+    session.rollback()
     try:
         result = (
             backup_restore.restore_backup(backup_id)

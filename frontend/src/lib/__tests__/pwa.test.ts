@@ -7,6 +7,8 @@
  * is why the registration bypasses the HTTP cache and the caches are versioned:
  * a new release must be able to evict the old one.
  *
+ * A first installation must not restart the page the user is opening. Later
+ * updates reload once so an existing tab can adopt the new application version.
  * The reload is latched to once. A worker taking control fires the change event,
  * and reloading unconditionally on every such event is an infinite refresh loop —
  * the user sees the page flicker and can never interact with it.
@@ -70,7 +72,28 @@ describe("registerServiceWorker", () => {
 
   it("reloads once when an updated service worker takes control", () => {
     const reload = vi.fn<() => void>();
-    const handleControllerChange = createControllerChangeHandler(reload);
+    const handleControllerChange = createControllerChangeHandler(reload, true);
+
+    handleControllerChange();
+    handleControllerChange();
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the first installation on the current page", () => {
+    const reload = vi.fn<() => void>();
+    const handleControllerChange = createControllerChangeHandler(reload, false);
+
+    handleControllerChange();
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("reloads for an update after the first installation", () => {
+    const reload = vi.fn<() => void>();
+    const handleControllerChange = createControllerChangeHandler(reload, false);
+    handleControllerChange();
+    reload.mockClear();
 
     handleControllerChange();
     handleControllerChange();

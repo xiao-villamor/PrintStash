@@ -1161,3 +1161,63 @@ def dismiss_capture_slot_leases(session: Session, *, inbox_item_id: int) -> bool
         session.delete(lease)
     session.flush()
     return True
+
+
+def release_job_files(session: Session, job_id: str) -> bool:
+    """Release only receipt-owned temporary files after durable source handoff."""
+    released = True
+    leases = session.exec(select(StagingLease).where(
+        StagingLease.background_job_id == job_id,
+        StagingLease.capture_upload_slot_origin_id.is_(None),
+    )).all()
+    for lease in leases:
+        path = Path(lease.path)
+        if _matching_path(lease) is not None:
+            removed = _quarantine_owned_file(path, receipt_id=lease.id,
+                device=lease.device, inode=lease.inode, ctime_ns=lease.ctime_ns, size_bytes=lease.size_bytes)
+            if not removed:
+                released = False
+                continue
+        elif _entry_present(path) or _entry_present(_quarantine_entry_path(path, lease.id)):
+            released = False
+            continue
+        session.delete(lease)
+    session.flush()
+    return released
+
+
+def record_job_lease(
+    session: Session,
+    *,
+    job_id: str,
+    staged: Path,
+    size: int,
+    sha256: str,
+    owner_user_id: int | None,
+) -> None:
+    stat = staged.stat(follow_symlinks=False)
+    existing = session.exec(select(StagingLease).where(StagingLease.path == str(staged))).first()
+    if existing is not None:
+        from app.modules.ingestion.staging_leases import _matching_path
+        if _matching_path(existing) != staged or existing.sha256 != sha256:
+            raise ValueError("staging_identity_unavailable")
+        existing.background_job_id = job_id
+        existing.expires_at = utcnow() + timedelta(hours=24)
+        session.add(existing)
+        session.flush()
+        return
+    session.add(
+        StagingLease(
+            id=uuid.uuid4().hex,
+            path=str(staged),
+            owner_user_id=owner_user_id,
+            background_job_id=job_id,
+            size_bytes=size,
+            sha256=sha256,
+            device=stat.st_dev,
+            inode=stat.st_ino,
+            ctime_ns=stat.st_ctime_ns,
+            expires_at=utcnow() + timedelta(hours=24),
+        )
+    )
+    session.flush()

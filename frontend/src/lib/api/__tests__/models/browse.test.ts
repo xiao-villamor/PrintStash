@@ -253,3 +253,23 @@ describe("similarity filter", () => {
     expect(lastCall().url).toContain("has_similar_candidates=false");
   });
 });
+
+describe("Print-history filter transport", () => {
+  it.each([listModels, listModelPage, listOutlinerModels, getModelFacets])(
+    "passes real duration bounds through every browse reader",
+    async (read) => {
+      respondWith([]);
+      await read({
+        printed_after: "2026-08-01T00:00:00Z",
+        printed_before: "2026-09-01T00:00:00Z",
+        print_duration_min_s: 0,
+        print_duration_max_s: 10800,
+      });
+      const params = new URL(lastCall().url, "http://local").searchParams;
+      expect(params.get("printed_after")).toBe("2026-08-01T00:00:00Z");
+      expect(params.get("printed_before")).toBe("2026-09-01T00:00:00Z");
+      expect(params.get("print_duration_min_s")).toBe("0");
+      expect(params.get("print_duration_max_s")).toBe("10800");
+    },
+  );
+});

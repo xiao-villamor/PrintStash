@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tomllib
 
 import pytest
 import yaml
@@ -18,6 +19,245 @@ def _workflow(name: str) -> dict:
 
 def _ci_workflow() -> dict:
     return _workflow("ci.yml")
+
+
+class TestRustToolchainPin:
+    def test_uses_one_patched_compiler_across_native_builds(self) -> None:
+        expected = "1.98.1"
+        toolchain = tomllib.loads(
+            (REPO_ROOT / "backend" / "rust" / "rust-toolchain.toml").read_text()
+        )
+        queue_toolchain = tomllib.loads(
+            (
+                REPO_ROOT
+                / "backend"
+                / "qualification"
+                / "queue"
+                / "rust-toolchain.toml"
+            ).read_text()
+        )
+        assert toolchain["toolchain"]["channel"] == expected
+        assert queue_toolchain["toolchain"]["channel"] == expected
+
+        pinned_paths = (
+            REPO_ROOT / ".github" / "workflows" / "ci.yml",
+            REPO_ROOT / "backend" / "Dockerfile",
+            REPO_ROOT / "backend" / "scripts" / "native-coverage.sh",
+            REPO_ROOT / "backend" / "qualification" / "queue" / "Dockerfile",
+        )
+        for path in pinned_paths:
+            source = path.read_text()
+            assert expected in source, path
+            assert "1.91" not in source, path
+
+    def test_pins_the_current_maturin_build_backend(self) -> None:
+        native_project = tomllib.loads(
+            (REPO_ROOT / "backend" / "rust" / "pyproject.toml").read_text()
+        )
+        assert native_project["build-system"]["requires"] == ["maturin==1.15.0"]
+
+        dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+        assert dockerfile.count("maturin==1.15.0") == 2
+
+
+class TestControlledImportBenchmark:
+    def test_runs_without_concurrent_ci_jobs(self) -> None:
+        jobs = _ci_workflow()["jobs"]
+        ordinary_guard = (
+            "github.event_name != 'workflow_dispatch' || "
+            "inputs.benchmark_imports != true"
+        )
+        flaky_guard = (
+            "(github.event_name == 'schedule' || "
+            "github.event_name == 'workflow_dispatch') && "
+            "inputs.benchmark_imports != true"
+        )
+
+        ordinary_jobs = set(jobs) - {
+            "import-benchmark",
+            "flaky-detection",
+            "queue-qualification",
+        }
+        assert ordinary_jobs
+        assert all(jobs[name]["if"] == ordinary_guard for name in ordinary_jobs)
+        assert jobs["flaky-detection"]["if"] == flaky_guard
+
+    def test_preserves_evidence_on_a_dedicated_opt_in_runner(self):
+        job = _ci_workflow()["jobs"]["import-benchmark"]
+        assert (
+            job["if"]
+            == "github.event_name == 'workflow_dispatch' && inputs.benchmark_imports"
+        )
+        assert job["permissions"] == {"contents": "read"}
+        commands = [step.get("run", "") for step in job["steps"]]
+        assert sum("scripts/bench_matrix.py" in command for command in commands) == 1
+        harness = (REPO_ROOT / "backend" / "scripts" / "bench_matrix.py").read_text()
+        assert '"bench_gcode.py"' in harness
+        assert '"name": "gcode-parse"' in harness
+        artifacts = [
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+        assert {step["with"]["name"] for step in artifacts} == {
+            "import-benchmark-evidence-${{ matrix.database }}-${{ matrix.cpus }}cpu",
+            "import-benchmark-release-images-${{ matrix.database }}-${{ matrix.cpus }}cpu",
+        }
+        assert all(step["with"]["if-no-files-found"] == "error" for step in artifacts)
+        evidence = next(
+            step
+            for step in artifacts
+            if step["with"]["name"]
+            == "import-benchmark-evidence-${{ matrix.database }}-${{ matrix.cpus }}cpu"
+        )
+        assert evidence["if"] == "always()"
+        assert all(step["if"] == "always()" for step in artifacts)
+        assert job["strategy"]["max-parallel"] == 1
+        assert job["strategy"]["fail-fast"] is False
+        assert job["strategy"]["matrix"] == {
+            "database": ["sqlite", "postgres"],
+            "cpus": [2, 4],
+        }
+
+
+class TestQueueQualification:
+    def test_runs_locked_contracts_with_native_coverage(self):
+        job = _ci_workflow()["jobs"]["queue-qualification"]
+        commands = "\n".join(step.get("run", "") for step in job["steps"])
+
+        assert "cargo +1.98.1 clippy --locked --all-targets --all-features" in commands
+        assert "cargo +1.98.1 audit --ignore RUSTSEC-2023-0071" in commands
+        assert "cargo +1.98.1 deny --locked" in commands
+        assert "cargo +1.98.1 llvm-cov --locked" in commands
+        assert job["services"]["postgres"]["image"].endswith(
+            "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+        )
+        artifact = next(
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        )
+        assert artifact["if"] == "always()"
+        assert artifact["with"]["if-no-files-found"] == "error"
+
+    def test_requires_explicit_manual_dispatch(self) -> None:
+        workflow = _ci_workflow()
+        trigger = workflow[True]["workflow_dispatch"]["inputs"]["qualify_queue"]
+
+        assert trigger == {
+            "description": "Run the deferred Rust queue qualification contracts",
+            "type": "boolean",
+            "default": False,
+        }
+        assert (
+            workflow["jobs"]["queue-qualification"]["if"]
+            == "github.event_name == 'workflow_dispatch' && inputs.qualify_queue"
+        )
+
+    def test_benchmark_preserves_serial_profiles(self):
+        workflow = _workflow("queue-qualification-benchmark.yml")
+        job = workflow["jobs"]["compare"]
+
+        triggers = workflow[True]
+        assert set(triggers) == {"pull_request", "workflow_dispatch"}
+        assert triggers["pull_request"]["paths"] == [
+            "backend/qualification/queue/**",
+            "backend/scripts/bench_queue.py",
+            "backend/scripts/bench_queue_qualification.py",
+            "backend/scripts/bench_queue_qualification_matrix.py",
+        ]
+        assert workflow["permissions"] == {"contents": "read"}
+
+        assert job["strategy"]["max-parallel"] == 1
+        assert job["strategy"]["fail-fast"] is False
+        assert job["strategy"]["matrix"] == {
+            "database": ["sqlite", "postgres"],
+            "cpus": [2, 4],
+        }
+        command = next(
+            step["run"]
+            for step in job["steps"]
+            if step.get("name") == "Compare current queue with pinned Rust candidates"
+        )
+        assert "bench_queue_qualification_matrix.py" in command
+        artifact = next(
+            step
+            for step in job["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        )
+        assert artifact["if"] == "always()"
+        assert artifact["with"]["if-no-files-found"] == "error"
+
+
+class TestFlakyDetectionJob:
+    def test_excludes_the_coverage_report_audit(self) -> None:
+        job = _ci_workflow()["jobs"]["flaky-detection"]
+        command = next(
+            step["run"]
+            for step in job["steps"]
+            if step.get("name") == "Run the suite five times with different orderings"
+        )
+
+        assert "--deselect tests/repo/test_coverage_floors.py" in command
+
+
+class TestBackendTimeouts:
+    def test_prevents_unbounded_backend_execution(self) -> None:
+        assert _ci_workflow()["jobs"]["backend"]["timeout-minutes"] == 60
+
+        project = tomllib.loads((REPO_ROOT / "backend" / "pyproject.toml").read_text())
+        assert project["tool"]["pytest"]["ini_options"]["timeout"] == 300
+        assert any(
+            dependency.startswith("pytest-timeout>=2.4,")
+            for dependency in project["project"]["optional-dependencies"]["dev"]
+        )
+
+
+class TestNativeCoverageJob:
+    def test_audits_the_native_dependency_graph(self) -> None:
+        steps = _ci_workflow()["jobs"]["native-coverage"]["steps"]
+        install = next(
+            step["run"]
+            for step in steps
+            if step.get("name")
+            == "Install production compiler and coverage instrumentation"
+        )
+        assert "cargo +1.98.1 install cargo-audit --version 0.22.2 --locked" in install
+        assert (
+            "cargo +1.98.1 install cargo-llvm-cov --version 0.9.1 --locked" in install
+        )
+
+        audit = next(
+            step["run"]
+            for step in steps
+            if step.get("name") == "Audit the native dependency graph"
+        )
+        assert audit == "cargo +1.98.1 audit"
+        assert "--locked" not in audit
+
+    def test_requires_executed_native_coverage(self):
+        job = _ci_workflow()["jobs"]["native-coverage"]
+        assert not job.get("continue-on-error", False)
+        steps = job["steps"]
+        run = next(
+            step for step in steps if step.get("run") == "./scripts/native-coverage.sh"
+        )
+        assert not run.get("continue-on-error", False)
+        assert run["working-directory"] == "backend"
+        artifact = next(
+            step
+            for step in steps
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        )
+        assert artifact["if"] == "always()"
+        assert artifact["with"]["if-no-files-found"] == "error"
+        assert artifact["with"]["path"] == "backend/rust/target/native-coverage-report/"
+
+        script = (REPO_ROOT / "backend" / "scripts" / "native-coverage.sh").read_text()
+        assert "--package printstash-gcode-core" in script
+        assert "--package printstash-libbgcode" in script
+        assert '"/rust/gcode-core/src/"' in script
+        assert '"/rust/libbgcode-sys/src/"' in script
 
 
 class TestCriticalCapabilitiesJob:
@@ -232,9 +472,7 @@ class TestContainerVulnerabilityScanning:
 
         assert len(rows) == 8
         assert all(row.get("load", True) is True for row in rows)
-        assert scan["with"]["image"] == (
-            "${{ matrix.image }}:${{ matrix.arch }}-ci"
-        )
+        assert scan["with"]["image"] == ("${{ matrix.image }}:${{ matrix.arch }}-ci")
         assert scan["with"]["report-name"] == (
             "ci-${{ matrix.image }}-${{ matrix.arch }}"
         )
@@ -243,9 +481,7 @@ class TestContainerVulnerabilityScanning:
         workflow = _workflow("container-publish.yml")
         scan_job = workflow["jobs"]["scan"]
         merge_job = workflow["jobs"]["merge"]
-        resolve = next(
-            step for step in scan_job["steps"] if step.get("id") == "target"
-        )
+        resolve = next(step for step in scan_job["steps"] if step.get("id") == "target")
         scan = next(
             step
             for step in scan_job["steps"]
@@ -273,9 +509,7 @@ class TestContainerVulnerabilityScanning:
         assert "--output table=/reports/report.txt" in scan["run"]
         assert "--output json=/reports/report.json" in scan["run"]
         assert "--output sarif=/reports/report.sarif" in scan["run"]
-        assert "ghcr.io/anchore/grype:v0.118.0@sha256:" in scan["env"][
-            "GRYPE_IMAGE"
-        ]
+        assert "ghcr.io/anchore/grype:v0.118.0@sha256:" in scan["env"]["GRYPE_IMAGE"]
         assert upload["with"]["retention-days"] == 90
         assert upload["with"]["if-no-files-found"] == "warn"
 
@@ -336,7 +570,9 @@ class TestContainerVulnerabilityScanning:
             (REPO_ROOT / ".github/actions/grype-scan/action.yml").read_text()
         )
         upload = next(
-            step for step in action["runs"]["steps"] if step["name"] == "Upload SARIF report"
+            step
+            for step in action["runs"]["steps"]
+            if step["name"] == "Upload SARIF report"
         )
 
         assert workflow_job["permissions"]["security-events"] == "write"
@@ -344,3 +580,21 @@ class TestContainerVulnerabilityScanning:
         assert upload["uses"] != "github/codeql-action/upload-sarif@v4"
         assert upload["continue-on-error"] is True
         assert upload["with"]["sarif_file"].endswith("/report.sarif")
+
+
+class TestBackendCoverageJob:
+    def test_retains_coverage_after_a_failed_floor(self):
+        artifacts = [
+            step
+            for step in _ci_workflow()["jobs"]["backend"]["steps"]
+            if step.get("uses", "").startswith("actions/upload-artifact@")
+        ]
+        assert len(artifacts) == 1
+        artifact = artifacts[0]
+        assert artifact["if"] == "always()"
+        assert artifact["with"]["name"] == "backend-coverage"
+        assert artifact["with"]["if-no-files-found"] == "error"
+        assert set(artifact["with"]["path"].splitlines()) == {
+            "backend/coverage.json",
+            "backend/.coverage-html/",
+        }

@@ -26,7 +26,12 @@ from app.api.artifact_responses import delivery_request, render_delivery
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.logging import get_logger
-from app.core.security import get_current_user, require_superuser, require_user
+from app.core.security import (
+    get_current_user,
+    require_auth,
+    require_superuser,
+    require_user,
+)
 from app.db.models import CollectionRole, File, FileType, Model, User
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
@@ -51,6 +56,7 @@ from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import publish_bytes
 from app.runtime.jobs import registry
+from app.schemas.enrichment import ArtifactEnrichmentRead, ArtifactEnrichmentRequest
 from app.schemas.ingest import IngestResponse
 
 logger = get_logger(__name__)
@@ -575,3 +581,25 @@ async def get_toolpath(
         media_type="text/plain",
         headers={"Cache-Control": "private, no-store"},
     )
+
+
+@router.post(
+    "/{file_id}/enrichment", status_code=202, dependencies=[Depends(require_auth)]
+)
+def request_artifact_enrichment(
+    file_id: int,
+    request: ArtifactEnrichmentRequest,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ArtifactEnrichmentRead:
+    """Request optional outputs or retry a failed generation without rendering."""
+    from app.modules.library.model_views.enrichment import states_for_files
+    from app.modules.media.analysis_generations import retry_enrichment
+
+    file = _accessible_file(session, file_id, current_user)
+    model = session.get(Model, file.model_id)
+    assert model is not None and current_user.id is not None
+    rbac.require_model_collection_role(session, current_user, model.collection_id, CollectionRole.EDIT)
+    retry_enrichment(session, file, metadata=request.metadata, thumbnail=request.thumbnail, actor_id=current_user.id)
+    session.commit()
+    return states_for_files(session, [file_id])[file_id]

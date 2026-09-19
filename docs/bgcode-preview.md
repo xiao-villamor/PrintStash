@@ -7,6 +7,11 @@ create empty layers. PrintStash validates and converts a temporary copy with off
 The stored Artifact, metadata, thumbnail, original download and bytes uploaded to
 PrusaLink remain unchanged. PrusaLink remains beta.
 
+Metadata, validation, and embedded-thumbnail extraction use the bounded native
+engine described in [Native G-code metadata engine](native-gcode.md). Toolpath
+conversion remains a separately supervised libbgcode CLI because browser preview
+needs the printable command stream while ordinary imports do not.
+
 Full and lite API images include the converter for amd64 and arm64. Development
 installs need the executable on PATH, or `VAULT_BGCODE_EXECUTABLE` pointing to it.
 The build script verifies the source archive digest and packages license notices.

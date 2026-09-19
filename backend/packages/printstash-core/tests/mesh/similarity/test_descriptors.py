@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 from importlib.resources import files
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -32,6 +33,17 @@ class TestPhysicalDescriptors:
         assert len(result.sh_basis_digest) == 64
         assert len(result.view_hashes) == 48
         assert result.unavailable == ()
+
+    def test_translates_native_inertia_errors(self, tetra, monkeypatch):
+        def rejected_inertia(_triangles):
+            raise ValueError("invalid_inertia_geometry")
+
+        monkeypatch.setattr(
+            "printstash_core.mesh.native_rasterizer.kernel",
+            lambda: SimpleNamespace(volume_inertia_ratios=rejected_inertia),
+        )
+        with pytest.raises(GeometryError, match="invalid_inertia_geometry"):
+            descriptors.volume_inertia_ratios(prepare_surface(*tetra))
 
     def test_isotropic_solid_inertia_is_independent_of_orientation(self, cube):
         surface = prepare_surface(*cube)
@@ -118,8 +130,12 @@ class TestSphericalHarmonics:
         assert np.count_nonzero(a) > 500
 
     def test_empty_occupancy_has_explicit_failure(self, tetra, monkeypatch):
+        def empty_occupancy(*args, **kwargs):
+            raise ValueError("empty_occupancy")
+
         monkeypatch.setattr(
-            descriptors, "voxelize", lambda *a, **k: np.zeros((64, 64, 64), bool)
+            "printstash_core.mesh.native_rasterizer.kernel",
+            lambda: SimpleNamespace(sh_spectrum=empty_occupancy),
         )
 
         with pytest.raises(GeometryError, match="empty_occupancy"):
@@ -218,3 +234,14 @@ class TestViews:
     def test_invalid_view_is_not_hashed(self, image):
         with pytest.raises(GeometryError, match="invalid_view_image"):
             descriptors.dct_hash(image)
+
+    def test_translates_native_hash_errors(self, monkeypatch):
+        def rejected_hash(_pixels):
+            raise ValueError("invalid_view_image")
+
+        monkeypatch.setattr(
+            "printstash_core.mesh.native_rasterizer.kernel",
+            lambda: SimpleNamespace(dct_hash=rejected_hash),
+        )
+        with pytest.raises(GeometryError, match="invalid_view_image"):
+            descriptors.dct_hash(np.zeros((64, 64)))

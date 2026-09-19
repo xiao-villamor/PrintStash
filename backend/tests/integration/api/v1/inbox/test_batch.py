@@ -92,7 +92,7 @@ class TestBatchItems:
     def test_imports_every_item_that_is_ready(
         self, client: TestClient, make_user, headers_for, make_item, imports_run
     ) -> None:
-        owner = make_user("batch-import")
+        owner = make_user("batch-import", superuser=True)
         row = make_item(
             owner,
             state=InboxItemState.REVIEW,
@@ -106,12 +106,13 @@ class TestBatchItems:
         )
 
         assert response.status_code == 200, response.text
-        assert imports_run == [(row.id, [])]
+        assert response.json()[0]["state"] == "importing"
+        assert response.json()[0]["background_job_id"]
 
     def test_drops_an_item_that_is_not_ready_to_import(
         self, client: TestClient, make_user, headers_for, make_item, imports_run
     ) -> None:
-        owner = make_user("batch-import-mixed")
+        owner = make_user("batch-import-mixed", superuser=True)
         ready = make_item(
             owner,
             state=InboxItemState.REVIEW,

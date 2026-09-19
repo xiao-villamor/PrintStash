@@ -1,0 +1,20 @@
+[package]
+name = "printstash-libbgcode"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+links = "printstash_libbgcode"
+
+[dependencies]
+cxx = "=1.0.202"
+libz-sys = { version = "=1.1.29", features = ["static"] }
+
+[build-dependencies]
+cc = "=1.4.6"
+cxx-build = "=1.0.202"
+libz-sys = { version = "=1.1.29", features = ["static"] }
+
+[dev-dependencies]
+crc32fast = "=1.5.2"
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"] }

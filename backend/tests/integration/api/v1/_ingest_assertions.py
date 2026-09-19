@@ -35,6 +35,7 @@ def completed_job(client: TestClient, response) -> dict:
     if authorization:
         headers["Authorization"] = authorization
 
+    drain_ingestion()
     job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
 
     assert job.status_code == 200, job.text
@@ -54,6 +55,8 @@ def assert_file_created(session: Session, file_id: int, file_type: FileType) -> 
     pass for both. So this asserts the row, its bytes on the backend, its
     metadata, and the owning model's thumbnail — row *and* blob — together.
     """
+    drain_enrichment()
+    session.expire_all()
     file_row = session.get(File, file_id)
     assert file_row is not None
     assert file_row.file_type == file_type
@@ -69,3 +72,29 @@ def assert_file_created(session: Session, file_id: int, file_type: FileType) -> 
     assert model.thumbnail_path
     assert get_backend().exists(model.thumbnail_path)
     return file_row
+
+
+def drain_ingestion() -> None:
+    """Drive durable command owners explicitly; TestClient does not run lifespan."""
+    import asyncio
+
+    from app.runtime.ingestion import process_one
+
+    async def drain():
+        for _ in range(100):
+            if not await process_one():
+                return
+        raise AssertionError("ingestion did not become idle")
+
+    asyncio.run(drain())
+
+
+def drain_enrichment() -> None:
+    from app.db.session import get_session_factory
+    from app.modules.media.enrichment import EnrichmentProcessor
+
+    processor = EnrichmentProcessor(get_session_factory(), get_backend())
+    for _ in range(100):
+        if not processor.work_one():
+            return
+    raise AssertionError("enrichment did not become idle")

@@ -39,6 +39,7 @@ export type FileRevisionStatus = "known_good" | "needs_test" | "failed" | "archi
 export type CollectionRole = "view" | "edit" | "admin";
 
 export interface FileRead {
+  enrichment?: ArtifactEnrichmentRead;
   id: number;
   model_id: number;
   original_filename: string;
@@ -70,6 +71,7 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  enrichment_pending?: boolean;
   family?: ModelFamilySummary | null;
   similarity?: ModelSimilarityRead;
   id: number;
@@ -163,6 +165,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  enrichment_pending?: boolean;
   family?: ModelFamilySummary | null;
   similarity?: ModelSimilarityRead;
   id: number;
@@ -418,7 +421,7 @@ export interface IngestJobStatus {
   skipped?: number;
   failed?: number;
   completion?: "complete" | "partial" | null;
-  thumbnail_status?: "generated" | "fallback_generated" | "skipped" | "failed" | null;
+  thumbnail_status?: "pending" | "generated" | "fallback_generated" | "skipped" | "failed" | null;
   thumbnail_reason?: string | null;
   fingerprint_status?: "ready" | "partial" | "unsupported" | "failed" | "pending" | null;
   retryable?: boolean;
@@ -594,11 +597,16 @@ export interface ListModelsParams {
   storage?: ("vault" | "external")[];
   uploaded_after?: string;
   uploaded_before?: string;
+  printed_after?: string;
+  printed_before?: string;
+  print_duration_min_s?: number;
+  print_duration_max_s?: number;
   limit?: number;
   offset?: number;
 }
 
 export type ModelSort =
+  | "relevance"
   | "date-desc"
   | "date-asc"
   | "name-asc"
@@ -628,6 +636,7 @@ export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
 }
 
 export interface SavedViewFilters {
+  sort?: ModelSort | null;
   family_id?: number | null;
   family_role?: VariantRole | null;
   in_family?: boolean | null;
@@ -650,6 +659,10 @@ export interface SavedViewFilters {
   storage?: ("vault" | "external")[];
   uploaded_after?: string | null;
   uploaded_before?: string | null;
+  printed_after?: string | null;
+  printed_before?: string | null;
+  print_duration_min_s?: number | null;
+  print_duration_max_s?: number | null;
 }
 
 export type ArtifactFileType = "stl" | "3mf" | "gcode" | "obj" | "step";
@@ -780,4 +793,22 @@ export interface TagRead {
   slug: string;
   model_count: number;
   multipart_model_count?: number;
+}
+
+export type EnrichmentState =
+  | "unknown"
+  | "pending"
+  | "running"
+  | "ready"
+  | "failed"
+  | "blocked"
+  | "disabled"
+  | "on_demand"
+  | "not_applicable";
+
+export interface ArtifactEnrichmentRead {
+  metadata: EnrichmentState;
+  thumbnail: EnrichmentState;
+  metadata_error: string | null;
+  thumbnail_error: string | null;
 }

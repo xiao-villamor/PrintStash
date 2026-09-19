@@ -46,7 +46,6 @@ from app.modules.ingestion.artifact_uploads import (
     UploadRequest,
 )
 from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE, ApiChunkError
-from app.modules.ingestion.artifact_uploads.handoff import run_verified_upload_ingestion
 from app.schemas.artifact_uploads import (
     ArtifactUploadChunkRead,
     ArtifactUploadCreate,
@@ -491,6 +490,9 @@ def finalize_artifact_upload(
             owner_user_id=current_user.id,
             check_capacity=False,
             remove_staged_on_failure=False,
+            command="verified_upload",
+            arguments={"upload_id": upload.id, "staged_path": str(verified.path)},
+            commit=False,
         )
     except Exception:
         manager.transition(
@@ -516,13 +518,6 @@ def finalize_artifact_upload(
             "bytes": verified.size_bytes,
             "job_id": job_id,
         },
-    )
-    background_tasks.add_task(
-        run_verified_upload_ingestion,
-        upload_id=upload.id,
-        job_id=job_id,
-        staged_path=verified.path,
-        session_factory=session_factory,
     )
     return _upload_read(manager, upload)
 

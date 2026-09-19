@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import List, Literal, Optional
 
 from sqlalchemy import func
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.db.models import (
     Model,
@@ -17,8 +17,26 @@ from app.schemas.models import (
     OutlinerModelRead,
 )
 
-from .filters import _filtered_stmt
+from .access import accessible_live_model_ids_stmt
+from .filters import _filtered_stmt, filtered_with_rank
 from .projections import _hydrate_list_rows, collection_name_for
+
+
+def read_items_by_ids(session: Session, user: User, model_ids: list[int]) -> list[ModelListItem]:
+    """Reuse authorized Model cards in heterogeneous, bounded result pages."""
+    if len(model_ids) > 2048:
+        raise ValueError("model_projection_limit")
+    if not model_ids or not user.is_active:
+        return []
+    rows = session.exec(
+        select(Model).where(
+            Model.id.in_(model_ids),
+            Model.id.in_(
+                accessible_live_model_ids_stmt(session, user).where(Model.id.in_(model_ids))
+            ),
+        )
+    ).all()
+    return _hydrate_list_rows(session, user, list(rows))
 
 
 def list_items(
@@ -50,7 +68,9 @@ def list_items(
         printer_presence=printer_presence,
         favorites=favorites,
     )
-    stmt = _filtered_stmt(session, user, filters)
+    stmt, rank = filtered_with_rank(session, user, filters)
+    if rank is not None:
+        stmt = stmt.order_by(rank.desc())
 
     # Model.id is the stable tiebreaker: without it, models sharing an
     # updated_at (e.g. a batch ZIP import) sort non-deterministically, so

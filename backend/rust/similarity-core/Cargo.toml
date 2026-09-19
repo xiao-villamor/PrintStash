@@ -1,0 +1,9 @@
+[package]
+name = "printstash-similarity-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+
+[dependencies]
+nalgebra = { version = "=0.35.0", default-features = false, features = ["std"] }

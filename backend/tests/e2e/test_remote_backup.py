@@ -27,6 +27,7 @@ from app.modules.storage.storage_providers import (
 )
 from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, openssh_endpoint, s3_endpoint
 from tests.fixtures.storage_presets import real_preset_configuration
+from tests.ingestion_work import drain_sources
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "sample.gcode"
@@ -172,6 +173,7 @@ class TestRemoteBackup:
         assert uploaded.status_code == 202, uploaded.text
         job_id = uploaded.json()["job_id"]
         for _ in range(50):
+            await drain_sources()
             job = (
                 await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
             ).json()

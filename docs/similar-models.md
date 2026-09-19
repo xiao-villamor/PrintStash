@@ -57,8 +57,14 @@ Advanced settings provide per-class thresholds, a triangle cap (2,000,000),
 verification samples (5,000), candidates per shortlist (20), an optional scan
 interval, and local embeddings. These controls have enforced upper bounds.
 
-Analysis on upload is a separate opt-in. A derivative failure leaves a successful
-upload intact. Runs keep their checkpoints across restarts and can be cancelled
+Analysis on upload is a separate opt-in. ZIP imports save sources first;
+background enrichment computes geometry and previews and queues similarity
+fingerprints in the database. New source work has scheduling priority, while
+background requests aged at least 60 seconds remain eligible to progress. A
+running analysis step retains its compute permit until it finishes. Import
+completion means the Models are available; their geometry, previews and similarity
+analysis may still be pending. A derivative failure leaves a successful upload
+intact. Runs keep their checkpoints across restarts and can be cancelled
 between work units. Maintenance and storage garbage collection share the normal
 application admission and retention controls. Truncated buckets, partial inputs,
 and unsupported Artifacts are reported in progress instead of implying a complete

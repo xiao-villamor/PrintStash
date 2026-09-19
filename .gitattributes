@@ -1,0 +1,2 @@
+# Preserve immutable upstream source snapshots byte-for-byte.
+backend/rust/libbgcode-sys/vendor/** whitespace=-trailing-space

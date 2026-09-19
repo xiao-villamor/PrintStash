@@ -80,7 +80,8 @@ class TestExtractEmbedded3mfThumbnail:
             "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_BYTES", 1_000
         )
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_AGGREGATE_BYTES", 1_100
+            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_AGGREGATE_BYTES",
+            1_100,
         )
         path = _make_3mf(
             tmp_path,
@@ -114,14 +115,16 @@ class TestExtractEmbedded3mfThumbnail:
         assert extract_embedded_3mf_thumbnail(p) is None
 
     def test_invalid_thumbnail_is_never_returned_as_raw_storage_payload(self) -> None:
-        with pytest.raises(ValueError, match="thumbnail_too_large"):
+        with pytest.raises(ValueError, match="thumbnail_format_unsupported"):
             thumbnail.to_webp(b"not-an-image")
 
     def test_rejects_thumbnail_declared_over_limit_without_reading_member(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         p = _make_3mf(tmp_path, {"Metadata/thumbnail.png": _PNG_BIG})
-        monkeypatch.setattr("app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_BYTES", 64)
+        monkeypatch.setattr(
+            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_BYTES", 64
+        )
 
         original_read = zipfile.ZipFile.read
 

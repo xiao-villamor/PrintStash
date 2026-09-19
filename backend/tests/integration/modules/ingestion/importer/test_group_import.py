@@ -48,6 +48,56 @@ def owner(db_session: Session) -> User:
 
 
 class TestRunGroupImport:
+    def test_persists_a_staged_collection_member(self, db_session, make_user, tmp_path):
+        import shutil
+
+        from sqlmodel import select
+
+        from app.db.models import ArtifactAnalysisGeneration, File
+        from app.db.session import get_session_factory
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.paths import TESTDATA_DIR
+
+        actor = make_user(superuser=True)
+        staged = tmp_path / "member.stl"
+        shutil.copyfile(TESTDATA_DIR / "Calibration Cube.stl", staged)
+        source_bytes = staged.read_bytes()
+        job = registry.create(owner_user_id=actor.id)
+        importer.import_resolved_groups(
+            job_id=job,
+            groups=[
+                ResolvedGroup(
+                    source_url="https://example.test/part",
+                    title="Member",
+                    staged_files=[(staged, "member.stl")],
+                )
+            ],
+            collection="Collection",
+            tags=None,
+            actor_user_id=actor.id,
+            session_factory=get_session_factory(),
+        )
+
+        status = registry.get(job)
+        assert status.state == "completed"
+        assert status.result["imported"] == 1
+        assert status.result["items"][0]["member"] == "Member"
+        file = db_session.exec(
+            select(File).where(
+                File.model_id == status.result["items"][0]["model_id"],
+                File.original_filename == "member.stl",
+            )
+        ).one()
+        assert get_backend().read_bytes(file.path) == source_bytes
+        assert (
+            db_session.exec(
+                select(ArtifactAnalysisGeneration.state).where(
+                    ArtifactAnalysisGeneration.file_id == file.id
+                )
+            ).one()
+            == "pending"
+        )
+
     def test_all_members_failing_marks_job_failed(self, owner: User) -> None:
         job = _run(
             owner,

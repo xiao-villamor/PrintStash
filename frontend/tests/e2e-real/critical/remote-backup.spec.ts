@@ -215,6 +215,9 @@ test.describe("shared provider connection forms", () => {
     await mkdir(accountRoot, { recursive: true });
     try {
       await page.goto("/settings?section=storage");
+      await page
+        .getByRole("button", { name: "Move storage with a verified migration", exact: true })
+        .click();
       await page.getByRole("button", { name: "Nextcloud and WebDAV", exact: true }).click();
       await page.getByRole("button", { name: /^Nextcloud Remote storage/ }).click();
       await page.getByLabel("Server URL").fill(endpoint);

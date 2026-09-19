@@ -1,0 +1,45 @@
+name: Queue qualification benchmark
+
+on:
+  pull_request:
+    paths:
+      - "backend/qualification/queue/**"
+      - "backend/scripts/bench_queue.py"
+      - "backend/scripts/bench_queue_qualification.py"
+      - "backend/scripts/bench_queue_qualification_matrix.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Queue candidates (${{ matrix.database }}, ${{ matrix.cpus }} CPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        database: [sqlite, postgres]
+        cpus: [2, 4]
+    steps:
+      - name: Check out the measured revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Compare current queue with pinned Rust candidates
+        run: >-
+          python3 backend/scripts/bench_queue_qualification_matrix.py
+          --head "$GITHUB_SHA"
+          --database "${{ matrix.database }}"
+          --cpus "${{ matrix.cpus }}"
+          --output "$RUNNER_TEMP/queue-qualification"
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: queue-qualification-benchmark-${{ matrix.database }}-${{ matrix.cpus }}cpu
+          path: ${{ runner.temp }}/queue-qualification/evidence/
+          retention-days: 90
+          if-no-files-found: error

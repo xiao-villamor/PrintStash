@@ -13,6 +13,30 @@ from app.modules.storage.capacity import CapacityManager, CapacityResource
 
 
 class TestCapacityManager:
+    def test_admits_an_explicit_logical_budget(self, db_session):
+        manager = CapacityManager(get_session_factory(), headroom_bytes=100)
+
+        reservation = manager.reserve(
+            "index", [CapacityResource.for_budget("index", 50, 50, role="index limit")]
+        )
+
+        assert manager.reserved_bytes() == {"budget:index": 50}
+        reservation.release()
+
+    def test_preserves_physical_headroom_with_logical_limits(self, db_session):
+        manager = CapacityManager(get_session_factory(), headroom_bytes=10)
+
+        with pytest.raises(OperationError, match="storage_capacity_exceeded"):
+            manager.reserve(
+                "index",
+                [
+                    CapacityResource.for_budget("index", 50, 50, role="index limit"),
+                    CapacityResource.for_quota("disk", 95, 100, role="remote disk"),
+                ],
+            )
+
+        assert manager.reserved_bytes() == {}
+
     def test_denies_combined_allocations_on_one_volume(self, db_session):
         manager = CapacityManager(get_session_factory(), headroom_bytes=10)
         resources = [
@@ -307,9 +331,7 @@ class TestDurableCapacityLifetime:
 
 
 class TestLegacyCapacityReservation:
-    def test_reuses_without_total_evidence(
-        self, db_session, make_capacity_reservation
-    ):
+    def test_reuses_without_total_evidence(self, db_session, make_capacity_reservation):
         row = make_capacity_reservation(operation_id="legacy")
         manager = CapacityManager(get_session_factory(), headroom_bytes=0)
 

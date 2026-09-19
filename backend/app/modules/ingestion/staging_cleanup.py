@@ -29,12 +29,18 @@ def prune_expired(
     backend: StorageBackend | None = None,
 ) -> tuple[int, int]:
     """Remove expired rows; unlink only exact files. Returns (rows, files)."""
+    from app.modules.ingestion import review_manifests
+    review_manifests.prune_expired(session)
     timestamp = now or utcnow()
     rows = list(
         session.exec(select(StagingLease).where(StagingLease.expires_at <= timestamp))
     )
     removed = unlinked = 0
     for lease in rows:
+        if lease.background_job_id:
+            from app.modules.ingestion.commands import retains_staging
+            if retains_staging(session, lease.background_job_id):
+                continue
         if lease.model_source_cover_id is not None:
             # A cover lease never represents a local path. Reconcile its
             # backend-native publication first; if no bytes were published,

@@ -27,6 +27,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from printstash_core.search.passages import SearchSubject, SubjectType
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -47,6 +48,60 @@ from tests import factories
 
 
 class TestGeneratedIdentities:
+    def test_search_projection_builder_creates_eligible_work(self, db_session):
+        from app.db.models import SearchPassage
+        from app.db.projections import ContentSource
+        from app.modules.search.projection import process_pending
+
+        model = factories.build_model(db_session, "Bracket")
+        factories.build_search_projection_request(
+            db_session, ContentSource("model", model.id)
+        )
+
+        process_pending(db_session)
+
+        assert db_session.exec(select(SearchPassage.text)).all() == ["Title: Bracket"]
+
+    def test_search_dependency_builder_tracks_removed_sources(self, db_session):
+        from app.db.projections import ContentSource
+        from app.modules.search.projection import affected_subjects
+
+        model = factories.build_model(db_session)
+        subject = SearchSubject(SubjectType.MODEL, model.id)
+        source = ContentSource("provenance", 999)
+        factories.build_search_dependency(db_session, subject, source)
+
+        assert list(affected_subjects(db_session, source)) == [subject]
+
+    def test_search_checkpoint_builder_resumes_a_partition(self, db_session):
+        from app.db.models import SearchPassage
+        from app.modules.search.reconciliation import reconcile_partition
+
+        first = factories.build_document(db_session, "First")
+        second = factories.build_document(db_session, "Second")
+        factories.build_search_reconciliation_state(
+            db_session,
+            SubjectType.DOCUMENT,
+            watermark_at=second.updated_at,
+            watermark_id=second.id,
+            partition_after_id=first.id,
+        )
+
+        reconcile_partition(db_session, SubjectType.DOCUMENT, limit=1)
+
+        assert db_session.exec(select(SearchPassage.subject_id)).all() == [second.id]
+
+    def test_search_passage_builder_preserves_subject_identity(self, db_session):
+        model = factories.build_model(db_session)
+        subject = SearchSubject(SubjectType.MODEL, model.id)
+
+        passage = factories.build_search_passage(db_session, subject)
+
+        assert passage.subject_type == "model"
+        assert passage.subject_id == model.id
+        assert passage.access_dependencies_json == "[]"
+        assert passage.text == "Title: Stored passage"
+
     def test_migration_builders_preserve_workflow_ownership(
         self, db_session: Session
     ) -> None:
@@ -771,7 +826,7 @@ class TestSimilarityFactories:
 
         from printstash_core.inference import EmbeddingSpace
 
-        from app.modules.inference.store import active_generation
+        from app.modules.search.vector_store import active_generation
 
         space = factories.build_embedding_space(db_session)
         generation = factories.build_index_generation(db_session, space)
@@ -788,7 +843,7 @@ class TestSimilarityFactories:
 
         from printstash_core.inference import EmbeddingSpace
 
-        from app.modules.inference.store import active_generation
+        from app.modules.search.vector_store import active_generation
 
         space = factories.build_embedding_space(db_session)
         factories.build_index_generation(db_session, space, active=False)
@@ -802,7 +857,7 @@ class TestSimilarityFactories:
 
     @pytest.mark.parametrize("component", [0, 1, 2048])
     def test_vectors_encode_component_identity(self, db_session, component):
-        from app.modules.inference.store import unit_component
+        from printstash_core.inference.units import unit_component
 
         space = factories.build_embedding_space(db_session)
         generation = factories.build_index_generation(db_session, space)
@@ -812,3 +867,20 @@ class TestSimilarityFactories:
         )
 
         assert unit_component(vector.unit_key) == component
+
+
+class TestFactoriesContract:
+    def test_review_builder_preserves_the_private_owner(self, db_session):
+        from app.modules.ingestion.review_manifests import get
+
+        owner = factories.build_user(db_session)
+        review = factories.build_ingestion_review(db_session, owner=owner)
+        restored = get(review.kind, review.id)
+        assert restored["owner_user_id"] == owner.id
+
+
+    def test_expired_review_builder_is_ineligible_for_acceptance(self, db_session):
+        from app.modules.ingestion.review_manifests import get
+
+        review = factories.build_ingestion_review(db_session, expired=True)
+        assert get(review.kind, review.id) is None

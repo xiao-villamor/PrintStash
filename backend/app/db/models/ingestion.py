@@ -262,3 +262,26 @@ class CaptureUploadSlot(SQLModel, table=True):
     uploaded_at: Optional[datetime] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class IngestionReview(SQLModel, table=True):
+    """Owner-scoped review manifest that survives process restarts."""
+
+    __tablename__ = "ingestion_reviews"
+    __table_args__ = ({"info": {"audit_exclude": True}},)
+    id: str = Field(primary_key=True, max_length=64)
+    kind: str = Field(max_length=32, index=True)
+    owner_user_id: Optional[int] = Field(
+        default=None, foreign_key="users.id", index=True
+    )
+    payload_json: str = Field(sa_column=Column(Text, nullable=False))
+    source_job_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(
+            String(64),
+            ForeignKey("background_jobs.id", ondelete="SET NULL"),
+            index=True,
+        ),
+    )
+    expires_at: datetime = Field(index=True)
+    claim_expires_at: Optional[datetime] = None

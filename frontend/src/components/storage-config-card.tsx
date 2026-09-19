@@ -5,13 +5,14 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Save } from "lucide-react";
+import { AlertTriangle, HardDrive, Save } from "lucide-react";
 import {
   enrollStorageRoot,
   getStorageProviders,
   getVaultConfig,
   updateVaultConfig,
 } from "@/lib/api";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StorageProviderFields } from "@/components/storage-provider-fields";
 import { providerFields } from "@/lib/storage-provider-form";
@@ -118,16 +119,14 @@ export function StorageConfigCard({
   if (loading) {
     return (
       <Localized>
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">
-              {uiText("Storage configuration")}
-            </h3>
+        <Card className="overflow-hidden">
+          <div className="px-4 py-4 sm:px-5 border-b border-border">
+            <h2 className="text-sm font-semibold text-foreground">{uiText("Storage location")}</h2>
           </div>
           <div className="p-3 sm:p-4 lg:p-6 text-sm text-muted-foreground">
             {uiText("Loading...")}
           </div>
-        </div>
+        </Card>
       </Localized>
     );
   }
@@ -175,24 +174,27 @@ export function StorageConfigCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">
-              {uiText("Storage configuration")}
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {t("settings.storageConfigDescription")}
-            </p>
+      <Card className="overflow-hidden">
+        <div className="px-4 py-4 sm:px-5 border-b border-border flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <HardDrive className="h-8 w-8 shrink-0 rounded-md bg-muted p-2" aria-hidden />
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                {uiText("Storage location")}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {t("settings.storageConfigDescription")}
+              </p>
+            </div>
           </div>
-          {cfg && (
+          {cfg?.storage_provider && (
             <span className="font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border text-muted-foreground border-border flex-shrink-0">
               {cfg.storage_provider}
             </span>
           )}
         </div>
 
-        <div className="space-y-5 p-4 sm:p-5 lg:p-6">
+        <div className="space-y-5 p-4 sm:p-5">
           {storageHealth && !storageHealth.ok && (
             <div
               role="alert"
@@ -268,24 +270,48 @@ export function StorageConfigCard({
           )}
           {migrationManaged ? (
             <div className="space-y-4">
-              {currentProvider && (
-                <StorageProviderSummary provider={currentProvider} activeTier={cfg?.storage_tier} />
-              )}
+              {currentProvider &&
+                (currentProvider.expected_tier !== "verified" ||
+                  cfg?.storage_tier !== "verified" ||
+                  currentProvider.support_level !== "stable") && (
+                  <StorageProviderSummary
+                    provider={currentProvider}
+                    activeTier={cfg?.storage_tier}
+                  />
+                )}
+              <p className="font-medium">{currentProvider?.label}</p>
               <p className="text-xs text-muted-foreground">{t("migration.changeHelp")}</p>
-              <dl className="grid gap-2 text-xs sm:grid-cols-2">
-                {locationFields.map((field) => (
-                  <div key={field.name}>
-                    <dt className="text-muted-foreground">{field.label}</dt>
-                    <dd className="break-all">{String(providerValues[field.name])}</dd>
-                  </div>
-                ))}
-              </dl>
+              <details className="space-y-3">
+                <summary className="cursor-pointer py-3 text-sm font-medium">
+                  {uiText("Connection details")}
+                </summary>
+                {currentProvider &&
+                  currentProvider.expected_tier === "verified" &&
+                  cfg?.storage_tier === "verified" &&
+                  currentProvider.support_level === "stable" && (
+                    <StorageProviderSummary
+                      provider={currentProvider}
+                      activeTier={cfg?.storage_tier}
+                    />
+                  )}
+                <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                  {locationFields.map((field) => (
+                    <div key={field.name}>
+                      <dt className="text-muted-foreground">{field.label}</dt>
+                      <dd className="break-all">{String(providerValues[field.name])}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
               {user?.is_superuser && (
                 <Button
                   variant="outline"
-                  onClick={() =>
-                    document.getElementById("vault-migration")?.scrollIntoView({ block: "start" })
-                  }
+                  onClick={() => {
+                    const target = document.getElementById("vault-migration");
+                    const disclosure = target?.closest("details");
+                    if (disclosure) disclosure.open = true;
+                    target?.scrollIntoView({ block: "start" });
+                  }}
                 >
                   {t("migration.changeEntry")}
                 </Button>
@@ -383,7 +409,7 @@ export function StorageConfigCard({
           })}
           confirmLabel={t("settings.storageEnrollConfirmAction")}
         />
-      </div>
+      </Card>
     </Localized>
   );
 }

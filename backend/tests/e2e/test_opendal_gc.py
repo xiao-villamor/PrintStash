@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import File, GcRun, Model
 from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_private_endpoint
+from tests.ingestion_work import drain_sources
 from tests.paths import FIXTURES_DIR
 
 
@@ -89,6 +90,7 @@ class TestOpenDalGc:
         )
         assert uploaded.status_code == 202, uploaded.text
         for _ in range(50):
+            await drain_sources()
             job = (
                 await api.get(
                     f"/api/v1/ingest/jobs/{uploaded.json()['job_id']}", headers=headers

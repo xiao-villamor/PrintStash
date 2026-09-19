@@ -490,3 +490,91 @@ class TestPrintStatistics:
     ) -> None:
         result = models_statistics.print_statistics(db_session, "not-a-real-period")
         assert result.period == "30d"
+
+
+class TestPrintHistoryFilters:
+    def test_requires_one_job_for_the_combined_history_predicates(
+        self, db_session, make_user, make_model, make_file, make_print_job
+    ):
+        user = make_user(superuser=True)
+        start, end = (
+            datetime(2026, 8, 1, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, tzinfo=timezone.utc),
+        )
+        split = make_model("Split history")
+        split_file = make_file(split)
+        make_print_job(
+            split_file,
+            state=PrintJobState.COMPLETED,
+            finished_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+            actual_duration_s=300,
+        )
+        make_print_job(
+            split_file,
+            state=PrintJobState.FAILED,
+            finished_at=start,
+            actual_duration_s=300,
+        )
+        make_print_job(
+            split_file,
+            state=PrintJobState.COMPLETED,
+            finished_at=start,
+            actual_duration_s=20000,
+        )
+        same = make_model("Matching history")
+        make_print_job(
+            make_file(same),
+            state=PrintJobState.COMPLETED,
+            finished_at=start,
+            actual_duration_s=300,
+        )
+        rows = models_listing.list_items(
+            db_session,
+            user,
+            filters=ModelFilters(
+                printed_after=start,
+                printed_before=end,
+                print_duration_max_s=10800,
+                print_outcome=[PrintJobState.COMPLETED],
+            ),
+        )
+        assert [row.id for row in rows] == [same.id]
+
+    def test_uses_actual_duration_with_half_open_date_boundaries(
+        self, db_session, make_user, make_model, make_file, make_print_job
+    ):
+        user = make_user(superuser=True)
+        start, end = (
+            datetime(2026, 8, 1, tzinfo=timezone.utc),
+            datetime(2026, 9, 1, tzinfo=timezone.utc),
+        )
+        expected = None
+        for name, finished, duration in [
+            ("at start", start, 100),
+            ("at end", end, 100),
+            ("at max", start, 10800),
+            ("unknown duration", start, None),
+            ("under min", start, 99),
+            ("unfinished", None, 100),
+        ]:
+            model = make_model(name)
+            file = make_file(model, metadata={"estimated_time_s": 1})
+            make_print_job(
+                file,
+                state=PrintJobState.COMPLETED,
+                finished_at=finished,
+                actual_duration_s=duration,
+            )
+            if name == "at start":
+                expected = model.id
+        rows = models_listing.list_items(
+            db_session,
+            user,
+            filters=ModelFilters(
+                printed_after=start,
+                printed_before=end,
+                print_duration_min_s=100,
+                print_duration_max_s=10800,
+            ),
+        )
+        assert [row.id for row in rows] == [expected]

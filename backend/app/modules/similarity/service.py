@@ -27,7 +27,7 @@ from app.modules.similarity.retrieval import editable_models
 def status(session: Session, actor: User) -> dict:
     config = read_settings(session)
     from app.db.session import get_session_factory
-    from app.modules.inference.search import capabilities
+    from app.modules.similarity.semantic_search import capabilities
 
     embedding_capabilities = capabilities(session, get_session_factory())
     backlog = session.exec(

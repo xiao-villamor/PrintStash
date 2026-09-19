@@ -141,7 +141,7 @@ def verify_meshes(
                 hypotheses,
                 key=lambda r: float(proximity_a.closest(fit[:256] @ r)[0].mean()),
             )
-            aligned[parity] = _surface_icp(proximity_a, fit, initial, diagonal)
+            aligned[parity] = proximity_a.align(fit, initial, diagonal)
         reflected = aligned[True][0] < aligned[False][0] * 0.8
         _, rotation, offset, convergence = aligned[reflected]
     a = sample_surface(left, sample_points, 15401)
@@ -215,36 +215,28 @@ def verify_meshes(
             if other_union and np.count_nonzero(vox_a & other) / other_union >= 0.999:
                 mirror_ambiguous = True
                 break
-    scaled = abs(factor - 1) > 1e-6
-    evidence: EvidenceClass | None = None
-    confidence = 0.0
-    if exact:
-        evidence = (
-            ("rescaled_mirrored" if scaled else "mirrored")
-            if reflected
-            else ("rescaled" if scaled else "identical_geometry")
+    from ..native_rasterizer import kernel
+
+    try:
+        evidence, confidence = kernel().verification_decision(
+            bool(exact),
+            reflected,
+            mirror_ambiguous,
+            factor,
+            surface_chamfer,
+            surface_hausdorff,
+            iou,
+            metrics_a.watertight,
+            metrics_b.watertight,
+            metrics_a.euler_characteristic,
+            metrics_b.euler_characteristic,
+            metrics_a.face_count,
+            metrics_b.face_count,
+            chamfer,
+            hausdorff,
         )
-        confidence = 1.0
-        if reflected and mirror_ambiguous:
-            evidence, confidence = "remeshed", 0.99
-    elif (
-        surface_chamfer < 0.004
-        and surface_hausdorff < 0.025
-        and iou is not None
-        and iou >= 0.94
-    ):
-        if (
-            metrics_a.watertight != metrics_b.watertight
-            or metrics_a.euler_characteristic != metrics_b.euler_characteristic
-        ):
-            evidence = "repaired"
-        elif metrics_a.face_count != metrics_b.face_count:
-            evidence = "remeshed"
-        else:
-            evidence = "similar_shape"
-        confidence = min(0.99, 0.8 + 0.19 * iou)
-    elif chamfer < 0.03 and hausdorff < 0.08 and iou is not None and iou > 0.9:
-        evidence, confidence = "similar_shape", min(0.95, iou)
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc
     transform = np.eye(4)
     transform[:3, :3] = rotation.T * scale
     transform[:3, 3] = left.centroid + offset - right.centroid @ rotation * scale
@@ -307,29 +299,3 @@ def _triangle_frame(triangle: FloatArray) -> FloatArray:
     z = np.cross(x, triangle[2] - triangle[0])
     z /= np.linalg.norm(z)
     return np.column_stack((x, np.cross(z, x), z))
-
-
-def _surface_icp(
-    proximity: SurfaceProximity,
-    points: FloatArray,
-    rotation: FloatArray,
-    diagonal: float,
-) -> tuple[float, FloatArray, FloatArray, float]:
-    import numpy as np
-
-    r, offset = rotation.copy(), np.zeros(3)
-    distances, target = proximity.closest(points @ r)
-    best = (float(distances.mean()) / diagonal, r.copy(), offset.copy(), 0.0)
-    for _ in range(8):
-        moved = points @ r + offset
-        center_a, center_b = moved.mean(axis=0), target.mean(axis=0)
-        u, _, vt = np.linalg.svd((moved - center_a).T @ (target - center_b))
-        correction = u @ np.diag([1, 1, np.linalg.det(u @ vt)]) @ vt
-        r = r @ correction
-        offset = (offset - center_a) @ correction + center_b
-        distances, target = proximity.closest(points @ r + offset)
-        error = float(distances.mean()) / diagonal
-        if error >= best[0] - 1e-9:
-            break
-        best = (error, r.copy(), offset.copy(), error)
-    return best

@@ -16,6 +16,22 @@ import { describe, expect, it, vi } from "vitest";
 import { Checkbox } from "../checkbox";
 
 describe("Checkbox", () => {
+  it("associates contextual help with the control", () => {
+    render(
+      <>
+        <Checkbox
+          checked={false}
+          onChange={() => {}}
+          ariaLabel="Allow downloads"
+          ariaDescribedBy="download-help"
+        />
+        <p id="download-help">Only administrator-requested downloads are allowed.</p>
+      </>,
+    );
+    expect(screen.getByRole("checkbox", { name: "Allow downloads" })).toHaveAccessibleDescription(
+      "Only administrator-requested downloads are allowed.",
+    );
+  });
   it("reports an unchecked box to assistive technology", () => {
     render(
       <Checkbox

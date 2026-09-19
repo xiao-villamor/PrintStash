@@ -137,7 +137,7 @@ class TestImportItem:
     def test_schedules_the_import_of_the_selected_files(
         self, client: TestClient, make_user, headers_for, make_item, imports_run
     ) -> None:
-        owner = make_user("import-schedules")
+        owner = make_user("import-schedules", superuser=True)
         row = make_item(
             owner,
             state=InboxItemState.REVIEW,
@@ -247,6 +247,36 @@ class TestImportItem:
 
 
 class TestRetryItem:
+    def test_retries_a_cover_without_reimporting_saved_sources(
+        self, client, db_session, make_user, make_model, make_file,
+        make_background_job, make_inbox_item, headers_for,
+    ):
+        from app.modules.ingestion.commands import capture_enrichment_job_id
+
+        owner = make_user(superuser=True)
+        model = make_model()
+        file = make_file(model)
+        source = make_background_job(owner=owner, state="completed")
+        work = make_background_job(
+            id=capture_enrichment_job_id(source.id), owner=owner,
+            kind="capture_enrichment", state="failed", attempts=8,
+            replay_safe=True,
+        )
+        row = make_inbox_item(
+            owner, state=InboxItemState.COMPLETED,
+            background_job_id=source.id, resulting_model_id=model.id,
+            retryable=True, error_code="capture_cover_attach_pending",
+        )
+        response = client.post(f"/api/v1/inbox/{row.id}/retry", headers=headers_for(owner))
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "completed"
+        assert response.json()["background_job_id"] == source.id
+        db_session.expire_all()
+        assert db_session.get(BackgroundJob, work.id).state == "pending"
+        assert db_session.get(BackgroundJob, work.id).attempts == 0
+        assert db_session.get(BackgroundJob, source.id).state == "completed"
+        assert db_session.exec(select(File.id).where(File.model_id == model.id)).all() == [file.id]
+
     def test_returns_an_item_with_no_manifest_to_captured(
         self, client: TestClient, make_user, headers_for, make_item, no_egress
     ) -> None:
@@ -283,7 +313,7 @@ class TestRetryItem:
         make_item,
         imports_run,
     ) -> None:
-        owner = make_user("retry-partial")
+        owner = make_user("retry-partial", superuser=True)
         row = make_item(
             owner,
             state=InboxItemState.COMPLETED,
@@ -309,7 +339,7 @@ class TestRetryItem:
         )
 
         # Re-importing the files that worked would duplicate them.
-        assert response.json()["state"] == "review"
+        assert response.json()["state"] == "importing"
         assert imports_run == [(row.id, ["bad"])]
 
     def test_refuses_a_retry_whose_stored_selection_no_longer_matches_the_manifest(

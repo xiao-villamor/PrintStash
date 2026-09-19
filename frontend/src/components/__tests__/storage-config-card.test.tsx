@@ -612,6 +612,8 @@ describe("Configured Vault migration entry", () => {
     renderCard({ migrationManaged: true, config: anS3Config() });
     expect(await screen.findByLabelText(/Access key/)).toBeVisible();
     expect(screen.queryByLabelText("Bucket")).not.toBeInTheDocument();
+    expect(screen.getByText("Bucket", { selector: "dt" })).not.toBeVisible();
+    await userEvent.click(screen.getByText("Connection details"));
     expect(screen.getByText("Bucket", { selector: "dt" })).toBeVisible();
     expect(screen.queryByText("/data/files")).not.toBeInTheDocument();
   });

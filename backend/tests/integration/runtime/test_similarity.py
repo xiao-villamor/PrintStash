@@ -13,6 +13,56 @@ from app.runtime.work_wakeup import LocalWorkWakeup
 
 
 class TestSimilarityRuntime:
+    def test_prioritizes_accepted_sources(self, db_session):
+        from app.db.models import BackgroundJob
+        from app.modules.ingestion.commands import enqueue
+        from app.runtime.jobs import registry
+
+        job = registry.create(session=db_session)
+        enqueue(db_session, job, "artifact", {})
+        db_session.commit()
+        assert similarity.process_one() is False
+        db_session.expire_all()
+        row = db_session.get(BackgroundJob, job)
+        assert (row.state, row.claim_token) == ("pending", None)
+
+    def test_yields_after_busy_processor(self, db_session, monkeypatch):
+        def busy(_processor):
+            raise OperationError("processor_busy", kind=ErrorKind.BUSY)
+
+        monkeypatch.setattr(similarity.SimilarityProcessor, "work_one", busy)
+        assert similarity.process_one() is False
+        maintenance.begin_restore_maintenance()
+        maintenance.end_restore_maintenance()
+
+    def test_defers_queued_work_during_foreground_import(self, db_session, make_user):
+        actor = make_user(superuser=True)
+        configuration.update_settings(db_session, actor, {"enabled": True})
+        run = runs.start(db_session, actor)
+        before = (run.state, run.phase, run.checkpoint_json, run.counters_json)
+        assert maintenance.begin_mutating_operation(foreground=True)
+        try:
+            worked = similarity.process_one()
+        finally:
+            maintenance.end_mutating_operation(foreground=True)
+
+        db_session.refresh(run)
+        assert worked is False
+        assert (run.state, run.phase, run.checkpoint_json, run.counters_json) == before
+
+    def test_resumes_queued_work_after_foreground_import(self, db_session, make_user):
+        actor = make_user(superuser=True)
+        configuration.update_settings(db_session, actor, {"enabled": True})
+        run = runs.start(db_session, actor)
+        assert maintenance.begin_mutating_operation(foreground=True)
+        maintenance.end_mutating_operation(foreground=True)
+
+        worked = similarity.process_one()
+
+        db_session.refresh(run)
+        assert worked is True
+        assert run.phase == "candidates"
+
     def test_idle_poll_does_not_retain_storage(self, db_session, monkeypatch):
         from app.modules.similarity import processing
 
@@ -133,3 +183,26 @@ class TestSimilarityRuntime:
         assert "inspect its run status" in caplog.text
         assert "private-path" not in caplog.text
         assert "source-token" not in caplog.text
+
+
+class TestSimilarityContract:
+    @pytest.mark.asyncio
+    async def test_drains_available_units_without_waiting_for_a_hint(
+        self, db_session, monkeypatch
+    ):
+        completed = 0
+
+        def work():
+            nonlocal completed
+            completed += 1
+            return completed < 4
+
+        class StopWhenIdle:
+            async def wait(self):
+                assert completed == 4
+                raise asyncio.CancelledError
+
+        monkeypatch.setattr(similarity, "process_one", work)
+        with pytest.raises(asyncio.CancelledError):
+            await similarity.run_similarity(StopWhenIdle())
+        assert completed == 4

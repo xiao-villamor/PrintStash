@@ -19,7 +19,8 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 class TestPreviewProfile:
     @staticmethod
     def test_canonical_thumbnail_profile_is_stable() -> None:
-        assert PREVIEW_PROFILE.version == 2
+        assert PREVIEW_PROFILE.version == 3
+        assert PREVIEW_PROFILE.encoding_method == 0
         assert PREVIEW_PROFILE.aspect_ratio == (4, 3)
         assert PREVIEW_PROFILE.margin_fraction == 0.10
         assert PREVIEW_PROFILE.material_albedo == (0.70, 0.75, 0.84)

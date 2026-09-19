@@ -1,0 +1,23 @@
+[package]
+name = "printstash-queue-qualification"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.98"
+publish = false
+license = "AGPL-3.0-only"
+
+[features]
+default = []
+postgres-tests = []
+
+[dependencies]
+anyhow = "=1.0.104"
+apalis = { version = "=0.7.4", default-features = false }
+apalis-sql = { version = "=0.7.4", default-features = false, features = ["migrate", "postgres", "sqlite", "tokio-comp"] }
+azums = { version = "=1.0.1", default-features = false, features = ["postgres", "sqlite"] }
+cpu-time = "=1.0.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sqlx = { version = "=0.8.6", default-features = false, features = ["chrono", "json", "postgres", "runtime-tokio-rustls", "sqlite", "uuid"] }
+tokio = { version = "=1.53.1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "=1.26.1", features = ["serde", "v4"] }

@@ -1,0 +1,162 @@
+[
+  {
+    "id": 1,
+    "name": "Benchy calibration boat",
+    "description": "A small tugboat for testing bridges, overhangs, dimensional accuracy and surface finish on an FDM printer."
+  },
+  {
+    "id": 2,
+    "name": "Gridfinity parts bin",
+    "description": "A square open container for sorting screws and electronic components in a modular workshop drawer."
+  },
+  {
+    "id": 3,
+    "name": "M042",
+    "description": "A hinged lid and latch close this protective container around an Arduino circuit board. Holes allow USB and power cables through."
+  },
+  {
+    "id": 4,
+    "name": "Headphone desk hook",
+    "description": "A curved support clamps beneath a desk to hang over-ear headphones out of the way."
+  },
+  {
+    "id": 5,
+    "name": "Filament spool roller",
+    "description": "Two bearing-supported wheels allow a large plastic filament reel to rotate smoothly while feeding the extruder."
+  },
+  {
+    "id": 6,
+    "name": "Articulated dragon",
+    "description": "A long fantasy creature with wings and linked body segments. Flexible joints print together without assembly."
+  },
+  {
+    "id": 7,
+    "name": "Phone stand",
+    "description": "An angled cradle holds a smartphone upright on a table for watching video. A slot routes the charging cable."
+  },
+  {
+    "id": 8,
+    "name": "Plant watering tray",
+    "description": "A shallow round dish catches water that drains through the holes under an indoor flower pot."
+  },
+  {
+    "id": 9,
+    "name": "Hex bit organizer",
+    "description": "A desktop rack with holes for screwdriver bits, arranged in labelled rows by tool size."
+  },
+  {
+    "id": 10,
+    "name": "Vase spiral",
+    "description": "A decorative twisted flower vessel with a continuous thin wall, designed for single-wall spiral printing."
+  },
+  {
+    "id": 11,
+    "name": "M017",
+    "description": "A toothed circular wheel engages another wheel to transfer rotary motion. The center bore fits a six-millimeter shaft."
+  },
+  {
+    "id": 12,
+    "name": "Cable comb",
+    "description": "A row of narrow channels keeps several electrical wires parallel and prevents tangles behind a computer."
+  },
+  {
+    "id": 13,
+    "name": "Lithophane night light",
+    "description": "A curved relief panel forms a portrait when illuminated from behind by a small LED lamp."
+  },
+  {
+    "id": 14,
+    "name": "Pegboard drill mount",
+    "description": "A bracket with two rear hooks suspends a cordless power drill on a perforated workshop wall."
+  },
+  {
+    "id": 15,
+    "name": "Cookie cutter star",
+    "description": "A hollow five-point outline presses through rolled pastry dough to create star-shaped biscuits."
+  },
+  {
+    "id": 16,
+    "name": "M099",
+    "description": "A narrow wedge fits beneath a door to stop it swinging shut. The ribbed underside grips the floor."
+  },
+  {
+    "id": 17,
+    "name": "Dice tower",
+    "description": "A tall hollow castle channels tabletop gaming dice through internal ramps into a catch tray."
+  },
+  {
+    "id": 18,
+    "name": "Laptop riser",
+    "description": "Two angled supports lift a portable computer above the desk and leave its underside open for cooling airflow."
+  },
+  {
+    "id": 19,
+    "name": "Battery dispenser",
+    "description": "A gravity-fed rack stores AA cells and presents the oldest cell at the bottom opening."
+  },
+  {
+    "id": 20,
+    "name": "M023",
+    "description": "A rotating ring attaches a small camera to a bicycle handlebar. A captive nut tightens the split clamp."
+  },
+  {
+    "id": 21,
+    "name": "Round coaster",
+    "description": "A flat circular drink mat protects a table from hot mugs and water marks. Raised edges contain drips."
+  },
+  {
+    "id": 22,
+    "name": "Drawer divider",
+    "description": "An adjustable partition separates kitchen utensils in a shallow drawer. Sliding tabs fit different drawer widths."
+  },
+  {
+    "id": 23,
+    "name": "Chess knight",
+    "description": "A stylized horse head sits on a round weighted base for use as a playing piece on a chessboard."
+  },
+  {
+    "id": 24,
+    "name": "Calibration cube",
+    "description": "A twenty-millimeter cube marked X, Y and Z for checking axis dimensions and extrusion settings."
+  },
+  {
+    "id": 25,
+    "name": "Wall key rack",
+    "description": "Five hooks hold household keys beside the entrance. Two screw holes secure the back plate to the wall."
+  },
+  {
+    "id": 26,
+    "name": "Toothbrush holder",
+    "description": "A ventilated bathroom cup holds four toothbrushes upright and drains excess water through its base."
+  },
+  {
+    "id": 27,
+    "name": "Book page holder",
+    "description": "A small wing-shaped accessory slips over the thumb and keeps the pages of a paperback spread open."
+  },
+  {
+    "id": 28,
+    "name": "Pet food scoop",
+    "description": "A deep measuring spoon with a long handle transfers dry animal food from a storage bag to a feeding bowl."
+  },
+  {
+    "id": 29,
+    "name": "Vacuum hose adapter",
+    "description": "A stepped hollow coupling joins a shop vacuum hose to the dust outlet of a sanding tool."
+  },
+  {
+    "id": 30,
+    "name": "SD card wallet",
+    "description": "A pocket-sized case protects eight removable camera memory cards in separate slots under a snap lid."
+  },
+  {
+    "id": 31,
+    "name": "Filament drying box",
+    "description": "A sealed reel enclosure contains desiccant packs and a humidity meter to keep printing filament dry."
+  },
+  {
+    "id": 32,
+    "name": "Paint bottle rack",
+    "description": "A tiered shelf displays small model-paint bottles so their color labels remain visible."
+  }
+]

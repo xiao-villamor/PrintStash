@@ -32,6 +32,8 @@ check only fires for markers a *selected* test carries.
 
 from __future__ import annotations
 
+import platform
+import secrets
 import subprocess
 import time
 from typing import Any, Callable, NoReturn
@@ -41,14 +43,15 @@ import pytest
 # SeaweedFS in `mini` mode: master, volume server and S3 gateway in one process.
 # Pinned by digest so a green run here and a green run in CI are the same run, and
 # given a development-sized volume limit so it allocates in seconds rather than
-# reserving gigabytes.
+# reserving gigabytes. Mini derives its volume-slot count from free disk space;
+# 8 MiB leaves room for the suite's many isolated buckets on small CI disks.
 SEAWEEDFS_IMAGE = (
     "chrislusf/seaweedfs:4.41"
     "@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d"
 )
 SEAWEEDFS_S3_PORT = 8333
 SEAWEEDFS_COMMAND = (
-    "mini -dir=/data -master.volumeSizeLimitMB=64 -master.telemetry=false"
+    "mini -dir=/data -master.volumeSizeLimitMB=8 -master.telemetry=false"
 )
 # The gateway's own readiness line. SeaweedFS binds the port before the S3 API can
 # answer, so a port check races and the first request comes back as a connection
@@ -67,15 +70,27 @@ NEXTCLOUD_IMAGE = (
     "nextcloud:29.0.4-apache"
     "@sha256:37d77a1857563d26f7c9a6dc8cdc306ef1118b66f0485bbf457d2f9c1d86e6ed"
 )
-# Pin the multi-architecture index: the former index contained amd64 only.
-OPENSSH_IMAGE = (
-    "lscr.io/linuxserver/openssh-server"
-    "@sha256:2a48f9ce01f61c1d7b376b7be99bd12801a3ecd9f339a4c7e7698d529e8d0b47"
-)
+# These are the platform children of OCI index
+# sha256:2a48f9ce01f61c1d7b376b7be99bd12801a3ecd9f339a4c7e7698d529e8d0b47.
+# Docker Engine stores the selected child after a pull; older daemons cannot
+# subsequently inspect the parent index by digest, which makes Docker SDK report
+# ImageNotFound even though the pull succeeded.
+OPENSSH_IMAGES = {
+    "amd64": (
+        "lscr.io/linuxserver/openssh-server"
+        "@sha256:85fa42da0475a71e1f51426439ebad63bf7ba3daaa7961430482759ea9ba562b"
+    ),
+    "arm64": (
+        "lscr.io/linuxserver/openssh-server"
+        "@sha256:bdf6c42b8d9a7e2250685ef7e6f9cfb07dd7b956cfb431590c49c7b312cbaf8a"
+    ),
+}
 
 POSTGRES_IMAGE = "postgres:16-alpine"
 POSTGRES_USER = "printstash"
-POSTGRES_PASSWORD = "printstash"
+# The import benchmark can contain private metadata, unlike synthetic fixtures.
+# Docker publishes this test service, so use an ephemeral session credential.
+POSTGRES_PASSWORD = secrets.token_urlsafe(32)
 POSTGRES_DB = "printstash"
 
 # Obviously-fake credentials. SeaweedFS accepts whatever it is given; nothing here
@@ -98,10 +113,26 @@ _TRANSIENT_START_MARKERS = (
     "tls handshake timeout",
     "temporary failure in name resolution",
     "service unavailable",
+    # Docker 27 on GitHub-hosted runners can finish pulling an immutable child
+    # manifest before that reference is visible to the following image inspect.
+    # A subsequent attempt sees the already-pulled image. Keep this bounded by
+    # CONTAINER_START_ATTEMPTS; a missing registry manifest reports
+    # "manifest unknown" instead and remains an immediate failure.
+    "no such image",
 )
 
 _started: list[Any] = []
 _resolved: dict[str, str | None] = {}
+
+
+def _openssh_image() -> str:
+    """Return the pinned OpenSSH child manifest for this Docker host."""
+    machine = platform.machine().lower()
+    architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(machine, machine)
+    try:
+        return OPENSSH_IMAGES[architecture]
+    except KeyError as exc:
+        raise RuntimeError(f"unsupported OpenSSH test architecture: {machine}") from exc
 
 
 def _start_container(factory: Callable[[], Any]) -> Any:
@@ -234,6 +265,26 @@ def postgres_url() -> str:
     return _resolve("postgres", POSTGRES_RESOURCE, _start_postgres)
 
 
+def pgvector_url() -> str:
+    """Real optional pgvector capability, independent of plain PostgreSQL tests."""
+
+    def start() -> str:
+        from testcontainers.community.postgres import PostgresContainer
+
+        container = _start_container(
+            lambda: PostgresContainer(
+                "pgvector/pgvector:0.8.0-pg16@sha256:a132765ec351c65111b5b675928a3a0515a466a40f97277329db8b8209ad8bc9",
+                username=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                dbname=POSTGRES_DB,
+            )
+        )
+        _started.append(container)
+        return container.get_connection_url(driver=None)
+
+    return _resolve("pgvector", "PostgreSQL with pgvector", start)
+
+
 def s3_endpoint() -> str:
     """A real S3-compatible endpoint URL. Raises when Docker is not running."""
     return _resolve("s3", S3_RESOURCE, _start_seaweedfs)
@@ -279,7 +330,7 @@ def _start_openssh() -> tuple[str, int, str]:
 
     container = _start_container(
         lambda: (
-            DockerContainer(OPENSSH_IMAGE)
+            DockerContainer(_openssh_image())
             .with_env("USER_NAME", "contract")
             .with_env("USER_PASSWORD", "contract-only")
             .with_env("PASSWORD_ACCESS", "true")

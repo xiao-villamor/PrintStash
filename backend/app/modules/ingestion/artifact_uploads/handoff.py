@@ -81,6 +81,8 @@ def run_verified_upload_ingestion(
                     ),
                     revision_notes=options.get("revision_notes"),
                     is_recommended=bool(options.get("is_recommended", False)),
+                    actor_user_id=owner_user_id,
+                    ingestion_key=job_id,
                 )
                 registry.finish(
                     job_id,

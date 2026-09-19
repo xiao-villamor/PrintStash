@@ -187,6 +187,23 @@ class TestVerifyMeshes:
         assert result.sampled_hausdorff_mm > result.sampled_hausdorff
         assert result.sampled_chamfer_mm > result.sampled_chamfer
 
+    def test_translates_native_decision_errors(self, tetra, monkeypatch):
+        from printstash_core.mesh import native_rasterizer
+
+        native = native_rasterizer.kernel()
+
+        class RejectedDecision:
+            def __getattr__(self, name):
+                return getattr(native, name)
+
+            def verification_decision(self, *args):
+                raise ValueError("invalid_verification_metrics")
+
+        monkeypatch.setattr(native_rasterizer, "kernel", lambda: RejectedDecision())
+
+        with pytest.raises(GeometryError, match="invalid_verification_metrics"):
+            verify_meshes(*tetra, *tetra, sample_points=256)
+
     @pytest.mark.parametrize("count", [0, 255, 5001, True], ids=str)
     def test_rejects_invalid_sample_budget(self, tetra, count):
         with pytest.raises(GeometryError, match="invalid_sample_count"):

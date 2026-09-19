@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import resource
 import time
+import weakref
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -51,6 +52,7 @@ class ThumbnailFailureReason(str, Enum):
     RENDERER_NO_OUTPUT = "renderer_no_output"
     STORAGE = "storage"
     LEASE_LOST = "lease_lost"
+    NO_EMBEDDED_THUMBNAIL = "no_embedded_thumbnail"
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,13 @@ class ThumbnailEngine:
     metrics: ThumbnailMetricsSink = field(default_factory=NoopThumbnailMetrics)
 
     def generate(self, request: ThumbnailRequest) -> ThumbnailResult:
+        from app.modules.media import mesh_processing
+
+        # Hold admission through cleanup as well as loading and rendering.
+        with mesh_processing._render_semaphore():
+            return self._generate(request)
+
+    def _generate(self, request: ThumbnailRequest) -> ThumbnailResult:
         # Lazy import prevents a module cycle: mesh_processing exposes the
         # backwards-compatible public entry points that delegate back here.
         from app.modules.media import mesh_processing
@@ -135,6 +144,7 @@ class ThumbnailEngine:
         mesh: Any | None = None
         prepared: PreparedMesh | None = None
         fingerprint_result: FingerprintResult | None = None
+        streaming_attempted = False
 
         def report(label: str) -> None:
             if request.report is not None:
@@ -185,7 +195,10 @@ class ThumbnailEngine:
                     strategy = ThumbnailStrategy.EMBEDDED
                     complete = True
                 else:
-                    if not over_cap:
+                    needs_loaded_stl = (
+                        request.include_geometry or request.include_fingerprint
+                    )
+                    if not over_cap and not (suffix == ".stl" and not needs_loaded_stl):
                         if request.include_fingerprint and suffix == ".3mf":
                             try:
                                 prepared = load_3mf(request.path)
@@ -300,7 +313,38 @@ class ThumbnailEngine:
                         image = embedded
                         strategy = ThumbnailStrategy.EMBEDDED
                         complete = True
-                    elif mesh is not None:
+                    elif suffix == ".stl":
+                        streaming_attempted = True
+                        streamed = stl_streaming.render_stl_preview_isolated(
+                            request.path, width=width, height=height
+                        )
+                        if streamed is not None:
+                            image = streamed.png
+                            strategy = ThumbnailStrategy.STREAMING
+                            complete = True
+                            if geometry["triangle_count"] is None:
+                                geometry.update(
+                                    {
+                                        "bbox_x_mm": round(
+                                            streamed.bounds_max[0]
+                                            - streamed.bounds_min[0],
+                                            2,
+                                        ),
+                                        "bbox_y_mm": round(
+                                            streamed.bounds_max[1]
+                                            - streamed.bounds_min[1],
+                                            2,
+                                        ),
+                                        "bbox_z_mm": round(
+                                            streamed.bounds_max[2]
+                                            - streamed.bounds_min[2],
+                                            2,
+                                        ),
+                                        "triangle_count": streamed.triangle_count,
+                                    }
+                                )
+
+                    if image is None and mesh is not None:
                         cap = int(settings.mesh_max_render_triangles)
                         ram_cap = mesh_processing._ram_triangle_cap(suffix)
                         if ram_cap is not None:
@@ -335,6 +379,7 @@ class ThumbnailEngine:
                     if (
                         image is None
                         and suffix == ".stl"
+                        and not streaming_attempted
                         and (over_cap or mesh is not None)
                     ):
                         if mesh is not None:
@@ -411,8 +456,14 @@ class ThumbnailEngine:
         finally:
             prepared = None
             if mesh is not None:
+                released_mesh = (
+                    weakref.ref(mesh) if not request.include_fingerprint else None
+                )
                 del mesh
-                mesh_processing._reclaim_memory()
+                if released_mesh is None:
+                    mesh_processing._reclaim_memory()
+                else:
+                    mesh_processing._reclaim_memory(released_mesh=released_mesh)
 
         if image is not None:
             failure = None

@@ -25,6 +25,7 @@ finished jobs is a payload that grows until the page stops loading.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import zipfile
@@ -48,6 +49,7 @@ from tests.factories import (
     build_user,
     user_config,
 )
+from tests.integration.api.v1._ingest_assertions import drain_ingestion
 
 
 @pytest.fixture
@@ -198,13 +200,13 @@ class TestJobUpdate:
             files=[],
             created_at=0.0,
         )
-        registry_._items["stale-token"] = stale
+        stale_token = registry_.add(stale)
         fresh_token = registry_.add(
             ingest_background._PendingModelFiles(
                 page_url="https://y", page_title="y", owner_user_id=owner.id, files=[]
             )
         )
-        assert registry_.get("stale-token") is None
+        assert registry_.get(stale_token) is None
         assert registry_.get(fresh_token) is not None
         assert registry_.pop(fresh_token) is not None
         assert registry_.get(fresh_token) is None
@@ -462,6 +464,7 @@ class TestIngestModel:
             data={"collection": "brand/new/path"},
         )
         assert response.status_code == 202, response.text
+        drain_ingestion()
         job_id = response.json()["job_id"]
         job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
         assert job.status_code == 200
@@ -548,15 +551,13 @@ class TestIngestUrl:
         staged.write_bytes(_cube_stl_bytes())
 
         async def fake_download(url: str):
-            return staged, "cube.stl"
+            return staged, "cube.stl", hashlib.sha256(staged.read_bytes()).hexdigest()
 
         with (
             patch.object(
                 ingest_module.importer, "validate_public_url", return_value=None
             ),
-            patch.object(
-                import_resolvers, "classify_collection", return_value=None
-            ),
+            patch.object(import_resolvers, "classify_collection", return_value=None),
             patch.object(
                 import_resolvers,
                 "list_model_files",
@@ -567,13 +568,18 @@ class TestIngestUrl:
                 "resolve_page_url",
                 AsyncMock(return_value=None),
             ),
-            patch.object(ingest_module.importer, "download_to_staging", fake_download),
+            patch.object(
+                ingest_module.importer,
+                "download_to_staging_with_receipt",
+                fake_download,
+            ),
         ):
             response = client.post(
                 "/api/v1/ingest/url",
                 headers=auth_headers,
                 json={"url": "https://cdn.test/cube.stl"},
             )
+            drain_ingestion()
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
         job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
@@ -741,6 +747,7 @@ class TestInspectArchiveBackground:
             files={"file": ("models.zip", archive.getvalue(), "application/zip")},
         )
         assert queued.status_code == 202
+        drain_ingestion()
         job_id = queued.json()["job_id"]
         status = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
         assert status.status_code == 200
@@ -778,7 +785,6 @@ class TestSelectArchiveEntries:
             files={"file": ("bundle.zip", _zip_bytes(), "application/zip")},
         )
         archive_id = upload.json()["archive_id"]
-        importer.archives._items[archive_id].owner_user_id = 999999
 
         other = _regular_user(db_session, "not-the-owner")
         other_headers = {
@@ -826,6 +832,7 @@ class TestSelectArchiveEntries:
             json={"names": ["cube.stl"]},
         )
         assert response.status_code == 202, response.text
+        drain_ingestion()
         job_id = response.json()["job_id"]
         job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
         assert job.status_code == 200
@@ -843,7 +850,7 @@ class TestSelectArchiveEntries:
         archive_id = upload.json()["archive_id"]
         with patch.object(
             ingest_module.importer,
-            "extract_selected",
+            "inspect_archive",
             side_effect=ImportError_("archive_entry_unsafe"),
         ):
             response = client.post(
@@ -851,10 +858,13 @@ class TestSelectArchiveEntries:
                 headers=auth_headers,
                 json={"names": ["cube.stl"]},
             )
-        assert response.status_code == 400, response.text
-        assert response.json()["detail"] == "archive_entry_unsafe"
+            drain_ingestion()
+        assert response.status_code == 202, response.text
+        job = ingest_module.registry.get(response.json()["job_id"])
+        assert job.state == "failed"
+        assert job.error == "archive_entry_unsafe"
 
-    def test_select_archive_entries_reports_no_importable_files(
+    def test_select_archive_entries_rejects_nonimportable_selection(
         self, tmp_path: Path, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
         use_local_storage(tmp_path)
@@ -864,14 +874,13 @@ class TestSelectArchiveEntries:
             files={"file": ("bundle.zip", _zip_bytes(), "application/zip")},
         )
         archive_id = upload.json()["archive_id"]
-        with patch.object(ingest_module.importer, "extract_selected", return_value=[]):
-            response = client.post(
-                f"/api/v1/ingest/archive/{archive_id}/select",
-                headers=auth_headers,
-                json={"names": ["cube.stl"]},
-            )
+        response = client.post(
+            f"/api/v1/ingest/archive/{archive_id}/select",
+            headers=auth_headers,
+            json={"names": ["notes.txt"]},
+        )
         assert response.status_code == 400, response.text
-        assert response.json()["detail"] == "no_importable_files"
+        assert response.json()["detail"] == "archive_entry_not_found"
 
     def test_select_archive_entries_rejects_a_selection_claimed_by_another_request(
         self,
@@ -1014,15 +1023,15 @@ class TestSelectModelFiles:
             return ["https://cdn.test/cube.stl"]
 
         async def fake_download_and_collect(url: str):
-            return [(staged, "cube.stl")]
+            return staged, "cube.stl", hashlib.sha256(staged.read_bytes()).hexdigest()
 
         with (
             patch.object(
                 import_resolvers, "resolve_selected_download", side_effect=fake_resolve
             ),
             patch.object(
-                ingest_background,
-                "_download_and_collect",
+                importer,
+                "download_to_staging_with_receipt",
                 side_effect=fake_download_and_collect,
             ),
         ):
@@ -1031,6 +1040,7 @@ class TestSelectModelFiles:
                 headers=auth_headers,
                 json={"file_ids": ["1"]},
             )
+            drain_ingestion()
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
         job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
@@ -1092,17 +1102,20 @@ class TestSelectCollectionMembers:
         staged.parent.mkdir(parents=True, exist_ok=True)
         staged.write_bytes(_cube_stl_bytes())
 
-        with patch.object(
-            ingest_background,
-            "_stage_members",
-            AsyncMock(
-                return_value=[
-                    importer.ResolvedGroup(
-                        source_url=member.page_url,
-                        title="A",
-                        staged_files=[(staged, "cube.stl")],
+        with (
+            patch.object(
+                import_resolvers, "resolve_page_url", AsyncMock(return_value=None)
+            ),
+            patch.object(
+                importer,
+                "download_to_staging_with_receipt",
+                AsyncMock(
+                    return_value=(
+                        staged,
+                        "cube.stl",
+                        hashlib.sha256(staged.read_bytes()).hexdigest(),
                     )
-                ]
+                ),
             ),
         ):
             response = client.post(
@@ -1110,6 +1123,7 @@ class TestSelectCollectionMembers:
                 headers=auth_headers,
                 json={"member_ids": ["1"]},
             )
+            drain_ingestion()
         assert response.status_code == 202, response.text
         job_id = response.json()["job_id"]
         job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)

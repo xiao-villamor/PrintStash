@@ -42,6 +42,7 @@ from app.modules.storage.storage_backend.contracts import (
 from app.schemas.artifact_uploads import ArtifactUploadCreate
 from tests._env import use_local_storage
 from tests.factories import content
+from tests.integration.api.v1._ingest_assertions import drain_ingestion
 
 
 def _request(payload: bytes) -> dict[str, object]:
@@ -423,6 +424,7 @@ class TestArtifactUploads:
         )
 
         assert finalized.status_code == 200
+        drain_ingestion()
         completed = client.get(
             f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
         ).json()
@@ -489,6 +491,7 @@ class TestArtifactUploads:
             select(ArtifactUploadPart).where(ArtifactUploadPart.session_id == upload_id)
         ).all()
         assert len(rows) == 1
+        drain_ingestion()
         completed = client.get(
             f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
         )
@@ -571,6 +574,7 @@ class TestArtifactUploads:
         )
 
         assert response.status_code == 200
+        drain_ingestion()
         completed = client.get(
             f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
         ).json()
@@ -606,6 +610,7 @@ class TestArtifactUploads:
 
         assert finalized.status_code == 200
         assert finalized.json()["job_id"]
+        drain_ingestion()
         assert (
             client.get(
                 f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
@@ -645,6 +650,7 @@ class TestArtifactUploads:
         )
 
         assert response.status_code == 200
+        drain_ingestion()
         completed = client.get(
             f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
         ).json()
@@ -865,3 +871,43 @@ class TestArtifactUploads:
 
         assert response.status_code == 200
         assert response.json()["state"] == "aborted"
+
+
+class TestDurableUploadHandoff:
+    def test_an_audit_failure_cannot_lose_the_committed_ingestion_command(
+        self, client, db_session, make_user, headers_for, tmp_path, monkeypatch,
+    ):
+        from fastapi import BackgroundTasks
+
+        from app.db.models import BackgroundJob
+        from app.db.session import get_session_factory
+        from app.modules.ingestion.commands import decode
+
+        use_local_storage(tmp_path)
+        owner = make_user(superuser=True)
+        headers = headers_for(owner)
+        payload = content.binary_stl()
+        created = client.post("/api/v1/artifact-uploads", json=_request(payload), headers=headers)
+        assert created.status_code == 201
+        upload_id = created.json()["id"]
+        assert _put_chunk(client, headers, upload_id, payload).status_code == 200
+
+        record = upload_api.audit.record
+
+        def fail_audit(*args, **kwargs):
+            if kwargs.get("action") == "artifact_upload.finalize":
+                raise RuntimeError("audit connection lost")
+            return record(*args, **kwargs)
+
+        monkeypatch.setattr(upload_api.audit, "record", fail_audit)
+        with pytest.raises(RuntimeError, match="audit connection lost"):
+            upload_api.finalize_artifact_upload(
+                upload_id, BackgroundTasks(), owner, db_session, get_session_factory(),
+            )
+        db_session.expire_all()
+        upload = db_session.get(ArtifactUploadSession, upload_id)
+        job = db_session.get(BackgroundJob, upload.background_job_id)
+        assert decode(job.payload_json)[0] == "verified_upload"
+        drain_ingestion()
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload_id).state == ArtifactUploadState.COMPLETED

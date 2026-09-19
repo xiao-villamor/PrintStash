@@ -149,7 +149,11 @@ def install_audit_listeners() -> None:
         ip = _ip_ctx.get()
         rows: list[AuditLog] = []
         for obj in session.new:
-            if isinstance(obj, AuditLog) or not hasattr(obj, "__tablename__"):
+            if (
+                isinstance(obj, AuditLog)
+                or not hasattr(obj, "__tablename__")
+                or getattr(type(obj), "__audit_exclude__", False)
+            ):
                 continue
             rows.append(
                 AuditLog(
@@ -162,7 +166,11 @@ def install_audit_listeners() -> None:
                 )
             )
         for obj in session.dirty:
-            if isinstance(obj, AuditLog) or not hasattr(obj, "__tablename__"):
+            if (
+                isinstance(obj, AuditLog)
+                or not hasattr(obj, "__tablename__")
+                or getattr(type(obj), "__audit_exclude__", False)
+            ):
                 continue
             diff = _diff_for_obj(obj)
             if not diff:
@@ -183,7 +191,11 @@ def install_audit_listeners() -> None:
                 )
             )
         for obj in session.deleted:
-            if isinstance(obj, AuditLog) or not hasattr(obj, "__tablename__"):
+            if (
+                isinstance(obj, AuditLog)
+                or not hasattr(obj, "__tablename__")
+                or getattr(type(obj), "__audit_exclude__", False)
+            ):
                 continue
             rows.append(
                 AuditLog(

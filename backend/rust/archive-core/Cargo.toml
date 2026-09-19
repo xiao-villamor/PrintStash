@@ -1,0 +1,13 @@
+[package]
+name = "printstash-archive-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+
+[dependencies]
+flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"] }
+tempfile = "=3.27.0"
+unicode-casefold = "=0.2.0"
+unicode-normalization = "=0.1.25"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2", "bzip2", "lzma"] }

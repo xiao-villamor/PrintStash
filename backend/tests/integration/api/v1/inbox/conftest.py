@@ -57,13 +57,16 @@ def no_egress(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
 @pytest.fixture
 def imports_run(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, list[str]]]:
-    """Record what the router scheduled instead of running a real import."""
+    """Record accepted commands while retaining the real durable handoff."""
     scheduled: list[tuple[int, list[str]]] = []
 
-    async def fake_run_import(item_id: int, selected_ids: list[str], _factory) -> None:
+    queue = inbox.queue_import
+
+    def record_import(item_id: int, selected_ids: list[str], factory) -> None:
+        queue(item_id, selected_ids, factory)
         scheduled.append((item_id, selected_ids))
 
-    monkeypatch.setattr(inbox, "run_import", fake_run_import)
+    monkeypatch.setattr(inbox, "queue_import", record_import)
     return scheduled
 
 

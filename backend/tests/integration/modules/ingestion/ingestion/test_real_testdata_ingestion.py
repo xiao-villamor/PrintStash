@@ -25,11 +25,14 @@ from sqlmodel import Session, select
 from app.core.config import _overlay
 from app.db.models import File, FileType, Metadata, Model
 from app.db.scopes import live
+from app.db.session import get_session_factory
 from app.modules.ingestion.ingestion import (
     add_gcode_revision_to_model,
     ingest_mesh,
     ingest_orca_gcode,
 )
+from app.modules.media.enrichment import EnrichmentProcessor
+from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.jobs import registry
 from tests._env import use_local_storage
 from tests.paths import TESTDATA_DIR, require_fixtures
@@ -178,6 +181,9 @@ class TestMetadata:
         assert f.is_external is False
         assert f.path.startswith(str(_overlay["data_dir"]))  # copied into the vault
 
+        assert EnrichmentProcessor(get_session_factory(), get_backend()).work_one()
+        db_session.expire_all()
+
         md = _metadata_for(db_session, f.id)
         # A 20mm calibration cube, ~252 triangles.
         assert md.bbox_x_mm == pytest.approx(20.0, abs=0.1)
@@ -199,6 +205,9 @@ class TestMetadata:
         )
 
         assert f.file_type == FileType.THREE_MF
+        assert EnrichmentProcessor(get_session_factory(), get_backend()).work_one()
+        db_session.expire_all()
+
         md = _metadata_for(db_session, f.id)
         # A flat ~126x54mm spatula, thin in Z.
         assert md.bbox_x_mm == pytest.approx(126.0, abs=1.0)
@@ -213,6 +222,9 @@ class TestMetadata:
     ) -> None:
         use_local_storage(tmp_path)
         model, f = _ingest_gcode(db_session, SPATULA_GCODE, model_name="Spatula GCode")
+
+        assert EnrichmentProcessor(get_session_factory(), get_backend()).work_one()
+        db_session.expire_all()
 
         md = _metadata_for(db_session, f.id)
         assert md.printer_model == "MK4IS"

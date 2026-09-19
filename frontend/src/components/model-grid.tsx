@@ -1,5 +1,7 @@
 "use client";
 
+import { historyFilters, historyKeys } from "@/lib/search-filters";
+
 import { CreateFamilyDialog } from "@/components/families/create-dialog";
 import { MEMBER_ROLES } from "@/types/families";
 import { FamilyTrashDialog } from "@/components/families/trash-dialog";
@@ -137,6 +139,12 @@ type LibraryItem =
 
 const PAGE_SIZE = 60;
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  {
+    value: "relevance",
+    get label() {
+      return uiText("aiSearch.relevance");
+    },
+  },
   {
     value: "date-desc",
     get label() {
@@ -870,6 +878,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     STRUCTURED_FILTER_KEYS.forEach((key) => params.delete(key));
     params.delete("uploaded_after");
     params.delete("uploaded_before");
+    historyKeys.forEach((key) => params.delete(key));
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
@@ -911,6 +920,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // Filters shared by the grid + outliner queries; only the search query and
   // pagination differ between them.
   const baseFilters: ModelListFilters = {
+    ...historyFilters(searchParams),
     family_id: familyId,
     family_role: familyRole,
     in_family: inFamily,
@@ -975,11 +985,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (filters.printed != null) params.set("printed", filters.printed ? "yes" : "no");
     if (filters.uploaded_after) params.set("uploaded_after", filters.uploaded_after);
     if (filters.uploaded_before) params.set("uploaded_before", filters.uploaded_before);
+    historyKeys.forEach((key) => {
+      if (filters[key] != null) params.set(key, String(filters[key]));
+    });
     router.replace(params.size ? `/?${params}` : "/", { scroll: false });
   }
 
   function applySavedView(view: SavedViewRead) {
     setActiveSavedViewId(view.id);
+    if (view.filters.sort) setSortKey(view.filters.sort);
     setSelectedTags(view.filters.tag);
     setSelectedPrinterId(view.filters.printer_id ?? null);
     setSelectedPrinterPresence(view.filters.printer_presence ?? null);
@@ -1009,6 +1023,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function currentViewFilters(): SavedViewRead["filters"] {
     return {
+      ...historyFilters(searchParams),
+      sort: sortKey,
       family_id: familyId ?? null,
       family_role: familyRole ?? null,
       in_family: inFamily ?? null,
@@ -1515,7 +1531,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !!query.trim() ||
     Object.values(structured).some((values) => values.length > 0) ||
     searchParams.has("uploaded_after") ||
-    searchParams.has("uploaded_before");
+    searchParams.has("uploaded_before") ||
+    historyKeys.some((key) => searchParams.has(key));
   const displayCount = libraryItems.length;
   // Build the return target from the selected view as well as the router
   // snapshot. `router.replace()` is asynchronous, so a card clicked directly
@@ -1712,6 +1729,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       "has_similar_candidates",
       "uploaded_after",
       "uploaded_before",
+      ...historyKeys,
     ])
       params.delete(key);
     const qs = params.toString();
@@ -1756,11 +1774,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         });
       }
     }
-    for (const key of ["uploaded_after", "uploaded_before"] as const) {
+    for (const key of ["uploaded_after", "uploaded_before", ...historyKeys] as const) {
       const value = searchParams.get(key);
       if (value)
         items.push({
-          label: `${ui(key === "uploaded_after" ? "Uploaded after" : "Uploaded before")}: ${value}`,
+          label: `${key === "uploaded_after" ? ui("Uploaded after") : key === "uploaded_before" ? ui("Uploaded before") : ui(`aiSearch.filter.${key}`)}: ${value}`,
           onRemove: () => {
             const params = new URLSearchParams(searchParams.toString());
             params.delete(key);
@@ -1880,6 +1898,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               onChange={setStructuredFilter}
               uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
               uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+              history={historyFilters(searchParams)}
               onDateChange={(key, value) => {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);
@@ -1923,6 +1942,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               onChange={setStructuredFilter}
               uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
               uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+              history={historyFilters(searchParams)}
               onDateChange={(key, value) => {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);

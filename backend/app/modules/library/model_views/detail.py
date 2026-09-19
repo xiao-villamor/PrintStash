@@ -36,6 +36,7 @@ from app.schemas.provenance import (
 )
 
 from .access import _effective_model_role
+from .enrichment import pending_models
 from .extensions import similarity_summaries
 from .projections import _file_reads_with_revisions, collection_name_for, thumb_url
 
@@ -149,9 +150,10 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         is not None
     )
 
-    from .families import family_summaries
+    from .extensions import family_summaries
 
     return ModelRead(
+        enrichment_pending=model_id in pending_models(session, [model_id]),
         family=family_summaries(session, user, [model_id]).get(model_id),
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
         id=m.id,  # type: ignore[arg-type]

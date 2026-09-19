@@ -156,18 +156,24 @@ class TestVaultAuditPolicyControls:
         make_audit_finding,
         make_system_config,
         make_notification_channel,
+        monkeypatch,
     ):
         import json
 
         from app.core.time import utcnow
         from app.db.models import NotificationDelivery, VaultAuditSeverity
+        from app.modules.administration import vault_audit_results
         from app.modules.administration.vault_audit_results import record_success
 
+        # A flush may release an unreferenced pending ORM object before the
+        # delivery is allocated. Python may then reuse its integer id, so
+        # identity bookkeeping must retain the original objects.
+        monkeypatch.setattr(vault_audit_results, "id", lambda _row: 1, raising=False)
         make_system_config(notifications_enabled=True)
         wanted = make_notification_channel(events=["storage_regression"])
         make_notification_channel(events=["storage_regression"])
         user = make_user()
-        make_audit_policy(
+        policy = make_audit_policy(
             user,
             notification_threshold="critical",
             notification_channels_json=json.dumps([wanted.id]),
@@ -206,6 +212,7 @@ class TestVaultAuditPolicyControls:
             resource_identifier="three",
             severity=VaultAuditSeverity.CRITICAL,
         )
+        assert policy.notification_cooldown_minutes == 60
         record_success(db_session, third)
         db_session.commit()
         rows = db_session.exec(

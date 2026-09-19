@@ -181,13 +181,19 @@ class TestScanLibrary:
         assert lib.last_scan_status == ExternalLibraryScanStatus.OK
         # Indexed in place; the over-cap mesh was never loaded through Trimesh, but
         # the streaming fallback still publishes geometry and a thumbnail.
+        from app.db.session import get_session_factory
+        from app.modules.media.enrichment import EnrichmentProcessor
+        from app.modules.storage.storage_backend.runtime import get_backend
+        assert EnrichmentProcessor(get_session_factory(), get_backend()).work_one()
+        db_session.expire_all()
         files = external_files(db_session)
         assert len(files) == 1
         md = db_session.exec(
             select(Metadata).where(Metadata.file_id == files[0].id)
         ).first()
         assert md is not None
-        assert md.triangle_count == len(mesh.faces)
+        from app.db.models import ArtifactAnalysisGeneration
+        assert md.triangle_count == len(mesh.faces), db_session.exec(select(ArtifactAnalysisGeneration.state, ArtifactAnalysisGeneration.error_code)).all()
         model = db_session.get(Model, files[0].model_id)
         assert model is not None
         assert model.thumbnail_path is not None

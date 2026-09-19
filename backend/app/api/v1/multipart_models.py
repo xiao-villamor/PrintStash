@@ -34,6 +34,7 @@ from app.db.models import (
     MultipartModelTagLink,
     User,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import rbac
@@ -171,6 +172,7 @@ def create_multipart_model(
     )
     session.add(aggregate)
     try:
+        content_changed(session, "multipart_model", (row.id for row in (aggregate,)))
         session.commit()
     except IntegrityError as exc:
         session.rollback()
@@ -212,6 +214,7 @@ def replace_multipart_model_tags(
     aggregate.updated_at = utcnow()
     aggregate.updated_by = current_user.id
     session.add(aggregate)
+    content_changed(session, "multipart_model", [aggregate.id])
     session.commit()
     session.refresh(aggregate)
     return multipart_models.read(session, current_user, aggregate)
@@ -342,6 +345,7 @@ def delete_multipart_model_cover(
     aggregate.updated_by = current_user.id
     aggregate.updated_at = utcnow()
     session.add(aggregate)
+    content_changed(session, "multipart_model", [aggregate.id])
     session.commit()
     process_storage_delete_intents()
     session.refresh(aggregate)
@@ -385,6 +389,7 @@ def update_multipart_model(
     aggregate.updated_at = utcnow()
     session.add(aggregate)
     try:
+        content_changed(session, "multipart_model", (row.id for row in (aggregate,)))
         session.commit()
     except IntegrityError as exc:
         session.rollback()

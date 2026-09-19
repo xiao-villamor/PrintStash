@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import math
 from dataclasses import dataclass
 from importlib.resources import files
 from types import SimpleNamespace
@@ -19,7 +18,6 @@ from ..rasterizer import render_mesh_thumbnail
 from .fingerprint import GeometryError, canonical_sample_triangles
 from .geometry import Surface
 from .hull import hull_volume
-from .voxel import voxelize
 
 if TYPE_CHECKING:
     import numpy as np
@@ -28,7 +26,9 @@ if TYPE_CHECKING:
     FloatArray = NDArray[np.float64]
 
 SH_RECIPE = "occupancy64-shells32-degree16-pca64-v1"
-VIEW_RECIPE = "pca-six-orthographic64-matte-dct8-v1"
+# Resampling changes can change thresholded view hashes. Record the actual
+# renderer so native views never masquerade as the legacy NumPy/Pillow recipe.
+VIEW_RECIPE = "pca-six-orthographic64-matte-dct8-rust-v2"
 
 
 @dataclass(frozen=True)
@@ -87,19 +87,13 @@ def volume_inertia_ratios(surface: Surface) -> tuple[float, ...]:
     """Signed tetrahedral volume integrals; callers first establish valid volume."""
     import numpy as np
 
-    tri = surface.vertices[surface.faces]
-    volumes = np.einsum("ij,ij->i", tri[:, 0], np.cross(tri[:, 1], tri[:, 2])) / 6
-    volume = float(volumes.sum())
-    sums = tri.sum(axis=1)
-    centroid = np.einsum("fi,f->i", sums, volumes) / (4 * volume)
-    second = (
-        np.einsum("fvi,fvj,f->ij", tri, tri, volumes)
-        + np.einsum("fi,fj,f->ij", sums, sums, volumes)
-    ) / (20 * volume)
-    covariance = second - np.outer(centroid, centroid)
-    inertia = np.trace(covariance) * np.eye(3) - covariance
-    eigenvalues = np.linalg.eigvalsh(inertia)
-    return tuple(float(x) for x in eigenvalues / eigenvalues[-1])
+    from ..native_rasterizer import kernel
+
+    triangles = np.asarray(surface.vertices[surface.faces], dtype="=f8")
+    try:
+        return tuple(kernel().volume_inertia_ratios(triangles.tobytes()))
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc
 
 
 def sh_spectrum(surface: Surface, *, fill: bool) -> FloatArray:
@@ -110,52 +104,17 @@ def sh_spectrum(surface: Surface, *, fill: bool) -> FloatArray:
     """
     import numpy as np
 
-    radius = float(np.linalg.norm(surface.vertices, axis=1).max()) * 1.01
-    occupancy = voxelize(surface.vertices, surface.faces, half_width=radius, fill=fill)
-    xyz = (np.argwhere(occupancy).astype(np.float64) + 0.5) / 32 - 1
-    distance = np.linalg.norm(xyz, axis=1)
-    inside = (distance > 0) & (distance <= 1)
-    xyz, distance = xyz[inside], distance[inside]
-    if not len(xyz):
-        raise GeometryError("empty_occupancy")
-    shells = np.minimum((distance * 32).astype(np.int64), 31)
-    z = xyz[:, 2] / distance
-    phi = np.arctan2(xyz[:, 1], xyz[:, 0])
-    power = np.zeros((32, 17), dtype=np.float64)
-    diagonal = np.ones(len(xyz))
-    normalization = float(len(xyz))
-    for order in range(17):
-        if order:
-            diagonal *= -(2 * order - 1) * np.sqrt(np.maximum(1 - z * z, 0))
-        previous = np.zeros(len(xyz))
-        current = diagonal.copy()
-        cosine, sine = np.cos(order * phi), np.sin(order * phi)
-        for degree in range(order, 17):
-            if degree > order:
-                following = (
-                    (2 * degree - 1) * z * current - (degree + order - 1) * previous
-                ) / (degree - order)
-                previous, current = current, following
-            coefficient = math.sqrt(
-                (2 * degree + 1)
-                / (4 * math.pi)
-                * math.factorial(degree - order)
-                / math.factorial(degree + order)
-            )
-            real = (
-                np.bincount(shells, weights=current * cosine, minlength=32)
-                * coefficient
-                / normalization
-            )
-            imaginary = (
-                np.bincount(shells, weights=current * sine, minlength=32)
-                * coefficient
-                / normalization
-            )
-            power[:, degree] += (real * real + imaginary * imaginary) * (
-                1 if order == 0 else 2
-            )
-    return np.sqrt(power).ravel()
+    from ..native_rasterizer import kernel
+
+    try:
+        packed = kernel().sh_spectrum(
+            np.asarray(surface.vertices, dtype="=f8").tobytes(),
+            np.asarray(surface.faces, dtype="=i8").tobytes(),
+            fill,
+        )
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc
+    return np.frombuffer(packed, dtype="=f8").copy()
 
 
 def project_sh(spectrum: FloatArray) -> tuple[tuple[float, ...], str]:
@@ -234,12 +193,11 @@ def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
 def dct_hash(pixels: FloatArray) -> bytes:
     import numpy as np
 
+    from ..native_rasterizer import kernel
+
     if pixels.shape != (64, 64) or not np.isfinite(pixels).all():
         raise GeometryError("invalid_view_image")
-    basis = np.cos(np.pi / 64 * (np.arange(64) + 0.5)[None, :] * np.arange(8)[:, None])
-    coefficients = basis @ pixels @ basis.T
-    values = coefficients.ravel()
-    threshold = np.median(values[1:])
-    bits = values > threshold
-    bits[0] = False
-    return np.packbits(bits, bitorder="big").tobytes()
+    try:
+        return bytes(kernel().dct_hash(np.asarray(pixels, dtype="=f8").tobytes()))
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc

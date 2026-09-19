@@ -5,8 +5,9 @@ precedence over historical branch names in git history.
 
 ## Branches
 
-Create one short-lived branch per bug, feature, or supporting change from an
-up-to-date `main`. The branch name describes the work:
+First establish the destination with [task baseline](task-start.md), including
+existing feature branches and their worktrees. For new standalone work, create
+one short-lived branch from up-to-date `main`. Its name describes the work:
 
 ```
 feat/73-material-aware-dispatch

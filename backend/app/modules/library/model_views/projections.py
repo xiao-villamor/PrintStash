@@ -39,8 +39,7 @@ from app.schemas.models import (
     PrintSummaryRead,
 )
 
-from .extensions import similarity_summaries
-from .families import family_summaries
+from .extensions import family_summaries, similarity_summaries
 from .thumbnails import thumb_url
 
 # ---------------------------------------------------------------------------
@@ -101,8 +100,12 @@ def _file_reads_with_revisions(
         [f.id for f, _md in files_with_meta if f.id is not None],
     )
     profiles = cost_profiles(session)
+    from .enrichment import states_for_files
+
+    enrichment = states_for_files(session, [f.id for f, _ in files_with_meta if f.id is not None])
     return [
         FileRead(
+            enrichment=enrichment.get(f.id, {}),
             id=f.id,  # type: ignore[arg-type]
             model_id=f.model_id,
             original_filename=f.original_filename,
@@ -131,6 +134,9 @@ def _hydrate_list_rows(
     model_ids = [m.id for m in rows if m.id is not None]
     if not model_ids:
         return []
+    from .enrichment import pending_models
+
+    enriching = pending_models(session, model_ids)
     similarity = similarity_summaries(session, user, model_ids)
     families = family_summaries(session, user, model_ids)
     starred_ids = set(
@@ -271,6 +277,7 @@ def _hydrate_list_rows(
         rec_status, rec_label = recommended.get(model.id, (None, None))
         out.append(
             ModelListItem(
+                enrichment_pending=model.id in enriching,
                 id=model.id,
                 family=families.get(model.id),
                 similarity=similarity.get(model.id, {}),

@@ -1,0 +1,10 @@
+{
+  "source_commit": "0364db751861bdecb122679ffa998181417c93d9",
+  "vector_scorer_sha256": "06dd6475fde27c6936d530e32076867be02790cfca05d5b3b9ca1947b5ff1c6b",
+  "cpu_model": "QEMU Virtual CPU version 2.5+",
+  "virtual_cpu_count": 4,
+  "physical_arm": false,
+  "memory_mib": 11677,
+  "independent_test_load": false,
+  "notes": "Existing user services left running; ordinary correctness gates completed before launch. Fresh seeded numeric vectors, no user library."
+}

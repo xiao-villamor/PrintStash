@@ -49,7 +49,7 @@ class VaultGenerationMiddleware:
             and not is_restore
             and not is_recovery_login
         )
-        if mutating and not begin_mutating_operation():
+        if mutating and not begin_mutating_operation(foreground=True):
             await JSONResponse(
                 {"detail": "restore_in_progress"},
                 status_code=503,
@@ -60,7 +60,7 @@ class VaultGenerationMiddleware:
             await self._pinned_request(scope, receive, send)
         finally:
             if mutating:
-                end_mutating_operation()
+                end_mutating_operation(foreground=True)
 
     async def _pinned_request(self, scope: Scope, receive: Receive, send: Send) -> None:
         admission = asyncio.create_task(asyncio.to_thread(generations.pin))

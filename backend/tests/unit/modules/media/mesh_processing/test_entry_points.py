@@ -108,9 +108,7 @@ class TestAnalyzeMesh:
     def test_reports_an_incomplete_fallback_thumbnail_as_incomplete(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        from app.modules.media import stl_fallback
 
-        monkeypatch.setattr(stl_fallback, "_MAX_ASCII_BYTES", 500)
         path = tmp_path / "ascii-truncated.stl"
         facet = (
             "facet normal 0 0 1\n"
@@ -121,7 +119,14 @@ class TestAnalyzeMesh:
             "endloop\n"
             "endfacet\n"
         )
-        path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
+        path.write_text(
+            "solid truncated\n"
+            + facet
+            + (" " * (16 * 1024 * 1024))
+            + "\n"
+            + facet
+            + "endsolid truncated\n"
+        )
         monkeypatch.setattr(
             mesh_processing, "_estimate_triangle_count", lambda _p: None
         )
@@ -138,9 +143,7 @@ class TestAnalyzeMesh:
     def test_measures_no_geometry_from_a_file_it_could_not_load(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        from app.modules.media import stl_fallback
 
-        monkeypatch.setattr(stl_fallback, "_MAX_ASCII_BYTES", 500)
         path = tmp_path / "ascii-truncated.stl"
         facet = (
             "facet normal 0 0 1\n"
@@ -151,7 +154,14 @@ class TestAnalyzeMesh:
             "endloop\n"
             "endfacet\n"
         )
-        path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
+        path.write_text(
+            "solid truncated\n"
+            + facet
+            + (" " * (16 * 1024 * 1024))
+            + "\n"
+            + facet
+            + "endsolid truncated\n"
+        )
         monkeypatch.setattr(
             mesh_processing, "_estimate_triangle_count", lambda _p: None
         )
@@ -355,7 +365,7 @@ class TestAnalyzeMesh:
         assert geometry["triangle_count"] == 99  # cheap geometry kept
         assert thumb is None
 
-    def test_loaded_mesh_triggers_memory_reclaim(
+    def test_releases_the_loaded_mesh_before_reclaim(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
@@ -363,7 +373,7 @@ class TestAnalyzeMesh:
         p = tmp_path / "ok.stl"
         _write_binary_stl(p, 500)
 
-        calls = {"n": 0}
+        released = []
         monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(500))
         monkeypatch.setattr(
             mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNG"
@@ -371,11 +381,11 @@ class TestAnalyzeMesh:
         monkeypatch.setattr(
             mesh_processing,
             "_reclaim_memory",
-            lambda: calls.__setitem__("n", calls["n"] + 1),
+            lambda *, released_mesh: released.append(released_mesh()),
         )
 
         mesh_operations.analyze_mesh(p)
-        assert calls["n"] == 1
+        assert released == [None]
 
     def test_skipped_mesh_does_not_reclaim(self, tmp_path: Path, monkeypatch) -> None:
         # No mesh was loaded (over cap), so there's nothing to free — and we don't pay
@@ -517,9 +527,7 @@ class TestRenderThumbnail:
             zf.writestr("Metadata/thumbnail.png", png)
 
         monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(10))
-        monkeypatch.setattr(
-            mesh_render, "render_mesh_thumbnail", lambda *a, **k: None
-        )
+        monkeypatch.setattr(mesh_render, "render_mesh_thumbnail", lambda *a, **k: None)
         assert mesh_operations.render_thumbnail(p) == png
 
     def test_render_thumbnail_is_none_when_nothing_can_be_rendered(
@@ -528,9 +536,7 @@ class TestRenderThumbnail:
         p = tmp_path / "cube.stl"
         _write_binary_stl(p, 10)
         monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(10))
-        monkeypatch.setattr(
-            mesh_render, "render_mesh_thumbnail", lambda *a, **k: None
-        )
+        monkeypatch.setattr(mesh_render, "render_mesh_thumbnail", lambda *a, **k: None)
         assert mesh_operations.render_thumbnail(p) is None
 
     def test_render_thumbnail_over_cap_with_embedded_fallback_disabled_returns_none(

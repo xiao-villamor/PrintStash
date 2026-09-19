@@ -15,6 +15,7 @@ from sqlmodel import select
 
 from app.db.models import Model
 from app.modules.storage.storage_backend.runtime import get_backend, init_backend
+from tests.ingestion_work import drain_enrichment, drain_sources
 
 _STL = b"""solid audit_fixture
 facet normal 0 0 1
@@ -46,10 +47,12 @@ async def _setup_and_login(api, tmp_path) -> dict[str, str]:
 
 async def _await_job(api, headers: dict[str, str], job_id: str) -> dict:
     for _ in range(100):
+        await drain_sources()
         response = await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
         assert response.status_code == 200, response.text
         job = response.json()
         if job["state"] in ("completed", "failed"):
+            await drain_enrichment()
             return job
         await asyncio.sleep(0.05)
     raise AssertionError(f"ingest job did not finish: {job}")

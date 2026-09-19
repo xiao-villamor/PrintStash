@@ -28,6 +28,7 @@ from app.db.session import SQLiteSessionFactory, override_session_factory
 from app.modules.library import provenance
 from app.schemas.provenance import CaptureManifestV2
 from tests.factories import print_job_config
+from tests.ingestion_work import drain_sources
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
@@ -96,6 +97,7 @@ class TestLibraryTransfer:
         assert upload.status_code == 202, upload.text
         job_id = upload.json()["job_id"]
         for _ in range(50):
+            await drain_sources()
             status = (
                 await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers_a)
             ).json()
@@ -256,6 +258,7 @@ class TestLibraryTransfer:
         )
         job_id = upload.json()["job_id"]
         for _ in range(50):
+            await drain_sources()
             status = (
                 await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers_a)
             ).json()

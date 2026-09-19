@@ -10,6 +10,7 @@ from app.db.models import File, Model
 from app.modules.storage import migration_journal, vault_migration
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.maintenance import end_restore_maintenance
+from tests.ingestion_work import drain_sources
 
 
 @pytest.fixture
@@ -30,6 +31,7 @@ async def ingest(api, headers, name: str, payload: bytes):
     assert response.status_code == 202, response.text
     job_id = response.json()["job_id"]
     for _ in range(100):
+        await drain_sources()
         job = await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
         if job.json()["state"] in {"completed", "failed"}:
             assert job.json()["state"] == "completed", job.text

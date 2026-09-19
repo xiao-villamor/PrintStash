@@ -23,6 +23,7 @@ covered separately in ``test_import_resolvers.py``.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import threading
 import uuid
@@ -95,7 +96,11 @@ def _fake_download(staged: Path, original_filename: str) -> AsyncMock:
     """Mock for ``download_to_staging`` that yields an already-staged file."""
 
     async def _dl(url: str):  # signature mirrors the real coroutine
-        return staged, original_filename
+        return (
+            staged,
+            original_filename,
+            hashlib.sha256(staged.read_bytes()).hexdigest(),
+        )
 
     return AsyncMock(side_effect=_dl)
 
@@ -138,6 +143,9 @@ def _benchy_zip_bytes(*sources: Path) -> bytes:
 def _job(client: TestClient, resp, headers: dict[str, str]) -> dict:
     assert resp.status_code == 202, resp.text
     job_id = resp.json()["job_id"]
+    from tests.integration.api.v1._ingest_assertions import drain_ingestion
+
+    drain_ingestion()
     job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
     assert job.status_code == 200, job.text
     return job.json()
@@ -230,7 +238,7 @@ class TestImportFromUrl:
             # The Printables page resolves to a direct STL link server-side.
             _patch_resolver("https://files.printables.test/3dbenchy.stl"),
             patch(
-                "app.modules.ingestion.importer.download_to_staging",
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
                 new=_fake_download(staged, "3dbenchy.stl"),
             ),
         ):
@@ -278,7 +286,7 @@ class TestImportFromUrl:
             # The MakerWorld page resolves to a direct .zip bundle link server-side.
             _patch_resolver("https://makerworld.test/instance/123/f3mf.zip"),
             patch(
-                "app.modules.ingestion.importer.download_to_staging",
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
                 new=_fake_download(staged, "3d-benchy.zip"),
             ),
         ):
@@ -460,7 +468,7 @@ class TestImportFromUrl:
             ),
             _patch_resolver(None),  # unrecognised host -> treated as a direct URL
             patch(
-                "app.modules.ingestion.importer.download_to_staging",
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
                 new=_fake_download(staged, "some-page"),
             ),
         ):
@@ -505,7 +513,10 @@ class TestImportFromUrl:
                 "app.modules.ingestion.import_resolvers.list_model_files",
                 new=AsyncMock(return_value=None),
             ),
-            patch("app.modules.ingestion.importer.download_to_staging", new=download),
+            patch(
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
+                new=download,
+            ),
         ):
             payload = _job(
                 client,
@@ -563,7 +574,10 @@ class TestImportFromUrl:
                 "app.modules.ingestion.import_resolvers.resolve_page_url",
                 new=AsyncMock(return_value="https://files.printables.test/x"),
             ),
-            patch("app.modules.ingestion.importer.download_to_staging", new=download),
+            patch(
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
+                new=download,
+            ),
         ):
             payload = _job(
                 client,
@@ -647,7 +661,10 @@ class TestImportFromUrl:
                 "app.modules.ingestion.import_resolvers.resolve_page_url",
                 new=AsyncMock(return_value="https://files.printables.test/x"),
             ),
-            patch("app.modules.ingestion.importer.download_to_staging", new=download),
+            patch(
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
+                new=download,
+            ),
         ):
             payload = _job(
                 client,
@@ -730,7 +747,10 @@ class TestImportFromUrl:
                     ]
                 ),
             ),
-            patch("app.modules.ingestion.importer.download_to_staging", new=download),
+            patch(
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
+                new=download,
+            ),
         ):
             payload = _job(
                 client,
@@ -775,7 +795,7 @@ class TestImportFromUrl:
             ),
             _patch_resolver("https://files.printables.test/3dbenchy.stl"),
             patch(
-                "app.modules.ingestion.importer.download_to_staging",
+                "app.modules.ingestion.importer.download_to_staging_with_receipt",
                 new=_fake_download(staged, "3dbenchy.stl"),
             ),
         ):
@@ -829,7 +849,7 @@ def _fake_download_seq(items: list[tuple[bytes, str]]) -> AsyncMock:
     async def _dl(url: str):
         data, filename = pending.pop(0)
         staged = _stage_bytes(data, Path(filename).suffix or ".bin")
-        return staged, filename
+        return staged, filename, hashlib.sha256(data).hexdigest()
 
     return AsyncMock(side_effect=_dl)
 
@@ -891,16 +911,19 @@ class TestDownloadToStaging:
         }
 
         # Only the SSRF guard's IP classification is relaxed; the rest of the
-        # download (real httpx stream against the pinned peer, header parsing,
+        # download (real Rust stream against the pinned peer, header parsing,
         # disk write) runs for real.
         with patch.object(url_safety, "is_public_ip", return_value=True):
-            staged, filename = await importer.download_to_staging(f"{base}/download")
+            staged, filename, digest = await importer.download_to_staging_with_receipt(
+                f"{base}/download"
+            )
 
         assert filename == "3dbenchy.stl"
         assert staged.exists()
         assert staged.read_bytes() == stl_bytes
         assert staged.parent == settings.incoming_dir
         assert staged.suffix == ".stl"
+        assert digest == hashlib.sha256(stl_bytes).hexdigest()
 
     @pytest.mark.asyncio
     async def test_download_to_staging_follows_redirect(
@@ -937,6 +960,36 @@ class TestDownloadToStaging:
 
         assert str(exc.value) == "download_too_large"
         # The oversized partial download was cleaned up, not left in staging.
+        assert set(settings.incoming_dir.iterdir()) == incoming_before
+
+    @pytest.mark.asyncio
+    async def test_download_to_staging_rejects_redirect_without_location(
+        self, tmp_path: Path, http_server: tuple[str, dict[str, dict]]
+    ) -> None:
+        use_local_storage(tmp_path)
+        base, routes = http_server
+        routes["/start"] = {"status": 302}
+
+        with patch.object(url_safety, "is_public_ip", return_value=True):
+            with pytest.raises(importer.ImportError_) as exc:
+                await importer.download_to_staging(f"{base}/start")
+
+        assert str(exc.value) == "url_redirect_without_location"
+
+    @pytest.mark.asyncio
+    async def test_download_to_staging_rejects_http_failure_without_partial_file(
+        self, tmp_path: Path, http_server: tuple[str, dict[str, dict]]
+    ) -> None:
+        use_local_storage(tmp_path)
+        base, routes = http_server
+        routes["/missing.stl"] = {"status": 404, "body": b"not a model"}
+        incoming_before = set(settings.incoming_dir.iterdir())
+
+        with patch.object(url_safety, "is_public_ip", return_value=True):
+            with pytest.raises(importer.ImportError_) as exc:
+                await importer.download_to_staging(f"{base}/missing.stl")
+
+        assert str(exc.value) == "download_http_status"
         assert set(settings.incoming_dir.iterdir()) == incoming_before
 
     @pytest.mark.asyncio

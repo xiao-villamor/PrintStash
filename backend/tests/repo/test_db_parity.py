@@ -30,6 +30,37 @@ PRODUCTION_PRAGMAS = {"foreign_keys": 1}
 
 
 class TestTestDatabase:
+    @pytest.mark.parametrize("quantization", ["float32", "int8", "binary"])
+    def test_reset_removes_registered_native_index_tables(
+        self, db_session, monkeypatch, quantization
+    ) -> None:
+        from printstash_core.inference.transforms import IndexTransform
+        from sqlalchemy import inspect
+
+        from app.core.config import _overlay
+        from app.modules.search import vector_index
+        from tests.conftest import _truncate_all
+        from tests.factories import build_embedding_space, build_index_generation
+
+        monkeypatch.setitem(_overlay, "search_native_vectors_enabled", True)
+        generation = build_index_generation(
+            db_session,
+            build_embedding_space(db_session, native_dimension=8),
+            index_backend="sqlite_vec",
+            index_dimension=8,
+            quantization=quantization,
+            transform_json=IndexTransform.approved(8, 8, quantization).metadata(),
+        )
+        assert vector_index.prepare(db_session, generation)
+        name = generation.vector_table_name
+        db_session.commit()
+        engine = db_session.get_bind()
+        db_session.close()
+
+        _truncate_all(engine)
+
+        assert not any(table.startswith(name) for table in inspect(engine).get_table_names())
+
     @pytest.mark.parametrize("pragma", sorted(PRODUCTION_PRAGMAS))
     def test_matches_the_pragma_production_runs(
         self, db_session: Session, pragma: str

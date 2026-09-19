@@ -11,7 +11,17 @@ from sqlalchemy import false
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session
 
+from app.core.errors import ErrorKind, OperationError
 from app.db.models import User
+from app.schemas.models import ModelFamilyRead
+
+
+class FamilyAnnotations(Protocol):
+    def family_summaries(
+        self, session: Session, user: User, model_ids: list[int]
+    ) -> dict[int, ModelFamilyRead]: ...
+
+    def membership_rows(self, session: Session, user: User): ...
 
 
 class ModelAnnotations(Protocol):
@@ -25,6 +35,24 @@ class ModelAnnotations(Protocol):
 
 
 _annotations: ModelAnnotations | None = None
+_families: FamilyAnnotations | None = None
+
+
+def bind_families(provider: FamilyAnnotations | None) -> None:
+    global _families
+    _families = provider
+
+
+def family_summaries(
+    session: Session, actor: User, model_ids: list[int]
+) -> dict[int, ModelFamilyRead]:
+    return _families.family_summaries(session, actor, model_ids) if _families else {}
+
+
+def membership_rows(session: Session, actor: User):
+    if _families is None:
+        raise OperationError("family_unavailable", kind=ErrorKind.UNAVAILABLE)
+    return _families.membership_rows(session, actor)
 
 
 def bind_annotations(provider: ModelAnnotations | None) -> None:

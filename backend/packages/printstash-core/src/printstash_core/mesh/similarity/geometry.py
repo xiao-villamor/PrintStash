@@ -42,6 +42,8 @@ def prepare_surface(vertices: NDArray[Any], faces: NDArray[Any]) -> Surface:
     import numpy as np
 
     validate_mesh_arrays(vertices, faces, FingerprintBudget())
+    # Tracking belongs to the caller's mutable mesh, not to analysis copies.
+    vertices, faces = np.asarray(vertices), np.asarray(faces)
     try:
         with np.errstate(over="raise", invalid="raise", divide="raise"):
             used = vertices[np.unique(faces)]
@@ -125,26 +127,21 @@ def nearest_neighbors(
     """
     import numpy as np
 
+    from ..native_rasterizer import kernel
+
     if not len(target):
         raise GeometryError("empty_target")
-    distances = np.empty(len(source), dtype=np.float64)
-    indices = np.empty(len(source), dtype=np.int64)
-    target_norm = np.einsum("ij,ij->i", target, target)
-    # Bound the distance temporary at 1M float64 cells even for dense meshes.
-    chunk = max(1, min(128, 1_000_000 // len(target)))
-    for start in range(0, len(source), chunk):
-        block = source[start : start + chunk]
-        squared = (
-            np.einsum("ij,ij->i", block, block)[:, None]
-            + target_norm[None, :]
-            - 2 * (block @ target.T)
+    try:
+        packed = kernel().nearest_neighbors(
+            np.asarray(source, dtype="=f8").tobytes(),
+            np.asarray(target, dtype="=f8").tobytes(),
         )
-        choices = np.argmin(squared, axis=1)
-        distances[start : start + len(block)] = np.sqrt(
-            np.maximum(squared[np.arange(len(block)), choices], 0)
-        )
-        indices[start : start + len(block)] = choices
-    return distances, indices
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc
+    records = np.frombuffer(
+        packed, dtype=np.dtype([("distance", "=f8"), ("index", "=u8")])
+    )
+    return records["distance"].copy(), records["index"].astype(np.int64)
 
 
 def equivalent_triangles(
@@ -163,27 +160,20 @@ def equivalent_triangles(
     """
     import numpy as np
 
-    if len(left.vertices) != len(right.vertices) or len(left.faces) != len(right.faces):
-        return False
-    target = right.vertices @ rotation * scale + translation
-    # Lexicographic order suffices only after demonstrating every positional
-    # correspondence. Near ties are handled with a second shifted grid.
-    for offset in (0.0, 0.5):
-        a = np.floor(left.vertices / tolerance + offset).astype(np.int64)
-        b = np.floor(target / tolerance + offset).astype(np.int64)
-        order_a = np.lexsort(a.T[::-1])
-        order_b = np.lexsort(b.T[::-1])
-        if not np.all(
-            np.linalg.norm(left.vertices[order_a] - target[order_b], axis=1)
-            <= tolerance
-        ):
-            continue
-        mapping = np.empty(len(target), dtype=np.int64)
-        mapping[order_b] = order_a
-        faces_a = np.sort(left.faces, axis=1)
-        faces_b = np.sort(mapping[right.faces], axis=1)
-        faces_a = faces_a[np.lexsort(faces_a.T[::-1])]
-        faces_b = faces_b[np.lexsort(faces_b.T[::-1])]
-        if np.array_equal(faces_a, faces_b):
-            return True
-    return False
+    from ..native_rasterizer import kernel
+
+    try:
+        return bool(
+            kernel().equivalent_triangles(
+                np.asarray(left.vertices, dtype="=f8").tobytes(),
+                np.asarray(left.faces, dtype="=i8").tobytes(),
+                np.asarray(right.vertices, dtype="=f8").tobytes(),
+                np.asarray(right.faces, dtype="=i8").tobytes(),
+                np.asarray(rotation, dtype="=f8").ravel().tolist(),
+                scale,
+                np.asarray(translation, dtype="=f8").tolist(),
+                tolerance,
+            )
+        )
+    except ValueError as exc:
+        raise GeometryError(str(exc)) from exc

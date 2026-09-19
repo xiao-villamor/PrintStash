@@ -48,12 +48,24 @@ export function rememberedArtifactUploads(): string[] {
   return readIds();
 }
 
-function toHex(bytes: ArrayBuffer): string {
-  return Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, "0")).join("");
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 export async function sha256Blob(blob: Blob): Promise<string> {
-  return toHex(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()));
+  if (globalThis.crypto?.subtle) {
+    return toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())));
+  }
+
+  // Ordinary LAN HTTP does not expose SubtleCrypto. Keep identical content and
+  // part verification there, without loading a whole large Artifact into memory.
+  const { sha256 } = await import("@noble/hashes/sha2.js");
+  const hash = sha256.create();
+  const readSize = 1024 * 1024;
+  for (let offset = 0; offset < blob.size; offset += readSize) {
+    hash.update(new Uint8Array(await blob.slice(offset, offset + readSize).arrayBuffer()));
+  }
+  return toHex(hash.digest());
 }
 
 export interface UploadOptions {

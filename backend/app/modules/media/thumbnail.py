@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-import io
 import re
-import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -25,7 +23,7 @@ class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
 
 
-def to_webp(data: bytes, *, normalize: bool = True) -> bytes:
+def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) -> bytes:
     """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
 
     Single conversion seam for every thumbnail write. Lossless keeps the
@@ -38,77 +36,23 @@ def to_webp(data: bytes, *, normalize: bool = True) -> bytes:
     thumbnail as a retryable derivative; hostile input is never stored raw.
     """
     try:
-        from PIL import Image
+        from printstash_core.mesh.native_rasterizer import kernel
+        from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(data)) as img:
-                if img.width * img.height > _MAX_IMAGE_PIXELS:
-                    raise ValueError("thumbnail_too_large")
-                img.load()
-                width = int(settings.model_thumbnail_width)
-                height = round(width * 3 / 4)
-                source_had_alpha = "A" in img.getbands()
-                source_is_webp = img.format == "WEBP"
-                rgba = img.convert("RGBA")
-                alpha_bounds = rgba.getchannel("A").getbbox()
-                if alpha_bounds is None:
-                    raise ThumbnailValidationError("thumbnail_empty")
-
-                if normalize:
-                    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
-
-                    canonical_with_safe_border = (
-                        source_had_alpha
-                        and rgba.size == (width, height)
-                        and alpha_bounds[0] > 0
-                        and alpha_bounds[1] > 0
-                        and alpha_bounds[2] < width
-                        and alpha_bounds[3] < height
-                        and 0.76
-                        <= max(
-                            (alpha_bounds[2] - alpha_bounds[0]) / width,
-                            (alpha_bounds[3] - alpha_bounds[1]) / height,
-                        )
-                        <= 0.84
-                    )
-                    if not canonical_with_safe_border:
-                        rgba = rgba.crop(alpha_bounds)
-                        margin = PREVIEW_PROFILE.margin_fraction
-                        content_size = (
-                            max(round(width * (1 - 2 * margin)), 1),
-                            max(round(height * (1 - 2 * margin)), 1),
-                        )
-                        scale = min(
-                            content_size[0] / rgba.width,
-                            content_size[1] / rgba.height,
-                        )
-                        normalized_size = (
-                            max(round(rgba.width * scale), 1),
-                            max(round(rgba.height * scale), 1),
-                        )
-                        if rgba.size != normalized_size:
-                            rgba = rgba.resize(
-                                normalized_size, Image.Resampling.LANCZOS
-                            )
-                        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-                        offset = (
-                            (width - rgba.width) // 2,
-                            (height - rgba.height) // 2,
-                        )
-                        canvas.alpha_composite(rgba, dest=offset)
-                        rgba = canvas
-                    elif source_is_webp:
-                        # The full renderer already encoded the canonical,
-                        # lossless recipe. Validation above is still shared;
-                        # only the redundant second WebP encode is skipped.
-                        return data
-                else:
-                    rgba.thumbnail((width, height), Image.Resampling.LANCZOS)
-
-                buf = io.BytesIO()
-                rgba.save(buf, format="WEBP", lossless=True, exact=True, method=6)
-                return buf.getvalue()
+        selected_width = int(settings.model_thumbnail_width) if width is None else width
+        if type(selected_width) is not int or not 320 <= selected_width <= 1280:
+            raise ValueError("thumbnail_width_invalid")
+        try:
+            converted = kernel().normalize_thumbnail(
+                data, selected_width, normalize, PREVIEW_PROFILE.margin_fraction
+            )
+        except ValueError as exc:
+            if str(exc) == "thumbnail_empty":
+                raise ThumbnailValidationError("thumbnail_empty") from exc
+            raise
+        if converted is None:
+            raise ThumbnailValidationError("thumbnail_format_unsupported")
+        return converted
     except ThumbnailValidationError:
         raise
     except Exception as exc:

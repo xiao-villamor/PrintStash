@@ -7,10 +7,132 @@
  * a notification channel, and the trash purge. Each is asserted after a reload or against
  * the artefact it produced, because "the toast appeared" is not evidence anything saved.
  */
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { test, expect } from "./helpers";
 import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("settings", () => {
+  test("cache GB limits persist after reloading settings", async ({ page }) => {
+    await page.goto("/settings?section=storage");
+    const enabled = page.getByRole("checkbox", { name: "Keep downloaded files on this machine" });
+    const wasEnabled = await enabled.isChecked();
+    if (!wasEnabled) await enabled.click();
+    const limit = page.getByRole("spinbutton", { name: "Cache size limit (GB)" });
+    const free = page.getByRole("spinbutton", { name: "Keep free on disk (GB)" });
+    const originalLimit = await limit.inputValue();
+    const originalFree = await free.inputValue();
+    await expect(page.getByText("Maximum cached files", { exact: true })).not.toBeVisible();
+    await limit.fill("2.5");
+    await free.fill("0.5");
+    await page.getByRole("button", { name: "Save cache settings" }).click();
+    await expect(page.getByText("Artifact cache settings updated.")).toBeVisible();
+    await page.reload();
+    await expect(limit).toHaveValue("2.5");
+    await expect(free).toHaveValue("0.5");
+    await page.getByText("Advanced cache settings", { exact: true }).click();
+    await expect(page.getByRole("spinbutton", { name: "Maximum cached files" })).toBeVisible();
+    await limit.fill(originalLimit);
+    await free.fill(originalFree);
+    if (!wasEnabled) await enabled.click();
+    await page.getByRole("button", { name: "Save cache settings" }).click();
+    await expect(page.getByText("Artifact cache settings updated.")).toBeVisible();
+  });
+
+  test("guides settings across screen sizes", async ({ page }, testInfo) => {
+    for (const theme of ["light", "dark"]) {
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.goto("/settings?section=storage");
+        await expect(page.getByRole("heading", { name: "Library storage" })).toBeVisible();
+        await page.evaluate(
+          (dark) => document.documentElement.classList.toggle("dark", dark),
+          theme === "dark",
+        );
+        await expect(page.getByText("Library files", { exact: true })).toBeVisible();
+        await expect(page.getByText("Growth forecast", { exact: true })).not.toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Clear cached files", exact: true }),
+        ).toHaveCount(0);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        ).toBeLessThanOrEqual(0);
+        await page.screenshot({
+          path: testInfo.outputPath(`storage-${theme}-${width}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.goto("/settings?section=ai-search");
+        await expect(
+          page.getByRole("heading", { name: "Where should AI Search run?" }),
+        ).toBeVisible();
+        await page.evaluate(
+          (dark) => document.documentElement.classList.toggle("dark", dark),
+          theme === "dark",
+        );
+        await expect(page.getByRole("combobox")).toHaveCount(0);
+        await page.screenshot({
+          path: testInfo.outputPath(`ai-${theme}-${width}.png`),
+          fullPage: true,
+          animations: "disabled",
+        });
+        await page.getByRole("button", { name: "Use this machine" }).click();
+        await expect(page.getByRole("button", { name: "Change location" })).toBeVisible();
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+        ).toBeLessThanOrEqual(0);
+        await page.getByRole("button", { name: "Change location" }).click();
+        await page.getByRole("button", { name: "Connect another server" }).click();
+        await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
+        await page.getByRole("button", { name: "Advanced AI controls" }).click();
+        await expect(
+          page.getByRole("checkbox", { name: "Enable AI Search", exact: true }),
+        ).toBeVisible();
+        await page.getByRole("button", { name: "Back to guided setup" }).click();
+        await expect(
+          page.getByRole("heading", { name: "Where should AI Search run?" }),
+        ).toBeVisible();
+      }
+    }
+    await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Move storage with a verified migration" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Move Vault storage", exact: true }),
+    ).toBeVisible();
+  });
+
+  test("returns from advanced AI controls without searching the page", async ({
+    page,
+  }, testInfo) => {
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto("/settings?section=ai-search");
+      await page.getByRole("button", { name: "Connect another server" }).click();
+      await page.getByRole("button", { name: "Advanced AI controls" }).click();
+      await page
+        .getByRole("checkbox", { name: "Enable AI Search", exact: true })
+        .scrollIntoViewIfNeeded();
+      const back = page.getByRole("button", { name: "Back to guided setup" });
+      await expect(back).toBeInViewport();
+      await expect(back).toBeFocused();
+      await page.screenshot({
+        path: testInfo.outputPath(`advanced-${width}.png`),
+        animations: "disabled",
+      });
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("heading", { name: "Where should AI Search run?" }),
+      ).toBeInViewport();
+      await expect(page.getByRole("button", { name: "Advanced AI controls" })).toBeFocused();
+      await page.screenshot({
+        path: testInfo.outputPath(`guided-return-${width}.png`),
+        animations: "disabled",
+      });
+    }
+  });
+
   test("create and revoke an API key", async ({ page }) => {
     const keyName = `e2e-key-${Date.now()}`;
     await page.goto("/settings");
@@ -377,14 +499,14 @@ test.describe("settings", () => {
       ),
       sw.click(),
     ]);
-    const after = await sw.getAttribute("aria-checked");
-    expect(after).not.toBe(before);
+    const after = before === "true" ? "false" : "true";
+    await expect(sw).toHaveAttribute("aria-checked", after);
 
     await page.reload();
     await page.getByRole("button", { name: "Design" }).click();
     await expect(
       page.getByRole("switch", { name: "Auto-mark known good on successful print" }),
-    ).toHaveAttribute("aria-checked", after!);
+    ).toHaveAttribute("aria-checked", after);
 
     // Restore the original so the shared DB doesn't drift for later runs.
     await Promise.all([
@@ -526,9 +648,16 @@ test.describe("settings", () => {
   });
 
   test("requires explicit cleanup from storage insights", async ({ page }) => {
+    const dataRoot = resolve(process.env.PLAYWRIGHT_REAL_DATA_DIR ?? "tests/e2e-real/.data");
+    const { stdout } = await promisify(execFile)(
+      resolve("../backend/.venv/bin/python"),
+      ["-m", "tests.fakes.storage_cleanup", dataRoot],
+      { cwd: resolve("../backend") },
+    );
+    const staged: { path: string; inbox_item_id: number } = JSON.parse(stdout);
     await page.goto("/settings");
     await page.getByRole("button", { name: "Storage", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Storage insights" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Library storage" })).toBeVisible();
     const [measurement] = await Promise.all([
       page.waitForResponse(
         (response) =>
@@ -538,13 +667,18 @@ test.describe("settings", () => {
       page.getByRole("button", { name: "Refresh measurement" }).click(),
     ]);
     expect(measurement.status()).toBe(200);
+    await page.getByText("Storage breakdown and diagnostics", { exact: true }).click();
     await expect(page.getByText(/Provider measurement:.*Capacity evidence is known/)).toBeVisible();
-    await page.getByRole("button", { name: "Clean up expired staging" }).click();
+    await page.getByRole("button", { name: "Clean up temporary files" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("Uncertain files are retained");
+    expect(existsSync(staged.path)).toBe(true);
     await dialog.getByRole("button", { name: "Clean up", exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "expired leases cleared" }),
     ).toBeVisible();
+    expect(existsSync(staged.path)).toBe(false);
+    const deleted = await page.request.delete(`/api/v1/inbox/${staged.inbox_item_id}`);
+    expect(deleted.ok()).toBe(true);
   });
 });

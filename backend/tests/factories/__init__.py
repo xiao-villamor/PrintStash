@@ -83,6 +83,9 @@ from tests.factories.identity import (
     grant_printer_role,
     user_config,
 )
+from tests.factories.inference import (
+    build_inference_endpoint as build_inference_endpoint,
+)
 from tests.factories.library import (
     build_collection,
     build_file,
@@ -106,6 +109,10 @@ from tests.factories.manufacturing import (
     build_multipart_build_part,
     build_multipart_part,
 )
+from tests.factories.media import build_artifact_analysis as build_artifact_analysis
+from tests.factories.media import (
+    build_thumbnail_generation as build_thumbnail_generation,
+)
 from tests.factories.ops import (
     build_artifact_upload,
     build_artifact_upload_part,
@@ -124,6 +131,7 @@ from tests.factories.ops import (
     build_external_library,
     build_failure_domain_declaration,
     build_filament_profile,
+    build_ingestion_review,
     build_library_observation,
     build_notification_channel,
     build_restore_marker,
@@ -151,6 +159,37 @@ from tests.factories.scenarios import (
     a_gcode_artifact,
     a_member_who_can_see_one_collection,
     a_printer_with_a_queue,
+)
+from tests.factories.search import build_search_dependency as build_search_dependency
+from tests.factories.search import build_search_expansion as build_search_expansion
+from tests.factories.search import (
+    build_search_expansion_term as build_search_expansion_term,
+)
+from tests.factories.search import (
+    build_search_generation_lease as build_search_generation_lease,
+)
+from tests.factories.search import (
+    build_search_index_failure as build_search_index_failure,
+)
+from tests.factories.search import (
+    build_search_lexical_posting as build_search_lexical_posting,
+)
+from tests.factories.search import (
+    build_search_lexical_state as build_search_lexical_state,
+)
+from tests.factories.search import (
+    build_search_lexical_term as build_search_lexical_term,
+)
+from tests.factories.search import build_search_passage as build_search_passage
+from tests.factories.search import (
+    build_search_projection_request as build_search_projection_request,
+)
+from tests.factories.search import (
+    build_search_reconciliation_state as build_search_reconciliation_state,
+)
+from tests.factories.search import build_subject_caption as build_subject_caption
+from tests.factories.search import (
+    build_user_search_preferences as build_user_search_preferences,
 )
 from tests.factories.similarity import (
     build_embedding_space,
@@ -202,6 +241,7 @@ __all__ = [
     "build_audit_finding",
     "build_audit_run",
     "build_background_job",
+    "build_ingestion_review",
     "build_capture",
     "build_capture_slot",
     "build_collection",
@@ -281,8 +321,25 @@ __all__ += [
     "build_geometry_fingerprint",
     "build_index_generation",
     "build_passage_vector",
+    "build_search_passage",
+    "build_search_expansion",
+    "build_search_expansion_term",
+    "build_subject_caption",
+    "build_user_search_preferences",
+    "build_inference_endpoint",
+    "build_search_dependency",
+    "build_artifact_analysis",
+    "build_thumbnail_generation",
+    "build_search_projection_request",
+    "build_search_reconciliation_state",
     "build_similarity_candidate",
     "build_similarity_decision",
     "build_similarity_observation",
     "build_similarity_run",
+]
+
+__all__ += [
+    "build_search_lexical_state",
+    "build_search_lexical_term",
+    "build_search_lexical_posting",
 ]

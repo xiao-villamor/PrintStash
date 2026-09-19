@@ -20,12 +20,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import _overlay
 from app.db.models import (
+    ArtifactAnalysisGeneration,
     File,
     FileType,
     Metadata,
     Model,
     ModelProvenanceField,
     ProvenanceCapture,
+    ThumbnailGeneration,
 )
 from app.db.session import (
     SQLiteSessionFactory,
@@ -80,6 +82,21 @@ def _visible_png() -> bytes:
     return output.getvalue()
 
 
+def _complete_preview(session, file, image):
+    from app.modules.media.thumbnail_engine import ThumbnailResult, ThumbnailStrategy
+    from app.modules.media.thumbnail_generations import (
+        claim_thumbnail,
+        finish_thumbnail,
+    )
+
+    claim = claim_thumbnail(session, file)
+    assert claim is not None
+    return finish_thumbnail(session, file, claim, ThumbnailResult(
+        image=image, geometry={}, strategy=ThumbnailStrategy.FULL, complete=True,
+        failure_reason=None, duration_ms=0, peak_rss_bytes=None,
+    ))
+
+
 def _persist(db_session: Session, model: Model, staged: Path, **kwargs):
     defaults = dict(
         model=model,
@@ -96,6 +113,34 @@ def _persist(db_session: Session, model: Model, staged: Path, **kwargs):
 
 
 class TestPersistArtifact:
+    def test_rolls_back_source_when_enrichment_registration_fails(
+        self, db_session, storage, model, tmp_path, monkeypatch
+    ):
+        from app.modules.media import analysis_generations
+
+        def reject_registration(*args, **kwargs):
+            raise RuntimeError("registration unavailable")
+
+        monkeypatch.setattr(analysis_generations, "request_enrichment", reject_registration)
+        with pytest.raises(RuntimeError, match="registration unavailable"):
+            _persist(db_session, model, _staged(tmp_path))
+
+        with get_session_factory().scoped_session() as fresh:
+            assert fresh.exec(select(File).where(File.model_id == model.id)).all() == []
+            assert fresh.exec(select(ArtifactAnalysisGeneration)).all() == []
+            assert fresh.exec(select(ThumbnailGeneration)).all() == []
+
+    def test_registers_enrichment_with_the_source_commit(
+        self, db_session, storage, model, tmp_path
+    ):
+        file = _persist(db_session, model, _staged(tmp_path))
+
+        with get_session_factory().scoped_session() as fresh:
+            analysis = fresh.exec(select(ArtifactAnalysisGeneration)).one()
+            preview = fresh.exec(select(ThumbnailGeneration)).one()
+            assert (analysis.file_id, analysis.source_sha256, analysis.state) == (file.id, file.sha256, "pending")
+            assert (preview.file_id, preview.processing_policy, preview.state) == (file.id, "background", "pending")
+
     def test_persist_never_overwrites_an_unclaimed_destination(
         self, db_session: Session, storage, model: Model, tmp_path: Path
     ) -> None:
@@ -531,6 +576,7 @@ class TestThumbnail:
         file_row = _persist(
             db_session, model, _staged(tmp_path), thumb_bytes=b"not-an-image"
         )
+        _complete_preview(db_session, file_row, b"not-an-image")
 
         db_session.refresh(model)
         assert file_row.id is not None
@@ -567,6 +613,7 @@ class TestThumbnail:
             _staged(tmp_path),
             thumb_bytes=_visible_png(),
         )
+        _complete_preview(db_session, file_row, _visible_png())
 
         assert occupied.read_bytes() == b"user-owned thumbnail-shaped file"
         assert Path(file_row.path).exists()
@@ -577,6 +624,7 @@ class TestThumbnail:
     ) -> None:
         png = _visible_png()
         file_row = _persist(db_session, model, _staged(tmp_path), thumb_bytes=png)
+        _complete_preview(db_session, file_row, png)
 
         db_session.refresh(model)
         assert model.thumbnail_file_id == file_row.id

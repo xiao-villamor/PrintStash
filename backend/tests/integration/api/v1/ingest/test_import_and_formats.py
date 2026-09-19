@@ -10,6 +10,7 @@ Fixtures are generated at runtime with trimesh so no binary blobs are committed.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import zipfile
 from pathlib import Path
@@ -33,6 +34,9 @@ def _mesh_bytes(ext: str, size: tuple[float, float, float] = (10, 10, 10)) -> by
 def _completed(client: TestClient, resp, headers: dict[str, str]) -> dict:
     assert resp.status_code == 202, resp.text
     job_id = resp.json()["job_id"]
+    from tests.integration.api.v1._ingest_assertions import drain_ingestion
+
+    drain_ingestion()
     job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
     assert job.status_code == 200, job.text
     return job.json()
@@ -181,12 +185,16 @@ class TestImportFromUrl:
             staging.mkdir(parents=True, exist_ok=True)
             staged = staging / "remote-cube.stl"
             staged.write_bytes(_mesh_bytes("stl"))
-            return staged, "remote-cube.stl"
+            return (
+                staged,
+                "remote-cube.stl",
+                hashlib.sha256(staged.read_bytes()).hexdigest(),
+            )
 
         with (
             patch("app.api.v1.ingest.importer.validate_public_url", return_value=None),
             patch(
-                "app.api.v1.ingest.importer.download_to_staging",
+                "app.api.v1.ingest.importer.download_to_staging_with_receipt",
                 new=AsyncMock(side_effect=_fake_download),
             ),
         ):

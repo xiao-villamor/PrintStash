@@ -18,7 +18,6 @@ unexpected happened. A refusal must never be reported as a success with an empty
 
 from __future__ import annotations
 
-import math
 import struct
 import time
 from pathlib import Path
@@ -85,327 +84,6 @@ def stl(tmp_path: Path):
         return path
 
     return write
-
-
-class TestFramingReservoir:
-    def test_keeps_every_centroid_while_there_is_room(self) -> None:
-        reservoir = worker._FramingReservoir()
-
-        reservoir.add([(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)])
-
-        assert reservoir.values == [(1.0, 2.0, 3.0), (4.0, 5.0, 6.0)]
-        assert reservoir.seen == 2
-
-    def test_stops_growing_at_the_reservoir_size(self) -> None:
-        reservoir = worker._FramingReservoir()
-
-        reservoir.add([(float(i), 0.0, 0.0) for i in range(RESERVOIR_SIZE + 500)])
-
-        # The whole point is a bounded footprint on an unbounded file.
-        assert len(reservoir.values) == RESERVOIR_SIZE
-        assert reservoir.seen == RESERVOIR_SIZE + 500
-
-    def test_samples_the_same_way_every_run(self) -> None:
-        centroids = [(float(i), 0.0, 0.0) for i in range(RESERVOIR_SIZE * 3)]
-        first, second = worker._FramingReservoir(), worker._FramingReservoir()
-
-        first.add(centroids)
-        second.add(centroids)
-
-        # A process-global RNG would make the same file frame differently on a
-        # retry, so the sampling uses its own LCG.
-        assert first.values == second.values
-
-
-class TestCheckDeadline:
-    def test_allows_work_before_the_deadline(self, limits) -> None:
-        worker._check_deadline(limits())
-
-    def test_refuses_work_after_the_deadline(self, limits) -> None:
-        with pytest.raises(worker._BudgetExceeded):
-            worker._check_deadline(limits(deadline=time.monotonic() - 1))
-
-
-class TestValidValue:
-    @pytest.mark.parametrize(
-        "value",
-        [0.0, 1.5, -1.5, 3.4028234663852886e38],
-        ids=["zero", "pos", "neg", "max"],
-    )
-    def test_accepts_a_coordinate_a_float32_can_hold(self, value: float) -> None:
-        assert worker._valid_value(value) is True
-
-    @pytest.mark.parametrize(
-        "value",
-        [math.inf, -math.inf, math.nan, 1e39],
-        ids=["inf", "-inf", "nan", "over-float32"],
-    )
-    def test_rejects_a_coordinate_a_float32_cannot_hold(self, value: float) -> None:
-        assert worker._valid_value(value) is False
-
-
-class TestSourceIsBinary:
-    def test_recognises_a_binary_stl_by_its_exact_length(self, stl) -> None:
-        path = stl(_binary_stl([TRIANGLE, SECOND]))
-
-        assert worker._source_is_binary(path) == (2, path.stat().st_size)
-
-    def test_rejects_a_file_too_short_to_hold_a_header(self, stl) -> None:
-        assert worker._source_is_binary(stl(b"short")) is None
-
-    def test_rejects_a_declared_count_the_file_length_contradicts(self, stl) -> None:
-        data = bytearray(_binary_stl([TRIANGLE]))
-        struct.pack_into("<I", data, 80, 5)
-
-        # A 90-byte file claiming four billion triangles is the whole reason this
-        # check exists.
-        assert worker._source_is_binary(stl(bytes(data))) is None
-
-    def test_rejects_a_declared_count_of_zero(self, stl) -> None:
-        assert worker._source_is_binary(stl(_binary_stl([]))) is None
-
-    def test_treats_ascii_as_not_binary(self, stl) -> None:
-        assert worker._source_is_binary(stl(_ascii_stl([TRIANGLE]))) is None
-
-    def test_reports_a_file_that_is_not_there(self, tmp_path: Path) -> None:
-        assert worker._source_is_binary(tmp_path / "missing.stl") is None
-
-
-class TestReadBinary:
-    def test_reads_every_triangle(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE, SECOND]))
-
-        stats = worker._read_binary(path, limits(), lambda _chunk: None)
-
-        assert stats.triangle_count == 2
-
-    def test_reports_the_bounding_box_it_saw(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE, SECOND]))
-
-        stats = worker._read_binary(path, limits(), lambda _chunk: None)
-
-        assert stats.bounds_min == (0.0, 0.0, 0.0)
-        assert stats.bounds_max == (1.0, 1.0, 1.0)
-
-    def test_hands_each_chunk_to_the_caller(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE] * 20))
-        chunks: list[int] = []
-
-        worker._read_binary(
-            path, limits(chunk_triangles=8), lambda chunk: chunks.append(len(chunk))
-        )
-
-        # Bounded chunks, not the whole file, is what keeps the footprint flat.
-        assert chunks == [8, 8, 4]
-
-    def test_refuses_a_file_that_is_not_exactly_a_binary_stl(self, stl, limits) -> None:
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_binary(stl(b"short"), limits(), lambda _chunk: None)
-
-    def test_refuses_more_triangles_than_the_budget_allows(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE] * 5))
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_binary(path, limits(max_triangles=2), lambda _chunk: None)
-
-    def test_refuses_a_source_larger_than_the_budget_allows(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE] * 5))
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_binary(path, limits(max_source_bytes=100), lambda _chunk: None)
-
-    def test_refuses_a_coordinate_that_is_not_finite(self, stl, limits) -> None:
-        path = stl(
-            _binary_stl([((math.inf, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))])
-        )
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_binary(path, limits(), lambda _chunk: None)
-
-    def test_refuses_to_read_past_the_deadline(self, stl, limits) -> None:
-        path = stl(_binary_stl([TRIANGLE]))
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_binary(
-                path, limits(deadline=time.monotonic() - 1), lambda _chunk: None
-            )
-
-
-class TestParseFloat:
-    def test_reads_a_number(self) -> None:
-        assert worker._parse_float("1.5") == 1.5
-
-    def test_refuses_something_that_is_not_a_number(self) -> None:
-        with pytest.raises(worker._InvalidSTL):
-            worker._parse_float("not-a-number")
-
-    def test_refuses_a_number_a_float32_cannot_hold(self) -> None:
-        with pytest.raises(worker._InvalidSTL):
-            worker._parse_float("inf")
-
-
-class TestReadAscii:
-    def test_reads_every_facet(self, stl, limits) -> None:
-        path = stl(_ascii_stl([TRIANGLE, SECOND]))
-
-        stats = worker._read_ascii(path, limits(), lambda _chunk: None)
-
-        assert stats.triangle_count == 2
-
-    def test_reports_the_bounding_box_it_saw(self, stl, limits) -> None:
-        path = stl(_ascii_stl([TRIANGLE, SECOND]))
-
-        stats = worker._read_ascii(path, limits(), lambda _chunk: None)
-
-        assert stats.bounds_min == (0.0, 0.0, 0.0)
-        assert stats.bounds_max == (1.0, 1.0, 1.0)
-
-    def test_ignores_lines_that_carry_no_geometry(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(
-            b"solid test\n", b"solid test\n\n# a comment\n// another\n"
-        )
-
-        stats = worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-        assert stats.triangle_count == 1
-
-    def test_accepts_a_file_that_ends_without_endsolid(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(b"endsolid test\n", b"")
-
-        # Several real slicers omit it; EOF at a facet boundary is unambiguous.
-        stats = worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-        assert stats.triangle_count == 1
-
-    def test_refuses_a_file_that_ends_mid_facet(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(b"endfacet\nendsolid test\n", b"")
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-    def test_refuses_a_file_with_no_facets_at_all(self, stl, limits) -> None:
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(
-                stl(b"solid test\nendsolid test\n"), limits(), lambda _chunk: None
-            )
-
-    def test_refuses_content_after_endsolid(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]) + b"facet normal 0 0 1\n"
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-    @pytest.mark.parametrize(
-        ("broken", "replacement"),
-        [
-            pytest.param(b"facet normal 0 0 1", b"facet normal 0 0", id="short-normal"),
-            pytest.param(b"outer loop", b"inner loop", id="wrong-loop"),
-            pytest.param(b"vertex 0.0 0.0 0.0", b"vertex 0.0 0.0", id="short-vertex"),
-            pytest.param(b"endloop", b"endlop", id="misspelt-endloop"),
-            pytest.param(b"endfacet", b"endfact", id="misspelt-endfacet"),
-        ],
-    )
-    def test_refuses_a_malformed_facet(
-        self, stl, limits, broken: bytes, replacement: bytes
-    ) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(broken, replacement, 1)
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-    def test_refuses_an_unknown_keyword(self, stl, limits) -> None:
-        data = b"solid test\nsurprise\n" + _ascii_stl([TRIANGLE])
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _chunk: None)
-
-    def test_refuses_a_line_longer_than_the_budget_allows(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE])
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(max_line_bytes=8), lambda _c: None)
-
-    def test_refuses_more_lines_than_the_budget_allows(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE, SECOND])
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_ascii(stl(data), limits(max_lines=3), lambda _c: None)
-
-    def test_refuses_more_bytes_than_the_budget_allows(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE, SECOND])
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_ascii(stl(data), limits(max_source_bytes=20), lambda _c: None)
-
-    def test_refuses_more_triangles_than_the_budget_allows(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE, SECOND])
-
-        with pytest.raises(worker._BudgetExceeded):
-            worker._read_ascii(stl(data), limits(max_triangles=1), lambda _c: None)
-
-    def test_refuses_bytes_that_are_not_ascii(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(b"solid test", b"solid t\xffst")
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _c: None)
-
-    def test_refuses_a_coordinate_that_is_not_a_number(self, stl, limits) -> None:
-        data = _ascii_stl([TRIANGLE]).replace(b"vertex 0.0 0.0 0.0", b"vertex a b c", 1)
-
-        with pytest.raises(worker._InvalidSTL):
-            worker._read_ascii(stl(data), limits(), lambda _c: None)
-
-
-class TestReadPass:
-    def test_reads_a_binary_file_as_binary(self, stl, limits) -> None:
-        stats = worker._read_pass(
-            stl(_binary_stl([TRIANGLE])), limits(), lambda _c: None
-        )
-
-        assert stats.triangle_count == 1
-
-    def test_reads_anything_else_as_ascii(self, stl, limits) -> None:
-        stats = worker._read_pass(
-            stl(_ascii_stl([TRIANGLE])), limits(), lambda _c: None
-        )
-
-        assert stats.triangle_count == 1
-
-
-class TestFrame:
-    def test_frames_a_mesh_around_its_sampled_centre(self, limits) -> None:
-        reservoir = worker._FramingReservoir()
-        reservoir.add([(0.5, 0.5, 0.5), (0.4, 0.6, 0.5)])
-
-        center, rotation, robust_min, robust_max, _mid, extent_x, extent_y = (
-            worker._frame((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), reservoir)
-        )
-
-        assert rotation.shape == (3, 3)
-        assert extent_x > 0 and extent_y > 0
-        assert len(center) == 3
-
-    def test_falls_back_to_the_exact_bounds_when_nothing_was_sampled(self) -> None:
-        center, _rotation, robust_min, robust_max, _mid, _x, _y = worker._frame(
-            (0.0, 0.0, 0.0), (2.0, 2.0, 2.0), worker._FramingReservoir()
-        )
-
-        # An empty reservoir must still frame something rather than divide by
-        # zero: the exact bounds stand in for the samples it never got.
-        assert all(abs(value - 0.0) < 0.05 for value in robust_min)
-        assert all(abs(value - 2.0) < 0.05 for value in robust_max)
-
-    def test_widens_a_degenerate_axis_back_to_the_exact_bounds(self) -> None:
-        reservoir = worker._FramingReservoir()
-        reservoir.add([(0.5, 0.5, 0.0), (0.5, 0.5, 0.0)])
-
-        _c, _r, robust_min, robust_max, _mid, _x, _y = worker._frame(
-            (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), reservoir
-        )
-
-        # A flat sample on an axis would frame the model edge-on and render a line.
-        assert robust_min[0] == 0.0
-        assert robust_max[0] == 1.0
 
 
 class TestWriteManifest:
@@ -579,6 +257,12 @@ class TestMain:
             pytest.param({"max_triangles": 0}, id="triangles-zero"),
             pytest.param({"max_triangles": 30_000_000}, id="triangles-over-cap"),
             pytest.param({"max_source_bytes": 0}, id="source-zero"),
+            pytest.param({"max_source_bytes": (1 << 30) + 1}, id="source-over-cap"),
+            pytest.param({"max_candidates": 20_000_001}, id="candidates-over-cap"),
+            pytest.param({"max_lines": 10_000_001}, id="lines-over-cap"),
+            pytest.param(
+                {"address_space_bytes": (512 << 20) + 1}, id="address-space-over-cap"
+            ),
             pytest.param({"chunk_triangles": 100_000}, id="chunk-over-cap"),
             pytest.param({"max_line_bytes": 1 << 20}, id="line-bytes-over-cap"),
             pytest.param({"timeout_seconds": 0}, id="timeout-zero"),
@@ -618,32 +302,27 @@ class TestMain:
         assert self._run(self._argv(source, tmp_path)) == 3
 
     def test_reports_a_source_that_changes_between_the_two_passes(
-        self, stl, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+        self, stl, tmp_path, monkeypatch
+    ):
+        import printstash_mesh_native as native
+
         source = stl(_binary_stl([TRIANGLE, SECOND]))
-        real_read_pass = worker._read_pass
 
-        def rewrite_after_reading(path, limits, callback):
-            stats = real_read_pass(path, limits, callback)
-            path.write_bytes(_binary_stl([TRIANGLE]))
-            return stats
+        # Actual identity checks are exercised in render-core/tests/source.rs;
+        # this boundary test asserts the supervisor's failure classification.
+        def changed(*args):
+            raise ValueError("source changed between passes")
 
-        monkeypatch.setattr(worker, "_read_pass", rewrite_after_reading)
-
-        # Two passes over a file somebody can still edit is a TOCTOU; the second
-        # pass must not render a frame computed from bytes that are gone.
+        monkeypatch.setattr(native, "render_stl_streaming", changed)
         assert self._run_in_process(source, tmp_path, monkeypatch) == 3
 
-    def test_reports_an_unexpected_failure_distinctly(
-        self, stl, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_reports_an_unexpected_failure_distinctly(self, stl, tmp_path, monkeypatch):
+        import printstash_mesh_native as native
+
         source = stl(_binary_stl([TRIANGLE]))
 
-        def exploding(*_args: object, **_kwargs: object):
+        def exploding(*args):
             raise RuntimeError("renderer exploded")
 
-        monkeypatch.setattr(worker, "_render", exploding)
-
-        # Exit 4 is "something I did not plan for", which the parent logs rather
-        # than treating as a rejected file.
+        monkeypatch.setattr(native, "render_stl_streaming", exploding)
         assert self._run_in_process(source, tmp_path, monkeypatch) == 4

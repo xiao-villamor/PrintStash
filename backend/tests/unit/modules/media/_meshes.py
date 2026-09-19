@@ -313,8 +313,12 @@ def _valid_preview_png(color: tuple[int, int, int] = (16, 192, 224)) -> bytes:
     return output.getvalue()
 
 
+class _FakeMesh(SimpleNamespace):
+    """A geometry double with the weak-reference support Trimesh provides."""
+
+
 def _fake_mesh(num_faces: int):
-    return SimpleNamespace(
+    return _FakeMesh(
         vertices=np.zeros((3, 3), dtype=np.float64),
         bounds=np.array([[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]]),
         faces=np.zeros((num_faces, 3), dtype=np.int64),

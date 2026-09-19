@@ -42,7 +42,7 @@ export function bgcodeFor(name: string): Buffer {
 }
 
 // A minimal single-triangle ASCII STL; the solid name keeps the bytes unique.
-function stlFor(name: string): string {
+export function stlFor(name: string): string {
   return [
     `solid ${name}`,
     "facet normal 0 0 1",
@@ -57,7 +57,7 @@ function stlFor(name: string): string {
 }
 
 export function modelCard(page: Page, name: string) {
-  return page.locator('a[href^="/models/"]').filter({ hasText: name });
+  return page.getByRole("main").locator('a[href^="/models/"]').filter({ hasText: name });
 }
 
 // Share/Edit details/Delete model live behind the "Model actions" dropdown on
@@ -139,6 +139,9 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
     await tagInput.fill(tag);
     await tagInput.press("Enter");
+    // Creating a tag is asynchronous. Upload only after the selected chip is
+    // visible, otherwise the transfer can capture an empty tag selection.
+    await expect(dialog.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();
   }
 
   await page.getByRole("button", { name: /upload to vault/i }).click();

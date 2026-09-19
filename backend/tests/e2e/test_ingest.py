@@ -62,7 +62,9 @@ async def _upload(api, headers, *, model_name: str) -> dict:
 
 
 async def _await_job(api, headers, job_id: str) -> dict:
+    from app.runtime.ingestion import process_one
     for _ in range(50):
+        await process_one()
         r = await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
         assert r.status_code == 200, r.text
         job = r.json()
@@ -70,6 +72,17 @@ async def _await_job(api, headers, job_id: str) -> dict:
             return job
         await asyncio.sleep(0.05)
     raise AssertionError(f"job {job_id} did not finish: {job}")
+
+
+async def _complete_enrichment() -> None:
+    from app.db.session import get_session_factory
+    from app.modules.media.enrichment import EnrichmentProcessor
+    from app.modules.storage.storage_backend.runtime import get_backend
+    processor = EnrichmentProcessor(get_session_factory(), get_backend())
+    for _ in range(50):
+        if not await asyncio.to_thread(processor.work_one):
+            return
+    raise AssertionError("enrichment did not settle")
 
 
 def _microfaceted_stl(columns: int = 420, rows: int = 420) -> bytes:
@@ -275,7 +288,8 @@ class TestMetadata:
         job = await _await_job(api, headers, uploaded.json()["job_id"])
 
         assert job["state"] == "completed", job
-        assert job["thumbnail_status"] == "fallback_generated", job
+        assert job["thumbnail_status"] == "pending", job
+        await _complete_enrichment()
         file_id = job["file_id"]
         thumbnail = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
         assert thumbnail.status_code == 200, thumbnail.text
@@ -309,7 +323,8 @@ class TestMetadata:
         job = await _await_job(api, headers, uploaded.json()["job_id"])
 
         assert job["state"] == "completed", job
-        assert job["thumbnail_status"] == "generated", job
+        assert job["thumbnail_status"] == "pending", job
+        await _complete_enrichment()
         thumbnail = await api.get(
             f"/api/v1/files/{job['file_id']}/thumbnail", headers=headers
         )
@@ -367,3 +382,327 @@ class TestMetadata:
             np.asarray([[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]),
             atol=1e-5,
         )
+
+
+class TestArchiveImport:
+    @pytest.mark.asyncio
+    async def test_imported_models_are_available_before_deferred_similarity(
+        self, api, tmp_path, e2e_db
+    ):
+        from app.db.models import File, GeometryFingerprint, SimilarityRun
+        from app.runtime import similarity
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        enabled = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=headers,
+            json={"enabled": True, "fingerprint_on_ingest": True},
+        )
+        assert enabled.status_code == 200, enabled.text
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("first.stl", source)
+            writer.writestr("second.stl", source)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["first.stl", "second.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 2, 2)
+        await _complete_enrichment()
+        files = e2e_db.exec(select(File).order_by(File.id)).all()
+        assert len(files) == 2
+        preview = await api.get(
+            f"/api/v1/files/{files[0].id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        assert e2e_db.exec(select(GeometryFingerprint)).all() == []
+        queued = e2e_db.exec(select(SimilarityRun)).all()
+        assert len(queued) == 2
+        assert {run.phase for run in queued} == {"fingerprint"}
+
+        assert await asyncio.to_thread(similarity.process_one) is True
+
+        e2e_db.expire_all()
+        fingerprints = e2e_db.exec(select(GeometryFingerprint)).all()
+        assert fingerprints
+        assert {row.state for row in fingerprints} == {"ready"}
+
+    @pytest.mark.asyncio
+    async def test_archive_3mf_streams_to_a_complete_import(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        pytest.importorskip("printstash_mesh_native")
+        import hashlib
+
+        import trimesh
+
+        from app.db.models import File
+        from tests.factories.geometry import three_mf
+
+        headers = await _setup_and_login(api, tmp_path)
+        monkeypatch.setitem(_overlay, "mesh_loader", "auto")
+        source = three_mf()
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("model.3mf", source)
+
+        def forbid_legacy(*args, **kwargs):
+            raise AssertionError("legacy mesh loading was used")
+
+        monkeypatch.setattr(trimesh, "load_scene", forbid_legacy)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["model.3mf"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 1, 1)
+        await _complete_enrichment()
+        e2e_db.expire_all()
+        imported = e2e_db.exec(select(File)).one()
+        assert imported.sha256 == hashlib.sha256(source).hexdigest()
+        preview = await api.get(
+            f"/api/v1/files/{imported.id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.getbbox() is not None
+
+    @pytest.mark.parametrize("engine", ["auto", "python"], ids=str)
+    @pytest.mark.asyncio
+    async def test_archive_stl_import_retains_geometry(
+        self, api, tmp_path, e2e_db, monkeypatch, engine
+    ):
+        import hashlib
+
+        from app.db.models import File, Metadata
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        monkeypatch.setitem(_overlay, "mesh_loader", engine)
+        monkeypatch.setitem(_overlay, "mesh_geometry", engine)
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("model.stl", source)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("library.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["model.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 1, 1)
+        await _complete_enrichment()
+        e2e_db.expire_all()
+        imported = e2e_db.exec(select(File)).one()
+        assert imported.sha256 == hashlib.sha256(source).hexdigest()
+        geometry = e2e_db.exec(
+            select(Metadata).where(Metadata.file_id == imported.id)
+        ).one()
+        assert (geometry.bbox_x_mm, geometry.bbox_y_mm, geometry.bbox_z_mm) == (
+            10,
+            20,
+            30,
+        )
+        assert geometry.volume_mm3 == 1000
+        assert geometry.triangle_count == 4
+        preview = await api.get(
+            f"/api/v1/files/{imported.id}/thumbnail", headers=headers
+        )
+        assert preview.status_code == 200, preview.text
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.getbbox() is not None
+
+
+class TestIngestContract:
+    @pytest.mark.asyncio
+    async def test_printing_rejects_a_material_mismatch_before_enrichment(
+        self, api, tmp_path, e2e_db
+    ):
+        from app.db.models import ArtifactAnalysisGeneration, PrinterStatus
+        from tests.factories import build_printer
+
+        headers = await _setup_and_login(api, tmp_path)
+        accepted = await _upload(api, headers, model_name="Compatibility before preview")
+        saved = await _await_job(api, headers, accepted["job_id"])
+        assert saved["state"] == "completed"
+        printer = build_printer(
+            e2e_db, name="ABS printer", moonraker_url="http://abs-printer.invalid",
+            status=PrinterStatus.READY,
+        )
+        material = await api.put(
+            f"/api/v1/printers/{printer.id}/material-state/manual",
+            headers=headers,
+            json={
+                "tools": [{"tool_key": "tool0", "label": "Tool 0", "nozzle_diameter_mm": 0.4}],
+                "slots": [{"slot_key": "feed", "label": "Feed", "tool_key": "tool0",
+                           "state": "loaded", "material_type": "ABS"}],
+            },
+        )
+        assert material.status_code == 200, material.text
+
+        response = await api.post(
+            "/api/v1/fleet/queue", headers=headers,
+            json={"file_id": saved["file_id"], "strategy": "manual", "printer_id": printer.id},
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "material_mismatch_confirmation_required"
+        e2e_db.expire_all()
+        assert e2e_db.exec(select(ArtifactAnalysisGeneration.state)).one() == "pending"
+
+    @pytest.mark.asyncio
+    async def test_recovers_only_the_accepted_archive_selection_after_restart(
+        self, api, tmp_path, e2e_db
+    ):
+        from sqlmodel import create_engine
+
+        from app.db.models import File
+        from app.db.session import (
+            SQLiteSessionFactory,
+            get_session_factory,
+            override_session_factory,
+        )
+        from app.runtime.ingestion import process_one
+        from app.runtime.jobs import JobRegistry, reconcile_interrupted_jobs
+
+        headers = await _setup_and_login(api, tmp_path)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("selected.gcode", "G28\n")
+            writer.writestr("unselected.gcode", "G29\n")
+        uploaded = await api.post(
+            "/api/v1/ingest/archive", headers=headers,
+            files={"file": ("restart.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers, json={"names": ["selected.gcode"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job_id = selected.json()["job_id"]
+        previous = get_session_factory()
+        restarted_engine = create_engine(str(_overlay["db_url"]))
+        override_session_factory(SQLiteSessionFactory(restarted_engine))
+        try:
+            assert reconcile_interrupted_jobs() == 0
+            assert JobRegistry().get(job_id).state == "pending"
+
+            assert await process_one() is True
+
+            assert JobRegistry().get(job_id).state == "completed"
+            with get_session_factory().scoped_session() as session:
+                files = session.exec(select(File)).all()
+                assert [file.original_filename for file in files] == ["selected.gcode"]
+                file_id = files[0].id
+            downloaded = await api.get(
+                f"/api/v1/files/{file_id}/download", headers=headers,
+            )
+            assert downloaded.status_code == 200, downloaded.text
+            assert downloaded.content == b"G28\n"
+        finally:
+            override_session_factory(previous)
+            restarted_engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_parallel_archive_preserves_duplicate_publication_order(self,
+        api, tmp_path, e2e_db, monkeypatch
+    ):
+        from app.db.models import File
+        from app.modules.media import render_budget
+        from tests.factories.geometry import tetrahedron
+
+        headers = await _setup_and_login(api, tmp_path)
+        monkeypatch.setitem(_overlay, "import_workers", 2)
+        monkeypatch.setattr(render_budget, "effective_cpus", lambda: 4)
+        monkeypatch.setattr(render_budget, "memory_budget", lambda: 1024**3)
+        source = tetrahedron().export(file_type="stl")
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as writer:
+            writer.writestr("first.stl", source)
+            writer.writestr("duplicate.stl", source)
+        uploaded = await api.post(
+            "/api/v1/ingest/archive",
+            headers=headers,
+            files={"file": ("parallel.zip", archive.getvalue(), "application/zip")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{uploaded.json()['archive_id']}/select",
+            headers=headers,
+            json={"names": ["first.stl", "duplicate.stl"]},
+        )
+        assert selected.status_code == 202, selected.text
+        job = await _await_job(api, headers, selected.json()["job_id"])
+        assert (job["state"], job["processed"], job["succeeded"]) == ("completed", 2, 2)
+        await _complete_enrichment()
+        e2e_db.expire_all()
+        rows = e2e_db.exec(select(File).order_by(File.id)).all()
+        assert [row.original_filename for row in rows] == ["first.stl", "duplicate.stl"]
+        assert [row.version for row in rows] == [1, 2]
+        assert rows[0].model_id == rows[1].model_id
+        assert all(row.thumbnail_path for row in rows)
+
+
+    @pytest.mark.asyncio
+    async def test_saved_artifact_is_available_before_background_enrichment(self, api, tmp_path):
+        from app.db.session import get_session_factory
+        from app.modules.media.enrichment import EnrichmentProcessor
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.runtime.ingestion import process_one
+
+        headers = await _setup_and_login(api, tmp_path)
+        source = trimesh.creation.box(extents=[10, 20, 30]).export(file_type="stl")
+        accepted = await api.post("/api/v1/ingest/model", headers=headers,
+            files={"file": ("cube.stl", source, "application/sla")})
+        assert accepted.status_code == 202
+        job_id = accepted.json()["job_id"]
+        pending = await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
+        assert pending.json()["state"] == "pending"
+
+        assert await process_one()
+        saved = (await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)).json()
+        assert saved["state"] == "completed"
+        file_id = saved["file_id"]
+        download = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert download.content == source
+        detail = (await api.get(f"/api/v1/models/{saved['model_id']}", headers=headers)).json()
+        assert detail["enrichment_pending"] is True
+        assert detail["files"][0]["enrichment"]["metadata"] == "pending"
+
+        assert await asyncio.to_thread(EnrichmentProcessor(get_session_factory(), get_backend()).work_one)
+        ready = (await api.get(f"/api/v1/models/{saved['model_id']}", headers=headers)).json()
+        assert ready["enrichment_pending"] is False
+        assert ready["files"][0]["metadata"]["triangle_count"] == 12
+        preview = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+        assert preview.status_code == 200
+        assert preview.headers["content-type"] == "image/webp"

@@ -29,6 +29,7 @@ function lazyImport<T extends { default: React.ComponentType }>(factory: () => P
 }
 
 const HomePage = lazyImport(() => import("@/pages/home"));
+const SearchPage = lazyImport(() => import("@/pages/search"));
 const SimilarModelComparisonPage = lazyImport(() => import("@/pages/similar-model-comparison"));
 const SimilarModelsPage = lazyImport(() => import("@/pages/similar-models"));
 const ModelFamilyPage = lazyImport(() => import("@/pages/model-family"));
@@ -71,6 +72,14 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
+      {
+        path: "search",
+        element: (
+          <RouteChunk>
+            <SearchPage />
+          </RouteChunk>
+        ),
+      },
       {
         path: "families/:id",
         element: (

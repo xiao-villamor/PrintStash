@@ -9,10 +9,63 @@ import pytest
 
 from app.api.vault_generation import VaultGenerationMiddleware
 from app.modules.storage.storage_backend import generations
+from app.runtime import maintenance
 from app.runtime.maintenance import end_restore_maintenance, hold_restore_maintenance
 
 
 class TestVaultGenerationMiddleware:
+    @pytest.mark.asyncio
+    async def test_prioritizes_the_complete_mutating_request(self, db_session):
+        observed = []
+
+        async def application(scope, receive, send):
+            observed.append(maintenance.foreground_mutations_pending())
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+            await asyncio.sleep(0)
+            observed.append(maintenance.foreground_mutations_pending())
+
+        await VaultGenerationMiddleware(application)(
+            {"type": "http", "path": "/api/v1/ingest/orca", "method": "POST"},
+            AsyncMock(),
+            AsyncMock(),
+        )
+        assert observed == [True, True]
+        assert not maintenance.foreground_mutations_pending()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+    async def test_clears_priority_after_request_failure(self, db_session, failure):
+        async def application(scope, receive, send):
+            assert maintenance.foreground_mutations_pending()
+            raise failure()
+
+        with pytest.raises(failure):
+            await VaultGenerationMiddleware(application)(
+                {"type": "http", "path": "/api/v1/models", "method": "POST"},
+                AsyncMock(),
+                AsyncMock(),
+            )
+        assert not maintenance.foreground_mutations_pending()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+    async def test_leaves_read_requests_outside_mutation_priority(
+        self, db_session, method
+    ):
+        observed = []
+
+        async def application(scope, receive, send):
+            observed.append(maintenance.foreground_mutations_pending())
+
+        await VaultGenerationMiddleware(application)(
+            {"type": "http", "path": "/api/v1/models", "method": method},
+            AsyncMock(),
+            AsyncMock(),
+        )
+        assert observed == [False]
+        assert not maintenance.foreground_mutations_pending()
+
     @pytest.mark.asyncio
     async def test_migration_mutations_are_refused_during_recovery(self):
         application, receive, send = AsyncMock(), AsyncMock(), AsyncMock()

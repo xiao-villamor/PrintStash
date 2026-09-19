@@ -1,10 +1,9 @@
 "use client";
 
-import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Suspense, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { useRouter, usePathname } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import {
   BarChart3,
@@ -15,13 +14,12 @@ import {
   Inbox,
   LogOut,
   Printer,
-  Search,
   Settings,
   SlidersHorizontal,
-  XCircle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { lastVaultHref } from "@/lib/last-collection";
+import { LibrarySearch } from "@/components/library-search";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
@@ -44,109 +42,6 @@ const WIKI_URL = "https://xiao-villamor.github.io/PrintStash/";
 function subscribeLastVaultHref(onStoreChange: () => void): () => void {
   window.addEventListener("storage", onStoreChange);
   return () => window.removeEventListener("storage", onStoreChange);
-}
-
-function TopBarSearch() {
-  useUiLocale();
-  const { t } = useI18n();
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const q = searchParams.get("q") ?? "";
-  const [value, setValue] = useState(q);
-  const [syncedQuery, setSyncedQuery] = useState(q);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [, startTransition] = useTransition();
-
-  // The URL owns the search term: a back/forward navigation or an inbound
-  // /?q=… link has to land in the box. Adjusting during render keeps the input
-  // from flashing the stale term for a frame.
-  if (syncedQuery !== q) {
-    setSyncedQuery(q);
-    setValue(q);
-  }
-
-  useEffect(() => {
-    if (pathname !== "/") return;
-    function focusSearch(event: KeyboardEvent) {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (
-        event.key !== "/" ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        target?.matches("input, textarea, select, [contenteditable='true']")
-      ) {
-        return;
-      }
-      event.preventDefault();
-      inputRef.current?.focus();
-    }
-    window.addEventListener("keydown", focusSearch);
-    return () => window.removeEventListener("keydown", focusSearch);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (pathname !== "/") return;
-    const handle = window.setTimeout(() => {
-      const next = value.trim();
-      if (next === q) return;
-      const params = new URLSearchParams(searchParams.toString());
-      if (next) params.set("q", next);
-      else params.delete("q");
-      const queryString = params.toString();
-      startTransition(() => {
-        router.replace(queryString ? `/?${queryString}` : "/", { scroll: false });
-      });
-    }, 250);
-    return () => window.clearTimeout(handle);
-  }, [pathname, q, router, searchParams, startTransition, value]);
-
-  function clearSearch() {
-    setValue("");
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("q");
-    const queryString = params.toString();
-    if (queryString) router.replace(`/?${queryString}`, { scroll: false });
-    else router.replace("/", { scroll: false });
-  }
-
-  if (pathname !== "/") return <span className="flex-1" />;
-
-  return (
-    <div className="flex-1 max-w-2xl mx-3 sm:mx-8 block">
-      <div className="relative">
-        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <Search className="h-5 w-5 text-muted-foreground" />
-        </div>
-        <input
-          ref={inputRef}
-          className="block w-full pl-10 pr-10 sm:pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-ring focus:border-primary dark:border-primary-soft text-sm transition-colors"
-          placeholder={t("nav.search")}
-          data-model-search
-          aria-label={uiText("Search models")}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-        />
-        <div className="absolute inset-y-0 right-0 pr-3 hidden sm:flex items-center pointer-events-none">
-          <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">
-            /
-          </span>
-        </div>
-        {value && (
-          <button
-            type="button"
-            onClick={clearSearch}
-            className="absolute right-2 sm:right-10 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-muted-foreground pointer-events-auto"
-            aria-label={t("nav.clearSearch")}
-          >
-            <XCircle className="h-4 w-4" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export function TopBar() {
@@ -195,7 +90,7 @@ export function TopBar() {
 
       {/* Search */}
       <Suspense fallback={<span className="flex-1" />}>
-        <TopBarSearch />
+        <LibrarySearch />
       </Suspense>
 
       {/* Right Actions & Profile */}

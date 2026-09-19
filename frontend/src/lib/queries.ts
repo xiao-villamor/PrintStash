@@ -350,6 +350,10 @@ export function useModelList(
       }),
     initialPageParam: null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) => page.items.some((model) => model.enrichment_pending))
+        ? 2000
+        : false,
     placeholderData: keepPreviousData,
   });
 }

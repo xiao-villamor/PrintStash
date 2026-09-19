@@ -1,7 +1,7 @@
 """Thumbnail generation state and render-slot reservations."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -63,8 +63,43 @@ class ThumbnailGeneration(SQLModel, table=True):
     lease_expires_at: Optional[datetime] = Field(default=None, index=True)
     duration_ms: Optional[int] = None
     peak_rss_bytes: Optional[int] = Field(default=None, sa_type=BigInteger)
+    processing_policy: str = Field(
+        default="on_demand",
+        sa_column=Column(String(16), nullable=False, server_default="on_demand"),
+    )
+    selection_version: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ArtifactAnalysisGeneration(SQLModel, table=True):
+    """Versioned metadata work, independent of thumbnail availability."""
+
+    __tablename__ = "artifact_analysis_generations"
+    __audit_exclude__: ClassVar[bool] = True
+    __table_args__ = (
+        UniqueConstraint(
+            "file_id", "source_sha256", "recipe", name="uq_artifact_analysis_recipe"
+        ),
+        Index("ix_artifact_analysis_due", "state", "next_attempt_at"),
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    file_id: int = Field(foreign_key="files.id", ondelete="CASCADE", index=True)
+    source_sha256: str = Field(max_length=64)
+    recipe: str = Field(default="metadata-v1", max_length=64)
+    state: str = Field(default="pending", max_length=16)
+    preserve_metadata: bool = False
+    actor_user_id: Optional[int] = Field(
+        default=None, foreign_key="users.id", ondelete="SET NULL"
+    )
+    attempts: int = 0
+    lease_token: Optional[str] = Field(default=None, max_length=64)
+    lease_expires_at: Optional[datetime] = None
+    next_attempt_at: datetime = Field(default_factory=utcnow)
+    error_code: Optional[str] = Field(default=None, max_length=64)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    finished_at: Optional[datetime] = None
 
 
 class ThumbnailRenderSlot(SQLModel, table=True):

@@ -1,0 +1,13 @@
+{
+  "source_commit": "cb080c6af780103d3eb2e136f1f82f222a33b3b3",
+  "vector_scorer_sha256": "c37f39878dde8d74a0a6549f884c6ff3300cc50c93f937ed6846db62568e8586",
+  "cpu_model": "QEMU Virtual CPU version 2.5+",
+  "virtual_cpu_count": 4,
+  "physical_arm": false,
+  "memory_mib": 11677,
+  "independent_test_load": false,
+  "notes": "Existing user services remained running. No correctness test or other benchmark ran during the measured queries. The library contains 32 frozen engineering texts replicated to 100,000 Model identities, not 100,000 independent quality labels. The later native-run commit changes only benchmark validation/tests/documentation; production code is identical to the source commit.",
+  "vector_store_sha256": "134313f3ef5c2ab0435920f233dedcc48eb40ba6155c9c58d71ca1f5e476f5fa",
+  "search_scale_sha256": "4efc0a4df876a6c93d76bf72e115183c04dee1e502cff32197509ee39d31a992",
+  "native_run_commit": "ef39bdb0e3ef755c079d3b66762e2ac2c0d199d6"
+}

@@ -7,7 +7,6 @@ import json
 import math
 import signal
 import struct
-import time
 import zlib
 from pathlib import Path
 from typing import Any
@@ -569,79 +568,6 @@ class TestRenderStlPreviewIsolated:
         assert result is not None
         assert result.triangle_count == 1
 
-    def test_streaming_renderer_rasterizes_at_requested_resolution(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A 320x240 result must not be rendered on a half-size work canvas."""
-        from app.modules.media import stl_preview_worker
-
-        path = tmp_path / "direct-resolution.stl"
-        _binary_triangle_stl(path)
-        reservoir = stl_preview_worker._FramingReservoir()
-
-        def collect(vertices: object) -> None:
-            import numpy as np
-
-            values = np.asarray(vertices)
-            reservoir.add(values.mean(axis=1))
-
-        limits = stl_preview_worker._Limits(
-            max_triangles=1_000,
-            max_source_bytes=1_000_000,
-            max_candidates=1_000_000,
-            chunk_triangles=128,
-            max_lines=10_000,
-            max_line_bytes=64 * 1024,
-            deadline=time.monotonic() + 5,
-        )
-        first = stl_preview_worker._read_pass(path, limits, collect)
-        observed: list[tuple[tuple[int, ...], tuple[int, ...], int, int]] = []
-
-        def fake_rasterise(
-            image: object,
-            zbuffer: object,
-            _triangles: object,
-            _normals: object,
-            _shade: object,
-            _base_color: object,
-            raster_width: int,
-            raster_height: int,
-            *,
-            budget: Any = None,
-        ) -> int:
-            import numpy as np
-
-            observed.append(
-                (
-                    np.asarray(image).shape,
-                    np.asarray(zbuffer).shape,
-                    raster_width,
-                    raster_height,
-                )
-            )
-            np.asarray(image)[0, 0] = 200
-            np.asarray(zbuffer)[0, 0] = 0.0
-            if budget is not None:
-                budget.used += 1
-            return 1
-
-        from app.modules.media import mesh_render
-
-        monkeypatch.setattr(mesh_render, "_rasterise_triangles", fake_rasterise)
-        output = tmp_path / "direct-resolution.png"
-        assert (
-            stl_preview_worker._render(path, output, 320, 240, limits, first, reservoir)
-            > 0
-        )
-        assert observed
-        assert all(
-            image_shape == (240, 320, 3)
-            and zbuffer_shape == (240, 320)
-            and raster_width == 320
-            and raster_height == 240
-            for image_shape, zbuffer_shape, raster_width, raster_height in observed
-        )
-
     def test_a_streaming_preview_is_byte_identical_on_a_second_run(
         self,
         tmp_path: Path,
@@ -1135,12 +1061,16 @@ class TestLimits:
 
 
 class TestRender:
-    def test_normal_stl_render_exception_uses_streaming_before_sampling(
+    def test_normal_stl_uses_streaming_before_full_or_sampled_render(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from types import SimpleNamespace
-
         import numpy as np
+
+        class LoadedMesh:
+            vertices = np.zeros((3, 3))
+            bounds = np.array([[0.0, 0.0, 0.0], [4.0, 3.0, 0.0]])
+            faces = np.zeros((12, 3), dtype=np.int64)
+            volume = 0.0
 
         path = tmp_path / "normal-render-fails.stl"
         _binary_triangle_stl(path)
@@ -1148,18 +1078,13 @@ class TestRender:
         monkeypatch.setattr(
             mesh_processing,
             "_load_mesh",
-            lambda _path: SimpleNamespace(
-                vertices=np.zeros((3, 3)),
-                bounds=np.array([[0.0, 0.0, 0.0], [4.0, 3.0, 0.0]]),
-                faces=np.zeros((12, 3), dtype=np.int64),
-                volume=0.0,
-            ),
+            lambda _path: LoadedMesh(),
         )
         monkeypatch.setattr(
             mesh_render,
             "render_mesh_thumbnail",
-            lambda *args, **kwargs: (_ for _ in ()).throw(
-                RuntimeError("renderer crash")
+            lambda *args, **kwargs: pytest.fail(
+                "the path renderer should finish before the full renderer"
             ),
         )
 

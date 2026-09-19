@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import printstash_core.files.archives as archives_module
 from printstash_core.files import (
     ArchiveLimits,
     ArchivePolicyError,
@@ -77,6 +79,23 @@ def _inspect(path: Path, **overrides: int) -> list:
 
 
 class TestInspectArchive:
+    def test_preserves_unrelated_native_errors(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from printstash_core.files import archives
+
+        def reject(*_args, **_kwargs):
+            raise ValueError("native_contract_error")
+
+        monkeypatch.setattr(
+            archives,
+            "kernel",
+            lambda: SimpleNamespace(inspect_archive=reject),
+        )
+
+        with pytest.raises(ValueError, match="native_contract_error"):
+            _inspect(tmp_path / "unused.zip")
+
     def test_lists_a_supported_model_file_with_its_type(self, tmp_path: Path) -> None:
         path = _archive(tmp_path / "bundle.zip", {"parts/a.stl": b"a"})
 
@@ -148,6 +167,28 @@ class TestInspectArchive:
         with pytest.raises(ArchivePolicyError, match="archive_duplicate_entry"):
             _inspect(path)
 
+    def test_refuses_two_entries_that_full_casefold_to_one_name(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "casefold-duplicates.zip"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Maße.stl", b"one")
+            archive.writestr("MASSE.stl", b"two")
+
+        with pytest.raises(ArchivePolicyError, match="archive_duplicate_entry"):
+            _inspect(path)
+
+    def test_refuses_a_symbolic_link_entry(self, tmp_path: Path) -> None:
+        path = tmp_path / "symlink.zip"
+        link = zipfile.ZipInfo("part.stl")
+        link.create_system = 3
+        link.external_attr = 0o120777 << 16
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr(link, b"../target")
+
+        with pytest.raises(ArchivePolicyError, match="archive_unsafe_entry"):
+            _inspect(path)
+
     def test_refuses_more_entries_than_the_limit(self, tmp_path: Path) -> None:
         path = _archive(tmp_path / "large.zip", {"a.stl": b"12", "b.stl": b"34"})
 
@@ -170,6 +211,21 @@ class TestInspectArchive:
         # provider error, not a `BadZipFile` traceback in the import job.
         with pytest.raises(ArchivePolicyError, match="archive_invalid"):
             _inspect(path)
+
+    def test_preserves_an_unexpected_native_value_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class BrokenKernel:
+            @staticmethod
+            def inspect_archive(*_args, **_kwargs):
+                raise ValueError("native contract bug")
+
+        monkeypatch.setattr(archives_module, "kernel", lambda: BrokenKernel())
+
+        with pytest.raises(ValueError, match="native contract bug") as raised:
+            _inspect(tmp_path / "unused.zip")
+
+        assert not isinstance(raised.value, ArchivePolicyError)
 
 
 class TestExtractSelected:
@@ -355,6 +411,47 @@ class TestInspectArchiveLimits:
 
 
 class TestExtractSelectedFailures:
+    def test_removes_prior_outputs_when_native_extraction_fails(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from printstash_core.files import archives
+
+        class FailingArchive:
+            def __init__(self, _path: Path) -> None:
+                pass
+
+            def selected_entries(self, *_args):
+                return [(0, ".stl", "first.stl"), (1, ".stl", "second.stl")]
+
+            def extract_to(
+                self, index: int, destination: Path, _max_entry_bytes: int
+            ) -> None:
+                if index == 1:
+                    raise ValueError("archive_extract_failed")
+                destination.write_bytes(b"first")
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(
+            archives,
+            "kernel",
+            lambda: SimpleNamespace(NativeArchive=FailingArchive),
+        )
+        staging = tmp_path / "staging"
+        staging.mkdir()
+
+        with pytest.raises(ArchivePolicyError, match="archive_extract_failed"):
+            extract_selected(
+                tmp_path / "unused.zip",
+                ["first.stl", "second.stl"],
+                staging_dir=staging,
+                max_entry_bytes=100,
+                importable_suffixes={".stl"},
+            )
+
+        assert list(staging.iterdir()) == []
+
     def test_removes_everything_it_staged_when_one_entry_is_refused(
         self, tmp_path: Path
     ) -> None:
@@ -376,6 +473,36 @@ class TestExtractSelectedFailures:
 
         # All-or-nothing: a half-extracted archive leaves staged bytes that no
         # row owns, and nothing will ever clean them up.
+        assert list(staging.iterdir()) == []
+
+    def test_removes_staged_files_when_a_later_destination_fails(
+        self, tmp_path: Path
+    ) -> None:
+        archive = _archive(
+            tmp_path / "two.zip", {"first.stl": b"one", "second.stl": b"two"}
+        )
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        calls = 0
+
+        def destination(suffix: str) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("destination unavailable")
+            return f"first{suffix}"
+
+        with pytest.raises(RuntimeError, match="destination unavailable"):
+            extract_selected(
+                archive,
+                ["first.stl", "second.stl"],
+                staging_dir=staging,
+                max_entry_bytes=100,
+                importable_suffixes={".stl"},
+                name_factory=destination,
+            )
+
+        assert calls == 2
         assert list(staging.iterdir()) == []
 
     def test_refuses_an_unsafe_entry_that_was_explicitly_selected(
@@ -441,3 +568,144 @@ class TestExtractSelectedFailures:
         staged = [path.name for path, _name in extracted]
         assert len(set(staged)) == 2
         assert all(name.endswith(".stl") for name in staged)
+
+    def test_preserves_an_existing_staging_destination(self, tmp_path: Path) -> None:
+        archive = _archive(tmp_path / "part.zip", {"part.stl": b"replacement"})
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        existing = staging / "fixed.stl"
+        existing.write_bytes(b"existing")
+
+        with pytest.raises(OSError):
+            extract_selected(
+                archive,
+                ["part.stl"],
+                staging_dir=staging,
+                max_entry_bytes=1024,
+                importable_suffixes={".stl"},
+                name_factory=lambda suffix: f"fixed{suffix}",
+            )
+
+        assert existing.read_bytes() == b"existing"
+
+
+class TestIncrementalExtraction:
+    def test_expands_only_one_entry_at_a_time(self, tmp_path):
+        from printstash_core.files import iter_selected
+
+        archive = tmp_path / "parts.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr("one.stl", b"first")
+            output.writestr("two.stl", b"second")
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        selected = iter_selected(
+            archive,
+            ["one.stl", "two.stl"],
+            staging_dir=staging,
+            max_entry_bytes=100,
+            importable_suffixes={".stl"},
+        )
+        first, _ = next(selected)
+        assert first.read_bytes() == b"first"
+        assert len(list(staging.iterdir())) == 1
+        second, _ = next(selected)
+        assert not first.exists()
+        assert second.read_bytes() == b"second"
+        selected.close()
+        assert not list(staging.iterdir())
+
+
+class TestArchivesContract:
+    @pytest.mark.parametrize(
+        "entries,names",
+        [
+            ({"folder/": b""}, ["folder/"]),
+            ({"notes.txt": b"notes"}, ["notes.txt"]),
+            ({"part.stl": b"model"}, []),
+        ],
+    )
+    def test_incremental_extraction_skips_non_model_selections(
+        self, tmp_path, entries, names
+    ):
+        from printstash_core.files import iter_selected
+
+        archive = _archive(tmp_path / "selection.zip", entries)
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        assert (
+            list(
+                iter_selected(
+                    archive,
+                    names,
+                    staging_dir=staging,
+                    max_entry_bytes=100,
+                    importable_suffixes={".stl"},
+                )
+            )
+            == []
+        )
+        assert list(staging.iterdir()) == []
+
+    @pytest.mark.parametrize(
+        "name,payload,reason",
+        [
+            ("../escape.stl", b"model", "archive_unsafe_entry"),
+            ("large.stl", b"x" * 101, "archive_entry_too_large"),
+        ],
+    )
+    def test_incremental_extraction_revalidates_selected_entries(
+        self, tmp_path, name, payload, reason
+    ):
+        from printstash_core.files import iter_selected
+
+        archive = _archive(tmp_path / "unsafe.zip", {name: payload})
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        with pytest.raises(ArchivePolicyError, match=reason):
+            list(
+                iter_selected(
+                    archive,
+                    [name],
+                    staging_dir=staging,
+                    max_entry_bytes=100,
+                    importable_suffixes={".stl"},
+                )
+            )
+        assert list(staging.iterdir()) == []
+
+    def test_incremental_extraction_cleans_up_after_exhaustion(self, tmp_path):
+        from printstash_core.files import iter_selected
+
+        archive = _archive(tmp_path / "selected.zip", {"part.stl": b"model"})
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        observed = [
+            (name, path.read_bytes())
+            for path, name in iter_selected(
+                archive,
+                ["part.stl", "part.stl"],
+                staging_dir=staging,
+                max_entry_bytes=100,
+                importable_suffixes={".stl"},
+            )
+        ]
+        assert observed == [("part.stl", b"model")]
+        assert list(staging.iterdir()) == []
+
+    def test_eager_extraction_skips_unselected_entries(self, tmp_path):
+        archive = _archive(
+            tmp_path / "selection.zip", {"other.stl": b"other", "part.stl": b"model"}
+        )
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        extracted = extract_selected(
+            archive,
+            ["part.stl"],
+            staging_dir=staging,
+            max_entry_bytes=100,
+            importable_suffixes={".stl"},
+        )
+        assert [(name, path.read_bytes()) for path, name in extracted] == [
+            ("part.stl", b"model")
+        ]

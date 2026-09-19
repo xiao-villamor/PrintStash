@@ -61,7 +61,7 @@ from app.modules.storage.storage_backend.contracts import (
 from app.modules.storage.storage_deletion import process_storage_delete_intents
 from app.modules.storage.storage_ownership import provider_ref_for_backend
 from app.schemas.inbox import CaptureUploadSlotsCreate, InboxImportRequest
-from tests.factories import build_model, build_user
+from tests.factories import build_background_job, build_model, build_user
 
 
 @pytest.fixture(autouse=True)
@@ -803,6 +803,8 @@ class TestCleanupCaptureSlots:
             source_hostname="makerworld.com",
             state=InboxItemState.IMPORTING,
         )
+        job_row = build_background_job(db_session, owner=owner)
+        row.background_job_id = job_row.id
         db_session.add(row)
         db_session.commit()
         receipt = CreationReceipt(
@@ -850,7 +852,7 @@ class TestCleanupCaptureSlots:
         )
 
         with pytest.raises(RuntimeError, match="commit failed"):
-            inbox._finish_import(row.id, "cover-commit-failure-job", _Factory())
+            inbox._finish_import(row.id, job_row.id, _Factory(), enrich=True)
 
         assert seam_calls == [write]
         rollback.undo()
@@ -1031,8 +1033,13 @@ class TestRetry:
         response = client.post(f"/api/v1/inbox/{row.id}/retry", headers=headers)
 
         assert response.status_code == 200
-        assert response.json()["state"] == "review"
-        assert calls == [(row.id, ["bad"])]
+        assert response.json()["state"] == "importing"
+        from app.modules.ingestion.commands import decode
+        db_session.expire_all()
+        accepted = db_session.get(BackgroundJob, response.json()["background_job_id"])
+        command, arguments = decode(accepted.payload_json)
+        assert command == "inbox"
+        assert arguments["context"]["selected"] == ["bad"]
 
     def test_retry_route_rejects_invalid_v2_selection_before_scheduling(
         self,

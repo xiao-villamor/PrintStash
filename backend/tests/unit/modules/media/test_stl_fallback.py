@@ -96,16 +96,14 @@ def _write_hostile_ascii(path: Path) -> Path:
 
 
 class TestRenderStlThumbnail:
-    def test_uses_the_canonical_material_colour(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_uses_the_canonical_material_colour(self, tmp_path, monkeypatch):
+        from dataclasses import replace
+
         path = tmp_path / "canonical-material.stl"
         _write_renderable_binary_stl(path, 12)
-        profile = type("PreviewProfile", (), {"material_albedo": (1.0, 0.0, 0.0)})()
+        profile = replace(stl_fallback.PREVIEW_PROFILE, material_albedo=(1.0, 0.0, 0.0))
         monkeypatch.setattr(stl_fallback, "PREVIEW_PROFILE", profile)
-
         result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
-
         assert result is not None
         pixels = np.asarray(Image.open(io.BytesIO(result.png)).convert("RGBA"))
         shaded = pixels[:, :, :3][pixels[:, :, 3] > 20]
@@ -191,35 +189,19 @@ class TestRenderStlThumbnail:
         bbox_area = (np.ptp(xs) + 1) * (np.ptp(ys) + 1)
         assert float(visible.sum() / bbox_area) >= 0.65
 
-    def test_stl_fallback_work_budget_is_observable(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        from app.modules.media import mesh_render
-
+    def test_stl_fallback_work_budget_is_observable(self, tmp_path, monkeypatch):
         monkeypatch.setattr(stl_fallback, "_MAX_SAMPLED_TRIANGLES", 32)
-        original_rasterise = mesh_render._rasterise_triangles
-        calls: list[int] = []
-
-        def bounded_rasterise(*args, **kwargs):
-            calls.append(int(args[2].shape[0]))
-            return original_rasterise(*args, **kwargs)
-
-        monkeypatch.setattr(mesh_render, "_rasterise_triangles", bounded_rasterise)
         path = tmp_path / "budget.stl"
         _write_annular_binary_stl(path)
-
         result = stl_fallback.render_stl_thumbnail(
-            path, width=64, height=48, max_triangles=1_000
+            path, width=64, height=48, max_triangles=1000
         )
-
         assert result is not None
         assert result.triangle_count == 768
-        assert result.sampled_triangles == 32
-        assert result.parsed_triangles == 32
-        assert result.scanned_bytes <= 84 + (32 * 50)
-        # Incomplete samples retain all source triangles and add one centroid-splat
-        # triangle per source facet. Both paths stay bounded by the sample cap.
-        assert calls and 32 <= sum(calls) <= 2 * 32
+        assert result.sampled_triangles == result.parsed_triangles == 32
+        assert result.scanned_bytes <= 84 + 32 * 50
+        assert 0 < result.raster_candidates <= 2_000_000
+        assert result.complete is False
 
     def test_stl_fallback_global_candidate_budget_for_large_facets(
         self, tmp_path: Path
@@ -336,6 +318,7 @@ class TestRenderStlThumbnail:
 
         path = tmp_path / "io-error.stl"
         _write_renderable_binary_stl(path, 1)
+
         original_open = Path.open
 
         def fail_open(_path: Path, *args, **kwargs):
@@ -344,8 +327,9 @@ class TestRenderStlThumbnail:
         monkeypatch.setattr(Path, "open", fail_open)
         assert stl_fallback._binary_stl_info(path) is None
         assert list(stl_fallback._iter_binary_triangles(path)) == []
-        assert stl_fallback._read_binary_samples(path, 1) is None
         monkeypatch.setattr(Path, "open", original_open)
+        path.unlink()
+        assert stl_fallback._read_binary_samples(path, 1) is None
 
         def fail_stat(_path: Path):
             raise OSError("missing")
@@ -366,12 +350,10 @@ class TestRenderStlThumbnail:
     ) -> None:
         path = tmp_path / "sampler-unreadable.stl"
         _write_renderable_binary_stl(path, 1)
+
         info = (1, path.stat().st_size)
 
-        def fail_open(_path: Path, *args, **kwargs):
-            raise OSError("unreadable")
-
-        monkeypatch.setattr(Path, "open", fail_open)
+        path.unlink()
 
         assert stl_fallback._read_binary_samples(path, 1, info=info) is None
 
@@ -487,86 +469,64 @@ class TestRenderStlThumbnail:
 
         assert stl_fallback.render_stl_thumbnail(path, **kwargs) is None
 
-    def test_refuses_a_sample_whose_coordinates_are_not_finite(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        path = tmp_path / "render-nan-coordinates.stl"
-        _write_renderable_binary_stl(path, 1)
-        sampled = _sampled_stl(coordinates=[float("nan")] * 9)
-
-        monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
-
+    def test_refuses_a_sample_whose_coordinates_are_not_finite(self, tmp_path):
+        path = tmp_path / "nan.stl"
+        path.write_bytes(
+            bytes(80)
+            + struct.pack("<I", 1)
+            + struct.pack("<12fH", *([0.0] * 3 + [float("nan")] * 9), 0)
+        )
         assert stl_fallback.render_stl_thumbnail(path) is None
 
-    def test_refuses_a_sample_whose_bounds_are_a_single_extreme_point(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        path = tmp_path / "render-degenerate-bounds.stl"
-        _write_renderable_binary_stl(path, 1)
-        sampled = _sampled_stl(
-            bounds_min=(1e308, 1e308, 1e308), bounds_max=(1e308, 1e308, 1e308)
+    def test_refuses_a_sample_whose_bounds_are_a_single_extreme_point(self, tmp_path):
+        path = tmp_path / "point.stl"
+        path.write_bytes(
+            bytes(80)
+            + struct.pack("<I", 1)
+            + struct.pack("<12fH", *([0.0] * 3 + [1e38] * 9), 0)
         )
-
-        monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
-
         assert stl_fallback.render_stl_thumbnail(path) is None
 
-    def test_refuses_a_sample_whose_bounds_overflow_float32(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        from app.modules.media import mesh_render
-
-        path = tmp_path / "render-overflowing-bounds.stl"
-        _write_renderable_binary_stl(path, 1)
-        sampled = _sampled_stl(
-            bounds_min=(-1e308, -1e308, -1e308), bounds_max=(1e308, 1e308, 1e308)
+    def test_refuses_a_sample_whose_bounds_overflow_float32(self, tmp_path):
+        path = tmp_path / "overflow.stl"
+        path.write_text(
+            "solid x\nvertex 1e308 0 0\nvertex 0 1e308 0\nvertex 0 0 1e308\nendsolid x\n"
         )
+        assert stl_fallback.render_stl_thumbnail(path) is None
 
-        monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
+    @pytest.mark.parametrize("field", ["hero_azimuth_degrees", "flat_tilt_degrees"])
+    def test_refuses_to_render_with_invalid_camera_recipe(
+        self, tmp_path, monkeypatch, field
+    ):
+        from dataclasses import replace
+
+        path = tmp_path / "invalid-recipe.stl"
+        _write_renderable_binary_stl(path, 1)
         monkeypatch.setattr(
-            mesh_render, "_select_view_rotation", lambda *_args: np.eye(3)
+            stl_fallback,
+            "PREVIEW_PROFILE",
+            replace(stl_fallback.PREVIEW_PROFILE, **{field: float("nan")}),
         )
-
         assert stl_fallback.render_stl_thumbnail(path) is None
 
-    @pytest.mark.parametrize(
-        "rotation",
-        [
-            lambda *_args: (_ for _ in ()).throw(ValueError("rotation")),
-            lambda *_args: np.full((3, 3), np.nan),
-        ],
-        ids=["raises", "returns-nan"],
-    )
-    def test_refuses_to_render_when_view_selection_fails(
-        self, tmp_path: Path, monkeypatch, rotation
-    ) -> None:
-        from app.modules.media import mesh_render
-
-        path = tmp_path / "render-rotation.stl"
-        _write_renderable_binary_stl(path, 1)
-        sampled = _sampled_stl()
-
-        monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
-        monkeypatch.setattr(mesh_render, "_select_view_rotation", rotation)
-
-        assert stl_fallback.render_stl_thumbnail(path) is None
-
-    def test_stl_fallback_returns_none_when_optional_render_dependencies_are_missing(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_stl_fallback_renders_without_python_image_dependencies(
+        self, tmp_path, monkeypatch
+    ):
         import builtins
 
-        path = tmp_path / "missing-dependency.stl"
+        path = tmp_path / "no-python-images.stl"
         _write_renderable_binary_stl(path, 1)
         original_import = builtins.__import__
 
-        def missing_numpy(name, *args, **kwargs):
-            if name == "numpy":
-                raise ImportError("numpy unavailable")
+        def missing_images(name, *args, **kwargs):
+            if name == "numpy" or name.startswith("PIL"):
+                raise ImportError("Python image dependencies unavailable")
             return original_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(builtins, "__import__", missing_numpy)
-        assert stl_fallback.render_stl_thumbnail(path) is None
+        monkeypatch.setattr(builtins, "__import__", missing_images)
+        result = stl_fallback.render_stl_thumbnail(path)
+        assert result is not None
+        assert result.png.startswith(b"\x89PNG")
 
     def test_incomplete_annular_sample_still_preserves_hole(
         self, tmp_path: Path, monkeypatch
@@ -667,28 +627,17 @@ class TestRenderStlThumbnail:
         assert result.parsed_triangles == 4
         assert result.scanned_bytes <= stl_fallback._MAX_ASCII_BYTES
 
-    def test_ascii_fallback_marks_truncated_metadata_incomplete(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-
-        monkeypatch.setattr(stl_fallback, "_MAX_ASCII_BYTES", 500)
+    def test_ascii_fallback_marks_truncated_metadata_incomplete(self, tmp_path):
         path = tmp_path / "ascii-truncated.stl"
-        facet = (
-            "facet normal 0 0 1\n"
-            "outer loop\n"
-            "vertex 0 0 0\n"
-            "vertex 1 0 0\n"
-            "vertex 0 1 0\n"
-            "endloop\n"
-            "endfacet\n"
+        facet = "facet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\n"
+        # A real prefix that exhausts the Rust byte budget before the facet cap.
+        path.write_text(
+            "solid x\n" + facet + ("#" + "x" * 65000 + "\n") * 260 + "endsolid x\n"
         )
-        path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
-
         result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
-
         assert result is not None
         assert result.complete is False
-        assert result.scanned_bytes <= 500
+        assert result.scanned_bytes <= 16 * 1024 * 1024
 
     @pytest.mark.parametrize(
         "pending_vertices",
@@ -733,3 +682,40 @@ class TestRenderStlThumbnail:
         )
 
         assert stl_fallback.render_stl_thumbnail(path, width=64, height=48) is None
+
+
+class TestSampleStlGeometry:
+    def test_reads_bounded_native_binary_geometry(self, tmp_path):
+        path = tmp_path / "sample.stl"
+        _write_renderable_binary_stl(path, 10)
+
+        sample = stl_fallback.sample_stl_geometry(path, max_triangles=2)
+
+        assert sample is not None
+        assert sample.triangle_count == 10
+        assert sample.sampled_triangles == 2
+        assert len(sample.coordinates) == 18
+        assert sample.complete is False
+
+    @pytest.mark.parametrize("budget", [0, 100_001, True, 1.5])
+    def test_rejects_invalid_geometry_work_budget(self, tmp_path, budget):
+        with pytest.raises(ValueError, match="invalid_stl_sample_budget"):
+            stl_fallback.sample_stl_geometry(
+                tmp_path / "absent.stl", max_triangles=budget
+            )
+
+    def test_keeps_geometry_partial_after_oversized_ascii_line(self, tmp_path):
+        path = tmp_path / "partial.stl"
+        path.write_text(
+            "solid x\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\n"
+            + "#" * (stl_fallback._MAX_ASCII_LINE_BYTES * 3)
+            + "\nendsolid x\n"
+        )
+
+        sample = stl_fallback.sample_stl_geometry(path, max_triangles=10)
+
+        assert sample is not None
+        assert sample.parsed_triangles == 1
+        assert sample.bounds_min == (0.0, 0.0, 0.0)
+        assert sample.bounds_max == (1.0, 1.0, 0.0)
+        assert sample.complete is False

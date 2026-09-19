@@ -62,7 +62,6 @@ class TestScanLibrary:
             ),
             operator=opendal.Operator("memory"),
         )
-        monkeypatch.setattr(external_library, "get_backend", lambda: remote)
         monkeypatch.setattr(ingestion, "get_backend", lambda: remote)
 
         summary = external_library.scan_library(lib.id)

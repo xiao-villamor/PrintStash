@@ -38,6 +38,7 @@ from .capacity import CapacityAdmissionEvent as CapacityAdmissionEvent
 from .capacity import CapacityLock as CapacityLock
 from .capacity import CapacityReservation as CapacityReservation
 from .capacity import StorageInventorySample as StorageInventorySample
+from .captions import SubjectCaption as SubjectCaption
 from .identity import (
     ApiKey as ApiKey,
 )
@@ -70,7 +71,10 @@ from .identity import (
 )
 from .inference import EmbeddingSpace as EmbeddingSpace
 from .inference import IndexGeneration as IndexGeneration
+from .inference import InferenceEndpoint as InferenceEndpoint
 from .inference import PassageVector as PassageVector
+from .inference import SearchGenerationLease as SearchGenerationLease
+from .inference import SearchIndexFailure as SearchIndexFailure
 from .ingestion import (
     BackgroundJob as BackgroundJob,
 )
@@ -82,6 +86,9 @@ from .ingestion import (
 )
 from .ingestion import (
     InboxItemResult as InboxItemResult,
+)
+from .ingestion import (
+    IngestionReview as IngestionReview,
 )
 from .ingestion import (
     StagingLease as StagingLease,
@@ -146,6 +153,9 @@ from .library import (
 )
 from .library import (
     Tag as Tag,
+)
+from .media import (
+    ArtifactAnalysisGeneration as ArtifactAnalysisGeneration,
 )
 from .media import (
     ThumbnailGeneration as ThumbnailGeneration,
@@ -216,6 +226,16 @@ from .provenance import (
 from .provenance import (
     ProvenanceCapture as ProvenanceCapture,
 )
+from .search import SearchDependency as SearchDependency
+from .search import SearchLexicalPosting as SearchLexicalPosting
+from .search import SearchLexicalState as SearchLexicalState
+from .search import SearchLexicalTerm as SearchLexicalTerm
+from .search import SearchPassage as SearchPassage
+from .search import SearchProjectionRequest as SearchProjectionRequest
+from .search import SearchReconciliationState as SearchReconciliationState
+from .search_expansion import SearchExpansion as SearchExpansion
+from .search_expansion import SearchExpansionTerm as SearchExpansionTerm
+from .search_preferences import UserSearchPreferences as UserSearchPreferences
 from .similarity import GeometryFingerprint as GeometryFingerprint
 from .similarity import SimilarityCandidate as SimilarityCandidate
 from .similarity import SimilarityCandidateObservation as SimilarityCandidateObservation

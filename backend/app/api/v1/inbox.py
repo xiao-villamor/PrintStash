@@ -245,7 +245,7 @@ def batch_items(
         elif payload.action == "import":
             if row.state != InboxItemState.REVIEW:
                 continue
-            background_tasks.add_task(inbox.run_import, row.id, [], session_factory)
+            inbox.queue_import(row.id, [], session_factory)
         else:
             inbox.dismiss(session, row)
         session.refresh(row)
@@ -312,9 +312,8 @@ def import_item(
         raise HTTPException(status_code=409, detail="pending_import_not_ready")
     assert row.id is not None
     inbox.validate_import_selection(row, payload.selected_ids)
-    background_tasks.add_task(
-        inbox.run_import, row.id, payload.selected_ids, session_factory
-    )
+    inbox.queue_import(row.id, payload.selected_ids, session_factory)
+    session.refresh(row)
     return inbox.read(row, session)
 
 
@@ -337,12 +336,8 @@ def retry_item(
     elif row.state == InboxItemState.REVIEW:
         selected = inbox.selected_ids(row.manifest_json)
         inbox.validate_import_selection(row, selected)
-        background_tasks.add_task(
-            inbox.run_import,
-            row.id,
-            selected,
-            session_factory,
-        )
+        inbox.queue_import(row.id, selected, session_factory)
+        session.refresh(row)
     return inbox.read(row, session)
 
 

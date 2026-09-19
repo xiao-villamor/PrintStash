@@ -16,17 +16,13 @@ count + per-entry + total uncompressed size caps).
 
 from __future__ import annotations
 
-import os
-import tempfile
-import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Optional
-from urllib.parse import unquote, urlparse
+from typing import TYPE_CHECKING, Callable, Optional
+from urllib.parse import unquote, urljoin, urlparse
 
-import httpx
 from printstash_core.files import (
     ArchiveEntry,
     ArchiveLimits,
@@ -43,18 +39,19 @@ from printstash_core.files import (
     safe_subdir as _safe_subdir,
 )
 from printstash_core.imports import StagedAsset
+from printstash_core.mesh.native_rasterizer import kernel
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.url_safety import (
     PinnedTarget,
     UnsafeUrlError,
-    pinned_transport,
     resolve_public_target,
 )
 from app.db.models import SUFFIX_TO_FILE_TYPE
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.ingestion.ingestion import ingest_mesh, ingest_orca_gcode
+from app.modules.ingestion.mesh_prefetch import Analysis
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.runtime.jobs import registry
 
@@ -111,67 +108,73 @@ async def download_to_staging(url: str) -> tuple[Path, str]:
 
     Returns ``(staged_path, original_filename)``. Enforces ``max_upload_bytes``.
     """
+    staged, filename, _digest = await download_to_staging_with_receipt(url)
+    return staged, filename
+
+
+async def download_to_staging_with_receipt(url: str) -> tuple[Path, str, str]:
+    """Download through the native engine and return its streaming SHA-256."""
     current = url
     for _ in range(settings.url_import_max_redirects + 1):
         # Resolve once and dial exactly that address: validating the hostname and
-        # then letting httpx resolve it again would let a hostile DNS server
-        # answer 127.0.0.1 the second time. Each redirect hop is a fresh URL, so
-        # each gets its own validation and its own pinned connection.
+        # then letting the HTTP client resolve it again would let hostile DNS
+        # answer 127.0.0.1 the second time. Every redirect gets fresh validation.
         target = _resolve_or_raise(current)
-        async with httpx.AsyncClient(
-            transport=pinned_transport(target), timeout=60.0
-        ) as client:
-            async with client.stream("GET", current, follow_redirects=False) as resp:
-                if resp.is_redirect:
-                    location = resp.headers.get("location")
-                    if not location:
-                        raise ImportError_("url_redirect_without_location")
-                    current = str(resp.url.join(location))
-                    continue
-                resp.raise_for_status()
-                original_filename = _content_disposition_name(
-                    resp
-                ) or _filename_from_url(current)
-                suffix = Path(original_filename).suffix.lower() or ".bin"
-                staged = settings.incoming_dir / f"{uuid.uuid4().hex}{suffix}"
-                with CapacityManager(get_session_factory()).hold(
-                    f"url-download:{staged.name}",
-                    [
-                        CapacityResource.for_path(
-                            staged.parent,
-                            settings.max_upload_bytes,
-                            role="URL import staging",
-                        )
-                    ],
-                ):
-                    staged.parent.mkdir(parents=True, exist_ok=True)
-                    fd, temp_name = tempfile.mkstemp(
-                        prefix=".printstash-url-", dir=staged.parent
-                    )
-                    temp = Path(temp_name)
-                    written = 0
-                    limit = settings.max_upload_bytes
-                    try:
-                        with os.fdopen(fd, "wb") as out:
-                            async for chunk in resp.aiter_bytes(1024 * 1024):
-                                written += len(chunk)
-                                if written > limit:
-                                    raise ImportError_("download_too_large")
-                                out.write(chunk)
-                            out.flush()
-                            os.fsync(out.fileno())
-                        os.link(temp, staged, follow_symlinks=False)
-                        return staged, original_filename
-                    finally:
-                        try:
-                            temp.unlink(missing_ok=True)
-                        except OSError:
-                            pass
+        reservation_id = uuid.uuid4().hex
+        with CapacityManager(get_session_factory()).hold(
+            f"url-download:{reservation_id}",
+            [
+                CapacityResource.for_path(
+                    settings.incoming_dir,
+                    settings.max_upload_bytes,
+                    role="URL import staging",
+                )
+            ],
+        ):
+            settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                result = await kernel().download_to_staging(
+                    target.url,
+                    target.host,
+                    target.ip,
+                    target.port,
+                    settings.incoming_dir,
+                    settings.max_upload_bytes,
+                    60.0,
+                )
+            except ValueError as exc:
+                raise ImportError_(str(exc)) from exc
+            if 300 <= result.status < 400:
+                if not result.location:
+                    raise ImportError_("url_redirect_without_location")
+                current = urljoin(target.url, result.location)
+                continue
+            original_filename = _content_disposition_value(
+                result.content_disposition or ""
+            ) or _filename_from_url(current)
+            suffix = Path(original_filename).suffix.lower() or ".bin"
+            staged = settings.incoming_dir / f"{reservation_id}{suffix}"
+            try:
+                digest = result.publish(staged)
+            except ValueError as exc:
+                raise ImportError_(str(exc)) from exc
+        try:
+            staged_size = staged.stat().st_size
+        except OSError as exc:
+            staged.unlink(missing_ok=True)
+            raise ImportError_("download_staging_failed") from exc
+        if result.written != staged_size:
+            staged.unlink(missing_ok=True)
+            raise ImportError_("download_staging_failed")
+        return staged, original_filename, digest
     raise ImportError_("url_too_many_redirects")
 
 
 def _content_disposition_name(resp) -> str | None:
-    cd = resp.headers.get("content-disposition", "")
+    return _content_disposition_value(resp.headers.get("content-disposition", ""))
+
+
+def _content_disposition_value(cd: str) -> str | None:
     marker = "filename="
     if marker not in cd:
         return None
@@ -273,43 +276,36 @@ class PendingArchive:
 
 
 class _ArchiveRegistry:
-    """In-process store of staged archives awaiting entry selection (1h TTL)."""
-
-    _TTL = 3600.0
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._items: dict[str, PendingArchive] = {}
+    """Durable, expiring archive review; source cleanup belongs to its lease."""
 
     def add(self, pending: PendingArchive) -> str:
-        archive_id = uuid.uuid4().hex
-        with self._lock:
-            self._prune()
-            self._items[archive_id] = pending
-        return archive_id
+        from app.modules.ingestion import review_manifests
 
-    def get(self, archive_id: str) -> PendingArchive | None:
-        with self._lock:
-            return self._items.get(archive_id)
+        payload = asdict(pending)
+        payload["path"] = str(pending.path)
+        return review_manifests.save(
+            "archive", payload, pending.owner_user_id, staged=pending.path
+        )
+
+    def get(self, archive_id: str, *, claim: bool = False) -> PendingArchive | None:
+        from app.modules.ingestion import review_manifests
+
+        payload = review_manifests.get("archive", archive_id, claim=claim)
+        if payload is None:
+            return None
+        payload["path"] = Path(payload["path"])
+        payload["entries"] = [ArchiveEntry(**entry) for entry in payload["entries"]]
+        return PendingArchive(**payload)
 
     def claim(self, archive_id: str) -> PendingArchive | None:
-        with self._lock:
-            item = self._items.get(archive_id)
-            if item is None or item.claimed:
-                return None
-            item.claimed = True
-            return item
+        return self.get(archive_id, claim=True)
 
     def pop(self, archive_id: str) -> PendingArchive | None:
-        with self._lock:
-            return self._items.pop(archive_id, None)
+        from app.modules.ingestion import review_manifests
 
-    def _prune(self) -> None:
-        cutoff = time.time() - self._TTL
-        for key in [k for k, v in self._items.items() if v.created_at < cutoff]:
-            stale = self._items.pop(key, None)
-            if stale is not None:
-                stale.path.unlink(missing_ok=True)
+        pending = self.get(archive_id)
+        review_manifests.remove("archive", archive_id)
+        return pending
 
 
 archives = _ArchiveRegistry()
@@ -339,6 +335,9 @@ def _ingest_one_file(
     actor_user_id: Optional[int],
     session_factory: SessionFactory,
     provenance_context: ProvenanceContext | None = None,
+    on_progress: Callable[[float], None] | None = None,
+    prepared_analysis: Analysis | None = None,
+    job_id: str | None = None,
 ) -> Optional[dict]:
     """Ingest one staged file under its own child job.
 
@@ -354,7 +353,9 @@ def _ingest_one_file(
     original_filename = PurePosixPath(original_filename.replace("\\", "/")).name
     suffix = Path(original_filename).suffix.lower()
     resolved_name = model_name or Path(original_filename).stem
-    child = registry.create(owner_user_id=actor_user_id, visible=False, kind="artifact")
+    child = registry.create(
+        owner_user_id=actor_user_id, visible=False, kind="artifact", job_id=job_id
+    )
     try:
         if suffix in _GCODE_SUFFIXES:
             ingest_orca_gcode(
@@ -369,6 +370,7 @@ def _ingest_one_file(
                 session_factory=session_factory,
                 source_url=source_url,
                 provenance_context=provenance_context,
+                on_progress=on_progress,
             )
         else:
             file_type = SUFFIX_TO_FILE_TYPE.get(suffix)
@@ -388,6 +390,13 @@ def _ingest_one_file(
                 session_factory=session_factory,
                 source_url=source_url,
                 provenance_context=provenance_context,
+                on_progress=on_progress,
+                defer_fingerprint=True,
+                **(
+                    {"prepared_analysis": prepared_analysis.process}
+                    if prepared_analysis is not None
+                    else {}
+                ),
             )
         child_status = registry.get(child)
         if child_status and child_status.state == "completed":
@@ -441,7 +450,12 @@ def import_assets(
     )
     results: list[dict] = []
     done = 0
-    for staged_file in staged_files:
+    succeeded = failed = skipped = duplicates = 0
+
+    def report_file_progress(progress: float) -> None:
+        registry.update(job_id, progress=(done + progress / 100) / total * 100)
+
+    for item_index, staged_file in enumerate(staged_files):
         if isinstance(staged_file, StagedAsset):
             staged, rel_name = (
                 staged_file.staged_path,
@@ -463,6 +477,7 @@ def import_assets(
             if subdir:
                 base = (collection or "").rstrip("/")
                 file_collection = f"{base}/{subdir}" if base else subdir
+        registry.update(job_id, current_item=rel_name)
         res = _ingest_one_file(
             staged,
             rel_name,
@@ -473,8 +488,21 @@ def import_assets(
             actor_user_id=actor_user_id,
             session_factory=session_factory,
             provenance_context=provenance_context,
+            on_progress=report_file_progress,
+            job_id=uuid.uuid5(
+                uuid.NAMESPACE_URL, f"printstash:{job_id}:{item_index}:{rel_name}"
+            ).hex,
         )
+        done += 1
         if res is None:
+            skipped += 1
+            registry.update(
+                job_id,
+                step=done,
+                processed=done,
+                skipped=skipped,
+                progress=done / total * 100,
+            )
             continue
         if isinstance(staged_file, StagedAsset):
             res = {
@@ -483,9 +511,18 @@ def import_assets(
                 "result_key": staged_file.result_key,
             }
         results.append(res)
-        done += 1
-        registry.update(job_id, step=done, progress=done / total * 100)
-
+        succeeded += bool(res.get("model_id"))
+        failed += bool(res.get("error"))
+        duplicates += bool(res.get("deduplicated"))
+        registry.update(
+            job_id,
+            step=done,
+            processed=done,
+            succeeded=succeeded,
+            failed=failed,
+            deduplicated=duplicates,
+            progress=done / total * 100,
+        )
     imported = [r for r in results if r.get("model_id")]
     failures = [r for r in results if r.get("error")]
     deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
@@ -494,7 +531,7 @@ def import_assets(
         state="completed" if imported else "failed",
         model_id=imported[0]["model_id"] if imported else None,
         result={"imported": len(imported), "total": total, "items": results},
-        processed=len(results),
+        processed=done,
         total=total,
         succeeded=len(imported),
         deduplicated=deduplicated,
@@ -659,4 +696,90 @@ def import_resolved_groups(
             }
             for r in failures
         ],
+    )
+
+
+def import_archive(
+    *,
+    job_id: str,
+    archive_path: Path,
+    names: list[str],
+    collection: str | None,
+    tags: str | None,
+    source_url: str | None,
+    actor_user_id: int | None,
+    session_factory: SessionFactory,
+) -> None:
+    """Extract and save one selected entry at a time, with stable replay keys."""
+    entries = {
+        entry.name: entry for entry in inspect_archive(archive_path) if entry.file_type
+    }
+    chosen = list(dict.fromkeys(name for name in names if name in entries))
+    if not chosen:
+        raise ImportError_("no_importable_files")
+    registry.update(job_id, state="running", stage="ingesting", total=len(chosen))
+    results = []
+    from contextlib import closing
+
+    from printstash_core.files import iter_selected
+
+    peak_bytes = max(entries[name].size_bytes for name in chosen)
+    with CapacityManager(session_factory).hold(
+        f"archive:{job_id}",
+        [
+            CapacityResource.for_path(
+                settings.incoming_dir, peak_bytes, role="archive entry"
+            )
+        ],
+    ):
+        with closing(
+            iter_selected(
+                archive_path,
+                chosen,
+                staging_dir=settings.incoming_dir,
+                max_entry_bytes=settings.max_archive_entry_mb * 1024**2,
+                importable_suffixes=_IMPORTABLE_SUFFIXES,
+            )
+        ) as selected:
+            for index, (staged, name) in enumerate(selected):
+                child = uuid.uuid5(
+                    uuid.NAMESPACE_URL, f"printstash:{job_id}:{index}:{name}"
+                ).hex
+                subdir = _safe_subdir(name)
+                target = (
+                    f"{collection}/{subdir}"
+                    if collection and subdir
+                    else subdir or collection
+                )
+                result = _ingest_one_file(
+                    staged,
+                    name,
+                    collection=target,
+                    tags=tags,
+                    source_url=source_url,
+                    model_name=None,
+                    actor_user_id=actor_user_id,
+                    session_factory=session_factory,
+                    job_id=child,
+                )
+                if result is not None:
+                    results.append(result)
+                registry.update(
+                    job_id,
+                    processed=index + 1,
+                    current_item=name,
+                    progress=(index + 1) / len(chosen) * 100,
+                )
+    successes = [result for result in results if "error" not in result]
+    failures = len(results) - len(successes)
+    registry.finish(
+        job_id,
+        state="completed" if successes else "failed",
+        completion="partial" if failures else "complete",
+        succeeded=len(successes),
+        failed=failures,
+        model_id=successes[0]["model_id"] if successes else None,
+        file_id=successes[0]["file_id"] if successes else None,
+        result={"imported": len(successes), "total": len(chosen), "items": results},
+        retryable=bool(failures),
     )

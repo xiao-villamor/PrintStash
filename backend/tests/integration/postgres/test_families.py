@@ -214,6 +214,43 @@ class TestConcurrentFamilyEdits:
 
 
 class TestFamilyBrowse:
+    @pytest.mark.parametrize("q", [None, "Same"])
+    def test_pages_unranked_families_by_recent_change(self, family_engine, q):
+        from datetime import datetime, timezone
+
+        from app.modules.library.model_views.family_browse import family_page
+
+        engine, config = family_engine
+        command.upgrade(config, FAMILY_REVISION)
+        with Session(engine) as session:
+            actor = f.build_user(session, superuser=True)
+            older = f.build_family(
+                session,
+                "Same old",
+                updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+            newer = f.build_family(
+                session,
+                "Same new",
+                updated_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            )
+            options = dict(
+                q=q,
+                collection_id=None,
+                favorites=False,
+                tags=[],
+                include_trashed=False,
+                sort=ModelSort.RELEVANCE,
+                limit=1,
+            )
+            first = family_page(session, actor, cursor=None, **options)
+            second = family_page(session, actor, cursor=first.next_cursor, **options)
+
+            assert [family.id for family in first.items] == [newer.id]
+            assert [family.id for family in second.items] == [older.id]
+            assert first.total == second.total == 2
+            assert second.next_cursor is None
+
     @pytest.mark.parametrize("sort", list(ModelSort))
     def test_pages_family_union_on_supported_databases(self, family_engine, sort):
         from datetime import datetime, timezone

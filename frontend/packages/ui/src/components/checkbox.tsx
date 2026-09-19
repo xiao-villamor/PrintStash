@@ -12,9 +12,10 @@ export const Checkbox = forwardRef<
     onChange: (checked: boolean) => void;
     className?: string;
     ariaLabel?: string;
+    ariaDescribedBy?: string;
     disabled?: boolean;
   }
->(({ checked, onChange, className, ariaLabel, disabled }, ref) => {
+>(({ checked, onChange, className, ariaLabel, ariaDescribedBy, disabled }, ref) => {
   return (
     <button
       ref={ref}
@@ -22,6 +23,7 @@ export const Checkbox = forwardRef<
       role="checkbox"
       aria-checked={checked}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       disabled={disabled}
       onClick={(e) => {
         e.preventDefault();

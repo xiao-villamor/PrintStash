@@ -539,7 +539,10 @@ class TestPut:
                 canonical_url="https://example.test/finish",
                 identity_key=uuid.uuid4().hex * 2,
             )
+            from tests.factories import build_background_job
+            source_job = build_background_job(setup, owner=owner, id="finish-job")
             row = InboxItem(
+                background_job_id=source_job.id,
                 owner_user_id=owner.id,
                 source_kind=InboxSourceKind.BROWSER,
                 source_url=source.canonical_url,
@@ -595,7 +598,7 @@ class TestPut:
         monkeypatch.setattr(inbox, "_record_v2_results", lambda *_args: (True, 1, 0))
         monkeypatch.setattr(inbox, "_cleanup_capture_slots", lambda *_args: True)
 
-        inbox._finish_import(row_id, "finish-job", factory)
+        inbox._finish_import(row_id, "finish-job", factory, enrich=True)
 
         # Cover, publication intent, proof finalization, then Inbox terminalization.
         assert len(commits) == 4

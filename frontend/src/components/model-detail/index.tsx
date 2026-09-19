@@ -1,6 +1,8 @@
 "use client";
 
+import { SubjectCaption } from "@/components/subject-caption";
 import { ModelFamilyMembership } from "@/components/families/model-membership";
+import { ModelSearchAction } from "@/components/model-search-action";
 
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -35,6 +37,7 @@ import {
   deleteModel,
   deleteTag,
   getAssetUrl,
+  getModel,
   getModelPrinterFiles,
   getModelPrintJobs,
   starModel,
@@ -146,6 +149,26 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [model, setModel] = useState(initialModel);
+  useEffect(() => {
+    if (!model.enrichment_pending) return;
+    let active = true;
+    let timer: number;
+    const refresh = async () => {
+      try {
+        const updated = await getModel(model.id, { fresh: true });
+        if (active) setModel(updated);
+      } catch {
+        // A transient read failure does not hide an already saved Artifact.
+      } finally {
+        if (active) timer = window.setTimeout(() => void refresh(), 2000);
+      }
+    };
+    timer = window.setTimeout(() => void refresh(), 2000);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [model.id, model.enrichment_pending]);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -654,6 +677,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   }
                   contentClassName="w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                 >
+                  <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
                   <button
                     type="button"
                     role="menuitem"
@@ -906,38 +930,43 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               className="animate-panel-in flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 [scrollbar-width:thin] [scrollbar-color:var(--outline-variant)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-outline-variant [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-primary/50"
             >
               {activeTab === "overview" && (
-                <OverviewTab
-                  model={model}
-                  editing={editing}
-                  editor={{
-                    collection: editCollection,
-                    setCollection: setEditCollection,
-                    catOpen,
-                    setCatOpen,
-                    collections,
-                    description: editDescription,
-                    setDescription: setEditDescription,
-                    sourceUrl: editSourceUrl,
-                    setSourceUrl: setEditSourceUrl,
-                    tagInput,
-                    setTagInput,
-                    tags: editTags,
-                    setTags: setEditTags,
-                    toggleTag: editToggleTag,
-                    createTag: editCreateTag,
-                    deleteTag: editDeleteTag,
-                    filteredTags: editFilteredTags,
-                    canCreate: editCanCreate,
-                  }}
-                  recommendedFile={recommendedGcode}
-                  hasGcode={hasGcode}
-                  revisionSaving={revisionUpdater.saving}
-                  onSend={requestSend}
-                  canSend={canViewPrinters}
-                  onCompare={() => setRequestedTab("revisions")}
-                  onMark={(file, patch) => void revisionUpdater.update(file, patch)}
-                  onAddRevision={requestAddRevision}
-                />
+                <div className="space-y-4">
+                  <OverviewTab
+                    model={model}
+                    editing={editing}
+                    editor={{
+                      collection: editCollection,
+                      setCollection: setEditCollection,
+                      catOpen,
+                      setCatOpen,
+                      collections,
+                      description: editDescription,
+                      setDescription: setEditDescription,
+                      sourceUrl: editSourceUrl,
+                      setSourceUrl: setEditSourceUrl,
+                      tagInput,
+                      setTagInput,
+                      tags: editTags,
+                      setTags: setEditTags,
+                      toggleTag: editToggleTag,
+                      createTag: editCreateTag,
+                      deleteTag: editDeleteTag,
+                      filteredTags: editFilteredTags,
+                      canCreate: editCanCreate,
+                    }}
+                    recommendedFile={recommendedGcode}
+                    hasGcode={hasGcode}
+                    revisionSaving={revisionUpdater.saving}
+                    onSend={requestSend}
+                    canSend={canViewPrinters}
+                    onCompare={() => setRequestedTab("revisions")}
+                    onMark={(file, patch) => void revisionUpdater.update(file, patch)}
+                    onAddRevision={requestAddRevision}
+                  />
+                  {!editing && auth.isAuthenticated && (
+                    <SubjectCaption key={model.id} type="model" id={model.id} />
+                  )}
+                </div>
               )}
 
               {activeTab === "settings" && (

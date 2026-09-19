@@ -610,3 +610,14 @@ class TestManagedCacheContent:
             if archive is not None:
                 archive.unlink(missing_ok=True)
             bind_backend(previous)
+
+
+class TestArtifactContentContract:
+    @pytest.mark.parametrize("present", [True, False])
+    def test_checks_mounted_source_presence_without_using_the_vault(self, tmp_path, present):
+        path = tmp_path / "mounted.stl"
+        if present:
+            path.write_bytes(b"source")
+        row = detached_file(model_id=1, path=str(path), original_filename="mounted.stl",
+            size_bytes=6, sha256=hashlib.sha256(b"source").hexdigest(), is_external=True)
+        assert artifact_content.resolve(row).exists() is present

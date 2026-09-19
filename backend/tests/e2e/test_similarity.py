@@ -5,10 +5,11 @@ import hashlib
 import pytest
 from sqlmodel import select
 
-from app.db.models import File, Metadata, SimilarityReviewDecision
+from app.db.models import File, GeometryFingerprint, Metadata, SimilarityReviewDecision
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.similarity import process_one
 from tests.factories.geometry import tetrahedron
+from tests.ingestion_work import drain_enrichment, drain_sources
 from tests.paths import TESTDATA_DIR
 
 
@@ -33,12 +34,13 @@ class TestSimilarity:
         )
 
         assert response.status_code == 202, response.text
+        await drain_sources()
+        await drain_enrichment()
         job = await api.get(
             f"/api/v1/ingest/jobs/{response.json()['job_id']}",
             headers=superuser_headers,
         )
         assert job.json()["state"] == "completed", job.text
-        assert job.json()["fingerprint_status"] == "ready", job.text
         file = e2e_db.get(File, job.json()["file_id"])
         metadata = e2e_db.exec(
             select(Metadata).where(Metadata.file_id == file.id)
@@ -47,6 +49,13 @@ class TestSimilarity:
         assert get_backend().read_bytes(file.path) == source
         assert file.thumbnail_path is not None
         assert get_backend().read_bytes(file.thumbnail_path)
+        assert process_one() is True
+        e2e_db.expire_all()
+        fingerprints = e2e_db.exec(
+            select(GeometryFingerprint).where(GeometryFingerprint.file_id == file.id)
+        ).all()
+        assert fingerprints
+        assert all(item.state == "ready" for item in fingerprints)
 
     @pytest.mark.asyncio
     async def test_confirms_evidence_after_local_scan(
@@ -73,11 +82,12 @@ class TestSimilarity:
                 data={"model_name": f"Part {index}"},
             )
             assert response.status_code == 202, response.text
+            await drain_sources()
+            await drain_enrichment()
             job = await api.get(
                 f"/api/v1/ingest/jobs/{response.json()['job_id']}", headers=headers
             )
             assert job.json()["state"] == "completed", job.text
-            assert job.json()["fingerprint_status"] == "ready", job.text
             uploaded.append(
                 (job.json()["file_id"], hashlib.sha256(content).hexdigest())
             )

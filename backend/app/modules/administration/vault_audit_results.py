@@ -115,7 +115,7 @@ def record_event(
     eligible = threshold != "off" and (not regression or regression_rank >= rank)
     # Durable evidence is never rate-limited. Delay deliveries to preserve every
     # new regression while spacing external sends across policy runs.
-    before_ids = {id(row) for row in session.new}
+    pending_before = tuple(session.new)
     if eligible:
         categories = sorted(
             {
@@ -148,7 +148,8 @@ def record_event(
         deliveries = [
             row
             for row in session.new
-            if id(row) not in before_ids and isinstance(row, NotificationDelivery)
+            if isinstance(row, NotificationDelivery)
+            and all(row is not pending for pending in pending_before)
         ]
         if policy and deliveries:
             due = (

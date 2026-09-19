@@ -1525,6 +1525,15 @@ async def run_import(
     )
     if context is None:
         return
+    await execute_import(item_id, context, session_factory)
+
+
+def queue_import(item_id: int, selected_ids: list[str], session_factory: SessionFactory) -> None:
+    """Commit the command and staged ownership before acknowledging acceptance."""
+    _begin_import(item_id, selected_ids, session_factory)
+
+
+async def execute_import(item_id: int, context: dict[str, Any], session_factory: SessionFactory) -> None:
     manifest = context["manifest"]
     selected = context["selected"]
     source_url = context["source_url"]
@@ -1713,9 +1722,7 @@ def _begin_import(
                 session.add(row)
                 session.commit()
                 return None
-        session.add(row)
-        session.commit()
-        return {
+        context = {
             "manifest": manifest,
             "selected": selected,
             "source_url": row.source_url,
@@ -1734,14 +1741,25 @@ def _begin_import(
                 if slot.role == "file" and slot.source_file_id and slot.storage_key
             },
         }
+        from app.modules.ingestion.commands import enqueue
+        enqueue(session, job_id, "inbox", {"item_id": item_id, "context": context})
+        # Accept the dependent stage before source processing can terminalize.
+        # A crash after the final Artifact commit cannot lose cover/cleanup work.
+        from app.modules.ingestion.commands import capture_enrichment_job_id
+        followup = capture_enrichment_job_id(job_id)
+        registry.create(row.owner_user_id, visible=False, kind="capture_enrichment", session=session, job_id=followup)
+        enqueue(session, followup, "capture_enrichment", {"item_id": item_id, "source_job_id": job_id})
+        session.add(row)
+        session.commit()
+        return context
 
 
-def _finish_import(item_id: int, job_id: str, session_factory: SessionFactory) -> None:
+def _finish_import(item_id: int, job_id: str, session_factory: SessionFactory, *, enrich: bool = False) -> bool:
     job = registry.get(job_id)
     with session_factory.scoped_session() as session:
         row = session.get(InboxItem, item_id)
-        if row is None:
-            return
+        if row is None or row.background_job_id != job_id or row.state not in {InboxItemState.IMPORTING, InboxItemState.COMPLETED}:
+            return True
         cover_write: source_covers.SourceCoverWrite | None = None
         # The cover intent uses a separate engine-bound transaction. Keep this
         # terminalization session in ``no_autoflush`` until that intent commit
@@ -1761,19 +1779,30 @@ def _finish_import(item_id: int, job_id: str, session_factory: SessionFactory) -
                     else InboxItemCompletion.COMPLETE
                 )
                 row.retryable = failed > 0
-                if not row.retryable:
-                    cover_result = _attach_capture_cover(session, row)
-                    if cover_result is False:
-                        row.error_code = "capture_cover_attach_pending"
+                if enrich:
+                    if not row.retryable:
+                        row.error_code = None
+                        cover_result = _attach_capture_cover(session, row)
+                        if cover_result is False:
+                            row.error_code = "capture_cover_attach_pending"
+                            row.retryable = True
+                        elif isinstance(cover_result, source_covers.SourceCoverWrite):
+                            cover_write = cover_result
+                    if not row.retryable and not _cleanup_capture_slots(session, row):
+                        row.error_code = "capture_upload_cleanup_pending"
                         row.retryable = True
-                    elif isinstance(cover_result, source_covers.SourceCoverWrite):
-                        cover_write = cover_result
-                if not row.retryable and not _cleanup_capture_slots(session, row):
-                    row.error_code = "capture_upload_cleanup_pending"
-                    row.retryable = True
-                if row.staging_key and not row.retryable:
-                    unlink_managed_file(row.staging_key, settings.incoming_dir)
-                    row.staging_key = None
+                    if row.staging_key and not row.retryable:
+                        unlink_managed_file(row.staging_key, settings.incoming_dir)
+                        row.staging_key = None
+                elif not row.retryable:
+                    from app.modules.ingestion.commands import (
+                        capture_enrichment_job_id,
+                        enqueue,
+                    )
+                    command_id = capture_enrichment_job_id(job_id)
+                    if session.get(BackgroundJob, command_id) is None:
+                        registry.create(row.owner_user_id, visible=False, kind="capture_enrichment", session=session, job_id=command_id)
+                        enqueue(session, command_id, "capture_enrichment", {"item_id": item_id, "source_job_id": job_id})
             else:
                 row.state = InboxItemState.FAILED
                 row.error_code = (
@@ -1787,6 +1816,8 @@ def _finish_import(item_id: int, job_id: str, session_factory: SessionFactory) -
             row.updated_at = utcnow()
             session.add(row)
         try:
+            from app.modules.ingestion.commands import require_execution_claim
+            require_execution_claim(session)
             session.commit()
         except Exception:
             session.rollback()
@@ -1795,6 +1826,7 @@ def _finish_import(item_id: int, job_id: str, session_factory: SessionFactory) -
                     session, get_backend(), cover_write
                 )
             raise
+        return not row.retryable
 
 
 def _record_v2_results(
@@ -1907,6 +1939,25 @@ def retry(session: Session, row: InboxItem) -> InboxItem:
         or not row.retryable
     ):
         raise OperationError("pending_import_not_retryable", kind=ErrorKind.CONFLICT)
+    if row.state == InboxItemState.COMPLETED and row.error_code in {"capture_cover_attach_pending", "capture_upload_cleanup_pending"} and row.background_job_id:
+        from app.modules.ingestion.commands import capture_enrichment_job_id
+        work = session.get(BackgroundJob, capture_enrichment_job_id(row.background_job_id))
+        if work is not None:
+            if work.state == "failed":
+                work.state = "pending"
+                work.status_json = '{"state":"pending"}'
+                work.attempts = 0
+                work.claim_token = None
+                work.lease_expires_at = None
+                work.finished_at = None
+            work.next_attempt_at = utcnow()
+            row.retryable = False
+            row.error_code = None
+            session.add(work)
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
     manifest = _json_dict(row.manifest_json)
     if (
         row.id is not None
@@ -2077,6 +2128,11 @@ def reconcile_interrupted_items() -> int:
         ).all()
         for row in rows:
             job = registry.get(row.background_job_id) if row.background_job_id else None
+            if row.state == InboxItemState.IMPORTING and row.background_job_id:
+                from app.modules.ingestion.commands import decode
+                durable_job = session.get(BackgroundJob, row.background_job_id)
+                if durable_job and durable_job.replay_safe and durable_job.state in {"pending", "running"} and decode(durable_job.payload_json) is not None:
+                    continue
             if (
                 row.state == InboxItemState.IMPORTING
                 and job is not None

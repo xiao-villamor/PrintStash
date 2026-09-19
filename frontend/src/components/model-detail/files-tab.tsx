@@ -1,5 +1,7 @@
 "use client";
 
+import { FileEnrichmentStatus } from "./file-enrichment-status";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -83,6 +85,12 @@ export function FilesTab({
                       value2: String(f.version ?? ""),
                     })}
                   </p>
+                  <FileEnrichmentStatus
+                    file={f}
+                    modelId={modelId}
+                    canEdit={canEdit}
+                    onModel={onModel}
+                  />
                   <div className="mt-1.5">
                     <EntityTagsDialog
                       entityLabel={f.original_filename}

@@ -1,0 +1,301 @@
+{
+  "architecture": "x86_64",
+  "measurements": [
+    {
+      "assets": [
+        {
+          "bytes": 133093490,
+          "filename": "model.onnx",
+          "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35"
+        },
+        {
+          "bytes": 711396,
+          "filename": "tokenizer.json",
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        }
+      ],
+      "cold_canary_seconds": 2.533142203988973,
+      "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+      "documents_seconds": 2.961451996001415,
+      "languages": [
+        "en"
+      ],
+      "license": "MIT",
+      "manifest_sha256": "4307020435dce08ac5b2671d4988301df4dc99f748cf52ba8e0cd6ed50994de7",
+      "missed_queries": [
+        "q25"
+      ],
+      "native_recall_at_5": 0.96875,
+      "queries": 32,
+      "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+      "repository": "BAAI/bge-small-en-v1.5",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "space": {
+        "alignment_identity": null,
+        "dimension": 384,
+        "document_prefix": "",
+        "modality": "text",
+        "model_key": "bge-small-en-v1.5",
+        "model_repo": "BAAI/bge-small-en-v1.5",
+        "model_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+        "normalization": "l2",
+        "profile": "semantic_text",
+        "provider": "onnx_cpu",
+        "provider_config_hash": null,
+        "query_prefix": "Represent this sentence for searching relevant passages: ",
+        "render_recipe": "{\"encoder_manifest_sha256\":\"4307020435dce08ac5b2671d4988301df4dc99f748cf52ba8e0cd6ed50994de7\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}"
+      },
+      "state": "measured",
+      "threads": 1,
+      "warm_query_p50_ms": 58.73083247570321,
+      "warm_query_p95_ms": 76.5445167722646
+    },
+    {
+      "assets": [
+        {
+          "bytes": 90405214,
+          "filename": "onnx--model.onnx",
+          "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"
+        },
+        {
+          "bytes": 466247,
+          "filename": "tokenizer.json",
+          "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037"
+        }
+      ],
+      "cold_canary_seconds": 1.67832654499216,
+      "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+      "documents_seconds": 1.7822793400264345,
+      "languages": [
+        "en"
+      ],
+      "license": "Apache-2.0",
+      "manifest_sha256": "c79c0b826436e5bca6a52d076a5335f50f80e85a8661d63d4df5f8527e49f96c",
+      "missed_queries": [
+        "q23",
+        "q25",
+        "q26"
+      ],
+      "native_recall_at_5": 0.90625,
+      "queries": 32,
+      "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+      "repository": "sentence-transformers/all-MiniLM-L6-v2",
+      "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+      "space": {
+        "alignment_identity": null,
+        "dimension": 384,
+        "document_prefix": "",
+        "modality": "text",
+        "model_key": "all-MiniLM-L6-v2-evaluation",
+        "model_repo": "sentence-transformers/all-MiniLM-L6-v2",
+        "model_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+        "normalization": "l2",
+        "profile": "semantic_text",
+        "provider": "onnx_cpu",
+        "provider_config_hash": null,
+        "query_prefix": "",
+        "render_recipe": "{\"encoder_manifest_sha256\":\"c79c0b826436e5bca6a52d076a5335f50f80e85a8661d63d4df5f8527e49f96c\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}"
+      },
+      "state": "measured",
+      "threads": 1,
+      "warm_query_p50_ms": 29.965888505103067,
+      "warm_query_p95_ms": 39.96150723833125
+    },
+    {
+      "assets": [
+        {
+          "bytes": 470268510,
+          "filename": "onnx--model.onnx",
+          "sha256": "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"
+        },
+        {
+          "bytes": 17082730,
+          "filename": "tokenizer.json",
+          "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+        }
+      ],
+      "cold_canary_seconds": 8.806107357959263,
+      "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+      "documents_seconds": 3.4556142709916458,
+      "languages": [
+        "en",
+        "es"
+      ],
+      "license": "MIT",
+      "manifest_sha256": "c5d2fd26d771e7934244f728d1ffa04649803d837b7e499525130eb1832d75ba",
+      "missed_queries": [],
+      "native_recall_at_5": 1.0,
+      "queries": 32,
+      "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+      "repository": "intfloat/multilingual-e5-small",
+      "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "space": {
+        "alignment_identity": null,
+        "dimension": 384,
+        "document_prefix": "passage: ",
+        "modality": "text",
+        "model_key": "multilingual-e5-small-evaluation",
+        "model_repo": "intfloat/multilingual-e5-small",
+        "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+        "normalization": "l2",
+        "profile": "semantic_text",
+        "provider": "onnx_cpu",
+        "provider_config_hash": null,
+        "query_prefix": "query: ",
+        "render_recipe": "{\"encoder_manifest_sha256\":\"c5d2fd26d771e7934244f728d1ffa04649803d837b7e499525130eb1832d75ba\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}"
+      },
+      "state": "measured",
+      "threads": 1,
+      "warm_query_p50_ms": 51.049600006081164,
+      "warm_query_p95_ms": 66.56916606298181
+    },
+    {
+      "assets": [
+        {
+          "bytes": 547310275,
+          "filename": "onnx--model.onnx",
+          "sha256": "147d5aa88c2101237358e17796cf3a227cead1ec304ec34b465bb08e9d952965"
+        },
+        {
+          "bytes": 711396,
+          "filename": "tokenizer.json",
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        }
+      ],
+      "cold_canary_seconds": 7.338593847001903,
+      "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+      "documents_seconds": 12.858990884036757,
+      "languages": [
+        "en"
+      ],
+      "license": "Apache-2.0",
+      "manifest_sha256": "0f3eda8e2895636ff2be7efadfebf3f33c78aff1147b80d85fd88e59db04c504",
+      "missed_queries": [
+        "q25"
+      ],
+      "native_recall_at_5": 0.96875,
+      "queries": 32,
+      "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+      "repository": "nomic-ai/nomic-embed-text-v1.5",
+      "revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
+      "space": {
+        "alignment_identity": null,
+        "dimension": 768,
+        "document_prefix": "search_document: ",
+        "modality": "text",
+        "model_key": "nomic-embed-text-v1.5-evaluation",
+        "model_repo": "nomic-ai/nomic-embed-text-v1.5",
+        "model_revision": "e9b6763023c676ca8431644204f50c2b100d9aab",
+        "normalization": "l2",
+        "profile": "semantic_text",
+        "provider": "onnx_cpu",
+        "provider_config_hash": null,
+        "query_prefix": "search_query: ",
+        "render_recipe": "{\"encoder_manifest_sha256\":\"0f3eda8e2895636ff2be7efadfebf3f33c78aff1147b80d85fd88e59db04c504\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}"
+      },
+      "state": "measured",
+      "threads": 1,
+      "warm_query_p50_ms": 155.37517351913266,
+      "warm_query_p95_ms": 242.1115803532302
+    },
+    {
+      "assets": [
+        {
+          "bytes": 336983163,
+          "filename": "onnx--model_quantized.onnx",
+          "sha256": "11bda26d2ee754b20d46c90d0fae7eb5a71e0f947e74261afd6ad640ebbcfa7f"
+        },
+        {
+          "bytes": 711396,
+          "filename": "tokenizer.json",
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+        }
+      ],
+      "cold_canary_seconds": 4.905088847037405,
+      "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+      "documents_seconds": 20.02138437697431,
+      "languages": [
+        "en"
+      ],
+      "license": "Apache-2.0",
+      "manifest_sha256": "b6d8f252cffd2f79269d8c16a783058fc7a476f7e623c68ef674c33b72b1c24f",
+      "missed_queries": [
+        "q25"
+      ],
+      "native_recall_at_5": 0.96875,
+      "queries": 32,
+      "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+      "repository": "mixedbread-ai/mxbai-embed-large-v1",
+      "revision": "b33106f585b9ce46904ad7443a3b52b7a63e231c",
+      "space": {
+        "alignment_identity": null,
+        "dimension": 1024,
+        "document_prefix": "",
+        "modality": "text",
+        "model_key": "mxbai-embed-large-v1-evaluation",
+        "model_repo": "mixedbread-ai/mxbai-embed-large-v1",
+        "model_revision": "b33106f585b9ce46904ad7443a3b52b7a63e231c",
+        "normalization": "l2",
+        "profile": "semantic_text",
+        "provider": "onnx_cpu",
+        "provider_config_hash": null,
+        "query_prefix": "Represent this sentence for searching relevant passages: ",
+        "render_recipe": "{\"encoder_manifest_sha256\":\"b6d8f252cffd2f79269d8c16a783058fc7a476f7e623c68ef674c33b72b1c24f\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}"
+      },
+      "state": "measured",
+      "threads": 1,
+      "warm_query_p50_ms": 358.0791645217687,
+      "warm_query_p95_ms": 508.1273325253278
+    }
+  ],
+  "hardware": {
+    "cpu": "QEMU Virtual CPU version 2.5+",
+    "architecture": "x86_64",
+    "inference_threads": 1,
+    "notes": "Shared development host; embedding-only timings, not end-to-end retrieval."
+  },
+  "corpus_kind": "assistant-authored engineering regression, not a human-labelled study",
+  "not_measured": [
+    {
+      "repository": "google/embeddinggemma-300m",
+      "revision": "57c266a740f537b4dc058e1b0cda161fd15afa75",
+      "reason": "Manual license-gated access; no acceptance performed; primary repository has no ONNX export."
+    },
+    {
+      "repository": "jinaai/jina-embeddings-v3",
+      "revision": "ab036b023d30b4d1138c4c3bfa9f0c445ab455d6",
+      "reason": "CC-BY-NC-4.0; primary ONNX uses 2291339168 bytes of external tensor data; external tensors are rejected. Its 1147151362-byte fp16 export also exceeds the per-file admission cap."
+    },
+    {
+      "repository": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+      "revision": "c25a394dd583836952667c12f008335071b3f43d",
+      "assets": [
+        {
+          "source": "onnx/model_int8.onnx",
+          "filename": "onnx--model_int8.onnx",
+          "size": 613527539,
+          "sha256": "6d0ea863f78b4a84afa3c7fcba1ec341572b5e28121aef77b7092b1dfdf679c7"
+        },
+        {
+          "source": "tokenizer.json",
+          "filename": "tokenizer.json",
+          "size": 11423705,
+          "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+        },
+        {
+          "source": "config.json",
+          "filename": "config.json",
+          "size": 1576,
+          "sha256": "66a10929782f3c9a3cd5dec90e2a95c60e05736134a63cd54479eeae80bed175"
+        },
+        {
+          "source": "README.md",
+          "filename": "README.md",
+          "size": 2413,
+          "sha256": "8f08d3205a023d3ff3f065d58a386f127efa3fe432dc61db3721e35c6716a0dd"
+        }
+      ],
+      "reason": "Verified int8 export has input_ids, attention_mask, position_ids and 56 past-key/value inputs, with last-token pooling. These are outside the admitted sentence-tower signature. No quality or latency claim."
+    }
+  ]
+}

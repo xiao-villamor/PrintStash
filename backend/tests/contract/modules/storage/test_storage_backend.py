@@ -993,3 +993,37 @@ class TestToolpathStorage:
         monkeypatch.setattr(artifact_content, "get_backend", lambda: s3_backend)
         assert await toolpath.render(artifact) == content
         assert s3_backend.read_bytes(key) == content
+
+
+class TestDeferredEnrichmentStorage:
+    def test_generates_a_preview_from_a_saved_s3_source(self, s3_backend, db_session, tmp_path):
+        import shutil
+
+        from sqlmodel import select
+
+        from app.db.models import FileType, Metadata, ThumbnailGeneration
+        from app.db.session import get_session_factory
+        from app.modules.ingestion.ingestion import persist_artifact
+        from app.modules.media.enrichment import EnrichmentProcessor
+        from app.modules.storage.storage_backend.runtime import use_read_backend
+        from tests.paths import TESTDATA_DIR
+
+        source = tmp_path / "cube.stl"
+        shutil.copyfile(TESTDATA_DIR / "Calibration Cube.stl", source)
+        original = source.read_bytes()
+        with use_read_backend(s3_backend):
+            file = persist_artifact(db_session, model=build_model(db_session), staged_path=source,
+                original_filename="cube.stl", file_type=FileType.STL,
+                blob_hash=hashlib.sha256(original).hexdigest(), meta={}, thumb_bytes=None,
+                overwrite_thumbnail=True)
+            assert file.thumbnail_path is None
+            assert s3_backend.read_bytes(file.path) == original
+            assert EnrichmentProcessor(get_session_factory(), s3_backend).work_one()
+            db_session.expire_all()
+            generation = db_session.exec(select(ThumbnailGeneration).where(ThumbnailGeneration.file_id == file.id)).one()
+            assert generation.state == "ready"
+            with Image.open(io.BytesIO(s3_backend.read_bytes(generation.storage_key))) as image:
+                assert min(image.size) > 0
+            metadata = db_session.exec(select(Metadata).where(Metadata.file_id == file.id)).one()
+            assert metadata.triangle_count > 0
+            assert s3_backend.read_bytes(file.path) == original

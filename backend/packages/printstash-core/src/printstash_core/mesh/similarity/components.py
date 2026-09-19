@@ -70,22 +70,11 @@ def split_components(
     origin = used[np.lexsort(used.T[::-1])[0]]
     verts, tris = clean_mesh(vertices, faces)
     verts += origin
-    parents = np.arange(len(tris))
+    from ..native_rasterizer import kernel
 
-    def root(index: int) -> int:
-        while parents[index] != index:
-            parents[index] = parents[parents[index]]
-            index = int(parents[index])
-        return index
-
-    edges = np.sort(tris[:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2)), axis=1)
-    order = np.lexsort(edges.T[::-1])
-    neighbors = np.flatnonzero(np.all(edges[order[1:]] == edges[order[:-1]], axis=1))
-    for offset in neighbors:
-        a, b = root(int(order[offset] // 3)), root(int(order[offset + 1] // 3))
-        if a != b:
-            parents[max(a, b)] = min(a, b)
-    labels = np.array([root(i) for i in range(len(tris))])
+    labels = np.frombuffer(
+        kernel().component_labels(tris.tobytes(), len(verts)), dtype=np.int64
+    )
     groups, counts = np.unique(labels, return_counts=True)
     if len(groups) > max_components:
         raise GeometryError("component_resource_limit")

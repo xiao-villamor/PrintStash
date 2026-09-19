@@ -42,6 +42,7 @@ from app.db.models import (
     MultipartModel,
     User,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.modules.identity import rbac
@@ -230,6 +231,7 @@ def create_document(
         updated_by=current_user.id,
     )
     session.add(doc)
+    content_changed(session, "document", (row.id for row in (doc,)))
     session.commit()
     session.refresh(doc)
     return _read(session, current_user, doc)
@@ -354,6 +356,7 @@ async def upload_document(
             raise HTTPException(status_code=413, detail="upload_too_large")
         doc.body = data.decode("utf-8", errors="replace")
         session.add(doc)
+        content_changed(session, "document", (row.id for row in (doc,)))
         session.commit()
         session.refresh(doc)
         if aggregate is not None:
@@ -367,9 +370,11 @@ async def upload_document(
     # recoverable intent before publication so SQLite's caller transaction does
     # not hold a write lock while the ownership ledger commits its reservation.
     session.add(doc)
+    content_changed(session, "document", (row.id for row in (doc,)))
     session.commit()
     session.refresh(doc)
     safe = _safe_filename(raw)
+    document_id = doc.id
     backend = get_backend()
     key = backend.document_file_key(doc.id, safe)
     receipt = None
@@ -393,10 +398,12 @@ async def upload_document(
             aggregate.updated_at = utcnow()
             aggregate.updated_by = current_user.id
             session.add(aggregate)
+        content_changed(session, "document", [document_id])
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()
         session.delete(doc)
+        content_changed(session, "document", [document_id])
         session.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -406,9 +413,10 @@ async def upload_document(
         session.rollback()
         if receipt is not None:
             backend.rollback_create(receipt)
-        persisted = session.get(Document, doc.id)
+        persisted = session.get(Document, document_id)
         if persisted is not None:
             session.delete(persisted)
+            content_changed(session, "document", [document_id])
             session.commit()
         raise
     session.refresh(doc)
@@ -448,6 +456,7 @@ def update_document(
     doc.updated_at = utcnow()
     doc.updated_by = current_user.id
     session.add(doc)
+    content_changed(session, "document", (row.id for row in (doc,)))
     session.commit()
     session.refresh(doc)
     return _read(session, current_user, doc)
@@ -470,6 +479,7 @@ def delete_document(
     doc.deleted_at = utcnow()
     doc.deleted_by = current_user.id
     session.add(doc)
+    content_changed(session, "document", (row.id for row in (doc,)))
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

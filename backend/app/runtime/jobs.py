@@ -18,8 +18,8 @@ from typing import Any, Dict, Optional
 from sqlalchemy import delete, exists, func, or_
 from sqlmodel import Session, select
 
-from app.core.time import utcnow
-from app.db.models import BackgroundJob, StagingLease
+from app.core.time import ensure_utc, utcnow
+from app.db.models import BackgroundJob, IndexGeneration, StagingLease
 from app.db.session import get_session_factory
 from app.schemas.ingest import (
     FingerprintStatus,
@@ -117,25 +117,29 @@ class JobRegistry:
         )
 
     def _persist(self, job: IngestJobStatus) -> None:
+        from sqlalchemy import update
+        from sqlmodel import col
+
+        from app.modules.ingestion.commands import (
+            execution_predicate,
+            require_execution_claim,
+        )
+
         with get_session_factory().scoped_session() as session:
-            row = session.get(BackgroundJob, job.job_id)
-            if row is None:
-                row = BackgroundJob(
-                    id=job.job_id,
-                    owner_user_id=job.owner_user_id,
-                    visible=job.visible,
-                    kind=job.kind,
-                    created_at=utcnow(),
-                )
-            row.owner_user_id = job.owner_user_id
-            row.visible = job.visible
-            row.kind = job.kind
-            row.state = job.state
+            require_execution_claim(session)
             job.updated_at = utcnow()
-            row.status_json = self._status_payload(job)
-            row.updated_at = job.updated_at
-            row.finished_at = job.finished_at
-            session.add(row)
+            values = dict(owner_user_id=job.owner_user_id, visible=job.visible,
+                kind=job.kind, state=job.state, status_json=self._status_payload(job),
+                updated_at=job.updated_at, finished_at=job.finished_at)
+            if session.get(BackgroundJob, job.job_id) is None:
+                session.add(BackgroundJob(id=job.job_id, created_at=utcnow(), **values))
+            else:
+                # Conditional publication also fences other processes' cached
+                # statuses. A SELECT followed by ORM assignment cannot do this.
+                session.connection().execute(update(BackgroundJob).where(
+                    BackgroundJob.id == job.job_id,
+                    col(BackgroundJob.state).not_in(_TERMINAL_STATES), execution_predicate(),
+                ).values(**values))
             session.commit()
 
     def _load_one(self, job_id: str) -> IngestJobStatus | None:
@@ -269,33 +273,44 @@ class JobRegistry:
         visible: bool = True,
         kind: str = "ingest",
         session: Session | None = None,
+        job_id: str | None = None,
     ) -> str:
-        job_id = uuid.uuid4().hex
+        if job_id is not None:
+            existing = session.get(BackgroundJob, job_id) if session is not None else self.get(job_id)
+            if existing is not None:
+                if existing.owner_user_id != owner_user_id or existing.kind != kind:
+                    raise ValueError("job_identity_conflict")
+                return job_id
+        job_id = job_id or uuid.uuid4().hex
+        job = IngestJobStatus(
+            job_id=job_id,
+            owner_user_id=owner_user_id,
+            visible=visible,
+            state="pending",
+            kind=kind[:64] or "ingest",
+        )
+        if session is not None:
+            # Join the caller's transaction. A second session used for pruning
+            # would deadlock its SQLite writer (or commit a shared connection).
+            # Load into the cache only after commit through get/update.
+            session.add(
+                BackgroundJob(
+                    id=job_id,
+                    owner_user_id=owner_user_id,
+                    visible=visible,
+                    kind=job.kind,
+                    state="pending",
+                    status_json=self._status_payload(job),
+                    created_at=utcnow(),
+                    updated_at=utcnow(),
+                )
+            )
+            session.flush()
+            return job_id
         with self._lock:
             self._prune_locked()
-            self._jobs[job_id] = IngestJobStatus(
-                job_id=job_id,
-                owner_user_id=owner_user_id,
-                visible=visible,
-                state="pending",
-                kind=kind[:64] or "ingest",
-            )
-            if session is None:
-                self._persist(self._jobs[job_id])
-            else:
-                session.add(
-                    BackgroundJob(
-                        id=job_id,
-                        owner_user_id=owner_user_id,
-                        visible=visible,
-                        kind=kind[:64] or "ingest",
-                        state="pending",
-                        status_json=self._status_payload(self._jobs[job_id]),
-                        created_at=utcnow(),
-                        updated_at=utcnow(),
-                    )
-                )
-                session.flush()
+            self._jobs[job_id] = job
+            self._persist(job)
         return job_id
 
     def update(
@@ -340,6 +355,7 @@ class JobRegistry:
                 return
             if state == "pending" and job.state != "pending":
                 return
+            previous_payload = self._status_payload(job)
             if state == "running" and job.started_at is None:
                 job.started_at = utcnow()
             if model_id is not None:
@@ -439,7 +455,22 @@ class JobRegistry:
                     duration,
                     result_label,
                 )
-            self._persist(job)
+            # Identical hints need at most one durable heartbeat per second.
+            # Changed fields and terminal transitions are always persisted now.
+            if (
+                self._status_payload(job) == previous_payload
+                and job.updated_at is not None
+                and (ensure_utc(utcnow()) - ensure_utc(job.updated_at)).total_seconds()
+                < 1.0
+            ):
+                return
+            try:
+                self._persist(job)
+            except Exception:
+                # A rejected claim or failed commit must not leave tentative
+                # state in the cache. Reload durable state on the next update.
+                self._jobs.pop(job_id, None)
+                raise
 
     def finish(
         self,
@@ -518,10 +549,23 @@ def reconcile_interrupted_jobs() -> int:
     with get_session_factory().scoped_session() as session:
         rows = list(
             session.exec(
-                select(BackgroundJob).where(BackgroundJob.state.in_(_ACTIVE_STATES))  # type: ignore[union-attr]
+                select(BackgroundJob).where(
+                    BackgroundJob.state.in_(_ACTIVE_STATES),  # type: ignore[union-attr]
+                    ~exists().where(
+                        IndexGeneration.job_id == BackgroundJob.id,
+                        IndexGeneration.version_token.is_not(None),
+                        IndexGeneration.state.in_(("active", "building")),
+                    ),
+                )
             ).all()
         )
+    interrupted = 0
+    from app.modules.ingestion.commands import decode
+
     for row in rows:
+        if row.replay_safe and decode(row.payload_json) is not None:
+            continue
+        interrupted += 1
         jobs = JobRegistry()
         status = jobs.get(row.id)
         if status is None:
@@ -532,7 +576,7 @@ def reconcile_interrupted_jobs() -> int:
             error="interrupted_by_restart",
             retryable=True,
         )
-    return len(rows)
+    return interrupted
 
 
 registry = JobRegistry()

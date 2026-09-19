@@ -43,7 +43,7 @@ from app.db.session import SessionFactory, get_session_factory
 from app.modules.administration import runtime_config
 from app.modules.administration.runtime_config import auto_mark_known_good_enabled
 from app.modules.ingestion import ingestion
-from app.modules.media import gcode_parser, thumbnail
+from app.modules.media import gcode_parser
 from app.modules.notifications import notifications
 from app.modules.printing import filament as filament_svc
 from app.modules.printing import print_results
@@ -1234,7 +1234,7 @@ class PrinterHub:
         file_type = FileType.THREE_MF if lowered.endswith(".3mf") else FileType.GCODE
         blob_hash = sha256_file(staged)
         meta = gcode_parser.parse(staged) if file_type == FileType.GCODE else {}
-        thumb_bytes = thumbnail.extract(staged) if file_type == FileType.GCODE else None
+        thumb_bytes = None
         with self._session_factory.session() as session:
             job = session.get(PrintJob, job_id)
             if job is None or job.source != "external":

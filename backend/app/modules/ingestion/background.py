@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import threading
 import time
 import uuid
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Generic, Optional, TypeVar
 
@@ -15,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.modules.ingestion import import_resolvers, importer
+from app.modules.ingestion.acquisition import AcquisitionJournal
 from app.runtime.jobs import registry
 from app.schemas.ingest import (
     ArchiveEntryRead,
@@ -55,45 +55,39 @@ class _PendingCollection:
     created_at: float = field(default_factory=time.time)
 
 
-T = TypeVar("T")
+T = TypeVar("T", _PendingModelFiles, _PendingCollection)
 
 
 class _PendingRegistry(Generic[T]):
-    """In-process token store for review manifests (1h TTL)."""
+    """Typed adapter for durable private review manifests."""
 
-    _TTL = 3600.0
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._items: dict[str, T] = {}
+    def __init__(self, kind: str = "model_files") -> None:
+        self.kind = kind
 
     def add(self, pending: T) -> str:
-        token = uuid.uuid4().hex
-        with self._lock:
-            self._prune()
-            self._items[token] = pending
-        return token
+        from app.modules.ingestion import review_manifests
+        return review_manifests.save(self.kind, asdict(pending), pending.owner_user_id)
 
     def get(self, token: str) -> Optional[T]:
-        with self._lock:
-            return self._items.get(token)
+        from app.modules.ingestion import review_manifests
+        payload = review_manifests.get(self.kind, token)
+        if payload is None:
+            return None
+        if self.kind == "collection":
+            payload["members"] = [import_resolvers.CollectionMember(**member) for member in payload["members"]]
+            return _PendingCollection(**payload)
+        payload["files"] = [import_resolvers.ModelFile(**file) for file in payload["files"]]
+        return _PendingModelFiles(**payload)
 
     def pop(self, token: str) -> Optional[T]:
-        with self._lock:
-            return self._items.pop(token, None)
-
-    def _prune(self) -> None:
-        cutoff = time.time() - self._TTL
-        for key in [
-            k for k, v in self._items.items() if getattr(v, "created_at", 0) < cutoff
-        ]:
-            self._items.pop(key, None)
+        from app.modules.ingestion import review_manifests
+        pending = self.get(token)
+        review_manifests.remove(self.kind, token)
+        return pending
 
 
 pending_model_files: _PendingRegistry[_PendingModelFiles] = _PendingRegistry()
-
-
-pending_collections: _PendingRegistry[_PendingCollection] = _PendingRegistry()
+pending_collections: _PendingRegistry[_PendingCollection] = _PendingRegistry("collection")
 
 
 def _makerworld_cookie(override: Optional[str]) -> Optional[str]:
@@ -232,13 +226,21 @@ async def _handle_collection_url(
     """Resolve a collection URL; either stage a review manifest or import all."""
     registry.update(job_id, state="running", stage="resolving")
     cookie = _makerworld_cookie(req.makerworld_cookie)
-    resolved = await import_resolvers.resolve_collection_url(
-        req.url, makerworld_cookie=cookie
-    )
-    if not resolved:
-        registry.update(job_id, state="failed", error="collection_resolve_failed")
-        return
-    title, members = resolved
+    journal = AcquisitionJournal(job_id, session_factory)
+    saved = await run_in_threadpool(journal.read, "collection_listing")
+    if saved is None:
+        resolved = await import_resolvers.resolve_collection_url(
+            req.url, makerworld_cookie=cookie
+        )
+        if not resolved:
+            registry.update(job_id, state="failed", error="collection_resolve_failed")
+            return
+        title, members = resolved
+        await run_in_threadpool(journal.save, "collection_listing",
+            {"title": title, "members": [asdict(member) for member in members]})
+    else:
+        title = saved["title"]
+        members = [import_resolvers.CollectionMember(**member) for member in saved["members"]]
     target = collection_target(req.collection, title)
 
     if req.review:
@@ -269,16 +271,10 @@ async def _handle_collection_url(
         )
         return
 
-    registry.update(job_id, stage="downloading", total=len(members))
-    groups = await _stage_members(members, makerworld_cookie=cookie)
-    await run_in_threadpool(
-        importer.import_resolved_groups,
-        job_id=job_id,
-        groups=groups,
-        collection=target,
-        tags=req.tags,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
+    await run_collection_member_import(
+        job_id=job_id, members=members, target_collection=target, tags=req.tags,
+        actor_user_id=actor_user_id, session_factory=session_factory,
+        makerworld_cookie=cookie,
     )
 
 
@@ -311,16 +307,20 @@ async def import_from_url(
         if listing is not None and len(listing[1]) > 1:
             _stage_model_files_manifest(job_id, req, actor_user_id, listing)
             return
-        download_url = (
-            await import_resolvers.resolve_page_url(
-                req.url,
-                makerworld_cookie=_makerworld_cookie(req.makerworld_cookie),
-                thingiverse_cookie=req.thingiverse_cookie,
+        journal = AcquisitionJournal(job_id, session_factory)
+        download_url = await run_in_threadpool(journal.read, "direct_link")
+        if download_url is None:
+            download_url = (
+                await import_resolvers.resolve_page_url(
+                    req.url,
+                    makerworld_cookie=_makerworld_cookie(req.makerworld_cookie),
+                    thingiverse_cookie=req.thingiverse_cookie,
+                )
+                or req.url
             )
-            or req.url
-        )
+            await run_in_threadpool(journal.save, "direct_link", download_url)
         registry.update(job_id, stage="downloading")
-        staged, original_filename = await importer.download_to_staging(download_url)
+        staged, original_filename = await journal.download("direct_download", download_url)
     except importer.ImportError_ as exc:
         registry.update(job_id, state="failed", error=str(exc))
         return
@@ -430,34 +430,19 @@ async def run_file_selection_import(
     actor_user_id: int,
     session_factory: SessionFactory,
 ) -> None:
-    """Background task: download a chosen subset of a page's files and ingest them."""
+    """Save each chosen download before acquiring the next source."""
+    journal = AcquisitionJournal(job_id, session_factory)
     try:
-        registry.update(job_id, state="running", stage="resolving")
-        links = await import_resolvers.resolve_selected_download(page_url, files)
-        registry.update(job_id, stage="downloading", total=len(links))
-        staged_files: list[tuple[Path, str]] = []
-        for link in links:
-            staged_files.extend(await _download_and_collect(link))
-    except importer.ImportError_ as exc:
-        registry.update(job_id, state="failed", error=str(exc))
-        return
-    except Exception as exc:  # noqa: BLE001 — network/IO boundary
+        links = await run_in_threadpool(journal.read, "selected_links")
+        if links is None:
+            links = await import_resolvers.resolve_selected_download(page_url, files)
+            await run_in_threadpool(journal.save, "selected_links", links)
+        await _import_downloads(job_id=job_id,
+            sources=[(page_url, "", link) for link in links], collection=collection,
+            tags=tags, actor_user_id=actor_user_id, session_factory=session_factory)
+    except Exception as exc:
         logger.exception("file selection import failed: %s", page_url)
-        registry.update(job_id, state="failed", error=str(exc))
-        return
-    if not staged_files:
-        registry.update(job_id, state="failed", error="no_importable_files")
-        return
-    await run_in_threadpool(
-        importer.import_assets,
-        job_id=job_id,
-        staged_files=staged_files,
-        collection=collection,
-        tags=tags,
-        source_url=page_url,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+        registry.update(job_id, state="failed", error=str(exc), retryable=True)
 
 
 async def run_collection_member_import(
@@ -470,22 +455,84 @@ async def run_collection_member_import(
     session_factory: SessionFactory,
     makerworld_cookie: Optional[str] = None,
 ) -> None:
-    """Background task: stage selected collection members and ingest them."""
-    try:
-        registry.update(
-            job_id, state="running", stage="downloading", total=len(members)
-        )
-        groups = await _stage_members(members, makerworld_cookie=makerworld_cookie)
-    except Exception as exc:  # noqa: BLE001 — network/IO boundary
-        logger.exception("collection member import failed")
-        registry.update(job_id, state="failed", error=str(exc))
-        return
-    await run_in_threadpool(
-        importer.import_resolved_groups,
-        job_id=job_id,
-        groups=groups,
-        collection=target_collection,
-        tags=tags,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+    """Resolve and save one member at a time with durable per-member progress."""
+    await _import_downloads(job_id=job_id,
+        sources=[(member.page_url, member.title, None) for member in members],
+        collection=target_collection, tags=tags, actor_user_id=actor_user_id,
+        session_factory=session_factory, collection_import=True,
+        makerworld_cookie=makerworld_cookie)
+
+
+async def _import_downloads(
+    *, job_id: str, sources: list[tuple[str, str, str | None]],
+    collection: str | None, tags: str | None, actor_user_id: int,
+    session_factory: SessionFactory, collection_import: bool = False,
+    makerworld_cookie: str | None = None,
+) -> None:
+    """Bound acquisition to one download; child identities checkpoint saved bytes."""
+    journal = AcquisitionJournal(job_id, session_factory)
+    results: list[dict] = []
+    registry.update(job_id, state="running", stage="downloading", total=len(sources))
+    for index, (page_url, title, direct_link) in enumerate(sources):
+        child_id = uuid.uuid5(uuid.NAMESPACE_URL, f"acquired:{job_id}:{index}:{page_url}").hex
+        try:
+            previous = await run_in_threadpool(registry.get, child_id)
+            if previous is None or previous.state not in {"completed", "failed"}:
+                from app.modules.ingestion.ingestion import require_ingestion_actor
+                def authorize():
+                    with session_factory.scoped_session() as session:
+                        require_ingestion_actor(session, actor_user_id, collection=collection)
+                await run_in_threadpool(authorize)
+                link = await run_in_threadpool(journal.read, f"link:{index}")
+                if link is None:
+                    link = direct_link or await import_resolvers.resolve_page_url(page_url, makerworld_cookie=makerworld_cookie) or page_url
+                    await run_in_threadpool(journal.save, f"link:{index}", link)
+                staged, filename = await journal.download(f"download:{index}", link)
+                suffix = Path(filename).suffix.lower()
+                is_archive = suffix == ".zip" or (suffix not in MESH_SUFFIXES | GCODE_SUFFIXES and await run_in_threadpool(zipfile.is_zipfile, staged))
+                if not is_archive and suffix not in MESH_SUFFIXES | GCODE_SUFFIXES:
+                    raise importer.ImportError_("no_importable_files")
+                await run_in_threadpool(registry.create, kind="ingest_batch", visible=False,
+                    owner_user_id=actor_user_id, job_id=child_id)
+                if is_archive:
+                    entries = await run_in_threadpool(importer.inspect_archive, staged)
+                    await run_in_threadpool(importer.import_archive, job_id=child_id,
+                        archive_path=staged, names=[entry.name for entry in entries if entry.file_type],
+                        collection=collection, tags=tags, source_url=page_url,
+                        actor_user_id=actor_user_id, session_factory=session_factory)
+                else:
+                    await run_in_threadpool(importer.import_assets, job_id=child_id,
+                        staged_files=[(staged, filename)], collection=collection, tags=tags,
+                        source_url=page_url, actor_user_id=actor_user_id, session_factory=session_factory)
+                previous = await run_in_threadpool(registry.get, child_id)
+            items = (previous.result or {}).get("items", []) if previous else []
+            if not items:
+                items = [{"name": title or page_url, "error": previous.error if previous and previous.error else "no_importable_files"}]
+            results.extend([{**item, "member": title} if collection_import else item for item in items])
+        except Exception as exc:
+            logger.exception("selected source import failed: %s", page_url)
+            results.append({"name": title or page_url, "error": str(exc)})
+        registry.update(job_id, processed=index + 1, progress=(index + 1) / max(len(sources), 1) * 100,
+            succeeded=sum(bool(item.get("model_id")) for item in results))
+    imported = [item for item in results if item.get("model_id")]
+    failures = [item for item in results if item.get("error")]
+    result = {"imported": len(imported), "total": len(results), "items": results}
+    if collection_import:
+        result.update(kind="collection_import", collection=collection)
+    errors = {item["error"] for item in failures}
+    await run_in_threadpool(registry.finish, job_id,
+        state="completed" if imported else "failed",
+        completion="partial" if failures and imported else "complete",
+        model_id=imported[0]["model_id"] if imported else None,
+        succeeded=len(imported), failed=len(failures), total=len(results), processed=len(results),
+        deduplicated=sum(bool(item.get("deduplicated")) for item in imported),
+        error=None if imported else next(iter(errors)) if len(errors) == 1 else "collection_import_failed" if collection_import else "no_importable_files",
+        result=result, retryable=bool(failures),
+        failed_items=[{"name": item.get("name", "item"), "reason": item["error"], "retryable": True} for item in failures])
+    if not failures:
+        from app.modules.ingestion.staging_leases import release_job_files
+        def cleanup():
+            with session_factory.scoped_session() as session:
+                release_job_files(session, job_id)
+                session.commit()
+        await run_in_threadpool(cleanup)

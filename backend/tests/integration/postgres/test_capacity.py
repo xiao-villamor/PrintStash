@@ -25,6 +25,7 @@ class TestPostgresCapacity:
         barrier = Barrier(2)
 
         try:
+
             def reserve(owner):
                 barrier.wait()
                 try:
@@ -49,13 +50,12 @@ class TestPostgresCapacity:
         from alembic.config import Config
         from sqlalchemy import inspect, text
         from sqlalchemy.engine import make_url
-        from sqlmodel import Session
 
         from alembic import command
-        from tests.factories import build_model
         from tests.factories.migration_rows import (
             RELEASED_V0121_REVISION,
             create_released_v0121_postgres_schema,
+            seed_schema_row,
         )
         from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
@@ -76,10 +76,16 @@ class TestPostgresCapacity:
                 create_released_v0121_postgres_schema(connection)
             command.stamp(config, RELEASED_V0121_REVISION)
             command.upgrade(config, "0a6b1f868ae0")
-            with Session(engine) as session:
-                identity = build_model(
-                    session, name="Preserved PostgreSQL model"
-                ).id
+            identity = 1
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "models",
+                    id=identity,
+                    name="Preserved PostgreSQL model",
+                    slug="preserved",
+                    hash="a" * 64,
+                )
             command.upgrade(config, "head")
             assert "capacity_reservations" in inspect(engine).get_table_names()
             with engine.connect() as connection:

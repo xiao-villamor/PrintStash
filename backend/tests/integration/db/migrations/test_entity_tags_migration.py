@@ -9,7 +9,8 @@ from sqlalchemy import create_engine, inspect
 from sqlmodel import Session, select
 
 from alembic import command
-from app.db.models import Model, ModelTagLink, Tag
+from app.db.models import ModelTagLink
+from tests.factories.migration_rows import seed_schema_row
 from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
 REVISION = "3e7ab53ac43d"
@@ -28,16 +29,10 @@ def _assert_upgrade_preserves_existing_model_tags(tmp_path: Path) -> None:
     config = _config(database)
     command.upgrade(config, PARENT)
     engine = create_engine(f"sqlite:///{database}")
-    with Session(engine) as session:
-        model = Model(name="Existing", slug="existing", hash="a" * 64)
-        tag = Tag(name="Legacy", slug="legacy")
-        session.add(model)
-        session.add(tag)
-        session.commit()
-        session.refresh(model)
-        session.refresh(tag)
-        session.add(ModelTagLink(model_id=model.id, tag_id=tag.id))
-        session.commit()
+    with engine.begin() as connection:
+        seed_schema_row(connection, "models", id=1, name="Existing", slug="existing", hash="a" * 64)
+        seed_schema_row(connection, "tags", id=1, name="Legacy", slug="legacy")
+        seed_schema_row(connection, "model_tags", model_id=1, tag_id=1)
 
     command.upgrade(config, REVISION)
 

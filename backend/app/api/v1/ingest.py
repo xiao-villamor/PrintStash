@@ -6,7 +6,7 @@ import hashlib
 import shutil
 import uuid
 import zipfile
-from datetime import timedelta
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
@@ -32,9 +32,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.security import require_auth, require_user
-from app.core.time import utcnow
 from app.db.models import (
-    SUFFIX_TO_FILE_TYPE,
     Collection,
     CollectionRole,
     StagingLease,
@@ -45,7 +43,10 @@ from app.db.session import SessionFactory, get_session, get_session_factory
 from app.modules.identity import rbac
 from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion import importer
-from app.modules.ingestion.ingestion import ingest_mesh, ingest_orca_gcode
+from app.modules.ingestion.commands import enqueue
+from app.modules.ingestion.staging_leases import (
+    record_job_lease as _record_staging_lease,
+)
 from app.modules.storage import storage
 from app.runtime.jobs import registry
 from app.schemas.ingest import (
@@ -132,31 +133,6 @@ def _stage_upload(upload: UploadFile, suffix: str) -> tuple[Path, int, str]:
     return staged, size, digest.hexdigest()
 
 
-def _record_staging_lease(
-    session: Session,
-    *,
-    job_id: str,
-    staged: Path,
-    size: int,
-    sha256: str,
-    owner_user_id: int | None,
-) -> None:
-    stat = staged.stat(follow_symlinks=False)
-    session.add(
-        StagingLease(
-            id=uuid.uuid4().hex,
-            path=str(staged),
-            owner_user_id=owner_user_id,
-            background_job_id=job_id,
-            size_bytes=size,
-            sha256=sha256,
-            device=stat.st_dev,
-            inode=stat.st_ino,
-            ctime_ns=stat.st_ctime_ns,
-            expires_at=utcnow() + timedelta(hours=24),
-        )
-    )
-    session.commit()
 
 
 def _create_staged_job(
@@ -169,6 +145,9 @@ def _create_staged_job(
     owner_user_id: int,
     check_capacity: bool = True,
     remove_staged_on_failure: bool = True,
+    command: str | None = None,
+    arguments: dict | None = None,
+    commit: bool = True,
 ) -> str:
     if check_capacity:
         try:
@@ -177,7 +156,7 @@ def _create_staged_job(
             if remove_staged_on_failure:
                 staged.unlink(missing_ok=True)
             raise
-    job_id = registry.create(owner_user_id=owner_user_id, kind=kind)
+    job_id = registry.create(owner_user_id=owner_user_id, kind=kind, session=session)
     try:
         _record_staging_lease(
             session,
@@ -187,7 +166,12 @@ def _create_staged_job(
             sha256=sha256,
             owner_user_id=owner_user_id,
         )
+        if command is not None:
+            enqueue(session, job_id, command, arguments or {})
+        if commit:
+            session.commit()
     except Exception:
+        session.rollback()
         if remove_staged_on_failure:
             staged.unlink(missing_ok=True)
         registry.finish(
@@ -305,19 +289,16 @@ async def ingest_orca(
         size=staged_size,
         sha256=staged_hash,
         owner_user_id=current_user.id,
-    )
-    background_tasks.add_task(
-        ingest_orca_gcode,
-        job_id=job_id,
-        staged_path=staged,
-        original_filename=original_filename,
-        model_name=_resolve_name(model_name, original_filename),
-        collection=collection,
-        tags=tags,
-        source_hash=source_hash,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-        target_library_id=target_library_id,
+        command="artifact",
+        arguments={
+            "staged_path": str(staged),
+            "original_filename": original_filename,
+            "model_name": _resolve_name(model_name, original_filename),
+            "collection": collection, "tags": tags,
+            "source_hash": source_hash,
+            "actor_user_id": current_user.id,
+            "target_library_id": target_library_id,
+        },
     )
     return IngestResponse(job_id=job_id, state="pending")
 
@@ -373,20 +354,16 @@ async def ingest_model(
         size=staged_size,
         sha256=staged_hash,
         owner_user_id=current_user.id,
-    )
-    background_tasks.add_task(
-        ingest_mesh,
-        job_id=job_id,
-        staged_path=staged,
-        original_filename=original_filename,
-        model_name=_resolve_name(model_name, original_filename),
-        collection=collection,
-        tags=tags,
-        file_type=SUFFIX_TO_FILE_TYPE[suffix],
-        source_hash=None,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-        target_library_id=target_library_id,
+        command="artifact",
+        arguments={
+            "staged_path": str(staged),
+            "original_filename": original_filename,
+            "model_name": _resolve_name(model_name, original_filename),
+            "collection": collection, "tags": tags,
+            "source_hash": None,
+            "actor_user_id": current_user.id,
+            "target_library_id": target_library_id,
+        },
     )
     return IngestResponse(job_id=job_id, state="pending")
 
@@ -420,14 +397,9 @@ async def ingest_url(
     _require_ingest_collection(session, current_user, req.collection)
 
     assert current_user.id is not None
-    job_id = registry.create(owner_user_id=current_user.id, kind="url")
-    background_tasks.add_task(
-        ingest_background.import_from_url,
-        job_id=job_id,
-        req=req,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-    )
+    job_id = registry.create(owner_user_id=current_user.id, kind="url", session=session)
+    enqueue(session, job_id, "url", {"request": req.model_dump(mode="json", exclude={"makerworld_cookie"}), "actor_user_id": current_user.id})
+    session.commit()
     return IngestResponse(job_id=job_id, state="pending")
 
 
@@ -486,6 +458,7 @@ async def inspect_archive_background(
     background_tasks: BackgroundTasks,
     file: UploadFile = UploadFileParam(..., description="The .zip archive"),
     current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> IngestResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename_required")
@@ -499,14 +472,9 @@ async def inspect_archive_background(
         staged.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="archive_invalid")
     assert current_user.id is not None
-    job_id = registry.create(owner_user_id=current_user.id, kind="archive_manifest")
-    background_tasks.add_task(
-        ingest_background.inspect_uploaded_archive,
-        job_id=job_id,
-        staged=staged,
-        original_filename=original_filename,
-        actor_user_id=current_user.id,
-    )
+    job_id = _create_staged_job(session, kind="archive_manifest", staged=staged,
+        size=_staged_size, sha256=_staged_hash, owner_user_id=current_user.id,
+        command="archive_inspection", arguments={"original_filename": original_filename, "actor_user_id": current_user.id})
     return IngestResponse(
         job_id=job_id, state="pending", message="archive inspection queued"
     )
@@ -544,9 +512,6 @@ async def select_archive_entries(
     if not req.names and not req.entry_ids:
         raise HTTPException(status_code=400, detail="no_entries_selected")
     _require_ingest_collection(session, current_user, req.collection)
-    pending = importer.archives.claim(archive_id)
-    if pending is None:
-        raise HTTPException(status_code=409, detail="archive_already_claimed")
     selected_names = list(req.names)
     if req.entry_ids:
         by_id = {entry.entry_id: entry.name for entry in pending.entries}
@@ -560,33 +525,23 @@ async def select_archive_entries(
     auto_collection = importer.archive_collection_path(
         req.collection, pending.archive_name
     )
-    try:
-        staged_files = await run_in_threadpool(
-            importer.extract_selected, pending.path, selected_names
-        )
-    except importer.ImportError_ as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    finally:
-        # The archive blob is no longer needed once entries are extracted.
-        importer.archives.pop(archive_id)
-        pending.path.unlink(missing_ok=True)
-
-    if not staged_files:
-        raise HTTPException(status_code=400, detail="no_importable_files")
-
+    available = {entry.name for entry in pending.entries if entry.file_type}
+    if not set(selected_names).issubset(available):
+        raise HTTPException(status_code=400, detail="archive_entry_not_found")
+    pending = importer.archives.claim(archive_id)
+    if pending is None:
+        raise HTTPException(status_code=409, detail="archive_already_claimed")
     assert current_user.id is not None
-    job_id = registry.create(owner_user_id=current_user.id, kind="archive")
-    background_tasks.add_task(
-        importer.import_assets,
-        job_id=job_id,
-        staged_files=staged_files,
-        collection=auto_collection,
-        tags=req.tags,
-        source_url=pending.source_url,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-        nest_subdirs=True,
-    )
+    from app.modules.storage.hashing import sha256_file
+    digest = await run_in_threadpool(sha256_file, pending.path)
+    job_id = _create_staged_job(session, kind="archive", staged=pending.path,
+        size=pending.path.stat().st_size, sha256=digest, owner_user_id=current_user.id,
+        remove_staged_on_failure=False, command="archive", arguments={
+            "names": selected_names, "collection": auto_collection,
+            "tags": req.tags, "source_url": pending.source_url,
+            "actor_user_id": current_user.id,
+        })
+    importer.archives.pop(archive_id)
     return IngestResponse(job_id=job_id, state="pending")
 
 
@@ -619,19 +574,15 @@ async def select_model_files(
         raise HTTPException(status_code=400, detail="no_files_selected")
     _require_ingest_collection(session, current_user, req.collection)
 
-    ingest_background.pending_model_files.pop(files_token)
+    from app.modules.ingestion import review_manifests
+    if not review_manifests.consume(session, "model_files", files_token):
+        raise HTTPException(status_code=409, detail="files_already_claimed")
     assert current_user.id is not None
-    job_id = registry.create(owner_user_id=current_user.id, kind="url_selection")
-    background_tasks.add_task(
-        ingest_background.run_file_selection_import,
-        job_id=job_id,
-        page_url=pending.page_url,
-        files=chosen,
-        collection=req.collection,
-        tags=req.tags,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-    )
+    job_id = registry.create(owner_user_id=current_user.id, kind="url_selection", session=session)
+    enqueue(session, job_id, "file_selection", {"page_url": pending.page_url,
+        "files": [asdict(file) for file in chosen], "collection": req.collection,
+        "tags": req.tags, "actor_user_id": current_user.id})
+    session.commit()
     return IngestResponse(job_id=job_id, state="pending")
 
 
@@ -671,19 +622,14 @@ async def select_collection_members(
     )
     _require_ingest_collection(session, current_user, req.collection)
 
-    ingest_background.pending_collections.pop(collection_token)
+    from app.modules.ingestion import review_manifests
+    if not review_manifests.consume(session, "collection", collection_token):
+        raise HTTPException(status_code=409, detail="collection_already_claimed")
     assert current_user.id is not None
-    job_id = registry.create(owner_user_id=current_user.id, kind="collection")
-    background_tasks.add_task(
-        ingest_background.run_collection_member_import,
-        job_id=job_id,
-        members=chosen,
-        target_collection=target,
-        tags=req.tags,
-        actor_user_id=current_user.id,
-        session_factory=session_factory,
-        makerworld_cookie=pending.makerworld_cookie,
-    )
+    job_id = registry.create(owner_user_id=current_user.id, kind="collection", session=session)
+    enqueue(session, job_id, "collection_selection", {"members": [asdict(member) for member in chosen],
+        "target_collection": target, "tags": req.tags, "actor_user_id": current_user.id})
+    session.commit()
     return IngestResponse(job_id=job_id, state="pending")
 
 

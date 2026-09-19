@@ -50,6 +50,7 @@ from tests.integration._backup_harness import (
 )
 
 POSTGRES_URL = "postgresql://printstash:secret@database/printstash"
+UNSUPPORTED_DB_URL = "mysql://printstash:secret@database/printstash"
 
 
 def _assert_source_identity_conflict(
@@ -128,7 +129,7 @@ class TestCreateBackup:
     ) -> None:
         from app.core.config import _overlay
 
-        monkeypatch.setitem(_overlay, "db_url", POSTGRES_URL)
+        monkeypatch.setitem(_overlay, "db_url", UNSUPPORTED_DB_URL)
 
         response = client.post("/api/v1/backups", headers=admin_headers)
 
@@ -144,7 +145,7 @@ class TestCreateBackup:
     ) -> None:
         from app.core.config import _overlay
 
-        monkeypatch.setitem(_overlay, "db_url", POSTGRES_URL)
+        monkeypatch.setitem(_overlay, "db_url", UNSUPPORTED_DB_URL)
 
         client.post("/api/v1/backups", headers=admin_headers)
 
@@ -390,7 +391,7 @@ class TestDatabaseCapabilities:
             "restore_supported": True,
         }
 
-    def test_reports_postgresql_as_unsupported(
+    def test_reports_postgresql_as_supported(
         self,
         client: TestClient,
         backup_env: BackupEnv,
@@ -407,8 +408,8 @@ class TestDatabaseCapabilities:
 
         assert response.json() == {
             "database_backend": "postgresql",
-            "create_supported": False,
-            "restore_supported": False,
+            "create_supported": True,
+            "restore_supported": True,
         }
 
     def test_rejects_a_non_superuser(
@@ -1079,7 +1080,7 @@ class TestRestoreBackup:
     ) -> None:
         from app.core.config import _overlay
 
-        monkeypatch.setitem(_overlay, "db_url", POSTGRES_URL)
+        monkeypatch.setitem(_overlay, "db_url", UNSUPPORTED_DB_URL)
 
         response = client.post("/api/v1/backups/any-id/restore", headers=admin_headers)
 

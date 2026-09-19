@@ -416,6 +416,10 @@ class Model(SQLModel, table=True):
     source_url: Optional[str] = Field(default=None, max_length=2048)
     thumbnail_path: Optional[str] = Field(default=None, max_length=512)
     thumbnail_file_id: Optional[int] = Field(default=None, foreign_key="files.id")
+    # Intent changes fence late derived covers without hiding the last ready one.
+    thumbnail_selection_version: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
 
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")

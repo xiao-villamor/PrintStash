@@ -19,7 +19,7 @@ class MeshDerivatives(Protocol):
         sessions: SessionFactory,
         file_id: int,
         actor_id: int | None,
-        result: FingerprintResult,
+        result: FingerprintResult | None,
     ) -> str: ...
 
 
@@ -39,7 +39,7 @@ def after_commit(
     sessions: SessionFactory,
     file_id: int,
     actor_id: int | None,
-    result: FingerprintResult,
+    result: FingerprintResult | None,
 ) -> str | None:
     return (
         _derivatives.after_commit(sessions, file_id, actor_id, result)

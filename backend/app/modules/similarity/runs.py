@@ -92,6 +92,7 @@ def start(
     scope: Scope = "library",
     ids: list[int] | None = None,
     trigger: str = "manual",
+    ingest_file_id: int | None = None,
 ) -> SimilarityRun:
     normalized = normalize_scope(session, actor, scope, ids or [])
     config = read_settings(session)
@@ -99,9 +100,12 @@ def start(
         raise OperationError("similarity_disabled", kind=ErrorKind.CONFLICT)
     # Actor-specific progress must not leak through another editor's conflicts.
     # Fingerprint leases still coalesce work between overlapping actors/scopes.
-    key = hashlib.sha256(
-        encode_json([actor.id, scope, normalized, ALGORITHM_VERSION]).encode()
-    ).hexdigest()
+    identity = [actor.id, scope, normalized, ALGORITHM_VERSION]
+    # Deferred Artifacts need their own cutoff: an earlier Model run excludes
+    # later uploads. Repeated delivery for the same Artifact still coalesces.
+    if ingest_file_id is not None:
+        identity.append(ingest_file_id)
+    key = hashlib.sha256(encode_json(identity).encode()).hexdigest()
     run = SimilarityRun(
         actor_id=actor.id,
         scope=scope,

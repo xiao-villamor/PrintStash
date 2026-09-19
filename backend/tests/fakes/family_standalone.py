@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import struct
+import time
 import zipfile
 from importlib.util import find_spec
 
@@ -31,6 +32,24 @@ def run() -> None:
             assert response.status_code == status, response.text
             return response
 
+        def finished_job(job_id):
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                job = request("GET", f"/ingest/jobs/{job_id}").json()
+                if job["state"] in {"completed", "duplicate", "failed"}:
+                    return job
+                time.sleep(0.05)
+            raise AssertionError(f"source did not finish: {job}")
+
+        def finished_enrichment(model_id):
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                model = request("GET", f"/models/{model_id}").json()
+                if not model["enrichment_pending"]:
+                    return
+                time.sleep(0.05)
+            raise AssertionError(f"enrichment did not finish: {model_id}")
+
         client.headers["Origin"] = "http://testserver"
         preparation = request("POST", "/setup/session").json()
         client.headers["X-PrintStash-Setup-CSRF"] = preparation["csrf"]
@@ -47,6 +66,7 @@ def run() -> None:
             },
         ).json()
         client.headers["Authorization"] = f"Bearer {setup['access_token']}"
+        request("GET", "/models/1/similar-text", status=503)
         model_ids = []
         revisions = {}
         for mesh in meshes:
@@ -58,7 +78,7 @@ def run() -> None:
                     "file": (mesh.name, mesh.read_bytes(), "application/octet-stream")
                 },
             ).json()
-            job = request("GET", f"/ingest/jobs/{uploaded['job_id']}").json()
+            job = finished_job(uploaded["job_id"])
             assert job["state"] == "completed", job
             model_ids.append(job["model_id"])
             gcode = (
@@ -74,10 +94,13 @@ def run() -> None:
                 data={"source_hash": hashlib.sha256(mesh.read_bytes()).hexdigest()},
                 files={"file": (f"{mesh.stem}.gcode", gcode, "text/plain")},
             ).json()
-            revision = request("GET", f"/ingest/jobs/{sliced['job_id']}").json()
+            revision = finished_job(sliced["job_id"])
             assert revision["state"] == "completed", revision
             assert revision["model_id"] == job["model_id"]
             revisions[job["model_id"]] = (revision["file_id"], gcode)
+
+        for model_id in model_ids:
+            finished_enrichment(model_id)
 
         family = request(
             "POST",
@@ -174,7 +197,7 @@ def run() -> None:
                 "file": ("library.zip", archive, "application/zip"),
             },
         ).json()
-        job = request("GET", f"/ingest/jobs/{imported['job_id']}").json()
+        job = finished_job(imported["job_id"])
         assert job["state"] == "completed", job
         assert request("GET", "/families").json()["total"] == 1
         assert request("GET", path).json()["canonical_model_id"] == model_ids[1]

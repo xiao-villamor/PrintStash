@@ -30,6 +30,7 @@ from app.db.models import (
     Tag,
     User,
 )
+from app.db.projections import content_changed
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.schemas.documents import DocumentListItem
@@ -663,6 +664,7 @@ def save_in_transaction(
     aggregate.updated_at = utcnow()
     session.add(aggregate)
     session.flush()
+    content_changed(session, "multipart_model", [aggregate.id])
     return aggregate
 
 
@@ -717,6 +719,7 @@ def replace_parts(
 def delete_aggregate(session: Session, aggregate: MultipartModel) -> None:
     """Delete only grouping rows; Models and their files remain untouched."""
     session.delete(aggregate)
+    content_changed(session, "multipart_model", [aggregate.id])
     session.commit()
 
 

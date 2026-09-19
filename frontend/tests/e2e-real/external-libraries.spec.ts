@@ -3,7 +3,7 @@
  *
  * Set PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT to an existing directory shared by the
  * browser test process and the backend process. The test removes only the
- * PrintStash marker it created, enrolls the resulting legacy/unbound row, and
+ * PrintStash marker it created, re-enrolls the resulting missing-proof row, and
  * proves a subsequent upload is written back into that exact root. Without the
  * explicit environment path the suite reports this contract as skipped rather
  * than pretending a local directory is safe to use.
@@ -17,7 +17,7 @@ const externalRoot = process.env.PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT;
 const markerName = ".printstash-external-root.json";
 
 test.describe("mounted library source root recovery", () => {
-  test("enrolls an unbound root before external write-back", async ({ page }) => {
+  test("re-enrolls a root with missing proof before external write-back", async ({ page }) => {
     if (!externalRoot) {
       test.skip(
         true,
@@ -48,13 +48,13 @@ test.describe("mounted library source root recovery", () => {
       expect(unbound.ok()).toBe(true);
       const listed = await unbound.json();
       expect(listed.find((library: { id: number }) => library.id === libraryId)).toMatchObject({
-        binding_state: "unbound",
+        binding_state: "missing",
         root_enrollable: true,
         watch_active: false,
       });
 
       await page.goto("/settings?section=libraries");
-      await expect(page.getByText("Needs enrollment")).toBeVisible();
+      await expect(page.getByText("Root proof unavailable")).toBeVisible();
       await page.getByRole("button", { name: "Review and enroll" }).click();
       const confirmation = page.getByRole("dialog", { name: "Enroll mounted source root?" });
       await expect(confirmation).toBeVisible();

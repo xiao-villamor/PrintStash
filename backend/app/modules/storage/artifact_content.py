@@ -58,6 +58,28 @@ class ArtifactHandle:
     file: File
     backend: StorageBackend | None
 
+    def exists(self) -> bool:
+        """Check source presence without routing external paths through the vault.
+
+        This is an availability check after publication, not a content hash
+        verification. Reads continue to enforce their full identity contract.
+        """
+        if self.backend is not None:
+            return self.backend.exists(self.file.path)
+        if self.file.source_key:
+            try:
+                source, key = source_for_file(self.file)
+                with source.materialize(key, expected=SourceEntry(key, self.file.size_bytes)) as content:
+                    return content.path.is_file()
+            except LibrarySourceError:
+                return False
+        import stat
+        try:
+            value = Path(self.file.path).lstat()
+            return stat.S_ISREG(value.st_mode) and value.st_size == self.file.size_bytes
+        except OSError:
+            return False
+
     def _temporary_capacity_claim(self, operation: str):
         from app.modules.storage.capacity import CapacityManager, CapacityResource
 

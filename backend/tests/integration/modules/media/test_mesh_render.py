@@ -3,6 +3,7 @@
 import io
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from app.modules.media import mesh_processing, mesh_render
@@ -10,6 +11,26 @@ from tests.paths import FIXTURES_DIR, TESTDATA_DIR
 
 
 class TestMeshRender:
+    def test_native_job_matches_previous_stages(self):
+        pytest.importorskip("printstash_mesh_native")
+        mesh = mesh_processing._load_mesh(TESTDATA_DIR / "benchy/3dbenchy.stl")
+        import reference_native_adapter as native_rasterizer
+        import reference_rasterizer as rasterizer
+
+        python = rasterizer.render_mesh_thumbnail(
+            mesh,
+            "benchy",
+            mesh_preparer=native_rasterizer.prepare_mesh,
+            image_encoder=native_rasterizer.encode_preview,
+        )
+        rust = mesh_render.render_mesh_thumbnail(mesh, "benchy")
+        assert python is not None and rust is not None
+        with (
+            Image.open(io.BytesIO(python)) as expected,
+            Image.open(io.BytesIO(rust)) as actual,
+        ):
+            np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))
+
     def test_preserves_preview_pixels(self):
         mesh = mesh_processing._load_mesh(TESTDATA_DIR / "benchy/3dbenchy.stl")
 

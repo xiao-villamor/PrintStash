@@ -49,7 +49,10 @@ class PreparedMesh:
 def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
     import numpy as np
 
-    resources = split_components(np.asarray(mesh.vertices), np.asarray(mesh.faces))
+    resources = split_components(
+        np.asarray(mesh.vertices),
+        np.asarray(mesh.faces),
+    )
     scene = ExpandedScene(
         resources,
         tuple(Instance(resource.resource_id, np.eye(4)) for resource in resources),
@@ -73,7 +76,9 @@ def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh
     import numpy as np
     import trimesh
     from lxml import etree
+    from printstash_core.mesh.native_rasterizer import kernel
 
+    parse_native = kernel().parse_3mf_xml
     if type(max_faces) is not int or not 1 <= max_faces <= MAX_ANALYSIS_FACES:
         raise GeometryError("invalid_scene_budget")
     try:
@@ -147,9 +152,17 @@ def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh
                 ):
                     raise GeometryError("archive_resource_limit")
                 with archive.open(info) as stream:
-                    payload = stream.read(64 * 1024 * 1024 + 1)
-                if len(payload) != info.file_size:
-                    raise GeometryError("invalid_archive")
+                    try:
+                        payload, packed = parse_native(
+                            stream, max_bytes=64 * 1024 * 1024
+                        )
+                    except ValueError as exc:
+                        if "DTD" in str(exc):
+                            raise GeometryError("xml_doctype_forbidden") from exc
+                        if "coordinates must be finite" in str(exc):
+                            raise GeometryError("nonfinite_geometry") from exc
+                        raise
+                packed_meshes = iter(packed)
                 parser = etree.XMLParser(
                     resolve_entities=False,
                     no_network=True,
@@ -171,39 +184,23 @@ def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh
                         resource_id = f"{name}#{_object_id(obj.get('id'))}"
                         mesh = obj.find(f"{{{CORE_NS}}}mesh")
                         if mesh is not None:
-                            nodes = mesh.findall(
-                                f"{{{CORE_NS}}}vertices/{{{CORE_NS}}}vertex"
+                            packed_vertices, packed_faces = next(packed_meshes)
+                            vertices = (
+                                np.frombuffer(
+                                    packed_vertices, dtype=np.float64
+                                ).reshape(-1, 3)
+                                * unit
                             )
-                            triangles = mesh.findall(
-                                f"{{{CORE_NS}}}triangles/{{{CORE_NS}}}triangle"
+                            faces = np.frombuffer(packed_faces, dtype=np.int64).reshape(
+                                -1, 3
                             )
-                            total_vertices += len(nodes)
-                            total_faces += len(triangles)
+                            total_vertices += len(vertices)
+                            total_faces += len(faces)
                             if (
                                 total_faces > max_faces
                                 or total_vertices > MAX_ANALYSIS_VERTICES
                             ):
                                 raise GeometryError("resource_limit")
-                            vertices = (
-                                np.array(
-                                    [
-                                        [
-                                            float(node.attrib[key])
-                                            for key in ("x", "y", "z")
-                                        ]
-                                        for node in nodes
-                                    ],
-                                    dtype=np.float64,
-                                ).reshape((-1, 3))
-                                * unit
-                            )
-                            faces = np.array(
-                                [
-                                    [int(tri.attrib[key]) for key in ("v1", "v2", "v3")]
-                                    for tri in triangles
-                                ],
-                                dtype=np.int64,
-                            ).reshape((-1, 3))
                             objects.append(MeshResource(resource_id, vertices, faces))
                         else:
                             children = obj.findall(
@@ -228,6 +225,8 @@ def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh
                         )
                         if item.get("printable", "1") in ("1", "true")
                     ]
+                if next(packed_meshes, None) is not None:
+                    raise GeometryError("invalid_3mf_model")
                 del root, tree, payload
             scene = expand_scene(tuple(objects), tuple(build), max_faces=max_faces)
             vertices, faces = compose_scene(scene)

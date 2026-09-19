@@ -9,6 +9,18 @@ from app.core.config import FrozenSettings
 
 
 class TestSettings:
+    @pytest.mark.parametrize("workers", [0, 1, 2, 32], ids=str)
+    def test_accepts_import_worker_limits(self, workers):
+        assert (
+            FrozenSettings(_env_file=None, import_workers=workers).import_workers
+            == workers
+        )
+
+    @pytest.mark.parametrize("workers", [-1, 33], ids=str)
+    def test_rejects_invalid_import_worker_limits(self, workers):
+        with pytest.raises(ValidationError, match="import_workers"):
+            FrozenSettings(_env_file=None, import_workers=workers)
+
     @pytest.mark.parametrize(
         ("field", "value"),
         [
@@ -67,3 +79,11 @@ class TestSettings:
                 max_archive_entry_mb=100,
                 max_archive_uncompressed_mb=99,
             )
+
+    @pytest.mark.parametrize(
+        "name", ["mesh_rasterizer", "mesh_loader", "mesh_geometry"]
+    )
+    def test_removed_engine_settings_cannot_select_python(self, name):
+        settings = FrozenSettings(_env_file=None, **{name: "python"})
+        assert name not in FrozenSettings.model_fields
+        assert not hasattr(settings, name)

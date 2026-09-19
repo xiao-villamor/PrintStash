@@ -33,7 +33,7 @@ class TLSStorage:
 
 
 @contextmanager
-def tls_storage(upstream: str, directory: Path):
+def tls_storage(upstream: str, directory: Path, *, omit_length: bool = False):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
     now = datetime.now(timezone.utc)
@@ -114,12 +114,16 @@ def tls_storage(upstream: str, directory: Path):
                         "content-length",
                     }:
                         self.send_header(name, value)
-                self.send_header(
-                    "Content-Length",
-                    response.getheader("Content-Length", "0")
-                    if self.command == "HEAD"
-                    else str(len(data)),
-                )
+                if omit_length:
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
+                else:
+                    self.send_header(
+                        "Content-Length",
+                        response.getheader("Content-Length", "0")
+                        if self.command == "HEAD"
+                        else str(len(data)),
+                    )
                 self.end_headers()
                 if self.command != "HEAD":
                     self.wfile.write(data)

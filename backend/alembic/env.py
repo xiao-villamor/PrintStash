@@ -9,6 +9,7 @@ from sqlmodel import SQLModel
 from alembic import context
 from app.core.config import settings
 from app.db import models  # noqa: F401
+from app.db.derived_objects import managed_names
 from app.db.migration_guards import (
     acknowledged_drops,
     dropped_and_added_columns,
@@ -96,7 +97,16 @@ def _configure_context(
     connection: Connection | None = None,
     url: str | None = None,
 ) -> None:
+    # SQLAlchemy catalog reads autobegin a transaction. Finish only that read
+    # transaction before Alembic decides who owns commit; otherwise migrations
+    # can be treated as externally owned and rolled back when the engine closes.
+    already_in_transaction = connection.in_transaction() if connection is not None else False
+    derived = managed_names(connection)
+    if connection is not None and not already_in_transaction and connection.in_transaction():
+        connection.commit()
     kwargs = {
+        "include_object": lambda obj, name, kind, reflected, compare_to: not (kind == "table" and name in derived),
+        "include_name": lambda name, kind, parents: not (kind == "table" and name in derived),
         "target_metadata": target_metadata,
         "compare_type": True,
         "compare_server_default": True,

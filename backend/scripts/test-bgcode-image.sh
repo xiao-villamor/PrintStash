@@ -8,4 +8,5 @@ docker run --rm \
     cp /fixtures/prusaslicer.bgcode /tmp/reference.bgcode
     bgcode /tmp/reference.bgcode
     cmp /tmp/reference.gcode /fixtures/prusaslicer.gcode
+    /app/.venv/bin/python -c "from pathlib import Path; import printstash_mesh_native as native; path=Path(\"/tmp/reference.bgcode\"); assert native.is_valid_bgcode(path); metadata=native.parse_gcode_metadata(path); assert metadata[\"slicer_name\"] == \"PrusaSlicer\"; assert native.gcode_thumbnails(path)"
   '

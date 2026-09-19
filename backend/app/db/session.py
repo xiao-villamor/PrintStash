@@ -46,6 +46,10 @@ def _set_sqlite_pragmas(dbapi_conn, _record) -> None:
     cursor.execute("PRAGMA temp_store=MEMORY")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+    if settings.search_native_vectors_enabled:
+        from app.db.vector_extensions import load_sqlite_vector_extension
+
+        load_sqlite_vector_extension(dbapi_conn)
 
 
 _engine: Engine = create_engine(

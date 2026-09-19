@@ -7,8 +7,8 @@ from sqlmodel import Session, col, select
 
 from app.db.models import GeometryFingerprint, PassageVector, User
 from app.db.session import SessionFactory
-from app.modules.inference import store
 from app.modules.inference.local import configured_provider
+from app.modules.similarity import vector_sources as store
 from app.modules.similarity.retrieval import Shortlist
 
 

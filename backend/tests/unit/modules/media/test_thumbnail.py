@@ -72,6 +72,35 @@ class TestExtract:
 
 
 class TestWebpNormalization:
+    @pytest.mark.parametrize("normalize", [True, False])
+    def test_preserves_rgba_pixels(self, normalize: bool) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGBA", (320, 240), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((32, 24, 287, 215), fill=(90, 130, 210, 255))
+        draw.rectangle((64, 48, 255, 191), fill=(211, 39, 119, 97))
+        source = io.BytesIO()
+        image.save(source, format="PNG")
+
+        encoded = to_webp(source.getvalue(), normalize=normalize, width=320)
+
+        with Image.open(io.BytesIO(encoded)) as result:
+            assert result.convert("RGBA").tobytes() == image.tobytes()
+
+    def test_preserves_fully_transparent_rgb(self) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGBA", (320, 240), (13, 29, 47, 0))
+        ImageDraw.Draw(image).rectangle((32, 24, 287, 215), fill=(90, 130, 210, 255))
+        source = io.BytesIO()
+        image.save(source, format="PNG")
+
+        encoded = to_webp(source.getvalue(), width=320)
+
+        with Image.open(io.BytesIO(encoded)) as result:
+            assert result.convert("RGBA").tobytes() == image.tobytes()
+
     def test_embedded_preview_is_centered_on_the_canonical_canvas(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -116,3 +145,25 @@ class TestWebpNormalization:
         encoded = source.getvalue()
 
         assert to_webp(encoded) == encoded
+
+    def test_unsupported_codec_cannot_fall_back_to_pillow(self):
+        from PIL import Image
+
+        from app.modules.media.thumbnail import ThumbnailValidationError
+
+        source = io.BytesIO()
+        Image.new("RGB", (2, 2), "white").save(source, format="BMP")
+        with pytest.raises(
+            ThumbnailValidationError, match="thumbnail_format_unsupported"
+        ):
+            to_webp(source.getvalue())
+
+    @pytest.mark.parametrize("width", [319, 1281, True, 640.5])
+    def test_rejects_invalid_output_width(self, width):
+        with pytest.raises(ValueError, match="thumbnail_too_large") as error:
+            to_webp(b"unused", width=width)
+        assert str(error.value.__cause__) == "thumbnail_width_invalid"
+
+    def test_reports_corrupt_supported_image(self):
+        with pytest.raises(ValueError, match="thumbnail_too_large"):
+            to_webp(b"\x89PNG\r\n\x1a\ntruncated", width=320)

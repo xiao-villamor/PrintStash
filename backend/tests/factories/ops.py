@@ -33,6 +33,7 @@ from app.db.models import (
     ExternalLibraryCheckpoint,
     ExternalLibraryObservation,
     FilamentProfile,
+    IngestionReview,
     LibrarySourceKind,
     Model,
     NotificationChannel,
@@ -529,3 +530,28 @@ def build_audit_event(
     overrides.setdefault("dedup_key", f"audit-event-{nth('audit_event')}")
     overrides.setdefault("event_type", "storage_regression")
     return save(session, VaultAuditEvent(run_id=run.id, **overrides))
+
+
+def build_ingestion_review(
+    session: Session,
+    *,
+    kind: str = "model_files",
+    owner: User | None = None,
+    expired: bool = False,
+    **overrides: Any,
+) -> IngestionReview:
+    defaults = {
+        "id": nth("review"),
+        "kind": kind,
+        "owner_user_id": owner.id if owner else None,
+        "payload_json": json.dumps(
+            {
+                "page_url": "https://example.com/model",
+                "page_title": "Model",
+                "owner_user_id": owner.id if owner else None,
+                "files": [],
+            }
+        ),
+        "expires_at": utcnow() + timedelta(hours=-1 if expired else 1),
+    }
+    return save(session, IngestionReview(**(defaults | overrides)))

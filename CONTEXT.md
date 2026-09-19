@@ -138,6 +138,23 @@ _Avoid_: verdict, role
 One bounded, cancellable, restart-safe execution of fingerprinting and candidate
 generation over an explicit scope.
 
+### AI Search
+
+**Search Subject**:
+A Model, Collection, Multipart Model or Document that search can return.
+Artifacts and Revisions contribute text to their Model rather than being Subjects.
+_Avoid_: item, record
+
+**Search Passage**:
+One bounded unit of searchable text derived from a Subject, with a versioned
+recipe. Long text and contributors with different visibility can form several Passages.
+_Avoid_: document, snippet
+
+**Visibility Segment**:
+Text from a Subject whose contributors share the same access requirements.
+Permission to see a grouping does not grant permission to see its restricted members.
+_Avoid_: user index, public passage
+
 ### Trash
 
 **Live**:

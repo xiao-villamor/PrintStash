@@ -132,18 +132,16 @@ class TestFingerprintExtraction:
         )
 
     def test_reuses_loaded_mesh_for_descriptors(self, tmp_path, monkeypatch):
-        import trimesh
-
         path = tmp_path / "part.stl"
         path.write_bytes(tetrahedron().export(file_type="stl"))
-        load = trimesh.load_scene
+        load = mesh_processing._load_mesh
         calls = []
 
         def observed_load(*args, **kwargs):
             calls.append(args[0])
             return load(*args, **kwargs)
 
-        monkeypatch.setattr(trimesh, "load_scene", observed_load)
+        monkeypatch.setattr(mesh_processing, "_load_mesh", observed_load)
 
         result = ThumbnailEngine().generate(
             ThumbnailRequest(path, width=64, include_fingerprint=True)
@@ -200,3 +198,23 @@ class TestFingerprintExtraction:
         assert result.image == preview
         assert result.fingerprint_result.state == "failed"
         assert result.fingerprint_result.failure_code == "nonfinite_geometry"
+
+    def test_native_view_hashes_have_distinct_recipe(self, tmp_path):
+        path = tmp_path / "native-views.stl"
+        path.write_bytes(tetrahedron().export(file_type="stl"))
+        result = (
+            ThumbnailEngine()
+            .generate(
+                ThumbnailRequest(
+                    path, include_fingerprint=True, include_thumbnail=False
+                )
+            )
+            .fingerprint_result
+        )
+        assert result.state == "ready"
+        assert result.algorithm_version != "geometry-v2-sh5f4577c4"
+        assert (
+            result.records[0].values["recipe"]["views"]
+            == "pca-six-orthographic64-matte-dct8-rust-v2"
+        )
+        assert len(result.records[0].values["view_blob"]) == 48

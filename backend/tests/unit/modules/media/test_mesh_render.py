@@ -26,7 +26,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
+from app.core.config import _overlay
 from app.modules.media import mesh_render
 
 
@@ -39,79 +41,6 @@ def _tilt_matrix() -> np.ndarray:
 
 
 class TestSelectViewRotation:
-    def test_flat_z_mesh_uses_front_view_like_stl_viewer(self) -> None:
-        verts = np.array(
-            [
-                [-5.0, -5.0, -0.2],
-                [5.0, -5.0, -0.2],
-                [5.0, 5.0, 0.2],
-                [-5.0, 5.0, 0.2],
-            ],
-            dtype=np.float64,
-        )
-
-        rotation = mesh_render._select_view_rotation(verts, np)
-        view = verts @ rotation.T
-
-        expected = _tilt_matrix() @ np.diag([1.0, 1.0, -1.0])
-        np.testing.assert_allclose(rotation, expected, atol=1e-12)
-        # Screen-X is untouched by the tilt: the broad face still spans the view.
-        np.testing.assert_allclose(view[:, 0], verts[:, 0])
-
-    def test_solid_mesh_uses_z_up_hero_view(self) -> None:
-        # A chunky/solid mesh gets the 3/4 "hero" view, not the flat front view.
-        # Print models are Z-up, so object +Z must map to (mostly) screen-up — the
-        # old view looked down the Z axis and showed the top of upright models (e.g.
-        # the gathered top of a dumpling) instead of their front.
-        verts = np.array(
-            [
-                [-1.0, -1.0, -1.0],
-                [1.0, -1.0, -1.0],
-                [1.0, 1.0, -1.0],
-                [-1.0, 1.0, -1.0],
-                [-1.0, -1.0, 1.0],
-                [1.0, -1.0, 1.0],
-                [1.0, 1.0, 1.0],
-                [-1.0, 1.0, 1.0],
-            ],
-            dtype=np.float64,
-        )
-
-        rotation = mesh_render._select_view_rotation(verts, np)
-
-        # A proper rotation, and not the flat front-view fallback.
-        np.testing.assert_allclose(rotation @ rotation.T, np.eye(3), atol=1e-9)
-        assert np.linalg.det(rotation) > 0.99
-        assert not np.allclose(rotation, np.diag([1.0, 1.0, -1.0]))
-
-        # Object +Z lands (mostly) on screen-up, not pointing into the screen.
-        z_on_screen = rotation @ np.array([0.0, 0.0, 1.0])
-        assert z_on_screen[1] > 0.8  # up
-        assert abs(z_on_screen[0]) < 0.2  # not tipped sideways
-
-    def test_flat_x_mesh_uses_broad_face_view(self) -> None:
-        verts = np.array(
-            [
-                [-0.1, -2.0, -3.0],
-                [0.1, -2.0, -3.0],
-                [0.1, 2.0, 3.0],
-                [-0.1, 2.0, 3.0],
-            ],
-            dtype=np.float64,
-        )
-
-        rotation = mesh_render._select_view_rotation(verts, np)
-
-        expected = _tilt_matrix() @ np.array(
-            [
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [-1.0, 0.0, 0.0],
-            ],
-            dtype=np.float64,
-        )
-        np.testing.assert_allclose(rotation, expected, atol=1e-12)
-
     def test_front_facing_flat_mesh_does_not_fall_back_to_silhouette(
         self, monkeypatch
     ) -> None:
@@ -234,39 +163,6 @@ class TestRenderThumbnail:
         assert png is not None and png.startswith(_PNG_MAGIC)
         assert Image.open(io.BytesIO(png)).size == (64, 64)
 
-    def test_raster_budget_is_cumulative_across_calls(self) -> None:
-        img = np.zeros((16, 16, 3), dtype=np.uint8)
-        zbuf = np.full((16, 16), np.inf, dtype=np.float64)
-        triangle = np.array([[[0.0, 0.0, 0.0], [9.0, 0.0, 0.0], [0.0, 9.0, 0.0]]])
-        normals = np.zeros((1, 3, 3), dtype=np.float64)
-        budget = mesh_render.RasterBudget(limit=16)
-
-        mesh_render._rasterise_triangles(
-            img,
-            zbuf,
-            triangle,
-            normals,
-            lambda n: np.ones((n.shape[0], 3)),
-            np.ones(3),
-            16,
-            16,
-            budget=budget,
-        )
-        mesh_render._rasterise_triangles(
-            img,
-            zbuf,
-            triangle,
-            normals,
-            lambda n: np.ones((n.shape[0], 3)),
-            np.ones(3),
-            16,
-            16,
-            budget=budget,
-        )
-
-        assert budget.used == 16
-        assert np.isfinite(zbuf).any()
-
     def test_normal_renderer_keeps_large_face_at_1280(self) -> None:
         from PIL import Image
 
@@ -284,29 +180,25 @@ class TestRenderThumbnail:
         assert alpha.max() == 255
         assert (alpha > 200).mean() > 0.10
 
-    def test_huge_mesh_never_allocates_full_face_arrays(self, monkeypatch) -> None:
-        # Spy on the rasteriser: every chunk it receives must be bounded by the
-        # configured chunk size, proving per-face arrays are built per-chunk and a
-        # full (F, 3, 3) array is never materialised.
+    def test_backend_uses_one_rust_job(self, monkeypatch):
         import trimesh
 
-        mesh = trimesh.creation.icosphere(subdivisions=5, radius=10.0)  # 20480 faces
-        chunk = 1000
-        _set_chunk_size(monkeypatch, chunk)
+        native = mesh_render.native_rasterizer.kernel()
+        original = native.render_preview
+        calls = []
 
-        seen_max = {"n": 0}
-        real = mesh_render._rasterise_triangles
+        def observe(*args):
+            calls.append(args[4])
+            return original(*args)
 
-        def _spy(img, zbuf, tri, vert_nrm, shade, base_color, width, height):
-            seen_max["n"] = max(seen_max["n"], int(tri.shape[0]))
-            return real(img, zbuf, tri, vert_nrm, shade, base_color, width, height)
-
-        monkeypatch.setattr(mesh_render, "_rasterise_triangles", _spy)
-        png = mesh_render.render_mesh_thumbnail(mesh, "big.stl", width=64, height=64)
-
-        assert png is not None
-        assert len(mesh.faces) > chunk  # the mesh really needed more than one chunk
-        assert 0 < seen_max["n"] <= chunk
+        monkeypatch.setattr(native, "render_preview", observe)
+        _set_chunk_size(monkeypatch, 1000)
+        mesh = trimesh.creation.icosphere(subdivisions=3)
+        result = mesh_render.render_mesh_thumbnail(
+            mesh, "mesh.stl", width=64, height=64
+        )
+        assert result is not None
+        assert calls == [1000]
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +210,35 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def _set_chunk_size(monkeypatch, n: int) -> None:
-    from app.core.config import _overlay
 
     monkeypatch.setitem(_overlay, "mesh_render_face_chunk_size", n)
+
+
+class TestRenderMeshThumbnail:
+    @pytest.mark.parametrize(
+        "mesh",
+        [None, SimpleNamespace(faces=None), SimpleNamespace(faces=[])],
+        ids=["absent-mesh", "absent-faces", "empty-faces"],
+    )
+    def test_has_no_preview_for_empty_geometry(self, mesh):
+        assert mesh_render.render_mesh_thumbnail(mesh, "empty.stl") is None
+
+    def test_reports_native_render_failure(self, monkeypatch, caplog):
+        from tests.factories.geometry import tetrahedron
+
+        def fail(*args, **kwargs):
+            raise ValueError("invalid_geometry")
+
+        monkeypatch.setattr(mesh_render.native_rasterizer, "render_preview", fail)
+
+        assert mesh_render.render_mesh_thumbnail(tetrahedron(), "broken.stl") is None
+        assert "Rust preview failed for broken.stl" in caplog.text
+
+    def test_requires_native_engine_even_for_empty_geometry(self, monkeypatch):
+        def unavailable():
+            raise RuntimeError("native_preview_unavailable")
+
+        monkeypatch.setattr(mesh_render.native_rasterizer, "kernel", unavailable)
+
+        with pytest.raises(RuntimeError, match="native_preview_unavailable"):
+            mesh_render.render_mesh_thumbnail(None, "empty.stl")

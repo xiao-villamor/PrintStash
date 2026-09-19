@@ -1,0 +1,35 @@
+query_id,query,expected_id,language,category
+q01,calibration boat,1,en,keyword
+q02,parts bin,2,en,keyword
+q03,protect an Arduino board with a lid,3,en,paraphrase
+q04,headphone desk hook,4,en,keyword
+q05,filament spool roller,5,en,keyword
+q06,articulated dragon,6,en,keyword
+q07,phone stand,7,en,keyword
+q08,plant watering tray,8,en,keyword
+q09,hex bit organizer,9,en,keyword
+q10,vase spiral,10,en,keyword
+q11,wheel with teeth for a rotating mechanism,11,en,paraphrase
+q12,cable comb,12,en,keyword
+q13,portrait visible when a light shines through it,13,en,paraphrase
+q14,pegboard drill mount,14,en,keyword
+q15,cookie cutter star,15,en,keyword
+q16,something to keep a door from closing,16,en,paraphrase
+q17,dice tower,17,en,keyword
+q18,laptop riser,18,en,keyword
+q19,battery dispenser,19,en,keyword
+q20,fasten my camera to the handlebars,20,en,paraphrase
+q21,protect the table under my coffee cup,21,en,paraphrase
+q22,drawer divider,22,en,keyword
+q23,pieza de ajedrez con cabeza de caballo,23,es,cross-language
+q24,cubo para calibrar los ejes de la impresora,24,es,cross-language
+q25,colgar las llaves junto a la puerta,25,es,cross-language
+q26,vaso para guardar cepillos de dientes,26,es,cross-language
+q27,book page hlder,27,en,typo
+q28,pet food scoup,28,en,typo
+q29,vacuum hose adapter,29,en,keyword
+q30,SD card wallet,30,en,keyword
+q31,filament drying box,31,en,keyword
+q32,paint bottle rack,32,en,keyword
+q33,tax deduction rules for overseas dividends,,en,out-of-domain
+q34,treatment for a bacterial ear infection,,en,out-of-domain

@@ -6,6 +6,7 @@ from .archives import (
     ArchivePolicyError,
     extract_selected,
     inspect_archive,
+    iter_selected,
     safe_entry_name,
     safe_subdir,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "ensure_unique_slug",
     "extract_selected",
     "inspect_archive",
+    "iter_selected",
     "safe_entry_name",
     "safe_subdir",
     "sha256_file",

@@ -237,7 +237,10 @@ test.describe("Browser onboarding", () => {
       await expect(
         page.getByRole("heading", { name: "My first model", exact: true }),
       ).toBeVisible();
-      await page.goto("/settings");
+      await page.getByRole("button", { name: /first-owner/ }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      await expect(page).toHaveURL(/\/settings$/);
+      await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
       await expect(
         page.getByRole("button", { name: "Resume the getting-started guide" }),
       ).toHaveCount(0);

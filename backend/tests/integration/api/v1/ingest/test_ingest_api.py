@@ -60,6 +60,8 @@ from tests.factories import (
 from tests.integration.api.v1._ingest_assertions import (
     assert_file_created,
     completed_job,
+    drain_enrichment,
+    drain_ingestion,
 )
 from tests.paths import FIXTURES_DIR
 
@@ -439,7 +441,7 @@ class TestIngestModel:
         metadata = db_session.exec(
             select(Metadata).where(Metadata.file_id == file_row.id)
         ).one()
-        assert metadata.bbox_x_mm == 1.0
+        assert metadata.bbox_x_mm is None
 
     def test_ingest_model_rejects_missing_filename(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -609,13 +611,14 @@ class TestIngestModel:
         assert response.status_code == 202
         job_id = response.json()["job_id"]
 
+        drain_ingestion()
         status = client.get(
             f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers
         ).json()
         assert checkpoints == ["fresh_session_and_storage"]
         assert status["state"] == "completed"
         assert status["completion"] == "complete"
-        assert status["thumbnail_status"] == "generated"
+        assert status["thumbnail_status"] == "pending"
         assert status["committed_at"] is not None
 
     def test_issue_67_over_cap_stl_persists_authenticated_webp_fallback(
@@ -645,7 +648,8 @@ class TestIngestModel:
         )
 
         assert payload["completion"] == "complete"
-        assert payload["thumbnail_status"] == "fallback_generated"
+        assert payload["thumbnail_status"] == "pending"
+        drain_enrichment()
         thumbnail = client.get(
             f"/api/v1/files/{payload['file_id']}/thumbnail", headers=auth_headers
         )
@@ -825,9 +829,7 @@ class TestIngestModel:
 
         # A job left pending forever is a queue an operator cannot clear.
         status = registry.get(created[0])
-        assert status is not None
-        assert status.state == "failed"
-        assert status.error == "staging_lease_failed"
+        assert status is None  # The unaccepted job and ownership receipt roll back together.
 
     def test_ingest_removes_the_staged_file_when_staging_is_full(
         self,
@@ -879,6 +881,7 @@ class TestIngestModel:
         )
         assert response.status_code == 202
         job_id = response.json()["job_id"]
+        drain_ingestion()
         status = client.get(
             f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers
         ).json()
@@ -953,11 +956,14 @@ class TestIngestModel:
                 data={"model_name": "Cube"},
             ),
         )
+        drain_enrichment()
+        db_session.expire_all()
         model_id = payload["model_id"]
         file_row = db_session.get(File, payload["file_id"])
         assert file_row is not None
         blob_path = file_row.path
-        thumb_path = get_backend().thumbnail_key(file_row.id)
+        thumb_path = file_row.thumbnail_path
+        assert thumb_path is not None
 
         delete = client.delete(f"/api/v1/models/{model_id}", headers=auth_headers)
         assert delete.status_code == 204

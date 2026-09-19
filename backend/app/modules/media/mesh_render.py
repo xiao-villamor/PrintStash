@@ -1,10 +1,11 @@
-"""Application compatibility facade for the core software mesh rasteriser."""
+"""Application adapter for the required Rust preview engine."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
+from printstash_core.mesh import native_rasterizer
 from printstash_core.mesh import rasterizer as _core
 
 from app.core.config import settings
@@ -13,18 +14,6 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 FLAT_MESH_THICKNESS_RATIO = _core.FLAT_MESH_THICKNESS_RATIO
-RasterBudget = _core.RasterBudget
-
-# Preserve the helper import surface used by the STL fallback and focused tests.
-_rasterise_triangles = _core._rasterise_triangles
-
-
-def _select_view_rotation(verts: Any, _np: Any) -> Any:
-    return _core._select_view_rotation(verts)
-
-
-def _front_rotation_for_thin_axis(thin_axis: int, _np: Any) -> Any:
-    return _core._front_rotation_for_thin_axis(thin_axis)
 
 
 def render_thumbnail(
@@ -46,22 +35,25 @@ def render_mesh_thumbnail(
     *,
     output_format: Literal["PNG", "WEBP"] = "PNG",
 ) -> Optional[bytes]:
-    """Render through core with application settings and logging injected."""
-    return _core.render_mesh_thumbnail(
-        mesh,
-        name,
-        width=width,
-        height=height,
-        face_chunk_size=settings.mesh_render_face_chunk_size,
-        logger=logger,
-        rasterise_triangles=_rasterise_triangles,
-        output_format=output_format,
-    )
+    """Render in Rust; this facade only transfers the mesh and encoded result."""
+    native_rasterizer.kernel()
+    if mesh is None or mesh.faces is None or len(mesh.faces) == 0:
+        return None
+    try:
+        return native_rasterizer.render_preview(
+            mesh,
+            width=width,
+            height=height,
+            chunk=settings.mesh_render_face_chunk_size,
+            output_format=output_format,
+        )
+    except Exception:  # noqa: BLE001 - the engine reports failed derivatives
+        logger.warning("mesh_render: Rust preview failed for %s", name, exc_info=True)
+        return None
 
 
 __all__ = [
     "FLAT_MESH_THICKNESS_RATIO",
-    "RasterBudget",
     "render_mesh_thumbnail",
     "render_thumbnail",
 ]

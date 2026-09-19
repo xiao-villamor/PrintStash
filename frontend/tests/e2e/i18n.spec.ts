@@ -27,7 +27,7 @@ test.describe("localization", () => {
     await page.getByRole("menuitemradio", { name: "Español" }).click();
     await page.getByRole("button", { name: /^Idioma:/ }).blur();
     await page.keyboard.press("/");
-    await expect(page.getByRole("textbox", { name: "Buscar modelos" })).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Buscar en la biblioteca" })).toBeFocused();
   });
 
   test("localizes the offline shell without an API or network", async ({ page, context }) => {

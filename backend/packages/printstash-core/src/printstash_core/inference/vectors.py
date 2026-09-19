@@ -15,6 +15,7 @@ class VectorEntry:
     unit_id: int
     subject_id: int
     blob: bytes
+    subject_type: str = "model"
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class Neighbor:
     unit_id: int
     subject_id: int
     score: float
+    subject_type: str = "model"
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,7 @@ class NeighborResult:
     items: tuple[Neighbor, ...]
     scanned: int
     truncated: bool
+    backend: str = "numpy"
 
 
 def normalize(vector: Iterable[float], dimension: int) -> bytes:
@@ -74,7 +77,8 @@ def cosine_neighbors(
     query_values = np.frombuffer(
         normalize(np.frombuffer(query, dtype="<f4"), dimension), dtype="<f4"
     )
-    best: dict[int, Neighbor] = {}
+    best: dict[tuple[str, int], Neighbor] = {}
+    cutoff: tuple[float, str, int, int] | None = None
     scanned = 0
     iterator = iter(entries)
     while scanned < max_scan:
@@ -92,26 +96,49 @@ def cosine_neighbors(
         ):
             raise EmbeddingError("embedding_vector_invalid")
         scores = np.clip((matrix / norms[:, None]) @ query_values, -1.0, 1.0)
-        for entry, score in zip(block, scores, strict=True):
-            neighbor = Neighbor(entry.unit_id, entry.subject_id, float(score))
-            previous = best.get(entry.subject_id)
-            if previous is None or (neighbor.score, -neighbor.unit_id) > (
+        # Validate every unit above, then only consider scores that can enter
+        # the bounded Subject set. Re-sorting the worst Subject for every losing
+        # unit would make a full scan O(units * limit).
+        competitive = (
+            range(len(block))
+            if cutoff is None
+            else np.flatnonzero(scores >= -cutoff[0])
+        )
+        for index in competitive:
+            entry = block[index]
+            score = float(scores[index])
+            order = (-score, entry.subject_type, entry.subject_id, entry.unit_id)
+            if cutoff is not None and order >= cutoff:
+                continue
+            identity = (entry.subject_type, entry.subject_id)
+            previous = best.get(identity)
+            if previous is not None and (score, -entry.unit_id) <= (
                 previous.score,
                 -previous.unit_id,
             ):
-                best[entry.subject_id] = neighbor
+                continue
+            best[identity] = Neighbor(
+                entry.unit_id, entry.subject_id, score, entry.subject_type
+            )
             if len(best) > limit:
-                worst = min(
-                    best.values(),
-                    key=lambda item: (item.score, -item.subject_id, -item.unit_id),
+                assert cutoff is not None
+                del best[(cutoff[1], cutoff[2])]
+            if len(best) == limit:
+                cutoff = max(
+                    (-item.score, item.subject_type, item.subject_id, item.unit_id)
+                    for item in best.values()
                 )
-                del best[worst.subject_id]
         scanned += len(block)
     # One-row lookahead makes budget truncation explicit to the caller.
     truncated = next(iterator, None) is not None
     items = heapq.nsmallest(
         limit,
         best.values(),
-        key=lambda item: (-item.score, item.subject_id, item.unit_id),
+        key=lambda item: (
+            -item.score,
+            item.subject_type,
+            item.subject_id,
+            item.unit_id,
+        ),
     )
     return NeighborResult(tuple(items), scanned, truncated)

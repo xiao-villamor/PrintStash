@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import _overlay
+from tests.integration.api.v1._ingest_assertions import drain_ingestion
 
 
 def _zip(entries: dict[str, str]) -> bytes:
@@ -43,6 +44,7 @@ def imported_model(client: TestClient, auth_headers, local_storage) -> None:
         data={"model_name": "Archive Me"},
     )
     assert uploaded.status_code == 202, uploaded.text
+    drain_ingestion()
     job = client.get(
         f"/api/v1/ingest/jobs/{uploaded.json()['job_id']}", headers=auth_headers
     )

@@ -34,9 +34,7 @@ from __future__ import annotations
 
 import struct
 import zlib
-from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 
 from printstash_core.gcode import (
     GcodeMetadata,
@@ -50,8 +48,10 @@ _FILE_METADATA = 0
 _GCODE = 1
 _SLICER_METADATA = 2
 _THUMBNAIL = 5
-# Block type 99 is not in the spec, so it declares no parameter bytes.
 _UNKNOWN_BLOCK = 99
+_MAX_BLOCKS = 4096
+_MAX_BLOCK_DATA = 64 * 1024 * 1024
+_MAX_METADATA_BYTES = 8 * 1024 * 1024
 
 
 def _block(
@@ -109,25 +109,6 @@ def _sample_container() -> bytes:
 def _written(path: Path, payload: bytes) -> Path:
     path.write_bytes(payload)
     return path
-
-
-class _ReportedSizePath:
-    """File-like path whose bytes can disappear after the size check.
-
-    A regular local file rarely truncates between ``stat`` and ``read``, but an
-    interrupted slicer export or storage-backed mount can do exactly that. The
-    validator must reject the short read instead of trusting the earlier size.
-    """
-
-    def __init__(self, payload: bytes, *, reported_size: int = 1_000_000) -> None:
-        self.payload = payload
-        self.reported_size = reported_size
-
-    def stat(self) -> SimpleNamespace:
-        return SimpleNamespace(st_size=self.reported_size)
-
-    def open(self, _mode: str) -> BytesIO:
-        return BytesIO(self.payload)
 
 
 class TestIsBgcode:
@@ -210,24 +191,6 @@ class TestIsValidContainerFraming:
         # The declared size is checked against the real file size *before* any
         # read, so a hostile length cannot make the parser allocate for it.
         assert is_valid_container(path) is False
-
-    def test_rejects_metadata_truncated_after_the_size_check(self) -> None:
-        metadata = struct.pack("<HHI", _FILE_METADATA, 0, 4)
-        metadata += struct.pack("<H", 0) + b"x"
-
-        assert is_valid_container(_ReportedSizePath(_container(metadata))) is False  # type: ignore[arg-type]
-
-    def test_rejects_gcode_truncated_while_computing_its_checksum(self) -> None:
-        gcode = struct.pack("<HHI", _GCODE, 0, 4) + struct.pack("<H", 0) + b"x"
-        payload = b"GCDE" + struct.pack("<IH", 1, 1) + gcode
-
-        assert is_valid_container(_ReportedSizePath(payload)) is False  # type: ignore[arg-type]
-
-    def test_rejects_a_checksum_truncated_after_the_block_body(self) -> None:
-        gcode = _gcode_block()
-        payload = b"GCDE" + struct.pack("<IH", 1, 1) + gcode
-
-        assert is_valid_container(_ReportedSizePath(payload)) is False  # type: ignore[arg-type]
 
     def test_rejects_more_blocks_than_the_safety_limit(self, tmp_path: Path) -> None:
         path = tmp_path / "too-many-blocks.bgcode"
@@ -369,64 +332,6 @@ class TestIterThumbnails:
         assert list(bgcode.iter_thumbnails(path)) == []
 
 
-class TestBlockParamLen:
-    def test_reports_six_parameter_bytes_for_a_thumbnail(self) -> None:
-        # Format, width, height — the reader needs all three to emit a preview.
-        assert bgcode._block_param_len(_THUMBNAIL) == 6
-
-    def test_reports_two_parameter_bytes_for_every_block_kind(self) -> None:
-        assert bgcode._block_param_len(_FILE_METADATA) == 2
-        assert bgcode._block_param_len(_GCODE) == 2
-
-    def test_reports_no_parameter_bytes_for_a_block_type_it_does_not_know(
-        self,
-    ) -> None:
-        # A future block type must be skippable: guessing a parameter length
-        # would shift every subsequent offset and reject a valid file.
-        assert bgcode._block_param_len(_UNKNOWN_BLOCK) == 0
-
-
-class TestDecompress:
-    def test_returns_stored_data_unchanged(self) -> None:
-        assert bgcode._decompress(0, b"metadata", max_output=1024) == b"metadata"
-
-    def test_refuses_stored_data_over_the_output_limit(self) -> None:
-        assert bgcode._decompress(0, b"x" * 2048, max_output=1024) is None
-
-    def test_inflates_a_deflate_stream(self) -> None:
-        assert (
-            bgcode._decompress(1, zlib.compress(b"metadata"), max_output=1024)
-            == b"metadata"
-        )
-
-    def test_refuses_a_stream_that_inflates_past_the_limit(self) -> None:
-        # The bomb case: 8 KiB of zeroes compresses to almost nothing.
-        assert (
-            bgcode._decompress(1, zlib.compress(b"x" * 8192), max_output=1024) is None
-        )
-
-    def test_refuses_a_truncated_stream(self) -> None:
-        # Accepting a partial inflate would silently return half the metadata.
-        valid = zlib.compress(b"metadata")
-
-        assert bgcode._decompress(1, valid[:-1], max_output=1024) is None
-
-    def test_refuses_a_stream_with_trailing_bytes(self) -> None:
-        # Trailing data means the declared length was wrong, or something is
-        # hidden after the stream; either way the block is not what it claims.
-        valid = zlib.compress(b"metadata")
-
-        assert bgcode._decompress(1, valid + b"trailing", max_output=1024) is None
-
-    def test_refuses_a_stream_that_is_not_deflate_at_all(self) -> None:
-        assert bgcode._decompress(1, b"not-deflate", max_output=1024) is None
-
-    def test_refuses_a_compression_scheme_it_does_not_implement(self) -> None:
-        # Heatshrink (2 and 3) is deliberately unimplemented: only the printable
-        # body uses it, and validation seeks past that.
-        assert bgcode._decompress(3, b"opaque", max_output=1024) is None
-
-
 class TestValidContainer:
     def test_accepts_a_slicer_written_container(self, tmp_path: Path) -> None:
         path = _written(tmp_path / "sample.bgcode", _sample_container())
@@ -437,7 +342,7 @@ class TestValidContainer:
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "large-sparse.bgcode"
-        body_size = bgcode._MAX_BLOCK_DATA + 1
+        body_size = _MAX_BLOCK_DATA + 1
         with path.open("wb") as file:
             file.write(b"GCDE" + struct.pack("<IH", 1, 0))
             file.write(struct.pack("<HHI", _GCODE, 0, body_size))
@@ -449,13 +354,14 @@ class TestValidContainer:
         # not capped by the metadata ceiling. A sparse file keeps this cheap.
         assert is_valid_container(path) is True
 
-    def test_accepts_a_block_type_it_does_not_recognise(self, tmp_path: Path) -> None:
+    def test_rejects_a_block_type_it_does_not_recognise(self, tmp_path: Path) -> None:
         unknown = struct.pack("<HHI", _UNKNOWN_BLOCK, 0, 4) + b"data"
         path = _written(tmp_path / "future.bgcode", _container(unknown, _gcode_block()))
 
-        # Forward compatibility: a container gaining a block type must not
-        # become unreadable in older PrintStash releases.
-        assert is_valid_container(path) is True
+        # Unknown block types have unknown parameter lengths. Guessing zero can
+        # desynchronise validation and treat attacker-controlled bytes as a new
+        # header, so a future format requires an explicit library update.
+        assert is_valid_container(path) is False
 
     def test_rejects_a_container_with_no_printable_block(self, tmp_path: Path) -> None:
         metadata_only = _container(
@@ -513,8 +419,7 @@ class TestValidContainer:
         # A hostile file can declare an unbounded number of tiny blocks; the
         # loop is bounded so validation cannot be made to run forever.
         blocks = b"".join(
-            struct.pack("<HHI", _UNKNOWN_BLOCK, 0, 0)
-            for _ in range(bgcode._MAX_BLOCKS + 1)
+            struct.pack("<HHI", _UNKNOWN_BLOCK, 0, 0) for _ in range(_MAX_BLOCKS + 1)
         )
         path = _written(tmp_path / "many.bgcode", _container(blocks, _gcode_block()))
 
@@ -662,21 +567,20 @@ class TestReadMetadataTextTolerance:
     ) -> None:
         # The declared length exceeds the hard per-block ceiling, so the walk
         # stops rather than attempting a 64 MiB+ read for a hostile header.
-        header = struct.pack("<HHI", _FILE_METADATA, 0, bgcode._MAX_BLOCK_DATA + 1)
+        header = struct.pack("<HHI", _FILE_METADATA, 0, _MAX_BLOCK_DATA + 1)
         header += struct.pack("<H", 0)
         path = _written(tmp_path / "huge-block.bgcode", _container(header))
 
         assert bgcode.read_metadata_text(path) is None
 
     def test_reads_metadata_past_a_checksum(self, tmp_path: Path) -> None:
-        metadata = (
+        metadata = _checksummed(
             _block(
                 _FILE_METADATA,
                 struct.pack("<H", 0),
                 b"Producer=PrusaSlicer 2.8.0\n",
                 compression=0,
             )
-            + b"\x00\x00\x00\x00"
         )
         payload = b"GCDE" + struct.pack("<IH", 1, 1) + metadata
         path = _written(tmp_path / "crc-metadata.bgcode", payload)
@@ -699,11 +603,10 @@ class TestIterThumbnailsTolerance:
     def test_skips_a_thumbnail_whose_parameters_are_too_short_to_read(
         self, tmp_path: Path
     ) -> None:
-        # `_block_param_len` asks for six bytes and gets them, but the block
-        # body is what carries the image — a header claiming a thumbnail with
-        # unreadable dimensions must be skipped, not yield a 0x0 preview.
-        short = struct.pack("<HHI", _THUMBNAIL, 3, 4) + struct.pack("<I", 4)
-        short += struct.pack("<HHH", 0, 16, 16) + b"data"
+        # The header declares four output bytes but supplies an empty
+        # Heatshrink stream. Exact bounded decoding must reject it.
+        short = struct.pack("<HHI", _THUMBNAIL, 3, 4) + struct.pack("<I", 0)
+        short += struct.pack("<HHH", 0, 16, 16)
         path = _written(
             tmp_path / "undecodable.bgcode", _container(short, _gcode_block())
         )

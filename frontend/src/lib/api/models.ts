@@ -71,6 +71,14 @@ function modelListSearch(params?: ListModelsParams): URLSearchParams {
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
 
+  for (const key of [
+    "printed_after",
+    "printed_before",
+    "print_duration_min_s",
+    "print_duration_max_s",
+  ] as const) {
+    if (params?.[key] != null) search.set(key, String(params[key]));
+  }
   return search;
 }
 
@@ -120,8 +128,8 @@ export async function unstarModel(id: number): Promise<ModelStarRead> {
   return handleResponse<ModelStarRead>(res);
 }
 
-export function getModel(id: number): Promise<ModelRead> {
-  return getJson<ModelRead>(`/api/v1/models/${id}`);
+export function getModel(id: number, options?: GetJsonOptions): Promise<ModelRead> {
+  return getJson<ModelRead>(`/api/v1/models/${id}`, options);
 }
 
 export function getVaultStats(options?: GetJsonOptions): Promise<VaultStatsRead> {
@@ -370,4 +378,13 @@ export function selectArchiveEntries(
   payload: { names: string[]; collection?: string; tags?: string },
 ): Promise<IngestResponse> {
   return sendJson<IngestResponse>(`/api/v1/ingest/archive/${archiveId}/select`, "POST", payload);
+}
+
+export function requestFileEnrichment(
+  fileId: number,
+): Promise<import("@/types").ArtifactEnrichmentRead> {
+  return sendJson(`/api/v1/files/${fileId}/enrichment`, "POST", {
+    metadata: true,
+    thumbnail: true,
+  });
 }

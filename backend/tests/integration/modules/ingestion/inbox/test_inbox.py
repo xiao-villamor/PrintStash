@@ -412,6 +412,10 @@ class TestReconcileInterruptedItems:
             } == slot_ids
 
         inbox.reconcile_interrupted_items()
+        import asyncio
+
+        from app.runtime.ingestion import process_one
+        asyncio.run(process_one(enrichment=True))
 
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
@@ -1240,6 +1244,9 @@ class TestRunImport:
 
         await inbox.run_import(row.id, ["a.stl"], get_session_factory())
 
+        from app.runtime.ingestion import process_one
+        await process_one(enrichment=True)
+
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
             assert fresh.state == InboxItemState.COMPLETED
@@ -1283,6 +1290,9 @@ class TestRunImport:
         monkeypatch.setattr(importer, "import_assets", fake_import_assets)
 
         await inbox.run_import(row.id, [], get_session_factory())
+
+        from app.runtime.ingestion import process_one
+        await process_one(enrichment=True)
 
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)

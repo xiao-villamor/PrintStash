@@ -24,6 +24,7 @@ FingerprintStatus = Literal[
     "pending", "ready", "partial", "unsupported", "failed", "stale", "skipped"
 ]
 ThumbnailStatus = Literal[
+    "pending",
     "generated",
     "fallback_generated",
     "skipped",

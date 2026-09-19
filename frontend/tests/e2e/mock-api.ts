@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { SubjectCaption } from "../../src/types/captions";
+import type { SearchStatus } from "../../src/types/search";
 
 const now = "2026-06-04T00:24:22.000000";
 
@@ -1060,6 +1062,36 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       storage: [],
       printed: [],
     });
+    return;
+  }
+  if (url.pathname === "/api/v1/search/status" && req.method === "GET") {
+    sendJson(res, {
+      enabled: false,
+      semantic_ready: false,
+      legs: ["lexical"],
+      generations: [],
+      degraded: [],
+      backlog: false,
+      remote_hosts: [],
+    } satisfies SearchStatus);
+    return;
+  }
+  if (url.pathname === "/api/v1/subjects/model/1/caption" && req.method === "GET") {
+    sendJson(res, {
+      state: null,
+      phase: null,
+      text: "",
+      version_token: null,
+      can_edit: true,
+      can_generate: false,
+      unavailable_reason: "caption_disabled",
+      model: null,
+      model_revision: null,
+      recipe: null,
+      edited_by: null,
+      updated_at: null,
+      error_code: null,
+    } satisfies SubjectCaption);
     return;
   }
   if (url.pathname === "/api/v1/models/1") {

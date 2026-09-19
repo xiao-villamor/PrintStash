@@ -103,3 +103,30 @@ class TestDelete:
 
         assert saved_views.delete(db_session, user.id, view.id) is True
         assert saved_views.delete(db_session, user.id, view.id) is False
+
+
+class TestSearchHistoryView:
+    def test_roundtrips_normalized_history_with_sort(self, db_session, make_user):
+        from datetime import datetime, timezone
+
+        from app.schemas.models import ModelSort
+
+        user = make_user()
+        filters = SavedViewFilters(
+            q="bracket",
+            printed_after=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            printed_before=datetime(2026, 9, 1, tzinfo=timezone.utc),
+            print_duration_max_s=10800,
+            print_outcome=["completed"],
+            sort=ModelSort.PRINTED_DESC,
+        )
+        created = saved_views.create(
+            db_session, user.id, SavedViewCreate(name="Recent prints", filters=filters)
+        )
+        loaded = saved_views.get_for_user(db_session, user.id, created.id)
+        assert loaded.filters == filters
+        row = db_session.get(SavedView, created.id)
+        assert (
+            "residual_query" not in row.filters_json
+            and "ranking" not in row.filters_json
+        )

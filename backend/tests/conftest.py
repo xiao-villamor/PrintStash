@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Iterator
@@ -244,9 +245,16 @@ def _truncate_all(engine: Engine = _test_engine) -> None:
     500 on a real installation, passed here. `AUTOCOMMIT` is what makes the pragmas
     take effect; `tests/repo/test_db_parity.py` is what stops this regressing again.
     """
+    from app.db.derived_objects import managed_names
+
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
         try:
+            # Drop owned native roots while their generation rows still identify
+            # them. Dropping a virtual table also removes its SQLite shadow tables.
+            for name in managed_names(conn):
+                if re.fullmatch(r"(?:vec|code)_gen_[1-9][0-9]*", name):
+                    conn.exec_driver_sql(f"DROP TABLE {name}")
             for table in _all_table_names():
                 conn.exec_driver_sql(f"DELETE FROM {table}")
         finally:

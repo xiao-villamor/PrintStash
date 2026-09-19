@@ -10,6 +10,20 @@ from tests.factories.geometry import three_mf
 
 
 class TestThreeMFResources:
+    def test_requires_the_native_resource_loader(self, tmp_path, monkeypatch):
+        from printstash_core.mesh import native_rasterizer
+
+        path = tmp_path / "resource.3mf"
+        path.write_bytes(three_mf())
+
+        def unavailable_native_loader():
+            raise RuntimeError("native loader unavailable")
+
+        monkeypatch.setattr(native_rasterizer, "kernel", unavailable_native_loader)
+
+        with pytest.raises(RuntimeError, match="native loader unavailable"):
+            load_3mf(path)
+
     def test_preserves_plate_multiplicity(self, tmp_path):
         path = tmp_path / "plate.3mf"
         build = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 50} 0 0") for i in range(6))

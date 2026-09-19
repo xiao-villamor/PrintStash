@@ -17,8 +17,20 @@ on:
     - cron: "27 4 * * *"
   workflow_dispatch:
     inputs:
+      benchmark_imports:
+        description: "Run the controlled import matrix and archive immutable release images"
+        type: boolean
+        default: false
+      benchmark_parent:
+        description: "Full immediate-parent commit for import comparisons"
+        type: string
+        default: "4b9afeb92d4e7e24298454af38c6c76aeddec437"
       native_clip:
         description: "Validate the pinned, preplaced real CLIP export on both native architectures"
+        type: boolean
+        default: false
+      qualify_queue:
+        description: "Run the deferred Rust queue qualification contracts"
         type: boolean
         default: false
 
@@ -30,8 +42,85 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  mesh-native:
+    name: Rust mesh loading and rendering (${{ matrix.arch }})
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Rust
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt
+      - name: Build the native extension
+        working-directory: backend
+        run: |
+          RUSTUP_TOOLCHAIN=1.98.1 uv sync --extra dev --frozen
+          RUSTUP_TOOLCHAIN=1.98.1 uv pip install ./rust
+          uv run python -c 'import printstash_mesh_native'
+          uv run ruff check rust/tests scripts/bench_import.py scripts/bench_database.py scripts/bench_corpus.py scripts/bench_matrix.py scripts/bench_queue.py scripts/bench_queue_qualification.py scripts/bench_queue_qualification_matrix.py
+          cargo +1.98.1 fmt --manifest-path rust/Cargo.toml --check
+          cargo +1.98.1 clippy --manifest-path rust/Cargo.toml --locked -- -D warnings
+          cargo +1.98.1 fmt --manifest-path rust/render-core/Cargo.toml --check
+          cargo +1.98.1 clippy --manifest-path rust/render-core/Cargo.toml --locked --all-targets -- -D warnings
+          cargo +1.98.1 test --manifest-path rust/render-core/Cargo.toml --locked
+      - name: Check native visibility and Python parity
+        working-directory: backend
+        run: uv run pytest -q rust/tests packages/printstash-core/tests/mesh
+      - name: Check application previews and complete ZIP ingestion
+        working-directory: backend
+        run: uv run pytest -q tests/integration/modules/media/test_mesh_render.py tests/integration/modules/media/test_mesh_processing.py::TestLoadMesh tests/e2e/test_ingest.py::TestArchiveImport
+
+  native-coverage:
+    name: Rust source coverage including Python bindings
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install production compiler and coverage instrumentation
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component llvm-tools-preview
+          cargo +1.98.1 install cargo-audit --version 0.22.2 --locked
+          cargo +1.98.1 install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Audit the native dependency graph
+        working-directory: backend/rust
+        run: cargo +1.98.1 audit
+      - name: Install backend test dependencies
+        working-directory: backend
+        run: RUSTUP_TOOLCHAIN=1.98.1 uv sync --extra dev --frozen
+      - name: Exercise instrumented native code
+        working-directory: backend
+        run: ./scripts/native-coverage.sh
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: native-coverage
+          path: backend/rust/target/native-coverage-report/
+          if-no-files-found: error
+
   similarity-native:
     name: Similarity native (${{ matrix.arch }})
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -78,6 +167,7 @@ jobs:
 
   critical-capabilities:
     name: Critical capabilities
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -123,6 +213,7 @@ jobs:
 
   printer-core:
     name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -146,15 +237,17 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: Install autonomous package
+      - name: Install autonomous package with required Rust engine
         run: |
+          rustup toolchain install 1.98.1 --profile minimal
           uv venv --python ${{ matrix.python }}
-          uv pip install --python .venv/bin/python \
+          RUSTUP_TOOLCHAIN=1.98.1 uv pip install --python .venv/bin/python \
             --resolution ${{ matrix.resolution }} \
-            --editable ".[dev,mesh,printers-all,testkit]"
+            --editable ".[dev,mesh,printers-all,testkit]" ../../rust
+          .venv/bin/python -c 'import printstash_mesh_native'
 
       - name: Test autonomous package
-        run: .venv/bin/pytest tests -q -m "not coverage_gate"
+        run: .venv/bin/pytest tests ../../rust/tests -q -m "not coverage_gate"
 
       # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
       # The gate reads the report the measured pass writes, so it cannot run inside
@@ -185,7 +278,9 @@ jobs:
 
   backend:
     name: Backend
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
@@ -246,11 +341,26 @@ jobs:
         # branches, and the second number is the one that says something.
         run: ./scripts/test.sh coverage -v
 
+      - name: Retain backend coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.json
+            backend/.coverage-html/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   backend-python313:
     name: Backend compatibility (Python 3.13, advisory)
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 30
+    # The complete suite reached 80% when the former 30-minute job budget ended.
+    # Keep individual test timeouts unchanged; allow the full matrix to finish.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
@@ -280,7 +390,9 @@ jobs:
     # as "CI is flaky" and gets a re-run rather than a fix. Five shuffled,
     # parallel runs on a schedule turn that into a specific named failure with a
     # seed that reproduces it.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -310,6 +422,7 @@ jobs:
             echo "::group::seed ${seed}"
             uv run pytest tests -q -p randomly --randomly-seed="${seed}" -n 4 \
               --deselect tests/integration/postgres \
+              --deselect tests/repo/test_coverage_floors.py \
               > "run-${seed}.log" 2>&1 || status=1
             tail -1 "run-${seed}.log"
             echo "::endgroup::"
@@ -340,6 +453,7 @@ jobs:
 
   sqlite-async:
     name: SQLite async extra
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -366,6 +480,7 @@ jobs:
 
   minio-migration:
     name: MinIO to SeaweedFS migration
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -400,6 +515,7 @@ jobs:
 
   frontend:
     name: Frontend
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -453,6 +569,7 @@ jobs:
 
   browser-extension:
     name: Browser extension
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -610,6 +727,7 @@ jobs:
 
   e2e-real:
     name: Real-backend E2E
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -656,7 +774,11 @@ jobs:
 
       - name: Real-backend E2E
         working-directory: frontend
-        run: pnpm test:e2e:real
+        env:
+          PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT: ${{ runner.temp }}/printstash-browser-external-root
+        run: |
+          mkdir -p "$PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT"
+          pnpm test:e2e:real
 
       - name: Storage-provider E2E
         working-directory: frontend
@@ -672,6 +794,7 @@ jobs:
 
   docker-build:
     name: Docker build and Grype scan (${{ matrix.image }}, ${{ matrix.arch }})
+    if: github.event_name != 'workflow_dispatch' || inputs.benchmark_imports != true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.image == 'printstash' && 45 || 40 }}
     permissions:
@@ -829,3 +952,144 @@ jobs:
         if: matrix.storage-smoke
         working-directory: backend
         run: ./scripts/test.sh image --image ${{ matrix.image }}:${{ matrix.arch }}-ci --variant ${{ matrix.variant }}
+
+
+  queue-qualification:
+    name: Rust queue qualification (SQLite and PostgreSQL)
+    if: github.event_name == 'workflow_dispatch' && inputs.qualify_queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: qualification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PRINTSTASH_QUEUE_QUALIFICATION_APALIS_POSTGRES_URL: postgresql://postgres:qualification@127.0.0.1:5432/qualification_apalis
+      PRINTSTASH_QUEUE_QUALIFICATION_AZUMS_POSTGRES_URL: postgresql://postgres:qualification@127.0.0.1:5432/qualification_azums
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned production compiler
+        run: rustup toolchain install 1.98.1 --profile minimal --component clippy,rustfmt,llvm-tools-preview
+      - name: Install pinned qualification tools
+        run: |
+          cargo +1.98.1 install cargo-audit --version 0.22.2 --locked
+          cargo +1.98.1 install cargo-deny --version 0.20.2 --locked
+          cargo +1.98.1 install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Create isolated candidate databases
+        env:
+          PGPASSWORD: qualification
+        run: |
+          createdb --host 127.0.0.1 --username postgres qualification_apalis
+          createdb --host 127.0.0.1 --username postgres qualification_azums
+      - name: Check formatting, lints, dependencies, and SQLite contracts
+        working-directory: backend/qualification/queue
+        run: |
+          cargo +1.98.1 fmt --check
+          cargo +1.98.1 clippy --locked --all-targets --all-features -- -D warnings
+          cargo +1.98.1 audit --ignore RUSTSEC-2023-0071
+          cargo +1.98.1 deny --locked check bans licenses sources
+          cargo +1.98.1 test --locked --all-targets -- --test-threads=1
+      - name: Check real PostgreSQL contracts and record native coverage
+        working-directory: backend/qualification/queue
+        run: >-
+          cargo +1.98.1 llvm-cov --locked --all-targets --features postgres-tests
+          --lcov --output-path target/qualification-coverage.lcov -- --test-threads=1
+      - name: Capture sanitized contract and dependency evidence
+        working-directory: backend/qualification/queue
+        env:
+          PGPASSWORD: qualification
+        run: |
+          evidence="$PWD/target/qualification-evidence"
+          mkdir -p "$evidence"
+          dropdb --host 127.0.0.1 --username postgres qualification_apalis
+          dropdb --host 127.0.0.1 --username postgres qualification_azums
+          createdb --host 127.0.0.1 --username postgres qualification_apalis
+          createdb --host 127.0.0.1 --username postgres qualification_azums
+          for candidate in apalis azums; do
+            PRINTSTASH_QUEUE_QUALIFICATION_CANDIDATE="$candidate" \
+            PRINTSTASH_QUEUE_QUALIFICATION_DATABASE=sqlite \
+            PRINTSTASH_QUEUE_QUALIFICATION_ROOT="$evidence/sqlite-$candidate" \
+            cargo +1.98.1 run --quiet --locked --bin queue-qualification \
+              > "$evidence/sqlite-$candidate.log"
+          done
+          PRINTSTASH_QUEUE_QUALIFICATION_CANDIDATE=apalis \
+          PRINTSTASH_QUEUE_QUALIFICATION_DATABASE=postgres \
+          PRINTSTASH_QUEUE_QUALIFICATION_POSTGRES_URL="$PRINTSTASH_QUEUE_QUALIFICATION_APALIS_POSTGRES_URL" \
+          PRINTSTASH_QUEUE_QUALIFICATION_ROOT="$evidence/postgres-apalis" \
+          cargo +1.98.1 run --quiet --locked --bin queue-qualification \
+            > "$evidence/postgres-apalis.log"
+          PRINTSTASH_QUEUE_QUALIFICATION_CANDIDATE=azums \
+          PRINTSTASH_QUEUE_QUALIFICATION_DATABASE=postgres \
+          PRINTSTASH_QUEUE_QUALIFICATION_POSTGRES_URL="$PRINTSTASH_QUEUE_QUALIFICATION_AZUMS_POSTGRES_URL" \
+          PRINTSTASH_QUEUE_QUALIFICATION_ROOT="$evidence/postgres-azums" \
+          cargo +1.98.1 run --quiet --locked --bin queue-qualification \
+            > "$evidence/postgres-azums.log"
+          cargo +1.98.1 metadata --locked --format-version 1 > "$evidence/cargo-metadata.json"
+          cargo +1.98.1 tree --locked --all-features > "$evidence/cargo-tree.txt"
+          {
+            rustc +1.98.1 --version --verbose
+            cargo +1.98.1 audit --version
+            cargo +1.98.1 deny --version
+            cargo +1.98.1 llvm-cov --version
+          } > "$evidence/tool-versions.txt"
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: queue-qualification-evidence
+          path: |
+            backend/qualification/queue/target/qualification-coverage.lcov
+            backend/qualification/queue/target/qualification-evidence/
+          if-no-files-found: error
+
+  import-benchmark:
+    name: Controlled import comparison (${{ matrix.database }}, ${{ matrix.cpus }} CPU)
+    if: github.event_name == 'workflow_dispatch' && inputs.benchmark_imports
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        database: [sqlite, postgres]
+        cpus: [2, 4]
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the committed benchmark revision
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Compare original and immediate-parent release images
+        env:
+          BENCHMARK_PARENT: ${{ inputs.benchmark_parent }}
+        run: >-
+          python3 backend/scripts/bench_matrix.py
+          --head "$GITHUB_SHA" --base "$BENCHMARK_PARENT"
+          --database "${{ matrix.database }}" --cpus "${{ matrix.cpus }}"
+          --output "$RUNNER_TEMP/import-benchmark"
+      - name: Upload sanitized measurements and corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: import-benchmark-evidence-${{ matrix.database }}-${{ matrix.cpus }}cpu
+          path: ${{ runner.temp }}/import-benchmark/evidence/
+          retention-days: 90
+          if-no-files-found: error
+      - name: Preserve the measured release images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: import-benchmark-release-images-${{ matrix.database }}-${{ matrix.cpus }}cpu
+          path: ${{ runner.temp }}/import-benchmark/images/
+          retention-days: 90
+          if-no-files-found: error

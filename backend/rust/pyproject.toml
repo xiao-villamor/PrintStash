@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "printstash-mesh-native"
+version = "0.1.0"
+description = "Native G-code parsing, mesh processing, and previews for PrintStash"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "printstash_mesh_native"
+locked = true

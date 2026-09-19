@@ -68,15 +68,63 @@ const report: StorageInventoryReport = {
 function setup(response = report) {
   return renderApp(<StorageInventoryPanel />, {
     auth: adminSession(),
-    routes: { "GET /api/v1/storage/inventory": () => json(response) },
+    routes: {
+      "GET /api/v1/storage/inventory": () => json(response),
+      "GET /api/v1/storage/inventory/cleanup-opportunities": json([]),
+    },
   });
 }
 
 describe("Storage insights", () => {
+  it("distinguishes a failed cleanup check from an empty result", async () => {
+    renderApp(<StorageInventoryPanel />, {
+      routes: {
+        "GET /api/v1/storage/inventory": json(report),
+        "GET /api/v1/storage/inventory/cleanup-opportunities": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(
+      await screen.findByText(
+        "Cleanup could not be checked. Refresh the measurement to try again.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("No files need cleaning up right now.")).not.toBeInTheDocument();
+  });
+  it("omits empty cleanup actions", async () => {
+    setup();
+    expect(await screen.findByText("No files need cleaning up right now.")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Clean up temporary files" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear derived cache" })).not.toBeInTheDocument();
+  });
+  it("prioritizes library space", async () => {
+    setup({
+      ...report,
+      inventory: {
+        ...report.inventory,
+        unique_owned_bytes: 2 * 1024 ** 3,
+        volumes: [
+          { ...report.inventory.volumes[0], free_bytes: 10 * 1024 ** 3, status: "available" },
+        ],
+      },
+    });
+    expect(await screen.findByText("2 GB")).toBeVisible();
+    expect(screen.getByText("10 GB")).toBeVisible();
+    expect(screen.getByText("Linked files")).not.toBeVisible();
+  });
+  it("keeps the storage summary readable before opening diagnostics", async () => {
+    setup();
+    expect(await screen.findByText("Library files")).toBeVisible();
+    expect(screen.getByText("Growth forecast")).not.toBeVisible();
+    expect(screen.getByText("No files need cleaning up right now.")).toBeVisible();
+    await userEvent.click(screen.getByText("Storage breakdown and diagnostics"));
+    expect(screen.getByText("Growth forecast")).toBeVisible();
+  });
   it("explains unknown capacity", async () => {
     setup();
-    expect(await screen.findByText("Capacity unknown")).toBeVisible();
-    expect(screen.getByText(/2 objects have no recorded size/)).toBeVisible();
+    expect(await screen.findByText("Free space is unknown")).toBeVisible();
+    expect(screen.getByText("Some file sizes are unknown, so usage may be higher.")).toBeVisible();
   });
   it("shows only aggregate unattributed audit evidence", async () => {
     setup({
@@ -106,7 +154,7 @@ describe("Storage insights", () => {
         volumes: [{ ...report.inventory.volumes[0], status: "blocked", free_bytes: 0 }],
       },
     });
-    expect(await screen.findByText("New allocations blocked")).toBeVisible();
+    expect(await screen.findByText("Storage is full — free up space to continue")).toBeVisible();
   });
   it("plots persisted history", async () => {
     setup({
@@ -124,6 +172,7 @@ describe("Storage insights", () => {
         },
       ],
     });
+    await userEvent.click(await screen.findByText("Storage breakdown and diagnostics"));
     expect(
       await screen.findByRole("img", { name: "Recorded owned storage over time" }),
     ).toBeVisible();
@@ -161,13 +210,25 @@ describe("Storage insights", () => {
       },
     });
 
+    await userEvent.click(await screen.findByText("Storage breakdown and diagnostics"));
     expect(await view.findByText("backup · 0 GB")).toBeVisible();
     expect(await view.findByText(/Private collection name/)).toBeVisible();
   });
   it("requires confirmation for staging cleanup", async () => {
-    setup();
+    const view = setup();
+    view.route({
+      "GET /api/v1/storage/inventory/cleanup-opportunities": json([
+        {
+          owner: "staging",
+          candidate_count: 1,
+          candidate_bytes: 1024,
+          action: "cleanup_staging",
+          available: true,
+        },
+      ]),
+    });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Clean up expired staging" }));
+    await user.click(await screen.findByRole("button", { name: "Clean up temporary files" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Uncertain files are retained");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

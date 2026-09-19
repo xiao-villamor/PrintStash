@@ -15,8 +15,10 @@ test.describe("vault", () => {
     await uploadGcodeModel(page, name);
 
     // Search narrows the grid to the matching model and reflects in the URL.
-    await page.getByRole("textbox", { name: "Search models" }).fill(name);
+    await page.getByRole("searchbox", { name: "Search library" }).fill(name);
     await expect(page).toHaveURL(/[?&]q=/);
+    await expect(page.locator("[data-search-suggestion]").filter({ hasText: name })).toBeVisible();
+    await expect(modelCard(page, name)).toHaveCount(1);
     await expect(modelCard(page, name)).toBeVisible();
 
     // List / grid toggle (title-labelled buttons) both keep the result.
@@ -89,10 +91,13 @@ test.describe("vault", () => {
     await expect(modelCard(page, plain)).toHaveCount(0);
   });
 
-  test("a meshless search term yields the empty state", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("textbox", { name: "Search models" }).fill(`no-such-model-${Date.now()}`);
+  test("an unmatched keyword yields the empty state", async ({ page }) => {
+    await uploadGcodeModel(page, `e2e-empty-search-${Date.now()}`);
+    // FTS matches any punctuation-separated term: "no-such-model" still
+    // matches "model". Use a single absent token against a populated library.
+    await page.getByRole("searchbox", { name: "Search library" }).fill(`unmatched${Date.now()}`);
     await expect(page).toHaveURL(/[?&]q=/);
     await expect(page.locator('a[href^="/models/"]')).toHaveCount(0);
+    await expect(page.getByText("No models found", { exact: true })).toBeVisible();
   });
 });

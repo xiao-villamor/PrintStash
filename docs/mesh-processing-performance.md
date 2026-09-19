@@ -101,6 +101,11 @@ cached reads, and does not certify a Raspberry Pi or NAS processor.
 
 ## Partial Rust implementation assessment
 
+Preview rasterization now has a separate optional Rust extension. Its build
+instructions and full-archive comparison method are documented in
+[import performance](import-performance.md). The proximity experiment below
+concerns similarity verification, which still uses the existing implementation.
+
 A standalone Rust prototype of the spatial-tree/point-to-triangle kernel was
 compiled with Rust 1.75 at optimization level 3. Its source is retained in
 `backend/tests/fakes/proximity_probe.rs`; it is a research executable, not

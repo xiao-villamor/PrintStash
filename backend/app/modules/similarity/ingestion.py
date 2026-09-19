@@ -30,15 +30,30 @@ def after_commit(
     sessions: SessionFactory,
     file_id: int,
     actor_id: int | None,
-    result: FingerprintResult,
+    result: FingerprintResult | None,
 ) -> str:
     with sessions.scoped_session() as session:
         file = session.get(File, file_id)
         if file is None:
             return "stale"
-        state = publish_precomputed(session, file, result)
         actor = session.get(User, actor_id) if actor_id else None
-        if state in ("ready", "partial") and actor is not None and actor.is_active:
+        if result is None:
+            config = read_settings(session)
+            if (
+                not config.enabled
+                or not config.fingerprint_on_ingest
+                or actor is None
+                or not actor.is_active
+            ):
+                return "skipped"
+            state = "pending"
+        else:
+            state = publish_precomputed(session, file, result)
+        if (
+            state in ("ready", "partial", "pending")
+            and actor is not None
+            and actor.is_active
+        ):
             try:
                 start(
                     session,
@@ -46,6 +61,7 @@ def after_commit(
                     scope="models",
                     ids=[file.model_id],
                     trigger="ingest",
+                    ingest_file_id=file.id if result is None else None,
                 )
             except OperationError as exc:
                 if exc.code not in (
@@ -54,4 +70,6 @@ def after_commit(
                     "similarity_scope_unavailable",
                 ):
                     raise
+                if state == "pending" and exc.code != "similarity_run_active":
+                    return "skipped"
         return state

@@ -550,6 +550,25 @@ describe("ModelBrowser", () => {
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("name-asc");
     });
 
+    it("restores the selected relevance ordering for Model browse", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
+      await screen.findByText("Benchy");
+      await user.click(sortButton());
+      await user.click(screen.getAllByRole("menuitem", { name: "Relevance" }).at(-1)!);
+      expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
+      await waitFor(() =>
+        expect(
+          app
+            .requests()
+            .some(
+              (request) =>
+                request.url.includes("sort=relevance") && request.url.includes("q=benchy"),
+            ),
+        ).toBe(true),
+      );
+    });
+
     it("falls back to the newest sort when storage holds something unknown", async () => {
       window.localStorage.setItem("ps-vault-sort", "not-a-sort");
 

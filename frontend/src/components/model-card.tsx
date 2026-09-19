@@ -405,6 +405,11 @@ function ModelCardInner({
           {/* Footer chips */}
           <div className="px-3 pb-3 mt-auto flex items-end justify-between gap-2 border-t border-border pt-2">
             <div className="flex flex-wrap gap-1.5 min-w-0">
+              {model.enrichment_pending && (
+                <span className="text-xs text-muted-foreground">
+                  {uiText("Preparing previews and details")}
+                </span>
+              )}
               {model.collection && (
                 <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
                   {model.collection}

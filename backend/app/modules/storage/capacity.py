@@ -90,6 +90,18 @@ class CapacityResource:
     def probe(self) -> int | None:
         return self.measure()[0]
 
+    @classmethod
+    def for_budget(
+        cls, domain_id: str, required_bytes: int, available_bytes: int, *, role: str
+    ) -> CapacityResource:
+        """An application ceiling, paired with a separate physical allocation.
+
+        Volume headroom belongs to the physical resource. Charging it against
+        this ceiling would make a 100 MiB application budget unusable whenever
+        the host reserves 1 GiB of free disk space.
+        """
+        return cls(f"budget:{domain_id}", required_bytes, available_bytes, role)
+
     def measure(self) -> tuple[int | None, int | None]:
         if self.path is None:
             return self.available_bytes, self.total_bytes
@@ -312,7 +324,12 @@ class CapacityManager:
                     )
                 warnings = []
                 for domain, available in free.items():
-                    decision = self.policy.evaluate(
+                    policy = (
+                        CapacityPolicy()
+                        if domain.startswith("budget:")
+                        else self.policy
+                    )
+                    decision = policy.evaluate(
                         requested[domain],
                         available_bytes=available,
                         reserved_bytes=totals[domain] - requested[domain],

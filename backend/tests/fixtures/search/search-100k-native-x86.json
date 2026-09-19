@@ -1,0 +1,446 @@
+{
+  "architecture": "x86_64",
+  "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "passages": 100000,
+  "distinct_texts": 32,
+  "corpus_sha256": "5b958b3beff3fcd69525bc9e5f31ba5915e9af32753737a6d24bb054b4ab55a8",
+  "queries_sha256": "2264e82dcbc6e024c3d1ae25d268189c5e776649c8d68ec828c91ed6dde297e0",
+  "query_count": 32,
+  "space": {
+    "model_key": "bge-small-en-v1.5",
+    "model_revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "dimension": 384,
+    "modality": "text",
+    "render_recipe": "{\"encoder_manifest_sha256\":\"4307020435dce08ac5b2671d4988301df4dc99f748cf52ba8e0cd6ed50994de7\",\"max_input_characters\":16384,\"passage_version\":1,\"recipe\":\"semantic-text-v1\"}",
+    "provider": "onnx_cpu",
+    "profile": "semantic_text",
+    "normalization": "l2",
+    "query_prefix": "Represent this sentence for searching relevant passages: ",
+    "document_prefix": "",
+    "model_repo": "BAAI/bge-small-en-v1.5",
+    "alignment_identity": null,
+    "provider_config_hash": null
+  },
+  "backend": "sqlite_vec",
+  "onnx_threads": 1,
+  "query_vectors_cached": false,
+  "seed_seconds": 66.93341123696882,
+  "cold_request_seconds": 2.599470896006096,
+  "cold_leg_errors": {},
+  "warmup_after_cold_seconds": 0.00971298199146986,
+  "p50_seconds": 1.7796084084839094,
+  "p95_seconds": 2.319633504154626,
+  "budget_seconds": 0.3,
+  "budget_passed": false,
+  "observations": [
+    {
+      "query_id": "q01",
+      "seconds": 1.789941402967088,
+      "components": {
+        "embedding_seconds": 0.04569441598141566,
+        "vector_seconds": 1.4168208760092966,
+        "fusion_seconds": 0.006091815012041479,
+        "model_materialization_seconds": 0.031023529008962214
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q02",
+      "seconds": 1.6639245719998144,
+      "components": {
+        "embedding_seconds": 0.050941977999173105,
+        "vector_seconds": 1.347082982014399,
+        "fusion_seconds": 0.005860186007339507,
+        "model_materialization_seconds": 0.032521291985176504
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q03",
+      "seconds": 2.3164103670278564,
+      "components": {
+        "embedding_seconds": 0.05864303302951157,
+        "vector_seconds": 1.3419272609753534,
+        "fusion_seconds": 0.005702256981749088,
+        "model_materialization_seconds": 0.026904560043476522
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q04",
+      "seconds": 1.7083075879490934,
+      "components": {
+        "embedding_seconds": 0.04456081800162792,
+        "vector_seconds": 1.34089558001142,
+        "fusion_seconds": 0.004385148000437766,
+        "model_materialization_seconds": 0.025014045007992536
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q05",
+      "seconds": 1.7281012809835374,
+      "components": {
+        "embedding_seconds": 0.04996229795506224,
+        "vector_seconds": 1.3809528370038606,
+        "fusion_seconds": 0.005875575006939471,
+        "model_materialization_seconds": 0.030143786978442222
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q06",
+      "seconds": 2.0062762550078332,
+      "components": {
+        "embedding_seconds": 0.04084815294481814,
+        "vector_seconds": 1.4504743479774334,
+        "fusion_seconds": 0.006017140985932201,
+        "model_materialization_seconds": 0.030293979973066598
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q07",
+      "seconds": 1.710206430987455,
+      "components": {
+        "embedding_seconds": 0.04280712403124198,
+        "vector_seconds": 1.3974846450146288,
+        "fusion_seconds": 0.005244961997959763,
+        "model_materialization_seconds": 0.026324360980652273
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q08",
+      "seconds": 2.088982152985409,
+      "components": {
+        "embedding_seconds": 0.0456555150449276,
+        "vector_seconds": 1.3862953929929063,
+        "fusion_seconds": 0.0064993310370482504,
+        "model_materialization_seconds": 0.0291581719648093
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q09",
+      "seconds": 1.7046163430204615,
+      "components": {
+        "embedding_seconds": 0.049294008989818394,
+        "vector_seconds": 1.3903871149523184,
+        "fusion_seconds": 0.006161659024655819,
+        "model_materialization_seconds": 0.027281254006084055
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q10",
+      "seconds": 1.912303245975636,
+      "components": {
+        "embedding_seconds": 0.04457521199947223,
+        "vector_seconds": 1.3549462860100903,
+        "fusion_seconds": 0.006060382991563529,
+        "model_materialization_seconds": 0.026708211982622743
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q11",
+      "seconds": 2.2895979399909265,
+      "components": {
+        "embedding_seconds": 0.051770206016954035,
+        "vector_seconds": 1.4152892449637875,
+        "fusion_seconds": 0.005772780976258218,
+        "model_materialization_seconds": 0.02522324403980747
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q12",
+      "seconds": 1.7215070640086196,
+      "components": {
+        "embedding_seconds": 0.041258251992985606,
+        "vector_seconds": 1.3875484400196,
+        "fusion_seconds": 0.006968660047277808,
+        "model_materialization_seconds": 0.024772826000116765
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q13",
+      "seconds": 2.5727939160424285,
+      "components": {
+        "embedding_seconds": 0.05571188899921253,
+        "vector_seconds": 1.4249884089804254,
+        "fusion_seconds": 0.25453638896578923,
+        "model_materialization_seconds": 0.0301386890350841
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q14",
+      "seconds": 1.7165431109606288,
+      "components": {
+        "embedding_seconds": 0.04813244199613109,
+        "vector_seconds": 1.3881674539879896,
+        "fusion_seconds": 0.006397020013537258,
+        "model_materialization_seconds": 0.03457220597192645
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q15",
+      "seconds": 1.7911280950065702,
+      "components": {
+        "embedding_seconds": 0.04475663404446095,
+        "vector_seconds": 1.474453842965886,
+        "fusion_seconds": 0.00487524998607114,
+        "model_materialization_seconds": 0.024426122021395713
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q16",
+      "seconds": 2.2961499000084586,
+      "components": {
+        "embedding_seconds": 0.0523509900085628,
+        "vector_seconds": 1.3801732999854721,
+        "fusion_seconds": 0.005874368012882769,
+        "model_materialization_seconds": 0.02871086000232026
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q17",
+      "seconds": 2.261577569996007,
+      "components": {
+        "embedding_seconds": 0.045844904030673206,
+        "vector_seconds": 1.3732204900006764,
+        "fusion_seconds": 0.006484863988589495,
+        "model_materialization_seconds": 0.026120584981981665
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q18",
+      "seconds": 1.6778868510155007,
+      "components": {
+        "embedding_seconds": 0.04481546103488654,
+        "vector_seconds": 1.3754579490050673,
+        "fusion_seconds": 0.005861915007699281,
+        "model_materialization_seconds": 0.02516184898559004
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q19",
+      "seconds": 1.704375249973964,
+      "components": {
+        "embedding_seconds": 0.05856942303944379,
+        "vector_seconds": 1.3731164339696988,
+        "fusion_seconds": 0.006721820973325521,
+        "model_materialization_seconds": 0.029364137968514115
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q20",
+      "seconds": 2.082789051986765,
+      "components": {
+        "embedding_seconds": 0.05596232699463144,
+        "vector_seconds": 1.4178987439954653,
+        "fusion_seconds": 0.00606111902743578,
+        "model_materialization_seconds": 0.028345333004835993
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q21",
+      "seconds": 2.2694487730041146,
+      "components": {
+        "embedding_seconds": 0.05330389796290547,
+        "vector_seconds": 1.3603430449729785,
+        "fusion_seconds": 0.00647288904292509,
+        "model_materialization_seconds": 0.0261652700137347
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q22",
+      "seconds": 1.8523131219553761,
+      "components": {
+        "embedding_seconds": 0.04450221901061013,
+        "vector_seconds": 1.4804588480037637,
+        "fusion_seconds": 0.006436327996198088,
+        "model_materialization_seconds": 0.025450629997067153
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q23",
+      "seconds": 1.5908856239984743,
+      "components": {
+        "embedding_seconds": 0.06710001797182485,
+        "vector_seconds": 1.4270803059916943,
+        "fusion_seconds": 8.092401549220085e-05,
+        "model_materialization_seconds": 0.028666449012234807
+      },
+      "items": 10,
+      "expected_text_in_top10": false
+    },
+    {
+      "query_id": "q24",
+      "seconds": 1.5358393149799667,
+      "components": {
+        "embedding_seconds": 0.06876342097530141,
+        "vector_seconds": 1.3699037629994564,
+        "fusion_seconds": 7.434998406097293e-05,
+        "model_materialization_seconds": 0.02669906400842592
+      },
+      "items": 10,
+      "expected_text_in_top10": false
+    },
+    {
+      "query_id": "q25",
+      "seconds": 2.323572893976234,
+      "components": {
+        "embedding_seconds": 0.0626058399793692,
+        "vector_seconds": 1.4512160170124844,
+        "fusion_seconds": 0.005918580980505794,
+        "model_materialization_seconds": 0.02954366203630343
+      },
+      "items": 10,
+      "expected_text_in_top10": false
+    },
+    {
+      "query_id": "q26",
+      "seconds": 1.7558304619742557,
+      "components": {
+        "embedding_seconds": 0.0626193750067614,
+        "vector_seconds": 1.359006222046446,
+        "fusion_seconds": 7.403799099847674e-05,
+        "model_materialization_seconds": 0.2647737950319424
+      },
+      "items": 10,
+      "expected_text_in_top10": false
+    },
+    {
+      "query_id": "q27",
+      "seconds": 1.769275414000731,
+      "components": {
+        "embedding_seconds": 0.04615836002631113,
+        "vector_seconds": 1.4577302699908614,
+        "fusion_seconds": 0.00580999901285395,
+        "model_materialization_seconds": 0.02509936800925061
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q28",
+      "seconds": 1.6610788009711541,
+      "components": {
+        "embedding_seconds": 0.04857881698990241,
+        "vector_seconds": 1.3353583879652433,
+        "fusion_seconds": 0.007657693000510335,
+        "model_materialization_seconds": 0.028627726947888732
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q29",
+      "seconds": 1.6689975959598087,
+      "components": {
+        "embedding_seconds": 0.050202044018078595,
+        "vector_seconds": 1.3511582630453631,
+        "fusion_seconds": 0.006303119007498026,
+        "model_materialization_seconds": 0.024748354975599796
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q30",
+      "seconds": 2.0217890379717574,
+      "components": {
+        "embedding_seconds": 0.045130304992198944,
+        "vector_seconds": 1.4309450750006363,
+        "fusion_seconds": 0.25268866698024794,
+        "model_materialization_seconds": 0.03431279998039827
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q31",
+      "seconds": 1.7379585809540004,
+      "components": {
+        "embedding_seconds": 0.056190335017163306,
+        "vector_seconds": 1.3769970879657194,
+        "fusion_seconds": 0.00648596795508638,
+        "model_materialization_seconds": 0.025657297985162586
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    },
+    {
+      "query_id": "q32",
+      "seconds": 1.863528708985541,
+      "components": {
+        "embedding_seconds": 0.04476941894972697,
+        "vector_seconds": 1.4286958730081096,
+        "fusion_seconds": 0.006226480007171631,
+        "model_materialization_seconds": 0.02556888497201726
+      },
+      "items": 10,
+      "expected_text_in_top10": true
+    }
+  ],
+  "processes": {
+    "2281583": {
+      "peak_sampled_rss_bytes": 264486912,
+      "cpu_seconds": 143.9
+    },
+    "2281976": {
+      "peak_sampled_rss_bytes": 399577088,
+      "cpu_seconds": 4.0
+    }
+  },
+  "peak_rss_kib": 270372,
+  "child_peak_rss_kib": 270372,
+  "cpu_seconds": 138.4570938,
+  "wall_seconds": 134.41027592500905,
+  "measurement_context": {
+    "valid_native_100k_measurement": false,
+    "native_rows_observed_after_run": 22,
+    "reason": "Seed factory commits allowed background repair to mark the native derivative ready before direct bulk fixture insertion. The original harness verified durable cardinality and ready state but omitted native cardinality. Timings are retained as invalid native-scale evidence; the corrected harness explicitly repopulates and verifies both counts."
+  }
+}

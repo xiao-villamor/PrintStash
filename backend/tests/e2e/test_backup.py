@@ -18,6 +18,7 @@ from sqlmodel import delete
 
 from app.db.models import File, Metadata, Model
 from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
+from tests.ingestion_work import drain_sources
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
@@ -33,6 +34,7 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
     assert up.status_code == 202, up.text
     job_id = up.json()["job_id"]
     for _ in range(50):
+        await drain_sources()
         status = (
             await api.get(f"/api/v1/ingest/jobs/{job_id}", headers=headers)
         ).json()

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import unicodedata
 import uuid
-import zipfile
 from collections.abc import Callable, Mapping, Set
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
-from typing import BinaryIO, cast
+from pathlib import Path
+from typing import ParamSpec, TypeVar
 
-from .storage import stream_to_path
+from .native_archive import kernel
 
 
 class ArchivePolicyError(ValueError):
@@ -46,20 +44,26 @@ class ArchiveEntry:
 
 def safe_entry_name(name: str) -> bool:
     """Reject absolute paths, drive letters, directories, and traversal."""
-    if not name or name.endswith(("/", "\\")):
-        return False
-    if name.startswith(("/", "\\")):
-        return False
-    if len(name) > 2 and name[1] == ":":
-        return False
-    path = PurePosixPath(name.replace("\\", "/"))
-    return not path.is_absolute() and ".." not in path.parts
+    return kernel().safe_entry_name(name)
 
 
 def safe_subdir(relative_name: str) -> str:
     """Return the validated POSIX directory part, or an empty root path."""
-    parent = PurePosixPath(relative_name.replace("\\", "/")).parent
-    return "" if str(parent) in (".", "") else str(parent)
+    return kernel().safe_subdir(relative_name)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _policy_call(call: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    try:
+        return call(*args, **kwargs)
+    except ValueError as exc:
+        code = str(exc)
+        if code.startswith("archive_"):
+            raise ArchivePolicyError(code) from exc
+        raise
 
 
 def inspect_archive(
@@ -70,58 +74,19 @@ def inspect_archive(
     image_suffixes: Set[str],
 ) -> list[ArchiveEntry]:
     """List supported entries while enforcing ZIP bomb and path policies."""
-    entries: list[ArchiveEntry] = []
-    try:
-        with zipfile.ZipFile(path) as archive:
-            infos = archive.infolist()
-            if len(infos) > limits.max_entries:
-                raise ArchivePolicyError("archive_too_many_entries")
-            central_size = max(path.stat().st_size - int(archive.start_dir), 0)
-            if central_size > limits.max_central_directory_bytes:
-                raise ArchivePolicyError("archive_too_large")
-
-            total = 0
-            normalized_names: set[str] = set()
-            for index, info in enumerate(infos):
-                normalized = unicodedata.normalize(
-                    "NFC", info.filename.replace("\\", "/")
-                )
-                if len(normalized.encode("utf-8")) > limits.max_path_bytes:
-                    raise ArchivePolicyError("archive_path_too_deep")
-                if len(PurePosixPath(normalized).parts) > limits.max_depth + 1:
-                    raise ArchivePolicyError("archive_path_too_deep")
-                folded = normalized.casefold()
-                if folded in normalized_names:
-                    raise ArchivePolicyError("archive_duplicate_entry")
-                normalized_names.add(folded)
-
-                if not info.is_dir() and not safe_entry_name(info.filename):
-                    raise ArchivePolicyError("archive_unsafe_entry")
-                if info.is_dir():
-                    continue
-                if info.file_size > limits.max_entry_bytes:
-                    raise ArchivePolicyError("archive_entry_too_large")
-                total += info.file_size
-                if total > limits.max_total_bytes:
-                    raise ArchivePolicyError("archive_too_large")
-
-                suffix = Path(info.filename).suffix.lower()
-                file_type = file_types.get(suffix)
-                is_image = suffix in image_suffixes
-                if file_type is None and not is_image:
-                    continue
-                entries.append(
-                    ArchiveEntry(
-                        entry_id=f"{index}:{info.CRC:08x}:{info.file_size}",
-                        name=info.filename,
-                        size_bytes=info.file_size,
-                        file_type=file_type,
-                        is_image=is_image,
-                    )
-                )
-    except zipfile.BadZipFile as exc:
-        raise ArchivePolicyError("archive_invalid") from exc
-    return entries
+    native_entries = _policy_call(
+        kernel().inspect_archive,
+        path,
+        limits.max_entries,
+        limits.max_entry_bytes,
+        limits.max_total_bytes,
+        limits.max_central_directory_bytes,
+        limits.max_path_bytes,
+        limits.max_depth,
+        dict(file_types),
+        set(image_suffixes),
+    )
+    return [ArchiveEntry(*entry) for entry in native_entries]
 
 
 def extract_selected(
@@ -141,26 +106,58 @@ def extract_selected(
         return f"{uuid.uuid4().hex}{suffix}"
 
     make_name: Callable[[str], str] = name_factory or default_name
+    archive = _policy_call(kernel().NativeArchive, path)
     try:
-        with zipfile.ZipFile(path) as archive:
-            for info in archive.infolist():
-                if info.filename not in wanted or info.is_dir():
-                    continue
-                if not safe_entry_name(info.filename):
-                    raise ArchivePolicyError("archive_unsafe_entry")
-                if info.file_size > max_entry_bytes:
-                    raise ArchivePolicyError("archive_entry_too_large")
-                suffix = Path(info.filename).suffix.lower()
-                if suffix not in importable_suffixes:
-                    continue
-                staged = staging_dir / make_name(suffix)
-                with archive.open(info) as source:
-                    stream_to_path(
-                        cast(BinaryIO, source), staged, max_bytes=max_entry_bytes
-                    )
-                extracted.append((staged, info.filename.replace("\\", "/")))
+        selected = _policy_call(
+            archive.selected_entries,
+            list(wanted),
+            max_entry_bytes,
+            set(importable_suffixes),
+        )
+        for index, suffix, source_name in selected:
+            staged = staging_dir / make_name(suffix)
+            _policy_call(archive.extract_to, index, staged, max_entry_bytes)
+            extracted.append((staged, source_name))
     except Exception:
         for staged, _name in extracted:
             staged.unlink(missing_ok=True)
         raise
+    finally:
+        archive.close()
     return extracted
+
+
+def iter_selected(
+    path: Path,
+    names: list[str],
+    *,
+    staging_dir: Path,
+    max_entry_bytes: int,
+    importable_suffixes: Set[str],
+):
+    """Yield one temporary selected entry; release it before extracting the next.
+
+    The caller first applies package-wide inspection limits. This iterator owns
+    its temporary file until the consumer moves it or advances/closes the stream.
+    It retains one ZIP directory and one expanded entry, regardless of archive size.
+    """
+    archive = _policy_call(kernel().NativeArchive, path)
+    try:
+        for name in dict.fromkeys(names):
+            selected = _policy_call(
+                archive.selected_entry,
+                name,
+                max_entry_bytes,
+                set(importable_suffixes),
+            )
+            if selected is None:
+                continue
+            index, suffix, source_name = selected
+            staged = staging_dir / f"{uuid.uuid4().hex}{suffix}"
+            try:
+                _policy_call(archive.extract_to, index, staged, max_entry_bytes)
+                yield staged, source_name
+            finally:
+                staged.unlink(missing_ok=True)
+    finally:
+        archive.close()
