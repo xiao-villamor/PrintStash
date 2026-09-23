@@ -103,7 +103,7 @@ test.describe("saved views", () => {
     // The star button is a sibling of the card's `<a>`, not a descendant of it
     // (both live under the same `<article>`) — scope through the article so
     // `getByLabel` can actually find it.
-    const starredArticle = page.locator("article").filter({ has: modelCard(page, starred) });
+    const starredArticle = modelCard(page, starred).locator("xpath=ancestor::article");
     await starredArticle.getByLabel(`Add ${starred} to favorites`).click();
     await expect(starredArticle.getByLabel(`Remove ${starred} from favorites`)).toBeVisible();
 
