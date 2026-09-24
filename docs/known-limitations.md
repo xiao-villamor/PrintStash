@@ -123,6 +123,9 @@ manufacturing platform.
 - The lite image intentionally omits browser-assisted imports and STEP/STP
   tessellation. It still includes NumPy, Pillow, and Trimesh, so STL/OBJ/3MF
   thumbnail generation does not depend on Chromium, OpenGL, or Cascadio.
+- DXF source files are stored, downloaded, and included in backups, but do not
+  have a generated thumbnail or in-browser drawing preview. CNC toolpaths and
+  machine control are not supported.
 
 ## Data And Metadata
 

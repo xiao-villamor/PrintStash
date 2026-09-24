@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/xiao-villamor/PrintStash/issues</Support>
   <Project>https://www.printstash.org</Project>
-  <Overview>Browser interface for PrintStash, an open-source self-hosted 3D print library and G-code vault. Browse, search, tag, organize, deduplicate, and preview STL, 3MF, OBJ, STEP/STP, G-code, and BGCODE files from any device on your network. Compare G-code revisions and slicer settings, record known-good or failed outcomes, manage shared NAS folders and collection permissions, review print history and cost, and send files to supported printers. This is the container you open in your browser. Install PrintStash-API first; both containers must use the same user-defined Docker network named "printstash".</Overview>
+  <Overview>Deprecated two-container template. For new installations use the PrintStash template with the unified image. Existing users should follow the migration guide before switching. Browser interface for PrintStash, an open-source self-hosted 3D print library and G-code vault. Browse, search, tag, organize, deduplicate, and preview STL, 3MF, OBJ, STEP/STP, G-code, and BGCODE files from any device on your network. Compare G-code revisions and slicer settings, record known-good or failed outcomes, manage shared NAS folders and collection permissions, review print history and cost, and send files to supported printers. This is the container you open in your browser. Install PrintStash-API first; both containers must use the same user-defined Docker network named "printstash".</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/templates/printstash-frontend.xml</TemplateURL>
@@ -25,7 +25,8 @@
   <Date>2026-06-17</Date>
   <MinVer>6.10</MinVer>
   <License>AGPL-3.0</License>
-  <Requires>Requires the PrintStash-API container running on the same "printstash" Docker network (it must be reachable as hostname "api").</Requires>
+  <Deprecated>true</Deprecated>
+  <Requires>Deprecated: install the unified PrintStash template for new deployments. This legacy frontend requires the PrintStash-API container running on the same "printstash" Docker network (it must be reachable as hostname "api").</Requires>
   <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Port to open PrintStash in your browser." Type="Port" Display="always" Required="true" Mask="false">3000</Config>
   <Config Name="Max upload size" Target="NGINX_CLIENT_MAX_BODY_SIZE" Default="512m" Mode="" Description="nginx client_max_body_size. Match the API VAULT_MAX_UPLOAD_MB (e.g. 512m)." Type="Variable" Display="always" Required="false" Mask="false">512m</Config>
 </Container>

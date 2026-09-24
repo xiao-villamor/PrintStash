@@ -107,6 +107,73 @@ describe("FilesTab", () => {
     expect(screen.getByText(/No source files/)).toBeVisible();
   });
 
+  it("moves only the selected managed source to trash after confirmation", async () => {
+    const onModel = vi.fn<(model: ModelRead) => void>();
+    const result = {
+      ...updatedModel,
+      files: [],
+      trashed_source_files: [{ id: 7, original_filename: "bracket.stl" }],
+    };
+    const view = renderApp(
+      <FilesTab modelId={1} sourceFiles={[artifact]} canEdit onModel={onModel} />,
+      {
+        routes: {
+          "GET /api/v1/tags": json([]),
+          "DELETE /api/v1/models/1/files/7": json(result),
+        },
+      },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for bracket.stl" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Move to trash" }));
+    expect(screen.getByRole("dialog", { name: "Move source file to trash?" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Move to trash" }));
+
+    await waitFor(() => expect(onModel).toHaveBeenCalledWith(result));
+    expect(view.requestsWithMethod("DELETE")).toHaveLength(1);
+  });
+
+  it("offers restore for a trashed source", async () => {
+    const onModel = vi.fn<(model: ModelRead) => void>();
+    const view = renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[]}
+        trashedSourceFiles={[{ id: 7, original_filename: "bracket.stl" }]}
+        canEdit
+        onModel={onModel}
+      />,
+      {
+        routes: {
+          "GET /api/v1/tags": json([]),
+          "POST /api/v1/models/1/files/7/restore": json(updatedModel),
+        },
+      },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Restore" }));
+
+    await waitFor(() => expect(onModel).toHaveBeenCalledWith(updatedModel));
+    expect(view.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("explains why a linked source cannot be removed", async () => {
+    renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[{ ...artifact, is_external: true }]}
+        canEdit
+        onModel={vi.fn<(model: ModelRead) => void>()}
+      />,
+      { routes: { "GET /api/v1/tags": json([]) } },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for bracket.stl" }));
+
+    expect(screen.getByText("Linked source files stay in their Library source.")).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Move to trash" })).not.toBeInTheDocument();
+  });
+
   it("keeps the editor open when saving fails", async () => {
     const view = renderApp(
       <FilesTab

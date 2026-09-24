@@ -106,6 +106,7 @@ describe("isMeshFile", () => {
     ["foo.obj", true],
     ["foo.step", true],
     ["foo.stp", true],
+    ["foo.dxf", true],
     ["FOO.STL", true],
     ["foo.gcode", false],
     ["foo.png", false],

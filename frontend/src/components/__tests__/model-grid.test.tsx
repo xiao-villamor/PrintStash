@@ -463,6 +463,34 @@ describe("ModelBrowser", () => {
   });
 
   describe("collection navigation", () => {
+    it("keeps existing root collections visible beside an imported root", async () => {
+      renderVault({
+        collections: [
+          aCollection({ id: 1, name: "Christine", path: "christine", model_count: 17 }),
+          aCollection({ id: 2, name: "Pegboard", path: "pegboard", model_count: 8 }),
+          aCollection({ id: 3, name: "Models", path: "models", model_count: 0 }),
+        ],
+      });
+
+      const main = await screen.findByRole("main");
+      for (const path of ["christine", "pegboard", "models"]) {
+        expect(main.querySelector(`[data-collection-path="${path}"]`)).toBeVisible();
+      }
+    });
+
+    it("finds an original root after an overlapping import", async () => {
+      renderVault({
+        at: "/?q=christine",
+        collections: [
+          aCollection({ id: 1, name: "Christine", path: "christine", model_count: 17 }),
+          aCollection({ id: 2, name: "Models", path: "models", model_count: 0 }),
+        ],
+      });
+
+      const main = await screen.findByRole("main");
+      expect(within(main).getByRole("button", { name: /Christine/ })).toBeVisible();
+    });
+
     it("opens a collection from its grid card", async () => {
       const user = userEvent.setup();
       renderVault({ collections: [aCollection()] });

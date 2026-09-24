@@ -34,6 +34,7 @@ import {
   type PrintablesSelectedFile,
 } from "./printables-capture.ts";
 import {
+  CaptureCapacityError,
   captureRichFiles,
   type BrowserCaptureFile,
   type CaptureStageRunner,
@@ -292,7 +293,15 @@ const runVaultStage: CaptureStageRunner = (stage: CaptureUploadStage, operation)
         ? "capture_vault_slot_upload_failed"
         : "capture_vault_finalize_failed";
   return runCaptureStage(
-    operation,
+    async (signal) => {
+      try {
+        return await operation(signal);
+      } catch (error) {
+        if (error instanceof CaptureCapacityError)
+          throw new CaptureDiagnosticError(failureCode, error.message);
+        throw error;
+      }
+    },
     timeoutCode,
     failureCode,
     "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
@@ -670,6 +679,35 @@ async function ensureOriginPermissions(origins: string[]) {
     throw new Error("Permission to download the selected source files was not granted.");
 }
 
+async function ensurePrintablesFilePermissions(links: readonly string[]) {
+  const origins = [...new Set(links.map((link) => `${new URL(link).origin}/*`))];
+  const alreadyGranted = await runCaptureStage(
+    () => browser.permissions.contains({ origins }),
+    "capture_permission_contains_timeout",
+    "capture_permission_contains_timeout",
+    "Permission check for Printables files timed out. Attach downloaded files in Pending Imports.",
+    "Printables",
+    "cors_failure",
+  );
+  if (alreadyGranted) return;
+  const granted = await runCaptureStage(
+    () => browser.permissions.request({ origins }),
+    "capture_permission_request_timeout",
+    "capture_permission_request_timeout",
+    "Permission request for Printables files timed out. Attach downloaded files in Pending Imports.",
+    "Printables",
+    "cors_failure",
+  );
+  if (!granted) {
+    throw new CaptureDiagnosticError(
+      "capture_permission_denied",
+      "user_file_required: Permission to download the selected Printables files was not granted. Attach downloaded files in Pending Imports.",
+      "Printables",
+      "cors_failure",
+    );
+  }
+}
+
 async function ensureMetadataPermission(origin: string, provider: "Printables" | "MakerWorld") {
   const origins = [origin];
   const alreadyGranted = await runCaptureStage(
@@ -704,8 +742,6 @@ async function downloadPrintablesCandidate(
   link: string,
   signal?: AbortSignal,
 ): Promise<BrowserCaptureFile> {
-  const origin = `${new URL(link).origin}/*`;
-  await ensureOriginPermission(origin);
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   const response = await fetch(link, {
     credentials: "omit",
@@ -1315,14 +1351,16 @@ captureButton.addEventListener("click", async () => {
         throw new Error("The browser connection expired. Connect PrintStash again.");
       const links = await resolvePrintablesLinks(pendingPrintablesCapture, selected);
       const linksById = new Map(links.map((link) => [link.id, link.url]));
+      const selectedLinks = selected.map((candidate) => {
+        const link = linksById.get(candidate.id);
+        if (!link) throw new Error("Printables link mapping changed.");
+        return { candidate, link };
+      });
+      await ensurePrintablesFilePermissions(selectedLinks.map(({ link }) => link));
       const files = await Promise.all(
-        selected.map((candidate) =>
+        selectedLinks.map(({ candidate, link }) =>
           runCaptureStage(
-            async (signal) => {
-              const link = linksById.get(candidate.id);
-              if (!link) throw new Error("Printables link mapping changed.");
-              return downloadPrintablesCandidate(candidate, link, signal);
-            },
+            (signal) => downloadPrintablesCandidate(candidate, link, signal),
             "capture_download_timeout",
             "capture_download_failed",
             "The selected Printables file could not be downloaded. Attach it manually in Pending Imports.",

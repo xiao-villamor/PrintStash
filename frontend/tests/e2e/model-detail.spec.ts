@@ -19,10 +19,70 @@
 import { expect, test } from "@playwright/test";
 
 import { collectPageProblems, useMockApi } from "./_setup";
+import type { ModelRead } from "../../src/types/models";
 
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("restores a trashed source within its original Model", async ({ page }) => {
+    let removed = false;
+    let original: ModelRead | null = null;
+    const modelBody = () => {
+      if (!original) throw new Error("Mock Model response has not loaded");
+      const model = original;
+      const files = model.files;
+      return removed
+        ? {
+            ...model,
+            files: files.filter((file) => file.id !== 1),
+            trashed_source_files: [{ id: 1, original_filename: "skadis_kitchen-roll_screw.stl" }],
+            thumbnail_url: null,
+          }
+        : { ...model, trashed_source_files: [] };
+    };
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      // SAFETY: the in-repository mock API returns the ModelRead fixture at this URL.
+      original = (await response.json()) as ModelRead;
+      await route.fulfill({ response, json: modelBody() });
+    });
+    await page.route("**/api/v1/models/1/files/1", async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      removed = true;
+      await route.fulfill({ json: modelBody() });
+    });
+    await page.route("**/api/v1/models/1/files/1/restore", async (route) => {
+      expect(route.request().method()).toBe("POST");
+      removed = false;
+      await route.fulfill({ json: modelBody() });
+    });
+
+    await page.goto("/models/1");
+    await page.getByRole("tab", { name: /Files/ }).click();
+    await page.getByRole("button", { name: "Actions for skadis_kitchen-roll_screw.stl" }).click();
+    await page.getByRole("menuitem", { name: "Move to trash" }).click();
+    await page
+      .getByRole("dialog", { name: "Move source file to trash?" })
+      .getByRole("button", { name: "Move to trash" })
+      .click();
+
+    await expect(
+      page.getByText(
+        "No source files for this Model. Revisions and print history remain available.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trashed source files" })).toBeVisible();
+    await page.reload();
+    await page.getByRole("tab", { name: /Revisions/ }).click();
+    await expect(
+      page.getByText("skadis_kitchen-roll_screw_PLA_30m12s.gcode").first(),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: /Files/ }).click();
+    await page.getByRole("button", { name: "Restore" }).click();
+    await expect(page.getByText("skadis_kitchen-roll_screw.stl").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trashed source files" })).toHaveCount(0);
+  });
+
   test("keeps viewer controls reachable inside the phone preview", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
 

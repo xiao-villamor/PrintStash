@@ -58,6 +58,18 @@ describe("parseApiError", () => {
     expect(err.code).toBe("422");
   });
 
+  it("preserves the code from a structured storage-risk conflict", () => {
+    const err = parseApiError(
+      new Error(
+        'HTTP 409: {"detail":{"code":"storage_risk_confirmation_required","tier":"guarded","required_confirmation":"confirm_storage_risk=true"}}',
+      ),
+    );
+
+    expect(err.status).toBe(409);
+    expect(err.code).toBe("storage_risk_confirmation_required");
+    expect(userMessage(err)).toMatch(/confirmation/i);
+  });
+
   it("returns a status-0 'unknown' error for unrecognised input", () => {
     const err = parseApiError("a plain string");
     expect(err.status).toBe(0);
@@ -86,6 +98,32 @@ describe("parseApiError", () => {
   });
 });
 
+describe("provider connection errors", () => {
+  it("explains missing MyMiniFactory application setup", () => {
+    expect(userMessage(new Error('HTTP 503: {"detail":"provider_not_configured"}'))).toMatch(
+      /MyMiniFactory.*server|server.*MyMiniFactory/i,
+    );
+  });
+
+  it("identifies rejected Cults credentials", () => {
+    expect(userMessage(new Error('HTTP 400: {"detail":"provider_auth_failed"}'))).toMatch(
+      /Cults.*credentials|credentials.*Cults/i,
+    );
+  });
+
+  it("explains a temporary provider outage", () => {
+    expect(userMessage(new Error('HTTP 503: {"detail":"provider_retry_exhausted"}'))).toMatch(
+      /provider.*unavailable|provider.*later/i,
+    );
+  });
+
+  it("explains an invalid provider response", () => {
+    expect(userMessage(new Error('HTTP 502: {"detail":"provider_response_invalid"}'))).toMatch(
+      /provider.*response/i,
+    );
+  });
+});
+
 describe("getErrorMessage", () => {
   it("maps known codes to friendly copy", () => {
     expect(getErrorMessage("invalid_credentials")).toBe("Invalid username or password.");
@@ -104,6 +142,14 @@ describe("getErrorMessage", () => {
       "Invalid username or password.",
     );
   });
+
+  it("explains an ownership conflict without claiming the server is unreachable", () => {
+    const message = userMessage(new Error('HTTP 409: {"detail":"storage_ownership_unverified"}'));
+
+    expect(message).toMatch(/ownership/i);
+    expect(message).toMatch(/not deleted/i);
+    expect(message).not.toMatch(/reach(ing)? the server/i);
+  });
 });
 
 describe("localized error recovery", () => {
@@ -114,6 +160,8 @@ describe("localized error recovery", () => {
       expect(getErrorMessage("artifact_upload_expired")).toBe(
         "Esta carga ha caducado. Iníciala de nuevo.",
       );
+      expect(getErrorMessage("storage_ownership_unverified")).toMatch(/almacenamiento/);
+      expect(getErrorMessage("storage_risk_confirmation_required")).toMatch(/confirmar/);
       expect(getErrorMessage("future_backend_code")).toBe(
         "Se ha producido un error al conectar con el servidor. Comprueba que PrintStash esté funcionando e inténtalo de nuevo.",
       );

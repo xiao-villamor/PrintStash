@@ -74,6 +74,58 @@ class TestBrowserCapture:
     rather than the services under it."""
 
     @pytest.mark.asyncio
+    async def test_five_selected_files_reach_pending_imports(
+        self, api, superuser_headers
+    ):
+        source = b"solid five\nendsolid five\n"
+        url = "https://www.printables.com/model/1234-five-files"
+        captured = await api.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=superuser_headers,
+            json={
+                "source_url": url,
+                "capture_source": {
+                    "provider": "printables",
+                    "canonical_url": url,
+                    "source_item_id": "1234",
+                    "source_revision": None,
+                    "adapter_version": "fixture-v1",
+                    "fields": {"title": {"value": "Five files", "origin": "confirmed"}},
+                    "tags": [],
+                },
+                "files": [
+                    {
+                        "id": f"file-{index}",
+                        "filename": f"file-{index}.stl",
+                        "media_type": "model/stl",
+                        "size_bytes": len(source),
+                        "sha256": hashlib.sha256(source).hexdigest(),
+                    }
+                    for index in range(5)
+                ],
+            },
+        )
+        assert captured.status_code == 201, captured.text
+        item_id = captured.json()["item"]["id"]
+        for slot in captured.json()["slots"]:
+            uploaded = await api.put(
+                f"/api/v1/inbox/capture-upload-slots/{slot['id']}",
+                headers={**superuser_headers, "content-type": "model/stl"},
+                content=source,
+            )
+            assert uploaded.status_code == 200, uploaded.text
+        finalized = await api.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize",
+            headers=superuser_headers,
+        )
+        assert finalized.status_code == 200, finalized.text
+        assert finalized.json()["state"] == "review"
+        cancel_after_review = await api.delete(
+            f"/api/v1/inbox/{item_id}/capture-upload", headers=superuser_headers
+        )
+        assert cancel_after_review.status_code == 409, cancel_after_review.text
+
+    @pytest.mark.asyncio
     async def test_preserves_capture_artifact_content(
         self, api, superuser_headers, e2e_db
     ):

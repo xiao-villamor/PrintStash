@@ -27,8 +27,10 @@ from app.api.v1.external_libraries import _to_read
 from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import (
+    Collection,
     ExternalLibrary,
     File,
+    Model,
 )
 from app.db.scopes import live
 from app.modules.administration import runtime_config
@@ -500,6 +502,57 @@ class TestDeleteLibrary:
 
 
 class TestScanNow:
+    def test_scanned_roots_remain_listed_after_overlapping_vault_upload(
+        self, tmp_path: Path, client, db_session: Session, auth_headers: dict
+    ) -> None:
+        """Separate DB rows from API projection when a bulk folder name overlaps."""
+        import trimesh
+
+        use_local_storage(tmp_path)
+        _enable_feature(db_session)
+        nas = tmp_path / "nas"
+        for folder, size in (("Christine", 10), ("Pegboard", 12)):
+            path = nas / folder / "part.stl"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(trimesh.creation.box(extents=(size, 10, 10)).export(file_type="stl"))
+        library = build_external_library(db_session, nas, name="nas")
+        external_library.scan_library(library.id)
+        db_session.expire_all()
+        original_roots = {
+            row.name: row.id
+            for row in db_session.exec(select(Collection).where(Collection.parent_id == None)).all()  # noqa: E711
+        }
+        assert {"Christine", "Pegboard"} <= original_roots.keys()
+        existing = db_session.exec(select(Model).where(Model.name == "part")).all()
+        existing_ids = {row.id for row in existing}
+        existing_file_ids = {row.id for row in _external_files(db_session)}
+
+        uploaded = client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("new.stl", trimesh.creation.box(extents=(14, 10, 10)).export(file_type="stl"), "model/stl")},
+            data={"model_name": "new", "collection": "Models/Christine"},
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = client.get(f"/api/v1/ingest/jobs/{uploaded.json()['job_id']}", headers=auth_headers)
+        assert job.json()["state"] == "completed", job.text
+
+        db_session.expire_all()
+        after_roots = {
+            row.name: row.id
+            for row in db_session.exec(select(Collection).where(Collection.parent_id == None)).all()  # noqa: E711
+        }
+        api_roots = {
+            row["name"]: row["id"]
+            for row in client.get("/api/v1/collections", headers=auth_headers).json()
+            if row["parent_id"] is None
+        }
+        assert {"Christine", "Pegboard", "Models"} <= after_roots.keys()
+        assert api_roots == after_roots
+        assert {name: after_roots[name] for name in original_roots} == original_roots
+        assert existing_ids <= {row.id for row in db_session.exec(select(Model)).all()}
+        assert existing_file_ids <= {row.id for row in _external_files(db_session)}
+
     def test_scan_now_queues_job(
         self, tmp_path: Path, client, db_session: Session, auth_headers: dict
     ) -> None:

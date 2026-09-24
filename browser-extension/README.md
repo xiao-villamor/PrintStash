@@ -65,6 +65,11 @@ manifest grants network access only to loopback addresses up front, while LAN
 and remote Vaults continue to request a per-host permission when connected.
 
 The extension verifies the public PrintStash health endpoint before pairing.
+One selected model capture may include several files; PrintStash reserves their
+bytes separately but counts the selection as one active Pending Import. If a
+transfer fails after slots are created, the extension requests cleanup of that
+unfinished capture. A capacity error in the popup distinguishes a full staging
+area from a staging directory whose free space cannot be measured.
 The one-time code is exchanged for an opaque browser-only credential; the code
 is never retained, and PrintStash stores only its hash. Local extension storage
 contains only the vault URL and that device credential—not a username, API key,

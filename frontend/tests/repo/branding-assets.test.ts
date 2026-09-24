@@ -30,3 +30,15 @@ describe("faviconFor", () => {
     expect(toggle).toContain("/icon-dark.svg?v=2");
   });
 });
+
+describe("Docker icon", () => {
+  it("provides the existing square brand mark as a public PNG", () => {
+    const icon = readFileSync(resolve(root, "public/logo.png"));
+    const extensionIcon = readFileSync(resolve(root, "../browser-extension/icon-128.png"));
+
+    expect(icon.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect(icon.readUInt32BE(16)).toBe(128);
+    expect(icon.readUInt32BE(20)).toBe(128);
+    expect(icon).toEqual(extensionIcon);
+  });
+});

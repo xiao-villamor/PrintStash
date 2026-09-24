@@ -428,7 +428,14 @@ const NO_SAVED_VIEWS: SavedViewRead[] = [];
 // The values each enum-valued filter accepts. The URL is user-editable, so a
 // `?file_type=nonsense` has to be dropped before it reaches a query.
 type StorageKind = NonNullable<ModelListFilters["storage"]>[number];
-const ARTIFACT_FILE_TYPES: readonly ArtifactFileType[] = ["stl", "3mf", "gcode", "obj", "step"];
+const ARTIFACT_FILE_TYPES: readonly ArtifactFileType[] = [
+  "stl",
+  "3mf",
+  "gcode",
+  "obj",
+  "step",
+  "dxf",
+];
 const FILE_REVISION_STATUSES: readonly FileRevisionStatus[] = [
   "known_good",
   "needs_test",

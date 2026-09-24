@@ -42,6 +42,17 @@ interface PreparedCaptureFile {
 }
 
 export type CaptureUploadStage = "slot_create" | "slot_upload" | "slot_finalize";
+
+export class CaptureCapacityError extends Error {
+  constructor(readonly reason: "staging_capacity_exceeded" | "staging_capacity_unavailable") {
+    super(
+      reason === "staging_capacity_unavailable"
+        ? "PrintStash could not measure staging space. Check its staging directory and disk access."
+        : "PrintStash capture capacity is full. Clear completed Pending Imports or free staging space, then retry.",
+    );
+  }
+}
+
 export type CaptureStageRunner = <T>(
   stage: CaptureUploadStage,
   operation: (signal: AbortSignal) => Promise<T>,
@@ -155,6 +166,12 @@ export async function captureRichFiles({
         ...(preparedCover ? { cover: preparedCover.declaration } : {}),
       }),
     });
+    if (created.status === 507) {
+      const detail = await created.json().catch(() => null);
+      if (detail?.detail === "staging_capacity_unavailable")
+        throw new CaptureCapacityError("staging_capacity_unavailable");
+      throw new CaptureCapacityError("staging_capacity_exceeded");
+    }
     if (!created.ok)
       throw new Error(`PrintStash returned ${created.status} while creating upload slots.`);
     return (await created.json()) as CaptureSlotResponse;
@@ -164,41 +181,56 @@ export async function captureRichFiles({
     throw new Error("PrintStash returned invalid capture upload slots.");
   }
 
-  for (const upload of uploads) {
-    const slot = matchingSlot(payload.slots, upload);
-    const uploadSlot = async (signal?: AbortSignal) => {
-      const uploaded = await fetchImpl(
-        `${base}/api/v1/inbox/capture-upload-slots/${encodeURIComponent(slot.id)}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${authorization}`,
-            "Content-Type": upload.declaration.media_type,
+  try {
+    for (const upload of uploads) {
+      const slot = matchingSlot(payload.slots, upload);
+      const uploadSlot = async (signal?: AbortSignal) => {
+        const uploaded = await fetchImpl(
+          `${base}/api/v1/inbox/capture-upload-slots/${encodeURIComponent(slot.id)}`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${authorization}`,
+              "Content-Type": upload.declaration.media_type,
+            },
+            signal,
+            body: upload.file,
           },
+        );
+        if (!uploaded.ok)
+          throw new Error(
+            `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
+          );
+      };
+      await (runStage ? runStage("slot_upload", uploadSlot) : uploadSlot());
+    }
+
+    const finalize = async (signal?: AbortSignal) => {
+      const finalized = await fetchImpl(
+        `${base}/api/v1/inbox/${payload.item.id}/capture-upload-finalize`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${authorization}` },
           signal,
-          body: upload.file,
         },
       );
-      if (!uploaded.ok)
-        throw new Error(
-          `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
-        );
+      if (!finalized.ok)
+        throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
+      return finalized.json();
     };
-    await (runStage ? runStage("slot_upload", uploadSlot) : uploadSlot());
-  }
-
-  const finalize = async (signal?: AbortSignal) => {
-    const finalized = await fetchImpl(
-      `${base}/api/v1/inbox/${payload.item.id}/capture-upload-finalize`,
-      {
-        method: "POST",
+    return await (runStage ? runStage("slot_finalize", finalize) : finalize());
+  } catch (error) {
+    // A failed transfer owns no reviewable capture. Ask the vault to dismiss
+    // the exact item and release any slots already uploaded in this batch.
+    try {
+      await fetchImpl(`${base}/api/v1/inbox/${payload.item.id}/capture-upload`, {
+        method: "DELETE",
         headers: { Authorization: `Bearer ${authorization}` },
-        signal,
-      },
-    );
-    if (!finalized.ok)
-      throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
-    return finalized.json();
-  };
-  return runStage ? runStage("slot_finalize", finalize) : finalize();
+      });
+    } catch {
+      // Preserve the original upload failure. The item remains visible for
+      // manual dismissal if the cleanup request could not reach the vault.
+    }
+    throw error;
+  }
 }

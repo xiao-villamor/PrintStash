@@ -79,6 +79,44 @@ class PurgeConflictError(UnsafeStorageDeleteError):
     """The resource changed or was restored before its purge claim landed."""
 
 
+class SourceFileLifecycleError(ValueError):
+    """A file cannot use the managed source Artifact lifecycle."""
+
+
+def _require_managed_source(file_row: File) -> None:
+    if file_row.file_type == FileType.GCODE:
+        raise SourceFileLifecycleError("source_file_required")
+    if file_row.is_external:
+        raise SourceFileLifecycleError("linked_source_protected")
+
+
+def soft_delete_source_file(
+    session: Session, model: Model, file_row: File, actor: User
+) -> None:
+    """Trash one managed source without changing the Model or its Revisions."""
+    _require_managed_source(file_row)
+    now = utcnow()
+    file_row.deleted_at = now
+    file_row.deleted_by = actor.id
+    if model.thumbnail_file_id == file_row.id:
+        model.thumbnail_file_id = None
+        model.thumbnail_path = None
+    model.updated_at = now
+    session.add(file_row)
+    session.add(model)
+    content_changed(session, "model", [model.id])
+    session.commit()
+
+
+def restore_source_file(session: Session, model: Model, file_row: File) -> None:
+    """Restore a source while keeping purge ownership and tombstone guards."""
+    _require_managed_source(file_row)
+    restore_resource(session, file_row, commit=False)
+    model.updated_at = utcnow()
+    session.add(model)
+    session.commit()
+
+
 class StorageRiskConfirmationRequired(UnsafeStorageDeleteError):
     """A non-Verified backend requires one-shot destructive confirmation."""
 

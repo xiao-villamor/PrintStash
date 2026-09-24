@@ -127,6 +127,35 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_resumable_dxf_upload_persists_the_original_bytes(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session, tmp_path
+    ) -> None:
+        use_local_storage(tmp_path)
+        payload = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
+        request = {
+            **_request(payload),
+            "filename": "drawing.dxf",
+            "media_type": "image/vnd.dxf",
+        }
+        created = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+        assert created.status_code == 201, created.text
+        upload_id = created.json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        finalized = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+        assert finalized.status_code == 200, finalized.text
+        artifact = db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+        assert artifact.file_type == FileType.DXF
+        downloaded = client.get(
+            f"/api/v1/files/{artifact.id}/download", headers=auth_headers
+        )
+        assert downloaded.content == payload
+
     def test_validates_file_types_for_each_upload_purpose(self) -> None:
         upload_api._validate_purpose_file(
             ArtifactUploadCreate(

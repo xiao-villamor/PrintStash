@@ -75,9 +75,17 @@ async def connect_cults(
             session, current_user.id, body.username, body.password
         )
     except ProviderConnectionError as exc:
+        if exc.code == "provider_auth_failed":
+            raise HTTPException(status_code=400, detail=exc.code) from None
+        if exc.code in {"provider_retry_exhausted", "provider_transport_failed"}:
+            raise HTTPException(status_code=503, detail=exc.code) from None
+        if exc.code in {"provider_response_invalid", "provider_request_failed"}:
+            raise HTTPException(
+                status_code=503 if exc.retryable else 502, detail=exc.code
+            ) from None
         raise HTTPException(
             status_code=400, detail="provider_connection_validation_failed"
-        ) from exc
+        ) from None
     session.commit()
     return ProviderConnectionRead(
         provider="cults", connected=True, updated_at=row.updated_at

@@ -741,8 +741,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 className="max-w-full max-h-full object-contain"
               />
             ) : (
-              <div className="flex items-center justify-center text-on-surface-variant">
+              <div className="flex flex-col items-center justify-center gap-2 text-on-surface-variant">
                 <FileText className="h-20 w-20 opacity-20" />
+                {sourceFiles.some((file) => file.file_type === "dxf") && (
+                  <span>
+                    {uiText("DXF preview is not supported yet. Download the original file below.")}
+                  </span>
+                )}
               </div>
             )}
 
@@ -975,6 +980,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <FilesTab
                   modelId={model.id}
                   sourceFiles={sourceFiles}
+                  trashedSourceFiles={model.trashed_source_files ?? []}
                   canEdit={canEditModel}
                   onModel={setModel}
                 />

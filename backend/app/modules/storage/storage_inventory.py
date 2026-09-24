@@ -695,7 +695,7 @@ def history(session: Session, target_ref: str) -> list[dict]:
 
 
 def _history_categories(current: StorageInventory) -> dict[str, int]:
-    artifact_types = {"stl", "3mf", "obj", "step", "gcode", "other"}
+    artifact_types = {"stl", "3mf", "obj", "step", "dxf", "gcode", "other"}
     derived_types = {
         "thumbnail",
         "legacy_thumbnail",

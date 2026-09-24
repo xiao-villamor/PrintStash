@@ -155,6 +155,22 @@ describe("ModelDetail", () => {
       expect(await screen.findByRole("tab", { name: /Files\s*2/ })).toBeInTheDocument();
     });
 
+    it("offers the original DXF download without promising a drawing preview", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        model: aModel({ files: [aFile({ file_type: "dxf", original_filename: "plate.dxf" })] }),
+      });
+
+      expect(
+        await screen.findByText(
+          "DXF preview is not supported yet. Download the original file below.",
+        ),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("tab", { name: /Files/ }));
+      expect(await screen.findByText("plate.dxf")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Download/ })).toBeInTheDocument();
+    });
+
     it("counts the G-code revisions on their tab", async () => {
       renderDetail({
         model: aModel({

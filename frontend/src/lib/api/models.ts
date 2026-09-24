@@ -305,6 +305,17 @@ export function replaceFileTags(
   return sendJson<ModelRead>(`/api/v1/models/${modelId}/files/${fileId}/tags`, "PUT", { tags });
 }
 
+export async function trashSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
+  const path = `/api/v1/models/${modelId}/files/${fileId}`;
+  const res = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
+  invalidateApiCache(path);
+  return handleResponse<ModelRead>(res);
+}
+
+export function restoreSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
+  return sendJson<ModelRead>(`/api/v1/models/${modelId}/files/${fileId}/restore`, "POST", {});
+}
+
 export async function deleteFileRevision(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}/revision`;
   const res = await fetch(getUrl(path), {

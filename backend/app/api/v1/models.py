@@ -78,10 +78,14 @@ from app.modules.library import (
     source_covers,
 )
 from app.modules.library.trash import (
+    PurgeConflictError,
+    SourceFileLifecycleError,
     StorageRiskConfirmationRequired,
     hard_delete_expired_models,
     hard_delete_model,
+    restore_source_file,
     soft_delete_model,
+    soft_delete_source_file,
 )
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
@@ -1495,6 +1499,71 @@ def replace_file_tags(
         current_user=current_user,
         session=session,
     )
+    return _detail_or_404(session, model_id, current_user)
+
+
+def _editable_source_file(
+    session: Session, actor: User, model_id: int, file_id: int
+) -> tuple[Model, File]:
+    model = session.get(Model, model_id)
+    if model is None or model.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    rbac.require_model_collection_role(
+        session, actor, model.collection_id, CollectionRole.EDIT
+    )
+    file_row = session.get(File, file_id)
+    if file_row is None or file_row.model_id != model_id:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    return model, file_row
+
+
+@router.delete(
+    "/{model_id}/files/{file_id}",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Move one managed source Artifact to trash",
+)
+def trash_source_file(
+    model_id: int,
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model, file_row = _editable_source_file(session, current_user, model_id, file_id)
+    if file_row.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    try:
+        soft_delete_source_file(session, model, file_row, current_user)
+    except SourceFileLifecycleError as exc:
+        raise HTTPException(
+            status_code=409 if str(exc) == "linked_source_protected" else 400,
+            detail=str(exc),
+        ) from exc
+    return _detail_or_404(session, model_id, current_user)
+
+
+@router.post(
+    "/{model_id}/files/{file_id}/restore",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Restore one managed source Artifact from trash",
+)
+def restore_source_file_route(
+    model_id: int,
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model, file_row = _editable_source_file(session, current_user, model_id, file_id)
+    if file_row.deleted_at is None:
+        raise HTTPException(status_code=400, detail="file_not_in_trash")
+    try:
+        restore_source_file(session, model, file_row)
+    except SourceFileLifecycleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PurgeConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="storage_cleanup_blocked") from exc
     return _detail_or_404(session, model_id, current_user)
 
 

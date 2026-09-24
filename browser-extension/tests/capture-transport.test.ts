@@ -8,6 +8,82 @@ import {
 } from "../capture-transport.ts";
 
 describe("capture upload-slot transport", () => {
+  it("dismisses an unfinished capture after an upload failure", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          item: { id: 44 },
+          slots: [
+            {
+              id: "slot-a",
+              role: "file",
+              source_file_id: "part",
+              filename: "part.stl",
+              media_type: "model/stl",
+              size_bytes: 1,
+              sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(
+      captureRichFiles({
+        fetchImpl,
+        vault: "https://prints.example.com",
+        authorization: "credential",
+        sourceUrl: "https://www.printables.com/model/9",
+        captureSource: {
+          provider: "printables",
+          canonical_url: "https://www.printables.com/model/9",
+          source_item_id: "9",
+          source_revision: null,
+          adapter_version: "browser-visible-v1",
+          tags: [],
+          fields: {},
+        },
+        files: [
+          { id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" },
+        ],
+      }),
+    ).rejects.toThrow("while uploading part.stl");
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "https://prints.example.com/api/v1/inbox/44/capture-upload",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it.each([
+    ["staging_capacity_exceeded", "capture capacity is full"],
+    ["staging_capacity_unavailable", "could not measure staging space"],
+  ])("explains the server's %s response", async (detail, message) => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({ detail }, { status: 507 }));
+    await expect(
+      captureRichFiles({
+        fetchImpl,
+        vault: "https://prints.example.com",
+        authorization: "credential",
+        sourceUrl: "https://www.printables.com/model/9",
+        captureSource: {
+          provider: "printables",
+          canonical_url: "https://www.printables.com/model/9",
+          source_item_id: "9",
+          source_revision: null,
+          adapter_version: "browser-visible-v1",
+          tags: [],
+          fields: {},
+        },
+        files: [
+          { id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" },
+        ],
+      }),
+    ).rejects.toThrow(message);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects duplicate or unsafe source file IDs before network calls", async () => {
     for (const ids of [["same", "same"], ["unsafe id"]]) {
       const fetchImpl = vi.fn();

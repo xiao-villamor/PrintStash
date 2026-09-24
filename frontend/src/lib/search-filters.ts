@@ -56,7 +56,7 @@ export function readSearchFilters(params: URLSearchParams): SavedViewFilters {
       "failed",
     ] as const),
     material_type: params.getAll("material_type"),
-    file_type: values(params, "file_type", ["stl", "3mf", "gcode", "obj", "step"] as const),
+    file_type: values(params, "file_type", ["stl", "3mf", "gcode", "obj", "step", "dxf"] as const),
     revision_status: values(params, "revision_status", [
       "known_good",
       "needs_test",

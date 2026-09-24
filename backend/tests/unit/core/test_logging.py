@@ -4,7 +4,15 @@ import logging
 
 import pytest
 
-from app.core.logging import SensitiveQueryFilter
+from app.core.logging import SensitiveQueryFilter, get_logger
+
+
+class TestHttpClientLogLevels:
+    def test_routine_requests_do_not_fill_info_logs(self):
+        get_logger("app.core.logging")
+
+        assert logging.getLogger("httpx").level >= logging.WARNING
+        assert logging.getLogger("httpcore").level >= logging.WARNING
 
 
 class TestSensitiveQueryFilter:

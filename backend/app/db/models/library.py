@@ -14,6 +14,9 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy import (
+    Enum as SAEnum,
+)
 from sqlmodel import Field, Relationship
 
 from app.core.time import utcnow
@@ -92,7 +95,7 @@ class File(SQLModel, table=True):
         Index("uq_files_model_version", "model_id", "version", unique=True),
         Index("ix_files_model_deleted_type", "model_id", "deleted_at", "file_type"),
         Index(
-            "uq_files_live_recommended_gcode",
+            "uq_files_live_recommended_gcode_text",
             "model_id",
             unique=True,
             sqlite_where=text(
@@ -109,7 +112,14 @@ class File(SQLModel, table=True):
 
     path: str = Field(max_length=1024)
     original_filename: str = Field(max_length=512)
-    file_type: FileType = Field(index=True)
+    # Extensible source formats are stored as enum names in a plain string
+    # column. PostgreSQL's native enum cannot accept a new label through
+    # Alembic autogenerate, while SQLAlchemy still returns FileType values.
+    file_type: FileType = Field(
+        sa_column=Column(
+            SAEnum(FileType, native_enum=False), nullable=False, index=True
+        )
+    )
     version: int = Field(default=1)
     size_bytes: int
     sha256: str = Field(index=True, max_length=64)

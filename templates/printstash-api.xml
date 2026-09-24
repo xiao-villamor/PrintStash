@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/xiao-villamor/PrintStash/issues</Support>
   <Project>https://www.printstash.org</Project>
-  <Overview>Backend for PrintStash, an open-source self-hosted 3D print library and G-code vault. Stores STL, 3MF, OBJ, STEP/STP, G-code, and BGCODE files plus searchable metadata, thumbnails, collections, tags, revisions, print history, user access, printer connections, and backups. PrintStash adds content-hash duplicate detection, slicer metadata extraction, NAS/shared-volume indexing, G-code outcome tracking, printer workflows, measured usage, cost tracking, and optional Spoolman integration. Install with PrintStash-Frontend on the same user-defined Docker network named "printstash"; the frontend reaches this container as hostname "api". Set a strong VAULT_JWT_SECRET before first start. Configure local or S3-compatible storage and backups in the setup wizard.</Overview>
+  <Overview>Deprecated two-container template. For new installations use the PrintStash template with the unified image. Existing users should follow the migration guide before switching. Backend for PrintStash, an open-source self-hosted 3D print library and G-code vault. Stores STL, 3MF, OBJ, STEP/STP, G-code, and BGCODE files plus searchable metadata, thumbnails, collections, tags, revisions, print history, user access, printer connections, and backups. PrintStash adds content-hash duplicate detection, slicer metadata extraction, NAS/shared-volume indexing, G-code outcome tracking, printer workflows, measured usage, cost tracking, and optional Spoolman integration. Install with PrintStash-Frontend on the same user-defined Docker network named "printstash"; the frontend reaches this container as hostname "api". Set a strong VAULT_JWT_SECRET before first start. Configure local or S3-compatible storage and backups in the setup wizard.</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI/>
   <TemplateURL>https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/templates/printstash-api.xml</TemplateURL>
@@ -25,7 +25,8 @@
   <Date>2026-06-17</Date>
   <MinVer>6.10</MinVer>
   <License>AGPL-3.0</License>
-  <Requires>Create a user-defined Docker network named "printstash" first (Settings -&gt; Docker, or `docker network create printstash`). Install PrintStash-Frontend on the same network.</Requires>
+  <Deprecated>true</Deprecated>
+  <Requires>Deprecated: install the unified PrintStash template for new deployments. This legacy template requires a user-defined Docker network named "printstash" first (Settings -&gt; Docker, or `docker network create printstash`). Install PrintStash-Frontend on the same network.</Requires>
   <Config Name="API Port" Target="8000" Default="8000" Mode="tcp" Description="Optional. Only needed if you want to hit the API or /metrics directly. The frontend reaches it internally via the printstash network." Type="Port" Display="advanced" Required="false" Mask="false">8000</Config>
   <Config Name="Data (models/files)" Target="/data/files" Default="/mnt/user/appdata/printstash/files" Mode="rw" Description="Private PrintStash storage. Must be a dedicated empty directory; never point this at an existing model, NAS, or Nextcloud folder. Add those later in Settings > External Libraries." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/printstash/files</Config>
   <Config Name="Thumbnails" Target="/data/thumbs" Default="/mnt/user/appdata/printstash/thumbs" Mode="rw" Description="Private generated-thumbnail storage. Must be a dedicated empty directory." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/printstash/thumbs</Config>

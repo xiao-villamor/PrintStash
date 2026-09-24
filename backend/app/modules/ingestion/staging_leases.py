@@ -38,7 +38,6 @@ from app.modules.storage.storage_backend.contracts import (
 )
 from app.modules.storage.storage_ownership import provider_ref_for_backend
 
-_LEASE_TABLE = getattr(StagingLease, "__table__")  # noqa: B009
 _CAPTURE_MARKER = b"user.printstash.capture-slot"
 _logger = logging.getLogger(__name__)
 
@@ -686,7 +685,8 @@ def create_capture_slot_lease(
     The path is an opaque storage locator. A later receipt makes cleanup
     backend-native, so this never assumes a local filesystem stage.
     """
-    if session.get(CaptureUploadSlot, slot_id) is None:
+    slot = session.get(CaptureUploadSlot, slot_id)
+    if slot is None:
         raise StagingLeaseError("capture upload slot does not exist")
     staging_path = capture_slot_staging_path(slot_id)
     staging_path.parent.mkdir(parents=True, exist_ok=True)
@@ -695,6 +695,7 @@ def create_capture_slot_lease(
         owner_user_id=owner_user_id,
         size_bytes=size_bytes,
         capacity_path=settings.incoming_dir,
+        capture_inbox_item_id=slot.inbox_item_id,
     )
     lease = StagingLease(
         id=uuid.uuid4().hex,
@@ -986,28 +987,54 @@ def _ensure_capacity(
     owner_user_id: int | None,
     size_bytes: int,
     capacity_path: Path,
+    capture_inbox_item_id: int | None = None,
 ) -> None:
     """Reject when capacity is exceeded *or cannot be measured*."""
     try:
-        count, used = session.exec(
+        # Every file in one browser capture has its own byte-owned lease, but
+        # together they represent one active review. Count that review once
+        # without weakening the byte cap or the limit on separate captures.
+        leases = session.exec(
             select(
-                func.count(_LEASE_TABLE.c.id),
-                func.coalesce(func.sum(_LEASE_TABLE.c.size_bytes), 0),
+                StagingLease.id,
+                StagingLease.owner_user_id,
+                StagingLease.size_bytes,
+                CaptureUploadSlot.inbox_item_id,
+            ).outerjoin(
+                CaptureUploadSlot,
+                CaptureUploadSlot.id
+                == func.coalesce(
+                    StagingLease.capture_upload_slot_id,
+                    StagingLease.capture_upload_slot_origin_id,
+                ),
             )
-        ).one()
-        owner_count = session.exec(
-            select(func.count(_LEASE_TABLE.c.id)).where(
-                StagingLease.owner_user_id == owner_user_id
+        ).all()
+        all_allocations = set()
+        owner_allocations = set()
+        used = 0
+        for lease_id, lease_owner, lease_size, capture_item_id in leases:
+            allocation = (
+                ("capture", capture_item_id)
+                if capture_item_id is not None
+                else ("lease", lease_id)
             )
-        ).one()
+            all_allocations.add(allocation)
+            if lease_owner == owner_user_id:
+                owner_allocations.add(allocation)
+            used += lease_size
+        candidate = (
+            ("capture", capture_inbox_item_id)
+            if capture_inbox_item_id is not None
+            else ("lease", "new")
+        )
         filesystem = os.statvfs(capacity_path)
         free = filesystem.f_bavail * filesystem.f_frsize
     except Exception as exc:  # capacity uncertainty must never be treated as room
         raise StagingCapacityExceeded("staging_capacity_unavailable") from exc
     if (
-        int(count) >= settings.staging_max_pending
-        or int(owner_count) >= settings.staging_max_active_per_user
-        or int(used) + size_bytes > settings.staging_max_gb * 1024**3
+        len(all_allocations | {candidate}) > settings.staging_max_pending
+        or len(owner_allocations | {candidate}) > settings.staging_max_active_per_user
+        or used + size_bytes > settings.staging_max_gb * 1024**3
         or free < settings.staging_min_free_gb * 1024**3
     ):
         raise StagingCapacityExceeded("staging_capacity_exceeded")

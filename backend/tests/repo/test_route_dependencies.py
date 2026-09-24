@@ -99,6 +99,7 @@ class TestRouteDependencies:
             ("/inbox/capture-upload-slots", "POST"),
             ("/inbox/capture-upload-slots/{slot_id}", "PUT"),
             ("/inbox/{item_id}/capture-upload-finalize", "POST"),
+            ("/inbox/{item_id}/capture-upload", "DELETE"),
             ("/inbox/browser-upload", "POST"),
         }
         assert not any(

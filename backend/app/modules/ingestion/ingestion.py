@@ -950,7 +950,7 @@ def run_ingestion_pipeline(
                 raise RuntimeError("captured_artifact_trashed")
 
         meta, thumb_bytes = strategy.process(staged_path, report)
-        if thumb_bytes is None and strategy.file_type not in (FileType.GCODE,):
+        if thumb_bytes is None and strategy.file_type not in (FileType.GCODE, FileType.DXF):
             logger.warning(
                 "ingestion_job job_id=%s stage=thumbnail result=missing", job_id
             )
@@ -973,7 +973,7 @@ def run_ingestion_pipeline(
             else "generated"
             if thumb_bytes
             else "skipped"
-            if strategy.file_type == FileType.GCODE
+            if strategy.file_type in (FileType.GCODE, FileType.DXF)
             else "failed"
         )
         thumbnail_reason = (
@@ -981,6 +981,8 @@ def run_ingestion_pipeline(
             if thumb_bytes
             else "no_embedded_thumbnail"
             if strategy.file_type == FileType.GCODE
+            else "unsupported_preview"
+            if strategy.file_type == FileType.DXF
             else "renderer_no_output"
         )
         created = False
@@ -1187,10 +1189,24 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
     )
 
 
+def _unrendered_source_strategy(file_type: FileType) -> IngestionStrategy:
+    """Persist a supported source whose geometry cannot be rendered yet."""
+    return IngestionStrategy(
+        file_type=file_type,
+        overwrite_thumbnail=False,
+        process=lambda _path, _report=_noop_progress: ({}, None),
+        step_labels=(),
+    )
+
+
 def strategy_for_artifact(file_type: FileType) -> IngestionStrategy:
     """Select the processing policy shared by ingestion, discovery and repair."""
     return (
-        _gcode_strategy() if file_type == FileType.GCODE else _mesh_strategy(file_type)
+        _gcode_strategy()
+        if file_type == FileType.GCODE
+        else _unrendered_source_strategy(file_type)
+        if file_type == FileType.DXF
+        else _mesh_strategy(file_type)
     )
 
 

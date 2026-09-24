@@ -97,6 +97,41 @@ class TestIngestModel:
 
 
 class TestIngestArchive:
+    def test_archive_import_retains_dxf_bytes(
+        self, tmp_path: Path, client: TestClient, db_session: Session,
+        auth_headers: dict[str, str],
+    ) -> None:
+        use_local_storage(tmp_path)
+        original = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
+        bundle = io.BytesIO()
+        with zipfile.ZipFile(bundle, "w") as archive:
+            archive.writestr("drawings/plate.dxf", original)
+        manifest = client.post(
+            "/api/v1/ingest/archive",
+            headers=auth_headers,
+            files={"file": ("drawings.zip", bundle.getvalue(), "application/zip")},
+        )
+        assert manifest.status_code == 200, manifest.text
+        body = manifest.json()
+        assert [(entry["name"], entry["file_type"]) for entry in body["entries"]] == [
+            ("drawings/plate.dxf", "dxf")
+        ]
+        result = _completed(
+            client,
+            client.post(
+                f"/api/v1/ingest/archive/{body['archive_id']}/select",
+                headers=auth_headers,
+                json={"names": ["drawings/plate.dxf"]},
+            ),
+            auth_headers,
+        )
+        assert result["state"] == "completed", result
+        file_row = db_session.exec(select(File).where(File.file_type == FileType.DXF)).one()
+        downloaded = client.get(
+            f"/api/v1/files/{file_row.id}/download", headers=auth_headers
+        )
+        assert downloaded.content == original
+
     def test_import_zip_archive_creates_models(
         self,
         tmp_path: Path,

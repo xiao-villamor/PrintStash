@@ -1564,7 +1564,7 @@
           },
           "file": {
             "contentMediaType": "application/octet-stream",
-            "description": "The .stl, .3mf, or .obj file",
+            "description": "A .stl, .3mf, .obj, .step, .stp, or .dxf file",
             "title": "File",
             "type": "string"
           },
@@ -6161,7 +6161,8 @@
           "3mf",
           "gcode",
           "obj",
-          "step"
+          "step",
+          "dxf"
         ],
         "title": "FileType",
         "type": "string"
@@ -11185,6 +11186,14 @@
               }
             ],
             "title": "Thumbnail Url"
+          },
+          "trashed_source_files": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrashedSourceFileRead"
+            },
+            "title": "Trashed Source Files",
+            "type": "array"
           },
           "updated_at": {
             "format": "date-time",
@@ -18753,6 +18762,24 @@
           "deleted_at"
         ],
         "title": "TrashedModelRead",
+        "type": "object"
+      },
+      "TrashedSourceFileRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "original_filename"
+        ],
+        "title": "TrashedSourceFileRead",
         "type": "object"
       },
       "UrlIngestRequest": {
@@ -29027,6 +29054,47 @@
         ]
       }
     },
+    "/api/v1/inbox/{item_id}/capture-upload": {
+      "delete": {
+        "description": "Release an unfinished capture's exact slot leases after extension failure.",
+        "operationId": "cancel_capture_upload_api_v1_inbox__item_id__capture_upload_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cancel Capture Upload",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}/capture-upload-finalize": {
       "post": {
         "operationId": "finalize_capture_upload_api_v1_inbox__item_id__capture_upload_finalize_post",
@@ -29754,7 +29822,7 @@
     },
     "/api/v1/ingest/model": {
       "post": {
-        "description": "Multipart upload of a source mesh. The file is staged and processed asynchronously: hashed, geometry extracted via trimesh (bounding box, volume, triangle count), a PNG thumbnail rendered, deduplicated, and persisted. Returns a job_id you can poll via GET /ingest/jobs/{job_id}.",
+        "description": "Multipart upload of a source file. The file is staged and processed asynchronously: hashed, geometry and thumbnail extracted where supported, deduplicated, and persisted. Returns a job_id you can poll via GET /ingest/jobs/{job_id}.",
         "operationId": "ingest_model_api_v1_ingest_model_post",
         "requestBody": {
           "content": {
@@ -29793,7 +29861,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Ingest a source mesh file (STL, 3MF, OBJ)",
+        "summary": "Ingest a source file (STL, 3MF, OBJ, STEP, DXF)",
         "tags": [
           "ingest"
         ]
@@ -33509,6 +33577,118 @@
           }
         ],
         "summary": "Compare actual print outcomes for Model Artifacts",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/files/{file_id}": {
+      "delete": {
+        "operationId": "trash_source_file_api_v1_models__model_id__files__file_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Move one managed source Artifact to trash",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/files/{file_id}/restore": {
+      "post": {
+        "operationId": "restore_source_file_route_api_v1_models__model_id__files__file_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Restore one managed source Artifact from trash",
         "tags": [
           "models"
         ]

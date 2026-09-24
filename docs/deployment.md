@@ -100,11 +100,15 @@ as private even for public repositories; see
 
 ### Unraid, CasaOS and other container dashboards
 
-Add the published image as a custom container with these settings:
+For Unraid, use the [single-container template](../templates/printstash.xml)
+and its [installation and migration guide](../unraid/README.md). On other
+container dashboards, add the published image as a custom container with these
+settings:
 
 | Setting | Value |
 | --- | --- |
 | Image | `ghcr.io/xiao-villamor/printstash:latest` (or your fork's namespace) |
+| Icon URL | `https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/frontend/public/logo.png` |
 | Network | Bridge |
 | Web port | Host port of your choice → container TCP port `3000` |
 | Persistent folder | A dedicated host folder → `/data` (read/write) |
@@ -121,10 +125,21 @@ command at their defaults so ownership setup and migrations run before startup.
 
 Open `http://<server-ip>:<host-port>` on a trusted network and complete the initial
 administrator registration. The frontend proxies the API internally, so only
-port `3000` needs publishing. These are custom-container settings; this change
-does not publish an Unraid Community Apps or CasaOS app-store listing.
+port `3000` needs publishing. The Unraid template supplies these settings
+through one container. Other dashboards can use the custom-container settings
+above.
+The same PNG is available from your running frontend at `/logo.png`.
 
 ## Add an optional setting
+
+MyMiniFactory account connection requires OAuth application credentials on the
+API container: `VAULT_MMF_CLIENT_ID` and `VAULT_MMF_CLIENT_SECRET`. Register
+`https://<your-public-origin>/api/v1/provider-connections/myminifactory/callback`
+as the OAuth callback URL with MyMiniFactory, using the exact scheme and host
+through which users open PrintStash. Restart the API after setting both values.
+Without them, the connection endpoint returns `provider_not_configured` and
+cannot start authorization. Cults uses the credentials entered by each user
+and does not use these MyMiniFactory settings.
 
 Add API settings under `services.api.environment` in your downloaded file.
 Keep `VAULT_RESTART_ENABLED: "true"`, which lets Settings restart the supervised

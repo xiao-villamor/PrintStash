@@ -1117,6 +1117,128 @@ describe("popup browser adapters", () => {
     expect(element("#status").textContent).not.toContain("code:");
   });
 
+  it.each([
+    {
+      name: "requests one file-host permission for concurrent Printables downloads",
+      alreadyGranted: false,
+      grant: true,
+    },
+    { name: "uses an existing Printables file-host permission", alreadyGranted: true, grant: true },
+    {
+      name: "stops Printables downloads when file-host permission is denied",
+      alreadyGranted: false,
+      grant: false,
+    },
+  ])("$name", async ({ alreadyGranted, grant }) => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_vault_secret",
+    });
+    fakeBrowser.scripting.executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: null }])
+      .mockResolvedValueOnce([{ result: { pageTitle: "3DBenchy", jsonLd: [] } }])
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    let permissionPending = false;
+    const fileHostRequests: string[][] = [];
+    fakeBrowser.permissions.contains = vi.fn(
+      async ({ origins }: { origins: string[] }) =>
+        !origins.includes("https://files.printables.com/*") || alreadyGranted,
+    );
+    fakeBrowser.permissions.request = vi.fn(async ({ origins }: { origins: string[] }) => {
+      if (!origins.includes("https://files.printables.com/*")) return true;
+      fileHostRequests.push(origins);
+      if (permissionPending) throw new Error("Another permission prompt is already open");
+      permissionPending = true;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      permissionPending = false;
+      return grant;
+    });
+    const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
+      if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+      if (url === "https://api.printables.com/graphql/") {
+        if (JSON.parse(stringBody(options)).query.includes("mutation")) {
+          return response({
+            data: {
+              getDownloadLink: {
+                ok: true,
+                output: {
+                  files: [
+                    { id: "first", link: "https://files.printables.com/first.3mf?token=secret" },
+                    { id: "second", link: "https://files.printables.com/second.3mf?token=secret" },
+                  ],
+                },
+              },
+            },
+          });
+        }
+        return response({
+          data: {
+            print: {
+              id: "3161",
+              name: "3DBenchy",
+              otherFiles: [
+                { id: "first", name: "first.3mf", fileSize: 4 },
+                { id: "second", name: "second.3mf", fileSize: 4 },
+              ],
+            },
+          },
+        });
+      }
+      if (url.startsWith("https://files.printables.com/")) {
+        return new Response("mesh", { status: 200, headers: { "Content-Type": "model/3mf" } });
+      }
+      if (url.endsWith("/capture-upload-slots")) {
+        const files = JSON.parse(stringBody(options)).files as {
+          id: string;
+          filename: string;
+          size_bytes: number;
+          sha256: string;
+        }[];
+        return response(
+          {
+            item: { id: 51 },
+            slots: files.map((file, index) => ({
+              id: `slot-${index}`,
+              role: "file",
+              source_file_id: file.id,
+              filename: file.filename,
+              media_type: "model/3mf",
+              size_bytes: file.size_bytes,
+              sha256: file.sha256,
+            })),
+          },
+          201,
+        );
+      }
+      if (url.includes("/capture-upload-slots/slot-")) return new Response(null, { status: 204 });
+      if (url.endsWith("/capture-upload-finalize")) return response({ id: 51, state: "ready" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await import("../popup.ts");
+    await settle();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 4; attempt += 1) await settle();
+    expect(document.querySelectorAll("#candidate-list input")).toHaveLength(2);
+    button("#capture").click();
+    for (let attempt = 0; attempt < 12; attempt += 1) await settle();
+
+    expect(fileHostRequests).toEqual(alreadyGranted ? [] : [["https://files.printables.com/*"]]);
+    if (grant || alreadyGranted) {
+      expect(element("#status").textContent).toContain("sent to Pending Imports");
+    } else {
+      expect(element("#status").textContent).toContain("Permission to download");
+      expect(fetchImpl.mock.calls.some(([url]) => url.endsWith("/capture-upload-slots"))).toBe(
+        false,
+      );
+    }
+  });
+
   it("enumerates MakerWorld packages, requires explicit subset confirmation, and uses fresh links plus durable slots", async () => {
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",

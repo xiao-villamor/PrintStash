@@ -327,17 +327,17 @@ async def ingest_orca(
     response_model=IngestResponse,
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_auth)],
-    summary="Ingest a source mesh file (STL, 3MF, OBJ)",
+    summary="Ingest a source file (STL, 3MF, OBJ, STEP, DXF)",
     description=(
-        "Multipart upload of a source mesh. The file is staged and processed "
-        "asynchronously: hashed, geometry extracted via trimesh (bounding box, "
-        "volume, triangle count), a PNG thumbnail rendered, deduplicated, and "
+        "Multipart upload of a source file. The file is staged and processed "
+        "asynchronously: hashed, geometry and thumbnail extracted where supported, "
+        "deduplicated, and "
         "persisted. Returns a job_id you can poll via GET /ingest/jobs/{job_id}."
     ),
 )
 async def ingest_model(
     background_tasks: BackgroundTasks,
-    file: UploadFile = UploadFileParam(..., description="The .stl, .3mf, or .obj file"),
+    file: UploadFile = UploadFileParam(..., description="A .stl, .3mf, .obj, .step, .stp, or .dxf file"),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
     collection: Optional[str] = Form(
         None, description="Optional collection, e.g. 'Functional/Brackets'"

@@ -38,145 +38,108 @@ See the [full capabilities](https://www.printstash.org/capabilities),
 [printer compatibility matrix](https://www.printstash.org/compatibility), and
 [documentation](https://www.printstash.org/docs/) before installation.
 
-## How the Unraid application is packaged
+## Install with the Unraid template
 
-PrintStash runs as **two containers**:
+The [PrintStash template](../templates/printstash.xml) now uses one container:
+the published `ghcr.io/xiao-villamor/printstash:latest` image runs the web UI
+and API together. No custom Docker network, second container, API port, JWT
+secret, or command override is needed.
 
-| Container | Role | Port |
-|-----------|------|------|
-| **PrintStash-API** | Backend API + database | 8000 |
-| **PrintStash-Frontend** | Web UI you open in the browser (nginx) | 3000 |
+1. Install **PrintStash** using the `printstash.xml` template. The old
+   **PrintStash-API** and **PrintStash-Frontend** templates are deprecated; do
+   not select them for a new installation. Confirm the image is
+   `ghcr.io/xiao-villamor/printstash:latest` before installing.
+2. Keep **Network** on `bridge` and the **WebUI port** at `3000`, or choose another
+   free host port.
+3. Keep **Appdata** at `/mnt/user/appdata/printstash`, or choose a dedicated
+   persistent folder. It maps to `/data` inside the container and holds the
+   SQLite database, managed files, thumbnails, staging files, and backups.
+4. Open the WebUI on a trusted local network and create the administrator
+   account. The first person to register becomes the administrator; registration
+   closes once an account exists. Do not expose first-run setup to the internet.
 
-The frontend serves the app and proxies `/api/v1` (including WebSockets) to the
-backend at the hostname **`api`**. Because of that, **both containers must share
-a user-defined Docker network** that does name resolution — Unraid's built-in
-`bridge` network does **not**, so the names won't resolve there.
+The template sets `VAULT_SETUP_MODE=trusted_network` for the initial registration
+and `VAULT_RESTART_ENABLED=true` for Settings → Restart. The template uses
+`--restart=unless-stopped` so Docker starts the whole container again when a
+Settings restart exits the supervised app; a manual stop remains stopped.
+It uses `PUID=99` and `PGID=100` for Unraid's usual `nobody:users` file
+ownership. Set the numeric owner and group of your shares in the template's
+advanced fields if they differ.
+The image's entrypoint creates and repairs managed data directories, runs
+migrations, and generates a persistent signing secret when none was supplied.
 
----
+**Keep existing model folders outside `/data`.** The managed `/data/files` path
+is PrintStash's private store, not a folder to index. To import a user share,
+add another Path mapping to the container, for example:
 
-## Install (Community Applications templates)
-
-### 1. Create the network (one time)
-
-On the Unraid terminal (or **Settings → Docker → add network**):
-
-```bash
-docker network create printstash
+```text
+Host path:      /mnt/user/3d-library
+Container path: /mnt/library
+Access:         Read/Write for enrollment
 ```
 
-### 2. Install PrintStash-API **first**
+In PrintStash, add a **Library source** using `/mnt/library`, the container path.
+After its root is verified, the mapping can be changed to read-only unless
+writeback is needed. See the [Unraid library-source recipe](../docs/library-sources.md#unraid).
+This separate mapping and the container's `PUID`/`PGID` must permit access to the
+share. A host path such as `/mnt/user/3d-library` entered directly in the app is
+not visible unless it is also mounted inside the container.
 
-From the `printstash-api` template:
+## Moving from the two-container template
 
-- **Network:** `printstash`
-- **JWT secret** (required): generate a long random string, e.g.
-  ```bash
-  openssl rand -hex 32
-  ```
-- Leave the volume paths at their defaults (`/mnt/user/appdata/printstash/...`)
-  or point them at dedicated empty app-data directories.
+1. Back up the existing database and appdata, including
+   `/data/db/.printstash-secrets-key` if present. While the old API is still
+   running, note the numeric owner of its database with
+   `docker exec PrintStash-API stat -c '%u:%g' /data/db/printstash.sqlite`
+   (replace `PrintStash-API` if you renamed the container). The old API image
+   normally used `10001:10001`. If you set a custom `PUID`/`PGID` on the old
+   container, keep those values instead. Also record any nonempty
+   `VAULT_JWT_SECRET` in the old API's container settings.
+2. Stop **PrintStash-API** and **PrintStash-Frontend**. Never run old and new
+   containers against the same database or files at the same time.
+3. The old template's default paths already sit under
+   `/mnt/user/appdata/printstash/{files,thumbs,db,staging,backups}`. With those
+   defaults, map the parent `/mnt/user/appdata/printstash` to `/data` in the new
+   template. Confirm the five folders and the existing SQLite database are there
+   before starting, so the new container does not create a fresh library.
+4. If you customized any of the five old host paths, copy its contents into
+   the corresponding subfolder of the new dedicated appdata parent first.
+   Preserve the database's hidden signing-key file. Keep the backup until the
+   library and files work through the new container.
+5. In the new template's advanced fields, set `PUID` and `PGID` to the old
+   API's numeric data owner from step 1. Keeping that identity also keeps
+   existing Library-source ownership markers readable. If the old API had a
+   nonempty `VAULT_JWT_SECRET`, add it to the new template as a Variable with
+   key `VAULT_JWT_SECRET` and the same value. Otherwise let the image reuse its
+   persisted secret.
+6. Recreate any separate Library-source mounts on the new container, start it,
+   then sign in with the existing account. The image runs migrations at startup.
+   Check that existing Library sources are still bound before importing files.
+   If a source reports `root_marker_unreadable`, restore the old API's `PUID`
+   and `PGID` and restart the container.
 
-> **Never map an existing model, NAS, or Nextcloud folder to `/data/files`.**
-> This is PrintStash's private blob store, not an import path. Finish setup with
-> the default dedicated directory, then add existing folders under **Settings →
-> Shared volumes** to index their files safely in place. See the
-> [Unraid library-source recipe](../docs/library-sources.md#unraid).
+## Optional settings and troubleshooting
 
-The template already:
-- relies on the API image, which runs database migrations on every start
-  (`alembic upgrade head`) from its entrypoint — no command override needed, and
-- gives the container the network alias **`api`** so the frontend can reach it.
+| Setting | Default | When to change it |
+| --- | --- | --- |
+| `VAULT_SETUP_MODE` | `trusted_network` | Set to `disabled` after first setup if desired; existing accounts already close registration. |
+| `PUID` / `PGID` | `99` / `100` | For a fresh install, use the numeric user and group that can access your shares. On upgrade, keep the old API data owner (usually `10001:10001`). |
+| `VAULT_MAX_UPLOAD_MB` | `512` | Raise for larger uploads, together with `NGINX_CLIENT_MAX_BODY_SIZE`. |
+| `NGINX_CLIENT_MAX_BODY_SIZE` | `528m` | Keep above the API upload limit to allow request overhead. |
 
-> Install the API **before** the frontend — the frontend expects `api` to
-> already be resolvable on the `printstash` network.
+- **Setup says no trusted network:** verify the template's advanced
+  `VAULT_SETUP_MODE` variable is `trusted_network`, then open the WebUI through
+  the server's private IP address on your LAN. For a custom hostname, see
+  [first-run addresses](../docs/first-run.md#access-addresses-and-proxies).
+- **Storage check fails or Library source cannot be added:** verify that the
+  appdata mount is writable, the separate share mount exists at the container
+  path you entered, and `PUID`/`PGID` can access both. Do not point the managed
+  storage path at the existing library. Check container logs for the failing
+  path and restart after correcting the mapping.
+- **A previous library looks empty:** stop the container and check the `/data`
+  mapping against the old database location before uploading anything.
+- **WebUI shows a 502:** the single container supervises both nginx and the API.
+  Check its logs and health status; no `api` network alias is needed.
 
-### 3. Install PrintStash-Frontend
-
-From the `printstash-frontend` template:
-
-- **Network:** `printstash`
-- Keep the **WebUI port** (default `3000`).
-- If you raise the API's max upload size, match `NGINX_CLIENT_MAX_BODY_SIZE`
-  here (e.g. `512m`).
-
-### 4. Open the app and finish setup
-
-Browse to `http://<server-ip>:3000` and complete the **first-run setup wizard**:
-
-- create your admin account,
-- choose **storage** — local disk (default), generic/named S3-compatible
-  storage, Nextcloud/WebDAV, or SFTP (remote presets remain beta; configure
-  them in the wizard rather than as container variables), and
-- optionally configure **backups** (local and/or an S3 destination).
-
-That's it — you're in your vault.
-
----
-
-## Alternative: Docker Compose Manager plugin
-
-PrintStash ships an official `docker-compose.yml` that already wires both
-services, the network, and volumes. Migrations run from the image entrypoint on
-every start, so there is no command to wire up. If you have the
-**Compose Manager** plugin (from Community Applications), this is the simplest
-path:
-
-1. Install the *Docker Compose Manager* plugin.
-2. Add a new stack and paste the repo's
-   [`docker-compose.yml`](https://github.com/xiao-villamor/PrintStash/blob/main/docker-compose.yml).
-3. Adjust volume paths to `/mnt/user/appdata/printstash/...` if you like. You do
-   not need to set `VAULT_JWT_SECRET`; the API generates and persists one on first
-   boot.
-4. Compose up on a trusted network, open `http://<server-ip>:3000`, and create
-   your local administrator account in the browser. The first person to finish
-   registration becomes the administrator.
-
----
-
-## Configuration reference
-
-Most settings are configured **in the app's setup wizard / Settings** and stored
-in the database — including local, generic/named S3-compatible,
-Nextcloud/WebDAV, or SFTP storage and backups. Local and generic S3 are stable;
-the named remote presets are beta. The container variables are mainly bootstrap
-defaults; see [storage providers](../docs/storage-providers.md) for capability
-tiers and environment-only setup caveats:
-
-| Variable | Container | Required | Notes |
-|----------|-----------|----------|-------|
-| `VAULT_JWT_SECRET` | API | – | Signs auth tokens. Generated and persisted on first boot if you leave it alone; set it (`openssl rand -hex 32`) only to own the value. Do not add it as an empty template variable, which is read as a deliberate choice and skips the generated secret. |
-| `VAULT_SETUP_MODE` | API | `disabled` | Set `trusted_network` for initial browser registration on a trusted network. Local Compose enables it. Existing accounts permanently close registration. |
-| `VAULT_MAX_UPLOAD_MB` | API | – | Max upload size in MB (default `512`). |
-| `NGINX_CLIENT_MAX_BODY_SIZE` | Frontend | – | Keep in sync with the above, e.g. `512m`. |
-| `VAULT_BACKUP_RETENTION_DAYS` | API | – | `0` keeps backups forever. |
-| `VAULT_ACCESS_TOKEN_EXPIRE_MINUTES` | API | – | JWT lifetime (default `60`). |
-| `VAULT_LOG_LEVEL` | API | – | `DEBUG` / `INFO` / `WARNING` / `ERROR`. |
-| `VAULT_METRICS_TOKEN` | API | – | If set, requires a bearer token to scrape `/metrics` (Prometheus). Leave empty to keep it open on your LAN. |
-
-### Persistent paths (API container)
-
-| Path | Holds |
-|------|-------|
-| `/data/files` | Private PrintStash model/G-code storage; must be a dedicated directory, never an existing library |
-| `/data/thumbs` | Private generated-thumbnail storage; use a dedicated directory |
-| `/data/db` | SQLite database |
-| `/data/staging` | Temporary upload/import staging |
-| `/data/backups` | Local backup archives |
-
----
-
-## Troubleshooting
-
-- **Frontend shows "connection refused" / 502 for `/api/v1`** — the API isn't
-  reachable as `api` on the `printstash` network. Check that **both** containers
-  are on the `printstash` network and that the API container has the
-  `--network-alias api` extra parameter (the template sets this).
-- **Stuck on a blank page or the network's default `bridge`** — recreate the
-  containers on the user-defined `printstash` network; the default `bridge` has
-  no DNS, so `api` can't resolve.
-- **No login works on a fresh install** — there is no default admin account.
-  Complete the first-run setup wizard to create one. If setup can't complete,
-  fix setup (storage paths, JWT secret) rather than looking for built-in
-  credentials.
-- **Monitoring** — the API exposes Prometheus metrics at
-  `http://<server-ip>:8000/metrics` for Grafana/Prometheus dashboards.
+The [unified Compose file](../docker-compose.unified.yml) is an alternative for
+Docker Compose Manager. It uses the same image and first-run settings.

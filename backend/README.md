@@ -1,7 +1,7 @@
 # PrintStash — Backend
 
-FastAPI backend for the vault. Ingests STL / 3MF / OBJ / G-code, extracts
-metadata, deduplicates by hash, and serves everything through a versioned
+FastAPI backend for the vault. Ingests STL / 3MF / OBJ / STEP / DXF / G-code, extracts
+supported metadata, deduplicates by hash, and serves everything through a versioned
 REST API. Used by the Next.js frontend and the OrcaSlicer post-processing
 hook.
 

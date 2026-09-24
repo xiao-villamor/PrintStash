@@ -4,6 +4,14 @@
 
 ### Added
 
+- DXF files can be imported as source Artifacts, downloaded with their original
+  bytes, and included in backups. Drawing previews are not yet available.
+- Managed source Artifacts can be moved to trash and restored individually from
+  Model detail. The Model, sibling Artifacts, Revisions and print history remain.
+  Linked Library-source originals stay protected.
+- A PNG version of the PrintStash icon for Unraid and other container dashboards
+  that cannot use SVG icons.
+
 - AI Search adds transactional text indexing for Models, Collections, Multipart
   Models and Documents, authorized lexical suggestions, hybrid results with match
   evidence, and local image/geometry search. Image queries support file selection,
@@ -44,6 +52,21 @@
   separate from verified geometry, and analysis never downloads model weights.
 
 ### Fixed
+
+- The Unraid Community Applications catalog has one current PrintStash listing;
+  the old API and frontend templates are marked deprecated for existing users.
+
+- The Unraid template uses the unified image with one persistent appdata mount,
+  a working first-run setup default, and Unraid file-owner defaults.
+
+- Printables captures request each selected file host's browser permission once
+  before downloading, avoiding repeated permission dialogs for multi-file imports.
+- Browser captures accept multi-file selections within the review limit, release
+  unfinished upload slots after transfer failures, and explain capacity errors.
+- Provider connection errors now distinguish missing MyMiniFactory OAuth setup,
+  rejected Cults credentials, provider outages, and invalid provider responses.
+- Routine HTTP client requests no longer fill INFO logs during PrusaLink polling;
+  printer errors and transport warnings remain visible.
 
 - AI Search mutations enforce token write scope, including caption edits, settings,
   generation management, local model operations and personal preferences.

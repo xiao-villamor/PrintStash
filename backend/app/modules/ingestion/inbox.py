@@ -786,6 +786,10 @@ def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
             ).first()
             if lease is not None:
                 session.delete(lease)
+        # Flush lease removals before deleting their parent slots; on SQLite
+        # the slot FK cascade otherwise races the ORM's pending lease DELETE.
+        session.flush()
+        for slot in slots:
             session.delete(slot)
         session.flush()
         # Keep caller-held slot objects usable after the commit. SQLAlchemy

@@ -35,7 +35,7 @@ ownership and recovery boundaries. See the canonical
 
 Developed features in the current app:
 
-- STL, 3MF, OBJ, STEP/STP, and G-code ingestion through the web UI, REST API, and OrcaSlicer post-processing hook
+- STL, 3MF, OBJ, STEP/STP, DXF, and G-code ingestion through the web UI and REST API; the OrcaSlicer post-processing hook sends G-code
 - Import from safe URLs or `.zip`, plus reviewed browser transfer for
   authenticated Printables/MakerWorld files and extension/manual Thingiverse
   capture; server resolution remains SSRF-guarded and archives remain

@@ -93,8 +93,9 @@ You can use the library without connecting a printer.
 
 ### Bring your files together
 
-- **Upload from your browser:** STL, 3MF, OBJ, STEP/STP, G-code, and PrusaSlicer
-  binary G-code (`.bgcode`). Import ZIP archives with file selection and keep
+- **Upload from your browser:** STL, 3MF, OBJ, STEP/STP, DXF, G-code, and PrusaSlicer
+  binary G-code (`.bgcode`). DXF originals remain downloadable without a preview.
+  Import ZIP archives with file selection and keep
   their folder structure as nested Collections.
 - **Capture from model sites:** send supported URLs or use the
   [browser extension](./browser-extension/README.md) for Printables, MakerWorld,

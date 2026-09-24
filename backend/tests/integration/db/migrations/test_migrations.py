@@ -1093,7 +1093,7 @@ class TestUpgrade:
             index["name"]: index for index in inspector.get_indexes("files")
         }
         assert bool(file_indexes["uq_files_model_version"]["unique"]) is True
-        assert bool(file_indexes["uq_files_live_recommended_gcode"]["unique"]) is True
+        assert bool(file_indexes["uq_files_live_recommended_gcode_text"]["unique"]) is True
         assert file_indexes["ix_files_model_deleted_type"]["column_names"] == [
             "model_id",
             "deleted_at",

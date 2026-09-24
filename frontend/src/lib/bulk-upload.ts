@@ -2,8 +2,8 @@
 // the React component so each step (path parsing, mesh filtering, dedup,
 // folder→collection mapping, and dropped-folder recursion) is unit-testable.
 
-const MESH_EXTENSIONS = new Set([".stl", ".3mf", ".obj", ".step", ".stp"]);
-export const MESH_ACCEPT = ".stl,.3mf,.obj,.step,.stp";
+const MESH_EXTENSIONS = new Set([".stl", ".3mf", ".obj", ".step", ".stp", ".dxf"]);
+export const MESH_ACCEPT = ".stl,.3mf,.obj,.step,.stp,.dxf";
 const GCODE_EXTENSIONS = new Set([".gcode", ".g", ".gco", ".bgcode"]);
 export const GCODE_ACCEPT = ".gcode,.g,.gco,.bgcode";
 

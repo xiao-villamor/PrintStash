@@ -35,9 +35,12 @@ from app.db.session import (
 from app.modules.ingestion import ingestion
 from app.modules.library import provenance
 from app.modules.media import thumbnail
+from app.modules.storage.storage_backend.contracts import StorageConfigurationError
+from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.runtime.jobs import registry
 from tests.factories import (
+    build_external_library,
     build_file,
     build_model,
     build_user,
@@ -96,6 +99,64 @@ def _persist(db_session: Session, model: Model, staged: Path, **kwargs):
 
 
 class TestPersistArtifact:
+    def test_external_writeback_rejects_replaced_root_then_retries_without_duplicate(
+        self,
+        db_session: Session,
+        storage,
+        model: Model,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        library = build_external_library(db_session, nas)
+        staged = _staged(tmp_path)
+        original = staged.read_bytes()
+        destination = nas / "bracket.stl"
+        old_root = tmp_path / "old-nas"
+        original_open = LocalStorageBackend._open_pinned_parent
+
+        def replace_before_publication(adapter, path):
+            nas.rename(old_root)
+            nas.mkdir()
+            return original_open(adapter, path)
+
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(LocalStorageBackend, "_open_pinned_parent", replace_before_publication)
+                with pytest.raises(StorageConfigurationError):
+                    _persist(
+                        db_session,
+                        model,
+                        staged,
+                        is_external=True,
+                        external_library_id=library.id,
+                        dest_key_override=str(destination),
+                        ingestion_key="issue-210-root-replacement",
+                        blob_hash=hashlib.sha256(original).hexdigest(),
+                    )
+            assert not destination.exists()
+            assert staged.read_bytes() == original
+        finally:
+            if nas.exists():
+                nas.rmdir()
+            if old_root.exists():
+                old_root.rename(nas)
+
+        saved = _persist(
+            db_session,
+            model,
+            staged,
+            is_external=True,
+            external_library_id=library.id,
+            dest_key_override=str(destination),
+            ingestion_key="issue-210-root-replacement",
+            blob_hash=hashlib.sha256(original).hexdigest(),
+        )
+        assert destination.read_bytes() == original
+        assert saved.path == str(destination)
+        assert len(db_session.exec(select(File).where(File.model_id == model.id)).all()) == 1
+
     def test_persist_never_overwrites_an_unclaimed_destination(
         self, db_session: Session, storage, model: Model, tmp_path: Path
     ) -> None:

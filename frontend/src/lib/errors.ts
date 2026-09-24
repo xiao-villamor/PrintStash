@@ -75,8 +75,16 @@ export function parseApiError(cause: unknown): ApiError {
 
   try {
     const parsed = JSON.parse(body);
-    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- FastAPI puts a string code in `detail` for coded errors but a list of field objects for 422 validation errors; only the string form is a detail code, and this line is where that body gets decoded.
-    const code = typeof parsed?.detail === "string" ? parsed.detail : String(status);
+    // FastAPI also returns a structured code for guarded storage operations.
+    // Keep 422 validation lists distinct from those coded conflict objects.
+    /* oxlint-disable anti-slop/no-runtime-typeof -- HTTP JSON is untyped at this boundary. */
+    const code =
+      typeof parsed?.detail === "string"
+        ? parsed.detail
+        : parsed?.detail && !Array.isArray(parsed.detail) && typeof parsed.detail.code === "string"
+          ? parsed.detail.code
+          : String(status);
+    /* oxlint-enable anti-slop/no-runtime-typeof */
     return new ApiError(status, code, body);
   } catch {
     return new ApiError(status, String(status), body);
@@ -90,10 +98,21 @@ const ERROR_MESSAGES = {
   storage_connection_target_in_use:
     "This target is used by Library sources or backups. Keep its location and account unchanged.",
   invalid_credentials: "Invalid username or password.",
+  provider_not_configured:
+    "MyMiniFactory is not configured on this PrintStash server. Ask the administrator to set its OAuth credentials.",
+  provider_auth_failed: "Cults rejected those credentials. Check the username and password.",
+  provider_retry_exhausted: "The provider is temporarily unavailable. Try again later.",
+  provider_transport_failed: "PrintStash could not reach the provider. Try again later.",
+  provider_request_failed: "The provider rejected the request. Try again later.",
+  provider_response_invalid: "The provider sent an invalid response. Try again later.",
   not_authenticated: "You must sign in to perform this action.",
   invalid_or_expired_token: "Your session has expired. Please sign in again.",
   // Models
   model_not_found: "This model no longer exists.",
+  storage_ownership_unverified:
+    "This item was not deleted because storage ownership could not be verified. Check Storage health before retrying.",
+  storage_risk_confirmation_required:
+    "Permanent deletion needs storage-risk confirmation. Refresh this page and review the confirmation before retrying.",
   // Printers
   printer_not_found: "This printer no longer exists.",
   printer_offline: "The printer is offline.",
@@ -124,7 +143,7 @@ const ERROR_MESSAGES = {
   // URL import
   url_required: "Enter a URL to import from.",
   url_not_a_direct_file:
-    "That link isn't a direct file. Paste a direct .stl/.3mf/.obj/.gcode or .zip download link.",
+    "That link isn't a direct file. Paste a direct .stl/.3mf/.obj/.dxf/.gcode or .zip download link.",
   url_scheme_not_allowed: "Only http(s) URLs can be imported.",
   url_host_missing: "That URL has no host.",
   url_dns_resolution_failed: "Couldn't resolve that host.",

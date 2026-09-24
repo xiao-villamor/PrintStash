@@ -13,6 +13,7 @@ export type {
 export type {
   MetadataRead,
   FileRead,
+  TrashedSourceFileRead,
   FileRevisionStatus,
   CollectionRole,
   FileRevisionUpdate,

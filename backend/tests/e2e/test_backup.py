@@ -45,6 +45,51 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
 
 
 class TestBackupRestore:
+    @pytest.mark.asyncio
+    async def test_dxf_original_survives_backup_restore(self, api, tmp_path, e2e_db):
+        headers = await _setup_and_login(api, tmp_path)
+        original = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("backup-drawing.dxf", original, "image/vnd.dxf")},
+            data={"model_name": "Backup Drawing"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        for _ in range(50):
+            job = (
+                await api.get(
+                    f"/api/v1/ingest/jobs/{uploaded.json()['job_id']}", headers=headers
+                )
+            ).json()
+            if job["state"] in ("completed", "failed", "duplicate"):
+                break
+            await asyncio.sleep(0.05)
+        assert job["state"] == "completed", job
+        file_id = job["file_id"]
+        model_id = job["model_id"]
+        backup = await api.post("/api/v1/backups", headers=headers)
+        assert backup.status_code == 202, backup.text
+
+        artifact = e2e_db.get(File, file_id)
+        assert artifact is not None
+        blob_path = Path(artifact.path)
+        e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
+        e2e_db.exec(delete(File).where(File.id == file_id))
+        e2e_db.exec(delete(Model).where(Model.id == model_id))
+        e2e_db.commit()
+        blob_path.unlink()
+
+        restored = await api.post(
+            f"/api/v1/backups/{backup.json()['backup_id']}/restore", headers=headers
+        )
+        assert restored.status_code == 200, restored.text
+        downloaded = await api.get(
+            f"/api/v1/files/{file_id}/download", headers=headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == original
+
     @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_backup_wipe_restore_round_trips_through_the_real_api(

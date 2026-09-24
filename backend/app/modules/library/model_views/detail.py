@@ -7,11 +7,12 @@ from collections import defaultdict
 from typing import Literal
 from typing import cast as type_cast
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.db.models import (
     CollectionRole,
     File,
+    FileType,
     Metadata,
     Model,
     ModelProvenanceField,
@@ -27,6 +28,7 @@ from app.modules.identity import rbac
 from app.modules.library import provenance
 from app.schemas.models import (
     ModelRead,
+    TrashedSourceFileRead,
 )
 from app.schemas.provenance import (
     ModelProvenanceRead,
@@ -140,6 +142,16 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         .outerjoin(Metadata, Metadata.file_id == File.id)
         .order_by(File.version.asc())  # type: ignore[attr-defined]
     ).all()
+    trashed_sources = session.exec(
+        select(File)
+        .where(
+            col(File.model_id) == model_id,
+            col(File.deleted_at).is_not(None),
+            col(File.file_type) != FileType.GCODE,
+            col(File.is_external).is_(False),
+        )
+        .order_by(col(File.deleted_at).desc())
+    ).all()
     starred = (
         session.exec(
             select(ModelStar.id).where(
@@ -169,6 +181,11 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         created_at=m.created_at,
         updated_at=m.updated_at,
         files=_file_reads_with_revisions(session, files_with_meta),
+        trashed_source_files=[
+            TrashedSourceFileRead(id=file.id, original_filename=file.original_filename)
+            for file in trashed_sources
+            if file.id is not None
+        ],
         starred=starred,
     )
 

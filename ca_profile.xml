@@ -5,12 +5,7 @@ PrintStash is an open-source, self-hosted 3D print library and G-code vault for 
 
 Keep an existing local or NAS folder as the source of truth through shared-volume indexing, give multiple users collection-level access, back up locally or to S3-compatible storage, and connect supported printers for file sync, send-to-print, controls, job history, measured filament use, and cost tracking. Moonraker/Klipper is stable; OctoPrint, PrusaLink, Bambu LAN, and supported Elegoo integrations are available with provider-specific beta capabilities.
 
-This repository maintains two Docker application templates:
-
-- **PrintStash-API** — the backend API and database.
-- **PrintStash-Frontend** — the web UI you open in your browser.
-
-Both containers run on a shared user-defined Docker network so the web UI can reach the API. Install **PrintStash-API first**, then **PrintStash-Frontend**, and follow the setup wizard in your browser. See the install guide for the required `printstash` network step.
+The current PrintStash template installs one container with the web UI and API together. Legacy API and frontend templates are deprecated for existing installations. Keep its persistent appdata mount, open the WebUI on a trusted local network, and create the first administrator account. Existing two-container users should follow the migration guide before switching templates.
 
 **Website:** https://www.printstash.org
 **Documentation:** https://www.printstash.org/docs/

@@ -196,6 +196,42 @@ def _embedded_3mf() -> tuple[bytes, tuple[int, int, int]]:
 
 
 class TestMetadata:
+    @pytest.mark.asyncio
+    async def test_dxf_source_keeps_original_bytes_without_a_preview(
+        self, api, tmp_path
+    ):
+        headers = await _setup_and_login(api, tmp_path)
+        original = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("drawing.dxf", original, "image/vnd.dxf")},
+            data={"model_name": "Drawing"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        assert job["thumbnail_status"] == "skipped"
+        assert job["thumbnail_reason"] == "unsupported_preview"
+        file_id = job["file_id"]
+        downloaded = await api.get(
+            f"/api/v1/files/{file_id}/download", headers=headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == original
+
+        repeated = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("drawing-copy.dxf", original, "image/vnd.dxf")},
+            data={"model_name": "Drawing copy"},
+            headers=headers,
+        )
+        assert repeated.status_code == 202, repeated.text
+        duplicate_job = await _await_job(api, headers, repeated.json()["job_id"])
+        assert duplicate_job["state"] in ("duplicate", "completed"), duplicate_job
+        models = (await api.get("/api/v1/models", headers=headers)).json()
+        assert len([model for model in models if model["name"].startswith("Drawing")]) == 1
+
     @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_a_repeated_gcode_upload_dedupes_by_content_hash(

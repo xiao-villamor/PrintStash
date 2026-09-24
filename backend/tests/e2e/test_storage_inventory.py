@@ -101,7 +101,9 @@ class TestStorageInventoryCleanup:
                 ("staging", "temporary"),
             }
         )
-        assert current["logical_bytes"] == 105
+        # One 10-byte Artifact per supported format, plus 20 trashed bytes,
+        # two 17-byte references to a shared key, and one Document byte.
+        assert current["logical_bytes"] == 10 * len(FileType) + 20 + 2 * 17 + 1
         # Only positively managed objects enter the physical total: one copy of
         # the shared 17-byte key, the 1-byte Document and 22 bytes of receipts.
         assert current["unique_owned_bytes"] == 40

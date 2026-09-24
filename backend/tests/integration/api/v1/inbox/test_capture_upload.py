@@ -20,7 +20,7 @@ import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 from starlette.requests import Request
 
 from app.core import config
@@ -30,6 +30,7 @@ from app.db.models import (
     CaptureUploadSlotState,
     InboxItem,
     InboxItemState,
+    StagingLease,
 )
 from app.modules.ingestion import inbox
 from tests.integration.api.v1.inbox.conftest import CANONICAL_URL, capture_source
@@ -128,6 +129,98 @@ def slots(client: TestClient, staging):
 
 
 class TestCreateCaptureUploadSlots:
+    def test_oversized_batch_rolls_back_earlier_slot_reservations(
+        self,
+        client: TestClient,
+        db_session: Session,
+        user_headers,
+        staging,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_max_gb", 1)
+        payload = _create_payload()
+        payload["files"] = [
+            {
+                **payload["files"][0],
+                "id": f"large-{index}",
+                "filename": f"large-{index}.3mf",
+                "size_bytes": 600 * 1024 * 1024,
+            }
+            for index in range(2)
+        ]
+        before = len(db_session.exec(select(StagingLease)).all())
+
+        response = client.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=user_headers("batch-rollback"),
+            json=payload,
+        )
+
+        assert response.status_code == 507, response.text
+        db_session.expire_all()
+        assert len(db_session.exec(select(StagingLease)).all()) == before
+
+    def test_a_five_file_capture_uses_one_active_review_allocation(
+        self, client: TestClient, user_headers, staging
+    ) -> None:
+        headers = user_headers("five-file-capture")
+        payload = _create_payload()
+        payload["files"] = [
+            {
+                **payload["files"][0],
+                "id": f"widget-{index}",
+                "filename": f"widget-{index}.3mf",
+            }
+            for index in range(5)
+        ]
+
+        response = client.post(
+            "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+        )
+
+        assert response.status_code == 201, response.text
+        assert len(response.json()["slots"]) == 5
+
+        for _ in range(3):
+            admitted = client.post(
+                "/api/v1/inbox/capture-upload-slots",
+                headers=headers,
+                json=_create_payload(),
+            )
+            assert admitted.status_code == 201, admitted.text
+        rejected = client.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=headers,
+            json=_create_payload(),
+        )
+        assert rejected.status_code == 507, rejected.text
+
+    def test_cancel_releases_an_unfinished_capture(
+        self, client: TestClient, db_session: Session, user_headers, staging
+    ) -> None:
+        headers = user_headers("cancel-slots")
+        created = client.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=headers,
+            json=_create_payload(),
+        )
+        assert created.status_code == 201, created.text
+        item_id = created.json()["item"]["id"]
+        denied = client.delete(
+            f"/api/v1/inbox/{item_id}/capture-upload",
+            headers=user_headers("other-cancel-user"),
+        )
+        assert denied.status_code == 404
+
+        cancelled = client.delete(
+            f"/api/v1/inbox/{item_id}/capture-upload", headers=headers
+        )
+
+        assert cancelled.status_code == 204, cancelled.text
+        db_session.expire_all()
+        assert db_session.exec(select(StagingLease)).all() == []
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []
+
     def test_hands_back_one_slot_per_declared_file(
         self, client: TestClient, user_headers, staging
     ) -> None:

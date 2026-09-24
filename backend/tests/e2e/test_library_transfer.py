@@ -77,6 +77,60 @@ def _switch_to_fresh_instance(tmp_path: Path, name: str) -> None:
 
 
 class TestLibraryTransfer:
+    @pytest.mark.asyncio
+    async def test_dxf_original_survives_portable_library_transfer(
+        self, api, tmp_path, e2e_db
+    ):
+        del e2e_db
+        headers_a = await _setup_instance(
+            api, tmp_path, name="dxf-source", username="dxf-owner-a"
+        )
+        original = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("portable.dxf", original, "image/vnd.dxf")},
+            data={"model_name": "Portable Drawing"},
+            headers=headers_a,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        for _ in range(50):
+            job = (
+                await api.get(
+                    f"/api/v1/ingest/jobs/{uploaded.json()['job_id']}", headers=headers_a
+                )
+            ).json()
+            if job["state"] in ("completed", "failed", "duplicate"):
+                break
+            await asyncio.sleep(0.05)
+        assert job["state"] == "completed", job
+        exported = await api.get("/api/v1/models/library-archive", headers=headers_a)
+        assert exported.status_code == 200, exported.text
+
+        _switch_to_fresh_instance(tmp_path, "dxf-target")
+        headers_b = await _setup_instance(
+            api, tmp_path, name="dxf-target", username="dxf-owner-b"
+        )
+        imported = await api.post(
+            "/api/v1/models/library-import",
+            headers=headers_b,
+            files={"file": ("library.zip", exported.content, "application/zip")},
+        )
+        assert imported.status_code == 202, imported.text
+        result = await api.get(
+            f"/api/v1/ingest/jobs/{imported.json()['job_id']}", headers=headers_b
+        )
+        assert result.json()["state"] == "completed", result.text
+        models = (await api.get("/api/v1/models", headers=headers_b)).json()
+        model = next(item for item in models if item["name"] == "Portable Drawing")
+        detail = await api.get(f"/api/v1/models/{model['id']}", headers=headers_b)
+        assert detail.status_code == 200, detail.text
+        file_row = detail.json()["files"][0]
+        assert file_row["file_type"] == "dxf"
+        downloaded = await api.get(
+            f"/api/v1/files/{file_row['id']}/download", headers=headers_b
+        )
+        assert downloaded.content == original
+
     @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_export_from_instance_a_import_into_instance_b_preserves_everything(

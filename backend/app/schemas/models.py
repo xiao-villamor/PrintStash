@@ -65,6 +65,11 @@ class FileRead(BaseModel):
     metadata: Optional[MetadataRead] = None
 
 
+class TrashedSourceFileRead(BaseModel):
+    id: int
+    original_filename: str
+
+
 class FileRevisionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -159,6 +164,7 @@ class ModelRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     files: List[FileRead] = []
+    trashed_source_files: List[TrashedSourceFileRead] = []
     starred: bool = False
 
 

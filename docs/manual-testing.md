@@ -49,7 +49,7 @@ Prerequisites:
 - [ ] Harness ports are free or overridden in `deploy/manual-testing/.env`.
       Authentik `9000` and SeaweedFS S3 `8333` are intentionally fixed because
       OIDC issuer and presigned S3 URLs must be identical inside and outside Compose.
-- [ ] Disposable STL, OBJ, 3MF, STEP/STP, valid G-code, invalid/corrupt files,
+- [ ] Disposable STL, OBJ, 3MF, STEP/STP, DXF, valid G-code, invalid/corrupt files,
       a safe ZIP, a traversal ZIP, a PDF, an image, and Markdown are available.
 - [ ] Real-printer tests use a small known-good file, a clear build plate, an
       operator at the printer, and an agreed stop condition.

@@ -37,8 +37,14 @@ class _AcceptingCults:
 
 
 class _RejectingCults:
+    def __init__(
+        self, code: str = "provider_auth_failed", *, retryable: bool = False
+    ) -> None:
+        self.code = code
+        self.retryable = retryable
+
     async def validate_credentials(self, _candidate: object) -> None:
-        raise ProviderConnectionError("provider_auth_failed")
+        raise ProviderConnectionError(self.code, retryable=self.retryable)
 
 
 @pytest.fixture
@@ -149,7 +155,43 @@ class TestConnectCults:
         )
 
         assert response.status_code == 400, response.text
-        assert response.json()["detail"] == "provider_connection_validation_failed"
+        assert response.json()["detail"] == "provider_auth_failed"
+
+    @pytest.mark.parametrize(
+        ("code", "retryable", "status"),
+        [
+            ("provider_retry_exhausted", True, 503),
+            ("provider_transport_failed", False, 503),
+            ("provider_response_invalid", False, 502),
+            ("provider_request_failed", False, 502),
+            ("provider_request_failed", True, 503),
+        ],
+    )
+    def test_classifies_provider_failure_without_storing_credentials(
+        self,
+        client: TestClient,
+        db_session: Session,
+        user_headers,
+        monkeypatch: pytest.MonkeyPatch,
+        code: str,
+        retryable: bool,
+        status: int,
+    ) -> None:
+        monkeypatch.setattr(
+            service,
+            "CultsMetadataClient",
+            lambda _transport: _RejectingCults(code, retryable=retryable),
+        )
+
+        response = client.post(
+            "/api/v1/provider-connections/cults/connect",
+            headers=user_headers(f"cults-{code}"),
+            json=CULTS_LOGIN,
+        )
+
+        assert response.status_code == status, response.text
+        assert response.json()["detail"] == code
+        assert db_session.exec(select(ProviderConnection)).all() == []
 
     def test_stores_nothing_when_the_provider_refuses_the_login(
         self, client: TestClient, db_session: Session, user_headers, cults_rejects

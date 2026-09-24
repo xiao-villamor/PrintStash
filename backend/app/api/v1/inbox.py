@@ -21,7 +21,7 @@ from sqlmodel import Session
 from app.core.browser_device_auth import require_user_or_browser_import_user
 from app.core.config import settings
 from app.core.security import require_auth, require_user
-from app.db.models import InboxItemState, User
+from app.db.models import InboxItemState, InboxSourceKind, User
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.modules.ingestion import importer, inbox, staging_leases
 from app.modules.storage import storage
@@ -142,9 +142,7 @@ async def put_capture_upload_slot(
     finally:
         if staged_path is not None:
             try:
-                if staging_leases.remove_capture_slot_staging(
-                    session, slot_id=slot.id
-                ):
+                if staging_leases.remove_capture_slot_staging(session, slot_id=slot.id):
                     session.commit()
             except Exception:
                 session.rollback()
@@ -160,6 +158,25 @@ def finalize_capture_upload(
     return inbox.read(
         inbox.finalize_capture_upload(session, current_user, item_id), session
     )
+
+
+@router.delete("/{item_id}/capture-upload", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_capture_upload(
+    item_id: int,
+    current_user: User = Depends(require_user_or_browser_import_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Release an unfinished capture's exact slot leases after extension failure."""
+    row = inbox.require_visible(session, current_user, item_id)
+    if row.owner_user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="pending_import_not_found")
+    if (
+        row.source_kind != InboxSourceKind.BROWSER
+        or row.state != InboxItemState.CAPTURED
+    ):
+        raise HTTPException(status_code=409, detail="capture_not_pending")
+    inbox.dismiss(session, row)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
