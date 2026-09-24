@@ -56,6 +56,7 @@ class TestStepGeometry:
         assert brep["volume_mm3"] == pytest.approx(6000)
         assert whole.values["volume"] == pytest.approx(6000)
         assert brep["recipe"]["linear_deflection_mm"] == 0.05
+        assert brep["recipe"]["version"] == "ocp-8.0.1-mm-v1"
         assert result.image is not None
 
     def test_converts_source_metres_to_mm(

@@ -156,6 +156,9 @@
 
 ### Changed
 
+- STEP geometry analysis now runs on OpenCascade 8 (`cadquery-ocp-novtk`
+  8.0.1). New STEP fingerprints record the `ocp-8.0.1-mm-v1` tessellation recipe.
+
 - The getting-started reminder can be dismissed with Don't show again. The choice
   is remembered per user in the current browser across Settings and the empty library.
 

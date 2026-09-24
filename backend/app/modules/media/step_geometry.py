@@ -18,10 +18,13 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepGProp import BRepGProp
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.collections import (
+        IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher,
+        Sequence_TCollection_AsciiString,
+    )
     from OCP.GProp import GProp_GProps
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.STEPControl import STEPControl_Reader
-    from OCP.TColStd import TColStd_SequenceOfAsciiString
     from OCP.TopAbs import (
         TopAbs_EDGE,
         TopAbs_FACE,
@@ -32,14 +35,13 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
     from OCP.TopExp import TopExp, TopExp_Explorer
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_IndexedMapOfShape
 
     if type(triangle_limit) is not int or not 1 <= triangle_limit <= MAX_ANALYSIS_FACES:
         raise StepGeometryError("geometry_work_limit")
     reader = STEPControl_Reader()
     if reader.ReadFile(str(source)) != IFSelect_RetDone:
         raise StepGeometryError("invalid_step")
-    units = [TColStd_SequenceOfAsciiString() for _ in range(3)]
+    units = [Sequence_TCollection_AsciiString() for _ in range(3)]
     reader.FileUnits(*units)
     source_units = [
         units[0].Value(index).ToCString() for index in range(1, units[0].Length() + 1)
@@ -57,7 +59,7 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
         ("vertices", TopAbs_VERTEX),
         ("solids", TopAbs_SOLID),
     ):
-        elements = TopTools_IndexedMapOfShape()
+        elements = IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher()
         TopExp.MapShapes_s(shape, kind, elements)
         counts[name] = elements.Extent()
         if counts[name] > 100_000:
@@ -71,7 +73,7 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
         if math.isfinite(measured) and measured > 0:
             volume, volume_reason = measured, None
     recipe = {
-        "version": "ocp-7.9.3-mm-v1",
+        "version": "ocp-8.0.1-mm-v1",
         "length_unit": "millimeter",
         "linear_deflection_mm": 0.05,
         "angular_deflection_radians": 0.35,
@@ -84,7 +86,7 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
     vertices, triangles = [], []
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
     while explorer.More():
-        face = TopoDS.Face_s(explorer.Current())
+        face = TopoDS.Face(explorer.Current())
         location = TopLoc_Location()
         mesh = BRep_Tool.Triangulation_s(face, location)
         if mesh is None:
