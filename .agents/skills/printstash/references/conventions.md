@@ -57,6 +57,18 @@ address from session context; GitHub attributes by verified email.
   or printer-provider behavior change.
 - Title reads like a commit subject: `fix(backup): quiesce background loops
   during restore`.
+- Link the issue on the body's first line so the PR and issue lifecycles stay
+  tied:
+  - Fully addresses it → `Closes #X`; GitHub closes the issue when the PR
+    merges into `main`. Each issue needs its own keyword:
+    `Closes #12, closes #34` (`Closes #12, #34` closes only #12).
+  - Partially addresses it → `Refs #X`, plus a line naming what remains open.
+    The PR still shows on the issue timeline; the issue stays open.
+  - "Fully" means every acceptance point in the issue, not just the headline
+    symptom. When unsure, use `Refs`: a missed close costs one click, a wrong
+    close silently buries unfinished work.
+  - Only `close`/`fix`/`resolve` (and their -s/-d forms) auto-close;
+    "addresses" or "related to" do not.
 - Behavior changes, larger features, and data-model/API changes should have an
   issue first (`.github/ISSUE_TEMPLATE/` has bug_report and feature_request
   forms).
