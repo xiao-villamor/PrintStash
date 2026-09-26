@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ContextManager
 
+from printstash_core.files import publish_staged_file
+
 
 class CacheUnavailable(RuntimeError):
     """Caching cannot safely admit this representation; use normal delivery."""
@@ -724,10 +726,10 @@ class CacheFill:
                 destination = self.cache._body_path(
                     self.representation.key, create=True
                 )
-                # Hard-link is atomic and cannot replace an existing path. Keeping
-                # the private temp until publication commits also permits verified
-                # fallback without a second provider transfer.
-                os.link(self.path, destination, follow_symlinks=False)
+                # Publication never replaces an existing path. The index stays
+                # uncommitted until a hardlinkless copy is complete and synced.
+                # Keep the verified temp for fallback without another transfer.
+                publish_staged_file(self.path, destination)
                 linked = True
                 self.cache._sync_directory(destination.parent)
                 info = destination.stat()

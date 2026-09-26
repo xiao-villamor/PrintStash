@@ -147,7 +147,8 @@ test.describe("Browser onboarding", () => {
         await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
         await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
         await expect(page).toHaveURL(/\/$/);
-        await page.goto("/getting-started");
+        // This owner-only control appears after login confirmation completes.
+        await page.getByRole("button", { name: "Resume the getting-started guide" }).click();
       }
       await expect(page).toHaveURL(/\/getting-started$/);
       await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();

@@ -11,15 +11,12 @@ prefix, a dot segment, a control character, a byte sequence long enough to
 overflow a filesystem's limit. Any of those reaching a path join is a write
 outside the storage root.
 
-**`stream_to_path` publishes atomically and never overwrites.** The staging file
-is written, fsynced, and then *linked* into place with `follow_symlinks=False`.
-Each of those is load-bearing: without the fsync a power loss leaves a truncated
-artifact the library believes is complete; without the link-not-rename an
-existing file would be silently replaced; without `follow_symlinks=False` a
-symlink planted at the destination would redirect the write anywhere the process
-can reach. And when anything fails — a size limit, a read error — the staging
-file is removed, because a `.printstash-stage-*` file left behind is an orphan
-nothing will ever collect.
+**`stream_to_path` never overwrites.** The private temp is written and synced
+before publication. Hard links publish atomically; unsupported filesystems use
+an exclusive copy and return only after syncing. Both reject collisions and
+symlinks. Failed reads and size limits publish nothing. A failed fallback copy
+preserves the uncertain destination rather than risk deleting a replacement;
+the private temp is still cleaned up.
 
 **Slugs must not collide.** A slug is a URL, so `ensure_unique_slug` walks past
 every taken name rather than picking the first candidate.
@@ -27,16 +24,24 @@ every taken name rather than picking the first candidate.
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
+import stat
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+from threading import Barrier
+from unittest.mock import Mock
 
 import pytest
 
 from printstash_core.files import (
+    PublicationStrategy,
     UnsafeStorageComponent,
     UploadTooLarge,
     ensure_unique_slug,
+    publish_staged_file,
     sha256_file,
     sha256_stream,
     slugify,
@@ -295,3 +300,290 @@ class TestStreamToPath:
             stream_to_path(FailingStream(), tmp_path / "failed.bin")
 
         assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    @pytest.mark.parametrize(
+        "link_errno",
+        [errno.EPERM, errno.EOPNOTSUPP, errno.EXDEV, errno.EMLINK],
+        ids=["unraid", "unsupported", "cross-device", "link-limit"],
+    )
+    def test_stages_without_hardlinks(self, tmp_path, monkeypatch, link_errno):
+        def unavailable(*args, **kwargs):
+            raise OSError(link_errno, "hard links unavailable")
+
+        monkeypatch.setattr(os, "link", unavailable)
+        destination = tmp_path / "upload.stl"
+        payload = b"model bytes" * 100_000
+        digest = hashlib.sha256()
+
+        written = stream_to_path(BytesIO(payload), destination, digest=digest)
+
+        assert written == len(payload)
+        assert destination.read_bytes() == payload
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+        assert digest.hexdigest() == hashlib.sha256(payload).hexdigest()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "dangling"], ids=str)
+    def test_fallback_refuses_existing_destination(self, tmp_path, monkeypatch, kind):
+        destination = tmp_path / "upload.stl"
+        target = tmp_path / "original.stl"
+        target.write_bytes(b"original")
+        creators = {
+            "file": lambda: destination.write_bytes(b"original"),
+            "symlink": lambda: destination.symlink_to(target),
+            "dangling": lambda: destination.symlink_to(tmp_path / "absent"),
+        }
+        creators[kind]()
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+
+        with pytest.raises(FileExistsError):
+            stream_to_path(BytesIO(b"replacement"), destination)
+
+        assert target.read_bytes() == b"original"
+        assert destination.is_symlink() or destination.read_bytes() == b"original"
+        assert not (tmp_path / "absent").exists()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_fallback_keeps_one_concurrent_winner(self, tmp_path, monkeypatch):
+        destination = tmp_path / "upload.stl"
+        barrier = Barrier(2)
+
+        def unavailable(*args, **kwargs):
+            barrier.wait(timeout=5)
+            raise PermissionError(errno.EPERM, "no links")
+
+        def write(payload):
+            try:
+                stream_to_path(BytesIO(payload), destination)
+                return payload
+            except FileExistsError:
+                return None
+
+        monkeypatch.setattr(os, "link", unavailable)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(write, [b"first" * 100_000, b"second" * 100_000]))
+
+        winners = [result for result in results if result is not None]
+        assert len(winners) == 1
+        assert destination.read_bytes() == winners[0]
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    @pytest.mark.parametrize(
+        "link_errno",
+        [errno.EIO, errno.EACCES, errno.ENOSPC],
+        ids=["io-error", "permissions", "disk-full"],
+    )
+    def test_propagates_unexpected_link_failure(
+        self, tmp_path, monkeypatch, link_errno
+    ):
+        destination = tmp_path / "upload.stl"
+        monkeypatch.setattr(os, "link", Mock(side_effect=OSError(link_errno, "failed")))
+
+        with pytest.raises(OSError) as caught:
+            stream_to_path(BytesIO(b"payload"), destination)
+
+        assert caught.value.errno == link_errno
+        assert not destination.exists()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_fallback_propagates_copy_failure(self, tmp_path, monkeypatch):
+        destination = tmp_path / "upload.stl"
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+
+        def fail_copy(source, output, *args, **kwargs):
+            output.write(b"partial")
+            raise OSError(errno.ENOSPC, "disk full")
+
+        monkeypatch.setattr("shutil.copyfileobj", fail_copy)
+
+        with pytest.raises(OSError, match="disk full"):
+            stream_to_path(BytesIO(b"payload"), destination)
+
+        assert destination.read_bytes() == b"partial"
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_fallback_preserves_raced_replacement_on_failure(
+        self, tmp_path, monkeypatch
+    ):
+        destination = tmp_path / "upload.stl"
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+
+        def replace_then_fail(source, output, *args, **kwargs):
+            destination.unlink()
+            destination.write_bytes(b"another writer")
+            raise OSError(errno.EIO, "copy failed")
+
+        monkeypatch.setattr("shutil.copyfileobj", replace_then_fail)
+
+        with pytest.raises(OSError, match="copy failed"):
+            stream_to_path(BytesIO(b"payload"), destination)
+
+        assert destination.read_bytes() == b"another writer"
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_fallback_propagates_destination_open_failure(self, tmp_path, monkeypatch):
+        destination = tmp_path / "upload.stl"
+        real_open = os.open
+
+        def deny_destination(path, *args, **kwargs):
+            if path == destination:
+                raise PermissionError(errno.EACCES, "access denied")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+        monkeypatch.setattr(os, "open", deny_destination)
+
+        with pytest.raises(PermissionError, match="access denied"):
+            stream_to_path(BytesIO(b"payload"), destination)
+
+        assert not destination.exists()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_fallback_propagates_sync_failure(self, tmp_path, monkeypatch):
+        destination = tmp_path / "upload.stl"
+        real_fsync = os.fsync
+        calls = 0
+
+        def fail_destination_sync(fd):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(errno.EIO, "sync failed")
+            real_fsync(fd)
+
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+        monkeypatch.setattr(os, "fsync", fail_destination_sync)
+
+        with pytest.raises(OSError, match="sync failed"):
+            stream_to_path(BytesIO(b"payload"), destination)
+
+        assert destination.read_bytes() == b"payload"
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+
+class TestPublishStagedFile:
+    def test_copy_stays_in_pinned_directories(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "upload").write_bytes(b"verified bytes")
+        source_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY)
+        target_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no hard links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        moved = tmp_path / "pinned"
+        target.rename(moved)
+        target.mkdir()
+        try:
+            publish_staged_file(
+                Path("upload"),
+                Path("result"),
+                src_dir_fd=source_fd,
+                dst_dir_fd=target_fd,
+            )
+        finally:
+            os.close(source_fd)
+            os.close(target_fd)
+        assert (moved / "result").read_bytes() == b"verified bytes"
+        assert not (target / "result").exists()
+
+    def test_uses_known_copy_capability(self, tmp_path, monkeypatch):
+        source = tmp_path / "source"
+        source.write_bytes(b"private bytes")
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=AssertionError("known unsupported"))
+        )
+        destination = tmp_path / "destination"
+        assert (
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+            is PublicationStrategy.COPY
+        )
+        assert destination.read_bytes() == b"private bytes"
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+    def test_identity_only_publication_never_substitutes_copy(
+        self, tmp_path, monkeypatch
+    ):
+        source = tmp_path / "source"
+        source.write_bytes(b"owned inode")
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=OSError(errno.EPERM, "no links"))
+        )
+        destination = tmp_path / "destination"
+        with pytest.raises(OSError) as caught:
+            publish_staged_file(source, destination, strategy=PublicationStrategy.LINK)
+        assert caught.value.errno == errno.EPERM
+        assert not destination.exists()
+
+    def test_copy_rejects_a_symlink_source(self, tmp_path):
+        source = tmp_path / "source"
+        source.symlink_to(tmp_path / "elsewhere")
+        (tmp_path / "elsewhere").write_bytes(b"unowned")
+        destination = tmp_path / "destination"
+        with pytest.raises(OSError):
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+        assert not destination.exists()
+
+    def test_copy_rejects_a_directory_source(self, tmp_path):
+        with pytest.raises(OSError):
+            publish_staged_file(
+                tmp_path, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )
+        assert not (tmp_path / "destination").exists()
+
+    def test_rejects_source_changes_during_copy(self, tmp_path, monkeypatch):
+        import shutil
+
+        source = tmp_path / "source"
+        source.write_bytes(b"first version")
+        destination = tmp_path / "destination"
+        original = shutil.copyfileobj
+
+        def changing_copy(src, dst, length):
+            original(src, dst, length)
+            source.write_bytes(b"different version")
+
+        monkeypatch.setattr(shutil, "copyfileobj", changing_copy)
+        with pytest.raises(OSError, match="source changed"):
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+        assert destination.read_bytes() == b"first version"
+
+    def test_copy_rejects_a_fifo_source(self, tmp_path):
+        source = tmp_path / "pipe"
+        os.mkfifo(source)
+        with pytest.raises(OSError, match="not a regular file"):
+            publish_staged_file(
+                source, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )
+        assert not (tmp_path / "destination").exists()
+
+    def test_rejects_an_incomplete_copy(self, tmp_path, monkeypatch):
+        import shutil
+
+        source = tmp_path / "source"
+        source.write_bytes(b"complete source")
+
+        def short_copy(src, dst, length):
+            dst.write(src.read(3))
+
+        monkeypatch.setattr(shutil, "copyfileobj", short_copy)
+        with pytest.raises(OSError, match="source changed"):
+            publish_staged_file(
+                source, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )

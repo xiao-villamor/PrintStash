@@ -14,8 +14,10 @@ owner, and another user's manifest reads as missing, never as forbidden.
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -166,6 +168,34 @@ class TestStageUpload:
 
 
 class TestIngestModel:
+    def test_ingests_model_without_hardlinks(
+        self, tmp_path, client, auth_headers, monkeypatch
+    ):
+        def unavailable(*args, **kwargs):
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr(os, "link", unavailable)
+        use_local_storage(tmp_path)
+        original = _cube_stl_bytes()
+
+        payload = _job(
+            client,
+            client.post(
+                "/api/v1/ingest/model",
+                headers=auth_headers,
+                files={"file": ("cube.stl", original, "application/sla")},
+            ),
+            auth_headers,
+        )
+
+        assert payload["state"] == "completed", payload
+        response = client.get(
+            f"/api/v1/files/{payload['file_id']}/download",
+            headers=auth_headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.content == original
+
     def test_ingest_model_superuser_can_target_unknown_collection(
         self, tmp_path: Path, client: TestClient, auth_headers: dict[str, str]
     ) -> None:

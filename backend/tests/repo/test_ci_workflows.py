@@ -19,6 +19,24 @@ def _ci_workflow() -> dict:
 class TestCriticalCapabilitiesJob:
     """Critical behavior has one visible, independently rerunnable CI signal."""
 
+    def test_retains_browser_failure_evidence(self) -> None:
+        steps = _ci_workflow()["jobs"]["critical-capabilities"]["steps"]
+        uploads = [
+            step
+            for step in steps
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        ]
+
+        assert len(uploads) == 1
+        upload = uploads[0]
+        assert upload["if"] == "${{ !cancelled() }}"
+        assert set(upload["with"]["path"].splitlines()) == {
+            "frontend/playwright-report/",
+            "frontend/test-results/",
+        }
+        assert upload["with"]["name"] == "playwright-report-critical"
+        assert upload["with"]["retention-days"] == 7
+
     def test_job_runs_the_repository_critical_lane(self) -> None:
         job = _ci_workflow()["jobs"]["critical-capabilities"]
         commands = [step.get("run") for step in job["steps"]]

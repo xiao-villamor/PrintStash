@@ -5,8 +5,8 @@
  * subfolder of /data is enough) keeps imports working, just slower and needing
  * twice the space for each file. The backend's startup probe is the only thing
  * that notices, so if this warning stays hidden the regression is invisible.
- * It must also stay quiet where copying is inherent (remote storage has no
- * probe) or where the layout is right, or operators learn to ignore it.
+ * Remote Vault storage still uses local staging: its filesystem warning must
+ * remain visible without implying that remote storage can use local hard links.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -24,6 +24,54 @@ afterEach(() => {
 });
 
 describe("ImportCopyWarning", () => {
+  it("reports unusable staging without promising successful copies", () => {
+    renderApp(
+      <ImportCopyWarning
+        storageHealth={{
+          ok: true,
+          backend: "s3",
+          diagnostics: {
+            staging: {
+              role: "staging",
+              path: "/data/staging",
+              fs_kind: "unknown",
+              hardlink: false,
+              exclusive_create: false,
+              directory_fsync: false,
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Uploads cannot be staged");
+    expect(screen.getByRole("status")).toHaveTextContent("write permissions");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Uploads still work");
+  });
+
+  it("explains hardlinkless staging with a remote vault", () => {
+    renderApp(
+      <ImportCopyWarning
+        storageHealth={{
+          ok: true,
+          backend: "s3",
+          diagnostics: {
+            staging: {
+              role: "staging",
+              path: "/data/staging",
+              fs_kind: "fuse",
+              hardlink: false,
+              exclusive_create: true,
+              directory_fsync: true,
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("does not support hard links");
+    expect(screen.getByRole("status")).toHaveTextContent("temporary space");
+    expect(screen.getByRole("status")).not.toHaveTextContent("are on different mounts");
+  });
+
   it("warns when staging cannot hard-link into the library", () => {
     renderApp(
       <ImportCopyWarning

@@ -44,7 +44,9 @@ def _receipt(index: int, offset: int, payload: bytes) -> ChunkReceipt:
 
 
 class TestApiChunkUploadAdapter:
-    def test_assembles_idempotent_fixed_chunks(self, tmp_path, monkeypatch) -> None:
+    def test_assembles_idempotent_fixed_chunks(
+        self, tmp_path, monkeypatch, hardlink_support
+    ) -> None:
         monkeypatch.setattr(
             "app.modules.ingestion.artifact_uploads.api_chunks.CHUNK_SIZE", 4
         )
@@ -99,7 +101,7 @@ class TestApiChunkUploadAdapter:
             adapter.write_chunk(session, receipt, payload)
 
     def test_conflicting_duplicate_preserves_the_first_chunk(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, hardlink_support
     ) -> None:
         monkeypatch.setattr(
             "app.modules.ingestion.artifact_uploads.api_chunks.CHUNK_SIZE", 4

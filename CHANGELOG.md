@@ -174,6 +174,18 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- Unify local create-only publication on filesystems without hard links (#249):
+  uploads, URL imports, native completion, cache fills and root markers use the
+  same safe copy fallback. Probe staging for every Vault provider and report
+  its limitations once at startup and in Settings, without changing the Vault's
+  safety tier. Preserve pinned-directory and identity checks during recovery.
+
+- File uploads now stage successfully on Unraid SHFS and other filesystems
+  that refuse hard links, including resumable uploads and native multipart
+  completion. Staging and storage downloads use an exclusive copy without
+  overwriting existing files. The Unraid guide explains the fallback and how
+  to rotate and preserve diagnostic container logs.
+
 - A process that started while an interrupted restore or Vault migration still
   needed recovery now starts its background work once recovery resolves it,
   instead of queueing work nothing ran until the next restart.

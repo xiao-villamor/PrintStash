@@ -58,7 +58,10 @@ secret, or command override is needed.
    library on another mount than staging, and every import then copies its
    file instead of hard-linking it (Settings warns when that happens). Keep
    the share on one pool, as appdata is by default: a share spread across
-   array disks can split staging and files the same way. See
+   array disks can split staging and files the same way. Hard links are an
+   optimization, not a requirement for file uploads: when SHFS refuses
+   them, upload staging and local Vault publication use create-only copies.
+   Keep enough free space for the additional copy. See
    [Hard-linked imports](../docs/deployment.md#hard-linked-imports).
 4. Choose **First-run setup**, which decides how the first administrator is
    created:
@@ -164,3 +167,68 @@ not visible unless it is also mounted inside the container.
 
 The default [Compose file](../docker-compose.yml) is an alternative for
 Docker Compose Manager. It uses the same image and first-run settings.
+
+## Uploads on `/mnt/user`
+
+Unraid's `/mnt/user` shares pass through SHFS/FUSE. With hard-link support
+unavailable, older PrintStash builds can fail an ordinary file upload with
+`PermissionError: [Errno 1] Operation not permitted` at `os.link`, naming two
+paths under `/data/staging/_incoming`. This happens **before** the file reaches
+the selected Vault storage, so switching to WebDAV alone does not fix it.
+
+The staging fallback is included in the **Unreleased** changes: use an image
+built from a revision containing this fix until a release includes it. It
+automatically copies when hard links are unavailable; no hard-link toggle is
+needed. This covers both the older upload endpoint and the current browser's
+resumable uploads, including native multipart completion and storage downloads.
+Local Vault storage already has a create-only copy fallback. A
+filesystem without reliable identity guarantees remains **Guarded** in storage
+checks; successful uploads do not upgrade its safety tier.
+
+There is no need to enable Unraid's global hard-link setting for this upload
+path, bypass `/mnt/user`, or use Nextcloud as a workaround once the fix is
+installed. Keep `PUID`/`PGID` matched to your share permissions: a genuinely
+unwritable directory or full disk will still fail. Do not move an existing
+installation between `/mnt/user` and a pool path while PrintStash is running.
+
+## Keeping diagnostic logs
+
+PrintStash sends application logs to container stdout/stderr. It does not
+create a rotating application log under `/data`; Docker manages retention.
+The WebUI audit log records user actions and is separate from diagnostic logs.
+
+To bound Docker's log files, edit the container in Unraid's advanced view and
+append these options to **Extra Parameters**, preserving the existing options:
+
+```text
+--log-driver=json-file --log-opt max-size=10m --log-opt max-file=5
+```
+
+These [Docker logging options](https://docs.docker.com/engine/logging/drivers/json-file/)
+retain up to five files of about 10 MB each. Applying the settings recreates the
+container; export useful logs **before** applying, updating, or removing it.
+Rotation also removes the oldest entries, so export soon after a failure.
+From the Unraid terminal (replace `PrintStash` with your container's name):
+
+```bash
+docker logs --timestamps --since 24h PrintStash > /mnt/user/appdata/printstash-diagnostics.log 2>&1
+```
+
+Save that file with the image tag/digest, the failed action, and the container
+path mappings when reporting a problem. Review it for credentials and private
+URLs before sharing. For retention across container replacements, forward
+container logs to your existing log collector or export them to a persistent
+share; Docker rotation alone does not provide that archive.
+
+### Staging capability warnings
+
+PrintStash probes `/data/staging` independently of the selected Vault provider.
+On hardlinkless SHFS/FUSE shares, Settings explains that uploads use copies and
+need more temporary space. Startup logs name each affected root once, and
+`GET /api/v1/health/details` exposes the measurements under
+`components.storage.diagnostics.staging`. The warning also appears with a remote
+Vault: switching to WebDAV does not change the local staging filesystem.
+
+These uploads no longer require a staging relocation or remote-provider
+workaround. A disk or pool path supporting hard links can still reduce copying.
+The staging warning does not change the selected Vault's safety tier.

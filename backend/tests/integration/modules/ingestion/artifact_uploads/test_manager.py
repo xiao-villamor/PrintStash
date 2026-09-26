@@ -6,6 +6,7 @@ A failure here means concurrent workers could overwrite newer upload state.
 from datetime import timedelta
 
 import pytest
+from printstash_core.files import PublicationStrategy
 from sqlalchemy import update
 from sqlmodel import Session
 
@@ -28,6 +29,7 @@ from app.modules.storage.storage_backend.contracts import (
 
 
 class _NativeBackend:
+    staging_publication_strategy = PublicationStrategy.AUTO
     storage_target = None
 
     def __init__(self, *, fail_begin: bool = False) -> None:

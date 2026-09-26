@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
+import shutil
+import stat
 import tempfile
 import unicodedata
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -74,12 +78,14 @@ def stream_to_path(
     max_bytes: int | None = None,
     digest: _Digest | None = None,
 ) -> int:
-    """Atomically stream ``src`` to a new path and return bytes written.
+    """Stream ``src`` to a new private staging path and return bytes written.
 
-    Bytes are written to a private sibling staging file first. A hard link
-    publishes the completed file atomically and fails rather than replacing an
-    existing destination. When supplied, ``digest`` observes the same single
-    pass that is published.
+    A hard link publishes the completed sibling temp atomically. On filesystems
+    without hard links, an exclusive copy preserves no-replace semantics but
+    may expose partial bytes: callers must not consume or advertise ``dest``
+    until this function returns. A failed copy leaves an uncertain destination
+    for operator review; it never unlinks a possible raced replacement.
+    When supplied, ``digest`` observes the input stream exactly once.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     bytes_written = 0
@@ -99,7 +105,7 @@ def stream_to_path(
                     digest.update(chunk)
             out.flush()
             os.fsync(out.fileno())
-        os.link(temp, dest, follow_symlinks=False)
+        publish_staged_file(temp, dest)
         return bytes_written
     finally:
         try:
@@ -108,3 +114,78 @@ def stream_to_path(
             # An uncertain private temp is safer than turning a successfully
             # published staging file into a reported failure.
             pass
+
+
+class PublicationStrategy(StrEnum):
+    AUTO = "auto"
+    LINK = "link"
+    COPY = "copy"
+
+
+LINK_UNAVAILABLE_ERRNOS = frozenset(
+    {errno.EXDEV, errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK}
+)
+
+
+def publish_staged_file(
+    staged_path: Path,
+    dest: Path,
+    *,
+    src_dir_fd: int | None = None,
+    dst_dir_fd: int | None = None,
+    strategy: PublicationStrategy = PublicationStrategy.AUTO,
+) -> PublicationStrategy:
+    """Publish a closed, synced file without replacing ``dest``; keep the source.
+
+    AUTO tries an atomic hard link, then an exclusive synced copy only for
+    unsupported-link errors. COPY uses a root's known degraded capability.
+    LINK is for probes and operations whose identity proof requires the same
+    inode; it never silently substitutes a copy. The returned strategy is LINK
+    or COPY. Descriptor-relative paths remain pinned throughout either path.
+
+    Copying has create-only semantics, not atomic visibility. Consumers wait
+    for successful return; uncertain destinations survive failures for review.
+    The caller owns source stability and destination-directory authorization.
+    """
+    if strategy is not PublicationStrategy.COPY:
+        try:
+            os.link(
+                staged_path,
+                dest,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+                follow_symlinks=False,
+            )
+            return PublicationStrategy.LINK
+        except OSError as exc:
+            if (
+                strategy is PublicationStrategy.LINK
+                or exc.errno not in LINK_UNAVAILABLE_ERRNOS
+            ):
+                raise
+    # Open the source first, without following symlinks. In recovery paths the
+    # quarantined entry may belong to a raced writer, not to this operation.
+    read_fd = os.open(
+        staged_path,
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=src_dir_fd,
+    )
+    with os.fdopen(read_fd, "rb") as staged:
+        before = os.fstat(staged.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise OSError(errno.EINVAL, "publication source is not a regular file")
+        out_fd = os.open(
+            dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=dst_dir_fd
+        )
+        with os.fdopen(out_fd, "wb") as out:
+            shutil.copyfileobj(staged, out, _CHUNK_SIZE)
+            out.flush()
+            os.fsync(out.fileno())
+            after = os.fstat(staged.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ) or os.fstat(out.fileno()).st_size != before.st_size:
+                raise OSError(errno.EIO, "publication source changed during copy")
+    return PublicationStrategy.COPY

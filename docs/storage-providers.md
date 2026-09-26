@@ -42,6 +42,24 @@ Mounted NAS presets configure Vault directories. For existing NAS files choose a
 
 ## Safety tiers
 
+Upload staging is probed separately from the Vault provider. At startup PrintStash
+records its filesystem kind, hard-link support, exclusive creation and directory
+sync support in `components.storage.diagnostics.staging` on
+`GET /api/v1/health/details`. This also applies to S3, WebDAV and SFTP Vaults:
+uploads still pass through a local staging directory.
+
+Filesystems without hard links, including Unraid `/mnt/user` (SHFS/FUSE), use
+exclusive, synced copies for staging and local publication. Settings and startup
+logs report the extra temporary space requirement. Each affected root is logged
+once per process setup, rather than once per upload. Existing destinations are
+never replaced. Copy publication can expose partial bytes until the operation
+returns; failed copies retain uncertain files for reconciliation.
+
+A staging copy warning does not change the Vault's safety tier. Local Vault roots
+without stable inode proofs remain Guarded, while a verified remote provider can
+remain Verified with hardlinkless staging. Actual permission, capacity or I/O
+errors still fail the operation. See [deployment layout](deployment.md#hard-linked-imports).
+
 - **Verified** storage proves conditional creation, replacement identity, and deletion identity. Automated storage-backed purge is allowed.
 - **Guarded** storage proves unique creation but lacks at least one destructive-operation proof. Manual permanent deletion requires one-shot confirmation; scheduled storage purge is skipped.
 - **Unguarded** storage cannot prove unique creation. Startup additionally requires `VAULT_STORAGE_ALLOW_UNVERIFIED=true`.

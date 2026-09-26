@@ -181,6 +181,14 @@ export interface StorageHealthRead {
     probed?: boolean;
     /** Local storage only: whether staged imports reach the library by hard link. */
     staged_hardlink?: boolean;
+    staging?: {
+      role: "staging";
+      path: string;
+      fs_kind: string;
+      hardlink: boolean;
+      exclusive_create: boolean;
+      directory_fsync: boolean;
+    };
   };
 }
 

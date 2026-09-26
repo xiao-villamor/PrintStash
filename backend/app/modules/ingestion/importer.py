@@ -29,6 +29,7 @@ from printstash_core.files import (
     ArchiveEntry,
     ArchiveLimits,
     ArchivePolicyError,
+    publish_staged_file,
     safe_entry_name,
 )
 from printstash_core.files import (
@@ -159,7 +160,7 @@ async def download_to_staging(url: str) -> tuple[Path, str]:
                                 out.write(chunk)
                             out.flush()
                             os.fsync(out.fileno())
-                        os.link(temp, staged, follow_symlinks=False)
+                        publish_staged_file(temp, staged)
                         return staged, original_filename
                     finally:
                         try:

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import app.modules.storage.storage_backend.local as storage_local
+import app.modules.storage.storage_backend.probes as storage_probes
 import app.modules.storage.storage_backend.s3 as storage_s3
 from app.modules.storage.storage_backend.contracts import (
     ObjectIdentity,
@@ -242,7 +243,7 @@ class TestLocalStorageBackendEnsureSetup:
         )
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
-        monkeypatch.setattr(storage_local, "detect_fs_kind", lambda _path: "network")
+        monkeypatch.setattr(storage_probes, "detect_fs_kind", lambda _path: "network")
         monkeypatch.setattr(
             os,
             "link",
@@ -270,7 +271,7 @@ class TestLocalStorageBackendEnsureSetup:
         )
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
-        monkeypatch.setattr(storage_local, "detect_fs_kind", lambda _path: "local")
+        monkeypatch.setattr(storage_probes, "detect_fs_kind", lambda _path: "local")
         backend = LocalStorageBackend()
 
         backend.ensure_setup()
@@ -287,7 +288,7 @@ class TestLocalStorageBackendEnsureSetup:
         )
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
-        monkeypatch.setattr(storage_local, "detect_fs_kind", lambda _path: "local")
+        monkeypatch.setattr(storage_probes, "detect_fs_kind", lambda _path: "local")
         monkeypatch.setattr(
             os,
             "link",
@@ -309,7 +310,7 @@ class TestLocalStorageBackendEnsureSetup:
         )
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
-        monkeypatch.setattr(storage_local, "detect_fs_kind", lambda _path: "network")
+        monkeypatch.setattr(storage_probes, "detect_fs_kind", lambda _path: "network")
         backend = LocalStorageBackend()
 
         backend.ensure_setup()
@@ -327,7 +328,7 @@ class TestLocalStorageBackendEnsureSetup:
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
         monkeypatch.setattr(
-            storage_local,
+            storage_probes,
             "detect_fs_kind",
             lambda path: "network" if Path(path) == configured.thumb_dir else "local",
         )
@@ -347,10 +348,10 @@ class TestLocalStorageBackendEnsureSetup:
         )
         _enroll_local_roots(configured)
         monkeypatch.setattr(storage_local, "settings", configured)
-        monkeypatch.setattr(storage_local, "detect_fs_kind", lambda _path: "local")
+        monkeypatch.setattr(storage_probes, "detect_fs_kind", lambda _path: "local")
         monkeypatch.setattr(
-            storage_local,
-            "_fsync_directory",
+            storage_probes.os,
+            "fsync",
             lambda _path: (_ for _ in ()).throw(OSError("unsupported")),
         )
         backend = LocalStorageBackend()

@@ -8,6 +8,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
+from printstash_core.files import PublicationStrategy
 from sqlalchemy import func, update
 from sqlmodel import Session, select
 
@@ -54,15 +55,18 @@ class SqlArtifactUploadManager:
         backend: StorageBackend | None = None,
     ) -> None:
         self.session = session
-        self.api_adapter = ApiChunkUploadAdapter(
-            staging_root or settings.incoming_dir / "artifact-uploads"
-        )
-        self.adapter = self.api_adapter
         if backend is None:
             try:
                 backend = get_backend()
             except RuntimeError:
                 backend = None
+        self.api_adapter = ApiChunkUploadAdapter(
+            staging_root or settings.incoming_dir / "artifact-uploads",
+            publication_strategy=backend.staging_publication_strategy
+            if backend is not None
+            else PublicationStrategy.AUTO,
+        )
+        self.adapter = self.api_adapter
         self.native_adapter = (
             NativeMultipartUploadAdapter(backend, self.api_adapter.root)
             if backend is not None

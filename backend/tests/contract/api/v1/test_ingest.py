@@ -886,9 +886,22 @@ class TestIngestUrl:
 class TestDownloadToStaging:
     @_requires(BENCHY_STL)
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("hardlinks", [True, False], ids=["hardlinks", "unraid"])
     async def test_download_to_staging_fetches_real_file(
-        self, tmp_path: Path, http_server: tuple[str, dict[str, dict]]
+        self,
+        tmp_path: Path,
+        http_server: tuple[str, dict[str, dict]],
+        monkeypatch,
+        hardlinks: bool,
     ) -> None:
+        if not hardlinks:
+            import errno
+            import os
+
+            def unsupported(*args, **kwargs):
+                raise OSError(errno.EPERM, "no hard links")
+
+            monkeypatch.setattr(os, "link", unsupported)
         use_local_storage(tmp_path)
         base, routes = http_server
         stl_bytes = BENCHY_STL.read_bytes()

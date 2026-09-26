@@ -9,6 +9,7 @@ import secrets
 import uuid
 from pathlib import Path
 
+from printstash_core.files import publish_staged_file
 from sqlmodel import Session
 
 from app.core.logging import get_logger
@@ -169,9 +170,14 @@ def _create_marker(root: Path, payload: dict[str, object]) -> bool:
             os.fsync(fd)
         finally:
             os.close(fd)
-        # link() is create-only, unlike replace(), so a concurrent valid marker
-        # can never be silently overwritten.
-        os.link(temporary, ROOT_MARKER_FILENAME, src_dir_fd=root_fd, dst_dir_fd=root_fd)
+        # Publication is create-only even on hardlinkless mounts, so a
+        # concurrent valid marker can never be silently overwritten.
+        publish_staged_file(
+            Path(temporary),
+            Path(ROOT_MARKER_FILENAME),
+            src_dir_fd=root_fd,
+            dst_dir_fd=root_fd,
+        )
         os.fsync(root_fd)
         return True
     except FileExistsError:
