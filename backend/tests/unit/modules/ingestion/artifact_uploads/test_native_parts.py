@@ -116,7 +116,7 @@ def cleartext_protection(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestNativeMultipartUploadAdapter:
     def test_completes_verified_provider_parts(
-        self, tmp_path: Path, cleartext_protection: None
+        self, tmp_path: Path, cleartext_protection: None, hardlink_support
     ) -> None:
         payload = b"abcdefgh"
         backend = _NativeBackend(payload)

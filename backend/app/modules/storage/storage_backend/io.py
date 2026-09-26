@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
+from printstash_core.files import publish_staged_file
+
 from app.core.logging import get_logger
 
 from .contracts import StorageCollisionError
@@ -26,7 +28,10 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _copy_stream_create_only(src: BinaryIO, dest: Path) -> Path:
-    """Fully stage and fsync a stream, then publish *dest* atomically/no-replace."""
+    """Fully stage and sync a stream, then publish *dest* without replacement.
+
+    Hardlinkless destinations use an exclusive copy; consume only after return.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=".printstash-download-", dir=dest.parent)
     temp = Path(temp_name)
@@ -36,7 +41,7 @@ def _copy_stream_create_only(src: BinaryIO, dest: Path) -> Path:
             destination.flush()
             os.fsync(destination.fileno())
         try:
-            os.link(temp, dest, follow_symlinks=False)
+            publish_staged_file(temp, dest)
         except FileExistsError as exc:
             raise StorageCollisionError(str(dest)) from exc
         _fsync_directory(dest.parent)

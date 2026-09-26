@@ -6,11 +6,14 @@ source bytes, reject destination collisions, and report accurate inventories.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -58,6 +61,21 @@ class TestStreamChunks:
 
 
 class TestDownloadToPath:
+    def test_downloads_without_hardlinks(self, tmp_path, monkeypatch):
+        backend = LocalStorageBackend()
+        source = tmp_path / "source.stl"
+        source.write_bytes(b"original")
+        destination = tmp_path / "copy.stl"
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=PermissionError(errno.EPERM, "no links"))
+        )
+
+        result = backend.download_to_path(str(source), destination)
+
+        assert result == destination
+        assert destination.read_bytes() == b"original"
+        assert source.read_bytes() == b"original"
+
     def test_copies_into_a_destination_whose_parents_do_not_exist(
         self, tmp_path: Path
     ) -> None:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
+import shutil
 import tempfile
 import unicodedata
 from collections.abc import Callable
@@ -74,12 +76,14 @@ def stream_to_path(
     max_bytes: int | None = None,
     digest: _Digest | None = None,
 ) -> int:
-    """Atomically stream ``src`` to a new path and return bytes written.
+    """Stream ``src`` to a new private staging path and return bytes written.
 
-    Bytes are written to a private sibling staging file first. A hard link
-    publishes the completed file atomically and fails rather than replacing an
-    existing destination. When supplied, ``digest`` observes the same single
-    pass that is published.
+    A hard link publishes the completed sibling temp atomically. On filesystems
+    without hard links, an exclusive copy preserves no-replace semantics but
+    may expose partial bytes: callers must not consume or advertise ``dest``
+    until this function returns. A failed copy leaves an uncertain destination
+    for operator review; it never unlinks a possible raced replacement.
+    When supplied, ``digest`` observes the input stream exactly once.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     bytes_written = 0
@@ -99,7 +103,7 @@ def stream_to_path(
                     digest.update(chunk)
             out.flush()
             os.fsync(out.fileno())
-        os.link(temp, dest, follow_symlinks=False)
+        publish_staged_file(temp, dest)
         return bytes_written
     finally:
         try:
@@ -108,3 +112,32 @@ def stream_to_path(
             # An uncertain private temp is safer than turning a successfully
             # published staging file into a reported failure.
             pass
+
+
+def publish_staged_file(staged_path: Path, dest: Path) -> None:
+    """Publish a closed, synced private file without replacing ``dest``.
+
+    Keep the source for caller-owned cleanup. Prefer atomic hard-link
+    publication; unsupported filesystems use an exclusive, synced copy.
+    Consumers must wait for return before reading the destination: the copy
+    can expose partial bytes. On failure leave uncertain destinations intact.
+    Both paths must be inside application-controlled staging directories.
+    """
+    try:
+        os.link(staged_path, dest, follow_symlinks=False)
+    except OSError as exc:
+        if exc.errno not in {
+            errno.EXDEV,
+            errno.EPERM,
+            errno.EOPNOTSUPP,
+            errno.EMLINK,
+        }:
+            raise
+        # O_EXCL rejects existing files and symlinks, including dangling
+        # symlinks. Never replace this with exists() followed by rename().
+        out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(out_fd, "wb") as out:
+            with staged_path.open("rb") as staged:
+                shutil.copyfileobj(staged, out, _CHUNK_SIZE)
+            out.flush()
+            os.fsync(out.fileno())

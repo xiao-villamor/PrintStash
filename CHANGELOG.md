@@ -174,6 +174,12 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- File uploads now stage successfully on Unraid SHFS and other filesystems
+  that refuse hard links, including resumable uploads and native multipart
+  completion. Staging and storage downloads use an exclusive copy without
+  overwriting existing files. The Unraid guide explains the fallback and how
+  to rotate and preserve diagnostic container logs.
+
 - A process that started while an interrupted restore or Vault migration still
   needed recovery now starts its background work once recovery resolves it,
   instead of queueing work nothing ran until the next restart.

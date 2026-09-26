@@ -10,6 +10,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
+from printstash_core.files import publish_staged_file
+
 from app.core.secrets import decrypt_secret, encrypt_secret
 from app.db.models import ArtifactUploadPart, ArtifactUploadSession
 from app.modules.storage.storage_backend.contracts import (
@@ -215,7 +217,7 @@ class NativeMultipartUploadAdapter:
                 upload.client_sha256 and sha256 != upload.client_sha256.lower()
             ):
                 raise NativeMultipartError("artifact_upload_hash_mismatch")
-            os.link(temporary, destination)
+            publish_staged_file(temporary, destination)
             temporary.unlink(missing_ok=True)
             stat = destination.stat(follow_symlinks=False)
             return VerifiedStagedArtifact(

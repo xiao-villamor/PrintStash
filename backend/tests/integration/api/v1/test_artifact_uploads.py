@@ -6,7 +6,9 @@ A failure here means clients may lose resumability, isolation, or ingestion hand
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -128,6 +130,40 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_resumable_upload_without_hardlinks(
+        self, client, auth_headers, db_session, tmp_path, monkeypatch
+    ):
+        def unavailable(*args, **kwargs):
+            raise PermissionError(errno.EPERM, "Operation not permitted")
+
+        monkeypatch.setattr(os, "link", unavailable)
+        use_local_storage(tmp_path)
+        payload = content.ascii_stl()
+        created = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        )
+        assert created.status_code == 201, created.text
+        upload_id = created.json()["id"]
+
+        uploaded = _put_chunk(client, auth_headers, upload_id, payload)
+        assert uploaded.status_code == 200, uploaded.text
+        retried = _put_chunk(client, auth_headers, upload_id, payload)
+        assert retried.status_code == 200, retried.text
+        finalized = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+        assert finalized.status_code == 200, finalized.text
+        drain_work()
+
+        artifact = db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+        downloaded = client.get(
+            f"/api/v1/files/{artifact.id}/download", headers=auth_headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == payload
+
     def test_resumable_dxf_upload_persists_the_original_bytes(
         self,
         client: TestClient,

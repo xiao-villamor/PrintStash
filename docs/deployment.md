@@ -233,16 +233,21 @@ An empty value means the default. **Move `VAULT_DATA_DIR` and
 ### Hard-linked imports
 
 Every upload, URL import, library-transfer archive and printer capture is first
-written to the staging directory, then published into the library by **hard
-link**: the staged file *becomes* the library file. Publishing takes the same
-fraction of a millisecond at any size (a 2 GiB file that took about 7 s to copy
+written to the staging directory. When the filesystem supports it, publication
+into the local library uses a **hard link**: the staged file *becomes* the
+library file. Publishing takes the same fraction of a millisecond at any size (a 2 GiB file that took about 7 s to copy
 publishes in under 1 ms), and the file never occupies disk twice, not even
 briefly.
 
 A hard link works only **within one mount**. Linux refuses one between two
 mounts even when both sit on the same disk. PrintStash then copies the file
 instead. Nothing breaks, but every import gets slower as files grow and briefly
-needs twice its size in free space.
+needs twice its size in free space. Ordinary file-upload staging also falls
+back to an exclusive copy if its own filesystem refuses hard links (for example,
+Unraid SHFS with hard-link support disabled). Existing files are never overwritten.
+The fallback returns only after copying and syncing the bytes; interrupted copies
+can leave an unreferenced partial staging file. See the
+[Unraid upload and logging guide](../unraid/README.md#uploads-on-mntuser).
 
 | Layout | Imports |
 | --- | --- |
