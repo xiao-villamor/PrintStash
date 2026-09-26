@@ -14,9 +14,11 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from printstash_core.files import PublicationStrategy
 from sqlmodel import Session, select
 from starlette.requests import Request
 
+import app.modules.storage.storage_backend.runtime as storage_runtime
 from app.api.v1 import artifact_uploads as upload_api
 from app.db.models import (
     ArtifactUploadPart,
@@ -79,6 +81,7 @@ def _put_chunk(
 
 
 class _NativeUploadBackend:
+    staging_publication_strategy = PublicationStrategy.AUTO
     storage_target = None
 
     def __init__(self, payload: bytes) -> None:
@@ -138,6 +141,7 @@ class TestArtifactUploads:
 
         monkeypatch.setattr(os, "link", unavailable)
         use_local_storage(tmp_path)
+        storage_runtime.get_backend().ensure_setup()
         payload = content.ascii_stl()
         created = client.post(
             "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers

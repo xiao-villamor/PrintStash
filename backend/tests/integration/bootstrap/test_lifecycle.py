@@ -188,7 +188,7 @@ class TestStorageComposition:
 
         events: list[str] = []
 
-        class _RecoveryBackend:
+        class _RecoveryBackend(lifecycle.LocalStorageBackend):
             backend_name = "local"
             capabilities = StorageCapabilities(
                 conditional_create=True,
@@ -231,7 +231,7 @@ class TestStorageComposition:
 
         events: list[str] = []
 
-        class _Backend:
+        class _Backend(lifecycle.LocalStorageBackend):
             backend_name = "local"
             capabilities = StorageCapabilities(
                 conditional_create=True,

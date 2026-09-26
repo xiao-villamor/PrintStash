@@ -44,7 +44,10 @@ def cross_mount_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     real_link = os.link
 
     def link(src, dst, *args, **kwargs):
-        if Path(os.fsdecode(src)).parent == staging:
+        if Path(os.fsdecode(src)).parent == staging and (
+            Path(os.fsdecode(dst)).parent != staging
+            or kwargs.get("dst_dir_fd") is not None
+        ):
             raise OSError(errno.EXDEV, os.strerror(errno.EXDEV), os.fsdecode(src))
         return real_link(src, dst, *args, **kwargs)
 
@@ -598,3 +601,83 @@ class TestEnsureSetup:
             for path in (tmp_path / root).iterdir()
             if "probe" in path.name
         ] == []
+
+
+class TestStagingProbe:
+    def test_reports_staging_capabilities(self, configured_backend, tmp_path) -> None:
+        configured_backend.ensure_setup()
+        probe = configured_backend.probe_diagnostics["staging"]
+        assert probe == {
+            "role": "staging",
+            "path": str(tmp_path / "staging"),
+            "fs_kind": "local",
+            "hardlink": True,
+            "exclusive_create": True,
+            "directory_fsync": True,
+        }
+
+    def test_warns_once_for_hardlinkless_staging(
+        self, configured_backend, tmp_path, monkeypatch, caplog
+    ) -> None:
+        real_link = os.link
+
+        def no_staging_links(src, dst, *args, **kwargs):
+            if Path(src).parent == tmp_path / "staging":
+                raise OSError(errno.EPERM, "no hard links")
+            return real_link(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "link", no_staging_links)
+        configured_backend.ensure_setup()
+        configured_backend.ensure_setup()
+        assert configured_backend.probe_diagnostics["staging"]["hardlink"] is False
+        warnings = configured_backend.capabilities.warnings
+        assert any("staging" in warning and "copy" in warning for warning in warnings)
+        assert (
+            sum(
+                "staging" in record.message
+                and "does not support hard links" in record.message
+                for record in caplog.records
+            )
+            == 1
+        )
+        assert configured_backend.capabilities.tier.value == "verified"
+
+    @pytest.mark.parametrize("entrypoint", ["create", "move"])
+    def test_uses_the_root_copy_capability(
+        self, configured_backend, tmp_path, monkeypatch, entrypoint
+    ):
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        configured_backend.ensure_setup()
+
+        def unexpected_link(*args, **kwargs):
+            raise AssertionError("known hardlinkless root must use exclusive copying")
+
+        monkeypatch.setattr(os, "link", unexpected_link)
+        destination = tmp_path / "files" / "copied.stl"
+        if entrypoint == "create":
+            receipt = configured_backend.create_bytes(STAGED_BYTES, str(destination))
+        else:
+            receipt = configured_backend.move_in(_staged(tmp_path), str(destination))
+        assert destination.read_bytes() == STAGED_BYTES
+        assert receipt.inode is None
+
+    def test_preserves_verified_library_with_degraded_staging(
+        self, configured_backend, tmp_path, monkeypatch
+    ):
+        real_link = os.link
+
+        def unsupported_staging(src, dst, *args, **kwargs):
+            if Path(src).parent == tmp_path / "staging":
+                raise OSError(errno.EPERM, "no staging links")
+            return real_link(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "link", unsupported_staging)
+        configured_backend.ensure_setup()
+        destination = tmp_path / "files" / "copied.stl"
+        receipt = configured_backend.move_in(_staged(tmp_path), str(destination))
+        assert destination.read_bytes() == STAGED_BYTES
+        assert receipt.inode == destination.stat().st_ino
+        assert configured_backend.capabilities.tier.value == "verified"

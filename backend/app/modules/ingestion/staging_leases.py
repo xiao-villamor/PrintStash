@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
+from printstash_core.files import PublicationStrategy, publish_staged_file
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -333,21 +334,23 @@ def _quarantine_owned_file(
         # still prove that the quarantined entry is the originally selected
         # regular file.
         if not matches(moved_info, quarantine, check_ctime=False):
-            # Restore through a no-replace hard link. If a writer filled the
-            # original name, leave both entries intact for reconciliation.
+            # Restore without replacing a writer that filled the original name.
+            # Copy restoration preserves the quarantined inode for reconciliation.
             try:
-                os.link(
-                    quarantine_name,
-                    path.name,
+                method = publish_staged_file(
+                    Path(quarantine_name),
+                    Path(path.name),
                     src_dir_fd=quarantine_fd,
                     dst_dir_fd=parent_fd,
-                    follow_symlinks=False,
                 )
             except FileExistsError:
                 pass
             except OSError:
                 pass
             else:
+                if method is PublicationStrategy.COPY:
+                    # Preserve the original raced inode for reconciliation.
+                    return False
                 try:
                     os.unlink(quarantine_name, dir_fd=quarantine_fd)
                     quarantine_created = False

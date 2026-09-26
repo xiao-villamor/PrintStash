@@ -7,16 +7,19 @@ import secrets
 import tempfile
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
+from printstash_core.files import PublicationStrategy
+
 from app.core.logging import get_logger
 from app.modules.storage.delivery_contracts import BrowserDownload
-from app.modules.storage.filesystem import FsKind
 from app.modules.storage.storage_identity import StorageTargetIdentity
+
+from .probes import LocalRootProbe, LocalRootRole, probe_local_root
 
 logger = get_logger(__name__)
 
@@ -89,6 +92,7 @@ class StorageCapabilities:
     direct_path: bool
     browser_multipart_upload: bool = False
     multipart_sha256_checksums: bool = False
+    local_warnings: tuple[str, ...] = ()
 
     @property
     def tier(self) -> StorageTier:
@@ -100,7 +104,7 @@ class StorageCapabilities:
 
     @property
     def warnings(self) -> tuple[str, ...]:
-        warnings: list[str] = []
+        warnings: list[str] = list(self.local_warnings)
         if not self.conditional_create:
             warnings.append(
                 "Two simultaneous uploads of the same revision can silently "
@@ -135,26 +139,6 @@ class StorageCapabilities:
             "multipart_sha256_checksums": self.multipart_sha256_checksums,
             "tier": self.tier.value,
             "warnings": list(self.warnings),
-        }
-
-
-@dataclass(frozen=True)
-class LocalRootProbe:
-    role: str
-    path: str
-    fs_kind: FsKind
-    hardlink: bool
-    exclusive_create: bool
-    directory_fsync: bool
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "role": self.role,
-            "path": self.path,
-            "fs_kind": self.fs_kind,
-            "hardlink": self.hardlink,
-            "exclusive_create": self.exclusive_create,
-            "directory_fsync": self.directory_fsync,
         }
 
 
@@ -249,10 +233,36 @@ class StorageBackend(ABC):
         """Versioned target identity, independent of locator/ownership hashes."""
         return None
 
+    staging_probe: LocalRootProbe | None = None
+    _reported_root_warnings: frozenset[str] = frozenset()
+
+    def _report_warnings(self, warnings: tuple[str, ...]) -> None:
+        for warning in warnings:
+            if warning not in self._reported_root_warnings:
+                logger.warning("storage capability warning: %s", warning)
+                self._reported_root_warnings = self._reported_root_warnings | {warning}
+
+    def report_root_warnings(self, probe: LocalRootProbe) -> None:
+        self._report_warnings(probe.warnings)
+
+    def report_capability_warnings(self) -> None:
+        self._report_warnings(self.capabilities.warnings)
+
+    def probe_staging(self, root: Path) -> None:
+        if self.staging_probe is None or self.staging_probe.path != str(root):
+            self.staging_probe = probe_local_root(LocalRootRole.STAGING, root)
+            self.report_root_warnings(self.staging_probe)
+
+    @property
+    def staging_publication_strategy(self) -> PublicationStrategy:
+        if self.staging_probe is not None and not self.staging_probe.hardlink:
+            return PublicationStrategy.COPY
+        return PublicationStrategy.AUTO
+
     @property
     def capabilities(self) -> StorageCapabilities:
         """Return guarantees measured for this configured adapter."""
-        return getattr(
+        capabilities = getattr(
             self,
             "_capabilities",
             StorageCapabilities(
@@ -265,9 +275,20 @@ class StorageBackend(ABC):
             ),
         )
 
+        if self.staging_probe is not None:
+            return replace(
+                capabilities,
+                local_warnings=capabilities.local_warnings
+                + self.staging_probe.warnings,
+            )
+        return capabilities
+
     @property
     def probe_diagnostics(self) -> dict[str, object]:
-        return getattr(self, "_probe_diagnostics", {})
+        diagnostics = dict(getattr(self, "_probe_diagnostics", {}))
+        if self.staging_probe is not None:
+            diagnostics["staging"] = self.staging_probe.as_dict()
+        return diagnostics
 
     def destructive_lifecycle_findings(self) -> list[dict[str, object]]:
         """Read-only operator policy findings that may expire managed bytes."""

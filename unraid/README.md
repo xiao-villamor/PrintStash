@@ -219,3 +219,16 @@ path mappings when reporting a problem. Review it for credentials and private
 URLs before sharing. For retention across container replacements, forward
 container logs to your existing log collector or export them to a persistent
 share; Docker rotation alone does not provide that archive.
+
+### Staging capability warnings
+
+PrintStash probes `/data/staging` independently of the selected Vault provider.
+On hardlinkless SHFS/FUSE shares, Settings explains that uploads use copies and
+need more temporary space. Startup logs name each affected root once, and
+`GET /api/v1/health/details` exposes the measurements under
+`components.storage.diagnostics.staging`. The warning also appears with a remote
+Vault: switching to WebDAV does not change the local staging filesystem.
+
+These uploads no longer require a staging relocation or remote-provider
+workaround. A disk or pool path supporting hard links can still reduce copying.
+The staging warning does not change the selected Vault's safety tier.

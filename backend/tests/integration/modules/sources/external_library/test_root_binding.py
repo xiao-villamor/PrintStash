@@ -26,6 +26,22 @@ def _enable_feature(session: Session) -> None:
 
 
 class TestExternalRootBinding:
+    def test_creates_marker_without_hardlinks(self, tmp_path, monkeypatch):
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no hard links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        payload = {"role": "external-library", "root_identity": "original"}
+        assert source_root_binding._create_marker(tmp_path, payload) is True
+        assert (
+            source_root_binding._create_marker(tmp_path, {"role": "replacement"})
+            is False
+        )
+        assert (
+            json.loads((tmp_path / root_markers.ROOT_MARKER_FILENAME).read_text())
+            == payload
+        )
+
     def test_changed_source_is_rejected_before_thumbnail_processing(
         self, tmp_path: Path
     ) -> None:

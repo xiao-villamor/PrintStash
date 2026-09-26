@@ -6,6 +6,7 @@ content belong to a configured managed root.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -553,18 +554,21 @@ class TestLocalRootSafetyBranches:
         assert not key.exists()
         assert list(key.parent.glob(".printstash-quarantine-*"))
 
+    @pytest.mark.parametrize(
+        "link_errno",
+        [errno.EPERM, errno.EXDEV, errno.EMLINK, errno.EOPNOTSUPP],
+        ids=["eperm", "exdev", "emlink", "unsupported"],
+    )
     def test_publishes_through_the_guarded_hardlinkless_fallback(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, link_errno: int
     ) -> None:
-        import errno
-
         backend = _configure_local_storage(tmp_path)
         from app.core.config import settings
 
         key = Path(settings.data_dir) / "guarded.bin"
 
         def no_hardlinks(*_args: object, **_kwargs: object) -> None:
-            raise OSError(errno.EXDEV, "cross-device")
+            raise OSError(link_errno, "hard link unavailable")
 
         monkeypatch.setattr(
             "app.modules.storage.storage_backend.local.os.link", no_hardlinks
@@ -1315,3 +1319,46 @@ class TestLegacyRootEnrollmentBranches:
         )
         assert payload.read_bytes() == payload_bytes
         assert marker.read_text(encoding="utf-8") == marker_contents
+
+
+class TestHardlinklessRecovery:
+    @pytest.mark.parametrize("operation", ["rollback", "reclaim"])
+    def test_preserves_raced_bytes_during_copy_restoration(
+        self, configured_backend, tmp_path, monkeypatch, operation
+    ):
+        destination = tmp_path / "files" / "race.bin"
+        receipt = configured_backend.create_bytes(b"original", str(destination))
+        original = tmp_path / "original.bin"
+        real_rename = os.rename
+        real_replace = os.replace
+
+        def move_replacement(rename, source, target, *args, **kwargs):
+            real_rename(destination, original)
+            destination.write_bytes(b"replacement")
+            return rename(source, target, *args, **kwargs)
+
+        def raced_rename(source, target, *args, **kwargs):
+            return move_replacement(real_rename, source, target, *args, **kwargs)
+
+        def raced_replace(source, target, *args, **kwargs):
+            return move_replacement(real_replace, source, target, *args, **kwargs)
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        monkeypatch.setattr(os, "rename", raced_rename)
+        monkeypatch.setattr(os, "replace", raced_replace)
+        if operation == "rollback":
+            removed = configured_backend.rollback_create(receipt)
+        else:
+            removed = configured_backend.reclaim_unverified(
+                str(destination), expected_size=8, expected_etag=None
+            )
+        assert removed is False
+        assert destination.read_bytes() == b"replacement"
+        assert original.read_bytes() == b"original"
+        retained = list(destination.parent.glob(".printstash-*-*"))
+        assert any(
+            path.is_file() and path.read_bytes() == b"replacement" for path in retained
+        )

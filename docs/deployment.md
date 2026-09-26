@@ -268,13 +268,20 @@ copy:
 
 - Settings shows **"Imports are copied, not hard-linked"**, both on the overview
   and on the Storage section.
-- The log says `imports copy every staged file: staging (…) cannot hard-link
-  into the library (…)`.
+- For separate mounts, the log says `imports copy every staged file: staging (…) cannot hard-link into the library (…)`.
+- For a filesystem without hard links, one startup warning names the affected
+  root and explains that publication uses extra temporary space for copying.
+  Staging is checked even when the Vault provider is remote.
 - `GET /api/v1/health/details` reports
-  `components.storage.diagnostics.staged_hardlink: false`.
+  `components.storage.diagnostics.staged_hardlink: false` for local imports.
+  `components.storage.diagnostics.staging` records staging's `hardlink`,
+  `exclusive_create`, `directory_fsync` and `fs_kind` capabilities for every
+  provider; its warnings also appear in the storage capability response.
 
-**Fixing it** means giving staging and the library the same mount, then
-restarting:
+**Avoiding the extra copies** requires staging and the library to share a mount
+that supports hard links, then restarting. A single SHFS/FUSE mount can still
+require copying; uploads continue to work without relocating it:
+
 
 - Remove a volume mapped onto a subfolder of `/data`, after copying its contents
   into the main volume the way [UPGRADE.md](../UPGRADE.md#unreleased-one-data-volume)

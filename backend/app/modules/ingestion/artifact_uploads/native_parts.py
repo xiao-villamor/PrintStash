@@ -217,7 +217,11 @@ class NativeMultipartUploadAdapter:
                 upload.client_sha256 and sha256 != upload.client_sha256.lower()
             ):
                 raise NativeMultipartError("artifact_upload_hash_mismatch")
-            publish_staged_file(temporary, destination)
+            publish_staged_file(
+                temporary,
+                destination,
+                strategy=self.backend.staging_publication_strategy,
+            )
             temporary.unlink(missing_ok=True)
             stat = destination.stat(follow_symlinks=False)
             return VerifiedStagedArtifact(

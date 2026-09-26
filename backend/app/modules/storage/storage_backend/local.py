@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
-import shutil
 import stat as stat_module
 import tempfile
 import uuid
@@ -14,10 +12,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterator
 
+from printstash_core.files import (
+    LINK_UNAVAILABLE_ERRNOS,
+    PublicationStrategy,
+    publish_staged_file,
+)
+
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.modules.storage.filesystem import detect_fs_kind
 from app.modules.storage.storage_identity import StorageTargetIdentity
 from app.runtime.maintenance import guarded_storage_destruction
 
@@ -26,6 +29,7 @@ from .contracts import (
     CapacityReliability,
     CreationReceipt,
     LocalRootProbe,
+    LocalRootRole,
     ObjectIdentity,
     StorageBackend,
     StorageCapabilities,
@@ -35,14 +39,13 @@ from .contracts import (
     StorageObjectInfo,
 )
 from .io import _copy_stream_create_only, _fsync_directory
+from .probes import probe_local_root
 
 logger = get_logger(__name__)
 
 # link(2) cannot place the staged file, but a copy can: the destination is on
 # another mount, the filesystem has no hard links, or the inode is at its limit.
-_LINK_UNAVAILABLE = frozenset(
-    {errno.EXDEV, errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK}
-)
+_LINK_UNAVAILABLE = LINK_UNAVAILABLE_ERRNOS
 
 
 def _open_linkable(src: Path) -> int | None:
@@ -128,8 +131,18 @@ class LocalStorageBackend(StorageBackend):
         }
         self._roots_ready = True
         self.recovery_mode = False
+        self._publication_roots: tuple[LocalRootProbe, ...] = ()
         self._startup_checked = False
         self._root_binding_diagnostics: dict[str, object] = {}
+
+    def _publication_strategy(self, dest: Path) -> PublicationStrategy:
+        for root in self._publication_roots:
+            if (
+                dest.absolute().is_relative_to(Path(root.path).absolute())
+                and not root.hardlink
+            ):
+                return PublicationStrategy.COPY
+        return PublicationStrategy.AUTO
 
     def _installation_identity(self) -> str:
         return self._identity
@@ -184,48 +197,7 @@ class LocalStorageBackend(StorageBackend):
             self._root_binding_diagnostics[role] = "binding_invalid"
             return False
 
-    @staticmethod
-    def _probe_root(role: str, root: Path) -> LocalRootProbe:
-        fd, source_name = tempfile.mkstemp(
-            prefix=".printstash-hardlink-probe-", dir=root
-        )
-        os.close(fd)
-        source = Path(source_name)
-        target = source.with_name(f"{source.name}.link")
-        hardlink = False
-        try:
-            os.link(source, target, follow_symlinks=False)
-            hardlink = True
-        except OSError:
-            pass
-        finally:
-            target.unlink(missing_ok=True)
-            source.unlink(missing_ok=True)
-
-        exclusive_create = False
-        probe = root / f".printstash-exclusive-probe-{uuid.uuid4().hex}"
-        try:
-            fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            os.close(fd)
-            exclusive_create = True
-        except OSError:
-            pass
-        finally:
-            probe.unlink(missing_ok=True)
-
-        directory_fsync = True
-        try:
-            _fsync_directory(root)
-        except OSError:
-            directory_fsync = False
-        return LocalRootProbe(
-            role=role,
-            path=str(root),
-            fs_kind=detect_fs_kind(root),
-            hardlink=hardlink,
-            exclusive_create=exclusive_create,
-            directory_fsync=directory_fsync,
-        )
+    _probe_root = staticmethod(probe_local_root)
 
     def _assert_no_managed_escape(self, path: Path) -> None:
         """Reject a key lexically inside a managed root that resolves outside it."""
@@ -517,18 +489,19 @@ class LocalStorageBackend(StorageBackend):
                 """Restore moved bytes only when the destination is vacant."""
                 nonlocal quarantine_created
                 try:
-                    os.link(
-                        quarantine.name,
-                        path.name,
+                    method = publish_staged_file(
+                        Path(quarantine.name),
+                        Path(path.name),
                         src_dir_fd=parent_fd,
                         dst_dir_fd=parent_fd,
-                        follow_symlinks=False,
                     )
                 except FileExistsError:
                     # A concurrent writer owns the destination. Preserve both
                     # entries for reconciliation rather than replacing it.
                     return
                 except OSError:
+                    return
+                if method is PublicationStrategy.COPY:
                     return
                 try:
                     os.unlink(quarantine.name, dir_fd=parent_fd)
@@ -681,55 +654,17 @@ class LocalStorageBackend(StorageBackend):
             self._assert_pinned_root_current(root_fd, root)
             if role == "external":
                 self._assert_external_binding_pinned(root_fd, root)
-            verified_identity = True
             try:
-                os.link(
-                    temp_name,
-                    dest_name,
+                method = publish_staged_file(
+                    Path(temp_name),
+                    Path(dest_name),
                     src_dir_fd=parent_fd,
                     dst_dir_fd=parent_fd,
-                    follow_symlinks=False,
+                    strategy=self._publication_strategy(dest),
                 )
-            except OSError as exc:
-                if isinstance(exc, FileExistsError):
-                    raise StorageCollisionError(str(dest)) from exc
-                if exc.errno not in {
-                    getattr(os, "EXDEV", 18),
-                    getattr(os, "EPERM", 1),
-                    getattr(os, "EOPNOTSUPP", 95),
-                }:
-                    raise
-                # Hardlinkless mounts retain create-only semantics through
-                # O_EXCL.  A later write failure deliberately leaves the
-                # destination for reconciliation; it is never blindly
-                # unlinked after a possible replacement race.
-                verified_identity = False
-                try:
-                    out_fd = os.open(
-                        dest_name,
-                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                        0o644,
-                        dir_fd=parent_fd,
-                    )
-                except FileExistsError as collision:
-                    raise StorageCollisionError(str(dest)) from collision
-                try:
-                    with os.fdopen(out_fd, "wb") as out:
-                        read_fd = os.open(
-                            temp_name,
-                            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                            dir_fd=parent_fd,
-                        )
-                        with os.fdopen(read_fd, "rb") as staged:
-                            shutil.copyfileobj(staged, out)
-                        out.flush()
-                        os.fsync(out.fileno())
-                except Exception:
-                    logger.warning(
-                        "guarded local publication left an uncertain destination",
-                        extra={"path": str(dest)},
-                    )
-                    raise
+            except FileExistsError as exc:
+                raise StorageCollisionError(str(dest)) from exc
+            verified_identity = method is PublicationStrategy.LINK
             os.unlink(temp_name, dir_fd=parent_fd)
             temp_created = False
             os.fsync(parent_fd)
@@ -807,41 +742,12 @@ class LocalStorageBackend(StorageBackend):
             # bind mount is replaced while a slow upload is in progress.
             self._assert_root_binding_for(dest)
             try:
-                # link(2) is an atomic no-replace publication on the same
-                # filesystem. Readers never observe the partial temp file.
-                os.link(temp, dest, follow_symlinks=False)
-            except OSError as exc:
-                if isinstance(exc, FileExistsError):
-                    raise StorageCollisionError(str(dest)) from exc
-                # The temp file has already been fully fsynced. Fall back to
-                # direct O_EXCL only when link(2) itself is unavailable; any
-                # other publication failure remains fatal.
-                if exc.errno not in {
-                    getattr(os, "EXDEV", 18),
-                    getattr(os, "EPERM", 1),
-                    getattr(os, "EOPNOTSUPP", 95),
-                }:
-                    raise
-                try:
-                    out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-                except FileExistsError as collision:
-                    raise StorageCollisionError(str(dest)) from collision
-                try:
-                    with os.fdopen(out_fd, "wb") as out:
-                        with temp.open("rb") as staged:
-                            shutil.copyfileobj(staged, out)
-                        out.flush()
-                        os.fsync(out.fileno())
-                except Exception:
-                    # O_EXCL proves this operation opened the path, but a
-                    # subsequent failure does not prove which bytes are at the
-                    # name. Preserve the partial object for reconciliation;
-                    # an unconditional unlink could remove a raced replacement.
-                    logger.warning(
-                        "guarded local publication left an uncertain destination",
-                        extra={"path": str(dest)},
-                    )
-                    raise
+                method = publish_staged_file(
+                    temp, dest, strategy=self._publication_strategy(dest)
+                )
+            except FileExistsError as exc:
+                raise StorageCollisionError(str(dest)) from exc
+            if method is PublicationStrategy.COPY:
                 # A directory fsync is best effort for Guarded fallback.  The
                 # capability probe advertises the weaker tier explicitly.
                 try:
@@ -898,6 +804,14 @@ class LocalStorageBackend(StorageBackend):
             return super().move_in(src, dest_key)
         dest = Path(dest_key)
         self._assert_root_binding_for(dest)
+        if self._publication_strategy(dest) is PublicationStrategy.COPY:
+            return super().move_in(src, dest_key)
+        if (
+            self.staging_probe is not None
+            and not self.staging_probe.hardlink
+            and src.absolute().is_relative_to(Path(self.staging_probe.path).absolute())
+        ):
+            return super().move_in(src, dest_key)
         staged_fd = _open_linkable(src)
         if staged_fd is not None:
             try:
@@ -955,7 +869,12 @@ class LocalStorageBackend(StorageBackend):
         revalidate: Callable[[], None],
     ) -> CreationReceipt | None:
         try:
-            os.link(src, dest_name, dst_dir_fd=parent_fd, follow_symlinks=False)
+            publish_staged_file(
+                src,
+                Path(dest_name),
+                dst_dir_fd=parent_fd,
+                strategy=PublicationStrategy.LINK,
+            )
         except FileExistsError as exc:
             raise StorageCollisionError(str(dest)) from exc
         except OSError as exc:
@@ -1040,15 +959,21 @@ class LocalStorageBackend(StorageBackend):
             # The path changed after the first check. Restore without replacing
             # anything that may now occupy the original destination.
             try:
-                os.link(quarantine, dest, follow_symlinks=False)
+                restored = publish_staged_file(quarantine, dest)
             except FileExistsError as exc:
                 logger.critical(
                     "storage quarantine preserved a raced object for recovery",
                     extra={"destination": str(dest), "quarantine": str(quarantine)},
                 )
                 raise StorageCollisionError(str(dest)) from exc
-            quarantine.unlink()
-            moved = False
+            if restored is PublicationStrategy.LINK:
+                quarantine.unlink()
+                moved = False
+            else:
+                logger.warning(
+                    "storage quarantine retained after copy restoration",
+                    extra={"quarantine": str(quarantine)},
+                )
             return None
         finally:
             if not moved:
@@ -1104,7 +1029,7 @@ class LocalStorageBackend(StorageBackend):
                 # Atomic no-replace publication. If another process claims the
                 # path after quarantine, both its file and our old owned inode
                 # survive; the replacement aborts.
-                os.link(temp, dest, follow_symlinks=False)
+                publish_staged_file(temp, dest, strategy=PublicationStrategy.LINK)
             except FileExistsError as exc:
                 logger.critical(
                     "storage replacement collision preserved old quarantine",
@@ -1300,9 +1225,22 @@ class LocalStorageBackend(StorageBackend):
             return
         self.recovery_mode = False
         roots = (
-            self._probe_root("data", self.data_dir),
-            self._probe_root("thumb", self.thumb_dir),
+            self._probe_root(LocalRootRole.DATA, self.data_dir),
+            self._probe_root(LocalRootRole.THUMB, self.thumb_dir),
         )
+        auxiliary = (
+            [self._probe_root(LocalRootRole.BACKUP, self.backup_dir)]
+            if self.backup_dir.is_dir()
+            else []
+        )
+        auxiliary.extend(
+            self._probe_root(LocalRootRole.EXTERNAL, root)
+            for root in self._external_roots
+            if root.is_dir()
+        )
+        self._publication_roots = (*roots, *auxiliary)
+        for root in self._publication_roots:
+            self.report_root_warnings(root)
         hardlinks = all(root.hardlink for root in roots)
         exclusive_create = all(root.exclusive_create for root in roots)
         directory_fsync = all(root.directory_fsync for root in roots)
@@ -1320,9 +1258,17 @@ class LocalStorageBackend(StorageBackend):
             conditional_replace=stable_inodes,
             namespace_ownership=True,
             direct_path=True,
+            local_warnings=tuple(
+                warning for root in self._publication_roots for warning in root.warnings
+            ),
         )
         staged_hardlink = self._probe_staged_hardlink()
-        if not staged_hardlink:
+        self.probe_staging(Path(settings.staging_dir))
+        if (
+            not staged_hardlink
+            and self.staging_probe is not None
+            and self.staging_probe.hardlink
+        ):
             logger.warning(
                 "imports copy every staged file: staging (%s) cannot hard-link "
                 "into the library (%s). Keep both on one mount, the single "
@@ -1336,7 +1282,7 @@ class LocalStorageBackend(StorageBackend):
             "directory_fsync": directory_fsync,
             "staged_hardlink": staged_hardlink,
             "root_bindings": self._root_binding_diagnostics,
-            "roots": [root.as_dict() for root in roots],
+            "roots": [root.as_dict() for root in self._publication_roots],
         }
 
     def _probe_staged_hardlink(self) -> bool:
@@ -1353,7 +1299,7 @@ class LocalStorageBackend(StorageBackend):
         source = Path(source_name)
         target = Path(self.data_dir) / f"{source.name}.link"
         try:
-            os.link(source, target, follow_symlinks=False)
+            publish_staged_file(source, target, strategy=PublicationStrategy.LINK)
             return True
         except OSError:
             return False

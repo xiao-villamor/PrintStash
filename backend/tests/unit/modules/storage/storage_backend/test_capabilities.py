@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterator
 
 import pytest
+from printstash_core.files import PublicationStrategy
 
 from app.modules.storage.storage_backend.contracts import (
     CapacityReliability,
@@ -261,6 +262,42 @@ class _ProbeBackend(StorageBackend):
 
 
 class TestStorageBackendDefaults:
+    def test_staging_degradation_preserves_remote_storage_guarantees(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        import errno
+        import os
+
+        backend = _ProbeBackend()
+        backend._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.VERSION,
+            verified_delete=True,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=False,
+        )
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        backend.probe_staging(tmp_path)
+        backend.report_capability_warnings()
+        backend.report_capability_warnings()
+        assert backend.capabilities.tier is StorageTier.VERIFIED
+        assert backend.capabilities.object_identity is ObjectIdentity.VERSION
+        assert backend.staging_publication_strategy is PublicationStrategy.COPY
+        assert backend.probe_diagnostics["staging"]["hardlink"] is False
+        assert len(backend.capabilities.warnings) == 1
+        assert (
+            sum(
+                "does not support hard links" in record.message
+                for record in caplog.records
+            )
+            == 1
+        )
+
     def test_uses_safe_capability_defaults_for_legacy_adapters(self) -> None:
         backend = _ProbeBackend()
 

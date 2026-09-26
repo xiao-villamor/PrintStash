@@ -8,7 +8,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from printstash_core.files import publish_staged_file
+from printstash_core.files import PublicationStrategy, publish_staged_file
 
 from app.db.models import ArtifactUploadSession
 
@@ -25,8 +25,14 @@ class ApiChunkError(ValueError):
 class ApiChunkUploadAdapter:
     adapter_id = "api_chunks"
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        publication_strategy: PublicationStrategy = PublicationStrategy.AUTO,
+    ) -> None:
         self.root = root
+        self.publication_strategy = publication_strategy
 
     def session_directory(self, session_id: str, *, create: bool = False) -> Path:
         if not _SESSION_ID.fullmatch(session_id):
@@ -71,7 +77,9 @@ class ApiChunkUploadAdapter:
                 stream.flush()
                 os.fsync(stream.fileno())
             try:
-                publish_staged_file(temporary, destination)
+                publish_staged_file(
+                    temporary, destination, strategy=self.publication_strategy
+                )
             except FileExistsError:
                 existing = destination.read_bytes()
                 if (
@@ -110,7 +118,9 @@ class ApiChunkUploadAdapter:
             if session.client_sha256 and sha256 != session.client_sha256.lower():
                 raise ApiChunkError("artifact_upload_hash_mismatch")
             try:
-                publish_staged_file(temporary, destination)
+                publish_staged_file(
+                    temporary, destination, strategy=self.publication_strategy
+                )
             except FileExistsError:
                 existing = self._verified_existing(destination, session)
                 temporary.unlink(missing_ok=True)

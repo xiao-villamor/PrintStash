@@ -408,3 +408,42 @@ class TestMetadata:
             np.asarray([[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]),
             atol=1e-5,
         )
+
+
+class TestHardlinklessStaging:
+    @pytest.mark.asyncio
+    async def test_uploads_with_visible_staging_degradation(
+        self, api, tmp_path, monkeypatch
+    ):
+        import errno
+        import os
+
+        from tests.factories import content
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no hard links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        headers = await _setup_and_login(api, tmp_path)
+        health = await api.get("/api/v1/health/details", headers=headers)
+        storage = health.json()["components"]["storage"]
+        assert storage["diagnostics"]["staging"]["hardlink"] is False
+        assert storage["diagnostics"]["staging"]["exclusive_create"] is True
+        assert any(
+            "staging" in warning and "copy" in warning
+            for warning in storage["warnings"]
+        )
+        payload = content.ascii_stl()
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            headers=headers,
+            files={"file": ("unraid.stl", payload, "model/stl")},
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        downloaded = await api.get(
+            f"/api/v1/files/{job['file_id']}/download", headers=headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == payload

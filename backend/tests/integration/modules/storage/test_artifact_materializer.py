@@ -295,6 +295,23 @@ class TestArtifactMaterializer:
 
 
 class TestCacheCompletionContract:
+    def test_caches_verified_bytes_without_hardlinks(
+        self, cache, representation, monkeypatch
+    ):
+        import errno
+        import os
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no hard links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        with cache.materialize(
+            representation, lambda: iter([b"verified bytes"])
+        ) as path:
+            assert path.read_bytes() == b"verified bytes"
+            assert path.suffix == ".blob"
+        assert cache.status()["entries"] == 1
+
     def test_shards_private_representation_files(self, cache, representation):
         with cache.materialize(
             representation, lambda: iter([b"verified bytes"])

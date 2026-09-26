@@ -225,6 +225,33 @@ class TestHealthDetails:
             "recent_admission_failures": 0,
         }
 
+    def test_reports_hardlinkless_staging_warning(
+        self, client, auth_headers, local_storage, monkeypatch
+    ):
+        import errno
+        import os
+
+        from app.core.config import settings
+
+        backend = get_backend()
+        real_link = os.link
+
+        def unsupported_staging(src, dst, *args, **kwargs):
+            if Path(src).parent == settings.staging_dir:
+                raise OSError(errno.EPERM, "no links")
+            return real_link(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "link", unsupported_staging)
+        backend.ensure_setup()
+        body = client.get("/api/v1/health/details", headers=auth_headers).json()[
+            "components"
+        ]["storage"]
+        assert body["diagnostics"]["staging"]["hardlink"] is False
+        assert any(
+            "staging" in warning and "copy" in warning for warning in body["warnings"]
+        )
+        assert body["tier"] == "verified"
+
     def test_reports_whether_imports_hard_link(
         self, client: TestClient, auth_headers: dict[str, str], local_storage: Path
     ) -> None:

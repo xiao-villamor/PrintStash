@@ -11,6 +11,8 @@ from .archives import (
 )
 from .hashing import sha256_file, sha256_stream
 from .storage import (
+    LINK_UNAVAILABLE_ERRNOS,
+    PublicationStrategy,
     UnsafeStorageComponent,
     UploadTooLarge,
     ensure_unique_slug,
@@ -21,6 +23,8 @@ from .storage import (
 )
 
 __all__ = [
+    "LINK_UNAVAILABLE_ERRNOS",
+    "PublicationStrategy",
     "ArchiveEntry",
     "ArchiveLimits",
     "ArchivePolicyError",

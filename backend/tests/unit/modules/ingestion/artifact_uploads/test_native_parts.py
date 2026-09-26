@@ -13,6 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from printstash_core.files import PublicationStrategy
 
 import app.modules.ingestion.artifact_uploads.native_parts as native_parts
 from app.core.time import utcnow
@@ -56,6 +57,7 @@ def _part(number: int, payload: bytes) -> ArtifactUploadPart:
 
 
 class _NativeBackend:
+    staging_publication_strategy = PublicationStrategy.AUTO
     native_multipart_capability = NativeMultipartCapability(part_size=4, max_parts=10)
 
     def __init__(self, payload: bytes = b"abcdefgh") -> None:

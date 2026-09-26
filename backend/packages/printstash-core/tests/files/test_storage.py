@@ -37,9 +37,11 @@ from unittest.mock import Mock
 import pytest
 
 from printstash_core.files import (
+    PublicationStrategy,
     UnsafeStorageComponent,
     UploadTooLarge,
     ensure_unique_slug,
+    publish_staged_file,
     sha256_file,
     sha256_stream,
     slugify,
@@ -467,3 +469,121 @@ class TestStreamToPath:
 
         assert destination.read_bytes() == b"payload"
         assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+
+class TestPublishStagedFile:
+    def test_copy_stays_in_pinned_directories(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "upload").write_bytes(b"verified bytes")
+        source_fd = os.open(source, os.O_RDONLY | os.O_DIRECTORY)
+        target_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY)
+
+        def unsupported(*args, **kwargs):
+            raise OSError(errno.EPERM, "no hard links")
+
+        monkeypatch.setattr(os, "link", unsupported)
+        moved = tmp_path / "pinned"
+        target.rename(moved)
+        target.mkdir()
+        try:
+            publish_staged_file(
+                Path("upload"),
+                Path("result"),
+                src_dir_fd=source_fd,
+                dst_dir_fd=target_fd,
+            )
+        finally:
+            os.close(source_fd)
+            os.close(target_fd)
+        assert (moved / "result").read_bytes() == b"verified bytes"
+        assert not (target / "result").exists()
+
+    def test_uses_known_copy_capability(self, tmp_path, monkeypatch):
+        source = tmp_path / "source"
+        source.write_bytes(b"private bytes")
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=AssertionError("known unsupported"))
+        )
+        destination = tmp_path / "destination"
+        assert (
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+            is PublicationStrategy.COPY
+        )
+        assert destination.read_bytes() == b"private bytes"
+        assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+    def test_identity_only_publication_never_substitutes_copy(
+        self, tmp_path, monkeypatch
+    ):
+        source = tmp_path / "source"
+        source.write_bytes(b"owned inode")
+        monkeypatch.setattr(
+            os, "link", Mock(side_effect=OSError(errno.EPERM, "no links"))
+        )
+        destination = tmp_path / "destination"
+        with pytest.raises(OSError) as caught:
+            publish_staged_file(source, destination, strategy=PublicationStrategy.LINK)
+        assert caught.value.errno == errno.EPERM
+        assert not destination.exists()
+
+    def test_copy_rejects_a_symlink_source(self, tmp_path):
+        source = tmp_path / "source"
+        source.symlink_to(tmp_path / "elsewhere")
+        (tmp_path / "elsewhere").write_bytes(b"unowned")
+        destination = tmp_path / "destination"
+        with pytest.raises(OSError):
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+        assert not destination.exists()
+
+    def test_copy_rejects_a_directory_source(self, tmp_path):
+        with pytest.raises(OSError):
+            publish_staged_file(
+                tmp_path, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )
+        assert not (tmp_path / "destination").exists()
+
+    def test_rejects_source_changes_during_copy(self, tmp_path, monkeypatch):
+        import shutil
+
+        source = tmp_path / "source"
+        source.write_bytes(b"first version")
+        destination = tmp_path / "destination"
+        original = shutil.copyfileobj
+
+        def changing_copy(src, dst, length):
+            original(src, dst, length)
+            source.write_bytes(b"different version")
+
+        monkeypatch.setattr(shutil, "copyfileobj", changing_copy)
+        with pytest.raises(OSError, match="source changed"):
+            publish_staged_file(source, destination, strategy=PublicationStrategy.COPY)
+        assert destination.read_bytes() == b"first version"
+
+    def test_copy_rejects_a_fifo_source(self, tmp_path):
+        source = tmp_path / "pipe"
+        os.mkfifo(source)
+        with pytest.raises(OSError, match="not a regular file"):
+            publish_staged_file(
+                source, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )
+        assert not (tmp_path / "destination").exists()
+
+    def test_rejects_an_incomplete_copy(self, tmp_path, monkeypatch):
+        import shutil
+
+        source = tmp_path / "source"
+        source.write_bytes(b"complete source")
+
+        def short_copy(src, dst, length):
+            dst.write(src.read(3))
+
+        monkeypatch.setattr(shutil, "copyfileobj", short_copy)
+        with pytest.raises(OSError, match="source changed"):
+            publish_staged_file(
+                source, tmp_path / "destination", strategy=PublicationStrategy.COPY
+            )
