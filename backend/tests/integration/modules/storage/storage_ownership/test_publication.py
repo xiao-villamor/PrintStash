@@ -18,6 +18,7 @@ from app.db.session import _set_sqlite_pragmas, get_session_factory
 from app.modules.ingestion.ingestion import _resolve_committed_artifact
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
+    StagedRemoteObject,
     StorageCollisionError,
 )
 from app.modules.storage.storage_backend.local import LocalStorageBackend
@@ -307,6 +308,36 @@ class TestPublishFile:
         db_session.commit()
 
         assert not source.exists()
+        assert backend.read_bytes(key) == b"staged"
+
+    def test_publishes_the_local_copy_when_the_store_cannot_copy_server_side(
+        self, db_session: Session, tmp_path
+    ) -> None:
+        # Local storage never copies server-side; an offered remote source
+        # must not cost the local publication anything.
+        backend = get_backend()
+        source = tmp_path / "staged.stl"
+        source.write_bytes(b"staged")
+        key = backend.thumbnail_key(926)
+        elsewhere = StagedRemoteObject(
+            key="vault-data/staging/artifact-uploads/session",
+            size=6,
+            namespace="vault/vault-data/",
+            provider_ref=None,
+            etag='"etag"',
+        )
+
+        publish_file(
+            db_session,
+            backend,
+            key,
+            source,
+            object_kind="thumbnail",
+            move=True,
+            remote_source=elsewhere,
+        )
+        db_session.commit()
+
         assert backend.read_bytes(key) == b"staged"
 
     def test_can_bind_a_staged_file_to_a_purpose_scoped_provider(

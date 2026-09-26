@@ -51,6 +51,8 @@ behaviour, not implementation details; status changes as each slice lands.
 | 43 | canonical API contract | OpenAPI | generated schema | only provider-neutral `/artifact-uploads` routes and safe schemas appear | repo | ✅ |
 | 44 | documented compatibility | documentation | operator selects a storage transport | modes, limits, CORS, recovery, and fallback behaviour are documented | repo | ✅ |
 | 45 | exact G-code and revision handoff | ingestion | verified G-code/new revision | normal ingestion receives the verified representation exactly once | integration | ✅ |
+| 46 | server-side publication | native multipart | verified direct upload on a store that proves create-only, source-pinned copies | the Artifact is copied inside the store and none of its bytes are uploaded again | e2e | ✅ |
+| 47 | publication falls back to upload | native multipart | store without the copy proof, a changed source, or a size mismatch | the verified local copy is uploaded instead | contract | ✅ |
 
 Evidence is split by the repository's test tiers: existing-source characterization
 stays with the archive, inbox capture, URL ingest, slicer, and external-library

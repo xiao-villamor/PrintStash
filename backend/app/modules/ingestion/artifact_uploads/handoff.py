@@ -35,6 +35,7 @@ from app.modules.work.contracts import JobOutcome
 from app.modules.work.jobs import jobs as registry
 
 from .manager import SqlArtifactUploadManager
+from .native_parts import NativeMultipartUploadAdapter
 
 
 def subject_key(upload_id: str) -> str:
@@ -66,6 +67,13 @@ def run_verified_upload_ingestion(
         owner_user_id = upload.owner_user_id
         target_id = upload.target_id
         staged_path = _staged_path(session, job_id)
+        # Native uploads already have verified bytes in the store. Preserve
+        # their identity through the Job so publication can copy them there.
+        staged_origin = (
+            NativeMultipartUploadAdapter.staged_origin(upload)
+            if upload.adapter_id == NativeMultipartUploadAdapter.adapter_id
+            else None
+        )
 
     if staged_path is None or not staged_path.exists():
         registry.finish(
@@ -84,6 +92,7 @@ def run_verified_upload_ingestion(
                     session=session,
                     model=model,
                     staged_path=staged_path,
+                    staged_origin=staged_origin,
                     original_filename=filename,
                     revision_label=options.get("revision_label"),
                     revision_status=FileRevisionStatus(
@@ -131,6 +140,7 @@ def run_verified_upload_ingestion(
                     tags=options.get("tags"),
                     source_hash=options.get("source_hash"),
                     target_library_id=options.get("target_library_id"),
+                    staged_origin=staged_origin,
                 ),
                 actor_user_id=owner_user_id,
                 session_factory=session_factory,

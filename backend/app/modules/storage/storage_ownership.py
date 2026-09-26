@@ -22,12 +22,27 @@ from app.db.publication import require_clean_publication_transaction
 from app.modules.storage.remote_io import RemoteIO
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
+    StagedRemoteObject,
     StorageBackend,
     StorageCollisionError,
     StorageTier,
 )
 
 logger = get_logger(__name__)
+
+
+def _release_staged_copy(source: Path, key: str) -> None:
+    """Drop the local copy once the store published its own, as a move would."""
+    try:
+        source.unlink(missing_ok=True)
+    except OSError:
+        # The object is published; a leftover staging file is the
+        # data-preserving failure, reclaimed with its staging lease.
+        logger.warning(
+            "server-side publication left the staged local copy",
+            extra={"source": str(source), "destination": key},
+        )
+
 
 _ORPHAN_GRACE = timedelta(hours=24)
 _SMALL_HASH_LIMIT = 16 * 1024 * 1024
@@ -491,8 +506,15 @@ def publish_file(
     sha256: str | None = None,
     move: bool = False,
     provider_ref: str | None = None,
+    remote_source: StagedRemoteObject | None = None,
 ) -> CreationReceipt:
-    """Publish a staged file with evidence known before storage mutation."""
+    """Publish a staged file with evidence known before storage mutation.
+
+    *remote_source* is the same bytes already sitting in *backend*, such as a
+    browser's direct upload. The backend copies it server-side when it can,
+    so the bytes are not uploaded a second time; otherwise *source* is
+    published as usual. Either way *source* is consumed when *move* is set.
+    """
     require_clean_publication_transaction(session)
     effective_provider_ref = provider_ref or provider_ref_for_backend(
         backend,
@@ -516,7 +538,15 @@ def publish_file(
         provider_ref=effective_provider_ref,
     )
     try:
-        if move:
+        receipt = (
+            backend.copy_in(remote_source, key)
+            if remote_source is not None and remote_source.size == size
+            else None
+        )
+        if receipt is not None:
+            if move:
+                _release_staged_copy(source, key)
+        elif move:
             receipt = backend.move_in(source, key)
         else:
             with source.open("rb") as handle:

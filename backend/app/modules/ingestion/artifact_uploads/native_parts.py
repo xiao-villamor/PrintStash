@@ -16,6 +16,7 @@ from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
     NativeMultipartHandle,
     NativeMultipartPart,
+    StagedRemoteObject,
     StorageBackend,
 )
 
@@ -79,6 +80,25 @@ class NativeMultipartUploadAdapter:
             return None
         completion = cls._decode(upload).get("completion_receipt")
         return CreationReceipt(**completion) if isinstance(completion, dict) else None
+
+    @classmethod
+    def staged_origin(cls, upload: ArtifactUploadSession) -> StagedRemoteObject | None:
+        """The completed upload where it sits in the store, pinned by identity.
+
+        Publication hands this to the backend so it can copy the object into
+        place server-side instead of uploading the downloaded copy again.
+        """
+        receipt = cls.completion_receipt(upload)
+        if receipt is None:
+            return None
+        return StagedRemoteObject(
+            key=receipt.key,
+            size=receipt.size,
+            namespace=receipt.namespace,
+            provider_ref=receipt.provider_ref,
+            etag=receipt.etag,
+            version_id=receipt.version_id,
+        )
 
     @classmethod
     def relocate_completion(

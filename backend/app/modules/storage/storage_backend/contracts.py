@@ -89,6 +89,9 @@ class StorageCapabilities:
     direct_path: bool
     browser_multipart_upload: bool = False
     multipart_sha256_checksums: bool = False
+    # A create-only copy between two keys of this store, pinned to the source
+    # object's identity, without the bytes leaving the store.
+    server_side_copy: bool = False
 
     @property
     def tier(self) -> StorageTier:
@@ -133,6 +136,7 @@ class StorageCapabilities:
             "direct_path": self.direct_path,
             "browser_multipart_upload": self.browser_multipart_upload,
             "multipart_sha256_checksums": self.multipart_sha256_checksums,
+            "server_side_copy": self.server_side_copy,
             "tier": self.tier.value,
             "warnings": list(self.warnings),
         }
@@ -223,6 +227,26 @@ class NativeMultipartPart:
     size_bytes: int
     checksum_sha256: str
     etag: str
+
+
+@dataclass(frozen=True)
+class StagedRemoteObject:
+    """A verified upload that already sits in a store, awaiting publication.
+
+    A browser's direct multipart upload lands in the store's own staging
+    namespace; PrintStash downloads it once to hash and parse it. Publishing
+    it then needs no second upload when the same store can copy server-side.
+    ``etag`` and ``version_id`` pin that copy to the exact object whose bytes
+    were hashed, and ``namespace``/``provider_ref`` confine it to the store
+    that holds it.
+    """
+
+    key: str
+    size: int
+    namespace: str
+    provider_ref: str | None
+    etag: str | None
+    version_id: str | None = None
 
 
 class StorageBackend(ABC):
@@ -604,6 +628,20 @@ class StorageBackend(ABC):
                 extra={"source": str(src), "destination": dest_key},
             )
         return receipt
+
+    def copy_in(
+        self, source: StagedRemoteObject, dest_key: str
+    ) -> CreationReceipt | None:
+        """Publish an object already in this store at *dest_key*, server-side.
+
+        The bytes never pass through PrintStash again. ``None`` means this
+        backend cannot: *source* lives in another store or namespace, the
+        store has not proven a create-only, source-pinned copy, or the source
+        changed after it was verified. The caller then uploads its verified
+        local copy instead, so a ``None`` is never a failure.
+        """
+        del source, dest_key
+        return None
 
 
 # ---------------------------------------------------------------------------

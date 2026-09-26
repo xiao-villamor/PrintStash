@@ -172,6 +172,18 @@ image. See UPGRADE.md before pulling.**
   ONNX models for local text-to-shape or Model queries. Learned neighbors remain
   separate from verified geometry, and analysis never downloads model weights.
 
+### Performance
+
+- Direct browser uploads to S3-compatible storage are published by copying the
+  finished upload inside the bucket instead of uploading it again from
+  PrintStash. The copy is create-only and pinned to the verified object, and is
+  used only when the startup probe proves the endpoint refuses a changed source
+  and an overwrite (`server_side_copy` in the storage diagnostics); other
+  endpoints keep uploading the verified copy.
+- S3 uploads of staged files send their parts in parallel straight from the
+  file, without first copying it into a temporary spool. Adopting an existing
+  S3 object hashes it as a stream with bounded memory.
+
 ### Fixed
 
 - A process that started while an interrupted restore or Vault migration still

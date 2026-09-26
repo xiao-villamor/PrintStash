@@ -47,7 +47,10 @@ from app.modules.identity import rbac
 from app.modules.library import taxonomy
 from app.modules.storage import storage
 from app.modules.storage.hashing import sha256_file
-from app.modules.storage.storage_backend.contracts import StorageCollisionError
+from app.modules.storage.storage_backend.contracts import (
+    StagedRemoteObject,
+    StorageCollisionError,
+)
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import provider_ref_for_backend, publish_file
@@ -373,6 +376,7 @@ def persist_artifact(
     ingestion_key: str | None = None,
     provenance_context: ProvenanceContext | None = None,
     session_factory: SessionFactory | None = None,
+    staged_origin: StagedRemoteObject | None = None,
 ) -> File:
     """Persist a staged artifact onto *model*: the only Artifact-persistence path.
 
@@ -381,6 +385,9 @@ def persist_artifact(
     library import); otherwise the Metadata row starts empty, every value
     unknown, and the derivative jobs fill it. After the commit it nudges the
     derivative sources, which find this Artifact by themselves.
+
+    ``staged_origin`` identifies the verified bytes already in the vault's
+    store, allowing publication by server-side copy instead of re-upload.
 
     Destination modes:
     - **Vault** (default): write into vault storage at ``blob_key(...)`` via
@@ -501,6 +508,7 @@ def persist_artifact(
                     object_kind="artifact",
                     sha256=blob_hash,
                     move=True,
+                    remote_source=staged_origin,
                 )
         if blob_receipt is not None:
             size_bytes = blob_receipt.size
@@ -797,6 +805,7 @@ class StagedArtifact:
     source_hash: Optional[str] = None
     source_url: Optional[str] = None
     target_library_id: int | None = None
+    staged_origin: StagedRemoteObject | None = None
 
 
 @dataclass(frozen=True)
@@ -920,6 +929,7 @@ def commit_staged_artifact(
             ingestion_key=ingestion_key,
             provenance_context=provenance_context,
             session_factory=session_factory,
+            staged_origin=artifact.staged_origin,
         )
         assert file_row.id is not None
         model_id, file_id = model.id, file_row.id
@@ -1057,6 +1067,7 @@ def add_gcode_revision_to_model(
     revision_status: FileRevisionStatus | None,
     revision_notes: str | None,
     is_recommended: bool,
+    staged_origin: StagedRemoteObject | None = None,
 ) -> File:
     """Attach a staged G-code file as a new revision of an existing model.
 
@@ -1095,6 +1106,7 @@ def add_gcode_revision_to_model(
         is_external=dest.is_external,
         external_library_id=dest.external_library_id,
         source_mtime=dest.source_mtime,
+        staged_origin=staged_origin,
     )
     assert file_row.id is not None
 

@@ -73,6 +73,7 @@ class TestStorageCapabilities:
             "direct_path": False,
             "browser_multipart_upload": False,
             "multipart_sha256_checksums": False,
+            "server_side_copy": False,
             "tier": "guarded",
             "warnings": [
                 "Interrupted uploads can leave retained bytes requiring storage-specific cleanup.",
