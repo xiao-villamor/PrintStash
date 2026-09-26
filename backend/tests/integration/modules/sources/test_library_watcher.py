@@ -70,6 +70,29 @@ async def _wait_for(condition, *, timeout: float = 5.0) -> None:
 
 
 class TestRefresh:
+    def test_configuration_change_wakes_the_supervisor(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(lw, "_SUPERVISOR_INTERVAL_S", 60)
+        watcher = lw.LibraryWatcher()
+
+        async def _run() -> None:
+            refreshed = asyncio.Event()
+
+            async def refresh() -> None:
+                refreshed.set()
+
+            monkeypatch.setattr(watcher, "refresh", refresh)
+            await watcher.start_all()
+            refreshed.clear()
+            try:
+                await asyncio.to_thread(watcher.request_refresh)
+                await asyncio.wait_for(refreshed.wait(), timeout=5)
+            finally:
+                await watcher.stop_all()
+
+        asyncio.run(_run())
+
     def test_refresh_follows_the_configured_set_of_watchers(
         self, db_session: Session, tmp_path: Path
     ) -> None:
@@ -287,6 +310,23 @@ class TestComputeDesired:
 
 
 class TestStopWatcher:
+    def test_missing_root_reports_scheduled_scan_fallback(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        watcher = lw.LibraryWatcher()
+        missing_root = tmp_path / "unmounted"
+
+        async def _run() -> None:
+            await asyncio.wait_for(
+                watcher._run_watcher(1, str(missing_root), False, asyncio.Event()),  # noqa: SLF001
+                timeout=5,
+            )
+
+        asyncio.run(_run())
+
+        assert "falling back to scheduled scans" in caplog.text
+        assert not missing_root.exists()
+
     def test_start_watcher_is_idempotent_for_an_active_library(
         self, tmp_path: Path
     ) -> None:
