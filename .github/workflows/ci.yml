@@ -121,6 +121,16 @@ jobs:
       - name: Run machine-declared critical capabilities
         run: ./scripts/test-critical.sh
 
+      - name: Upload critical Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-critical
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+
   printer-core:
     name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
     runs-on: ubuntu-latest
