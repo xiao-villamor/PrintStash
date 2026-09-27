@@ -3,45 +3,50 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
-  # Callable from the release workflow so a tag can't publish without these
-  # checks passing first (see ghcr.yml).
-  workflow_call:
-  # Nightly "full-matrix" gate + on-demand run. Every job below already runs
-  # per-PR (backend + coverage, e2e-real Playwright, frontend
-  # mock-API Playwright); these two triggers re-run the whole gauntlet off-peak
-  # daily and on manual dispatch, so a comprehensive gate exists without adding
-  # new job definitions or slowing individual PRs.
-  schedule:
-    - cron: "27 4 * * *"
-  workflow_dispatch:
-    inputs:
-      native_clip:
-        description: "Validate the pinned, preplaced real CLIP export on both native architectures"
-        type: boolean
-        default: false
+    branches: [main]
+  merge_group:
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  OPENBLAS_NUM_THREADS: "1"
+
+# Only superseded PR runs are disposable. A release can refer to any completed
+# main SHA, so a later push must never cancel that SHA's required result.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  similarity-native:
-    name: Similarity native (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+  backend:
+    name: Backend quick (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+          - suite: unit
+            paths: tests/unit
+          - suite: contract-e2e
+            paths: tests/contract tests/e2e
+          - suite: integration-api-routes
+            paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
+          - suite: integration-api-domains
+            paths: tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
+          - suite: integration-platform
+            paths: tests/integration/bootstrap tests/integration/core tests/integration/db tests/integration/main tests/integration/postgres tests/integration/runtime
+          - suite: integration-domains-a
+            paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
+          - suite: integration-domains-b
+            paths: tests/integration/modules/notifications tests/integration/modules/printing tests/integration/modules/search tests/integration/modules/similarity tests/integration/modules/sources tests/integration/modules/storage tests/integration/modules/work
+          - suite: repository
+            paths: tests/repo
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0
@@ -49,174 +54,10 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
-      - name: Install full native dependencies
-        working-directory: backend
-        run: uv sync --extra dev --extra full --frozen
-      - name: Check STEP and original ONNX contracts
-        working-directory: backend
-        run: uv run pytest -q tests/integration/modules/media/test_step_geometry.py tests/integration/modules/inference/test_local.py tests/integration/modules/inference/test_worker.py tests/integration/modules/similarity/test_embeddings.py
-      # Only an explicit workflow dispatch retrieves this pinned public export.
-      # Neither the application nor the ordinary PR tests download models.
-      - name: Preplace optional real CLIP export
-        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
-        env:
-          CLIP_DIR: ${{ runner.temp }}/similarity-clip
-        run: |
-          mkdir -p "$CLIP_DIR"
-          base='https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a'
-          curl --fail --location --retry 3 "$base/onnx/vision_model.onnx" --output "$CLIP_DIR/vision_model.onnx"
-          curl --fail --location --retry 3 "$base/onnx/text_model.onnx" --output "$CLIP_DIR/text_model.onnx"
-          curl --fail --location --retry 3 "$base/tokenizer.json" --output "$CLIP_DIR/tokenizer.json"
-          cp backend/tests/fixtures/embeddings/clip-vit-base-patch32-fp32.json "$CLIP_DIR/manifest.json"
-      - name: Validate real CLIP towers and standalone text search
-        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
-        working-directory: backend
-        env:
-          SIMILARITY_CLIP_ASSETS: ${{ runner.temp }}/similarity-clip
-        run: uv run pytest -q tests/integration/modules/inference/preplaced_clip.py
-
-  critical-capabilities:
-    name: Critical capabilities
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
           python-version: "3.11"
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: uv sync --extra dev --extra full --frozen
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browser
-        working-directory: frontend
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Run machine-declared critical capabilities
-        run: ./scripts/test-critical.sh
-
-      - name: Upload critical Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report-critical
-          path: |
-            frontend/playwright-report/
-            frontend/test-results/
-          retention-days: 7
-
-  printer-core:
-    name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11", "3.13"]
-        resolution: ["lowest-direct", "highest"]
-    defaults:
-      run:
-        working-directory: backend/packages/printstash-core
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Install autonomous package
-        run: |
-          uv venv --python ${{ matrix.python }}
-          uv pip install --python .venv/bin/python \
-            --resolution ${{ matrix.resolution }} \
-            --editable ".[dev,mesh,printers-all,testkit]"
-
-      - name: Test autonomous package
-        run: .venv/bin/pytest tests -q -m "not coverage_gate"
-
-      # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
-      # The gate reads the report the measured pass writes, so it cannot run inside
-      # that pass — hence two invocations rather than `--cov-fail-under`, which can
-      # only check the aggregate.
-      - name: Coverage gate for the autonomous package
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
-        # `uv pip install --python .venv/...` rather than `.venv/bin/pip`: the
-        # venv is created by `uv venv`, which does not install pip into it, so
-        # calling it directly exits 127 and this gate never ran.
-        run: |
-          uv pip install --python .venv/bin/python pytest-cov
-          .venv/bin/pytest tests -q -m "not coverage_gate" \
-            --cov --cov-report=term-missing --cov-report=json
-          .venv/bin/pytest tests/repo/test_coverage_floors.py -q --no-cov
-
-      - name: Lint autonomous package
-        run: .venv/bin/ruff check src tests
-
-      - name: Typecheck autonomous package
-        run: .venv/bin/pyright -p pyproject.toml
-
-      - name: Verify generated frontend contract
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
-        run: >-
-          .venv/bin/python -m printstash_core.printers.codegen
-          --output ../../../frontend/src/generated/printer-contracts.ts --check
-
-  backend:
-    name: Backend
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --extra full --frozen
-
-      - name: Verify optional async driver is absent from core
+      - run: uv sync --extra dev --extra full --frozen
+      - name: Verify optional dependency boundary
+        if: matrix.suite == 'unit'
         run: |
           if uv export --no-dev --frozen | grep -q aiosqlite; then
             echo "aiosqlite leaked into the core dependency set"
@@ -226,423 +67,144 @@ jobs:
             echo "a retired PostgreSQL driver remains in uv.lock"
             exit 1
           fi
-
-      - name: Lint backend
+      - if: matrix.suite == 'unit'
         run: uv run ruff check app/ tests/
-
-      - name: Check backend formatting (ratcheted modules)
+      - if: matrix.suite == 'unit'
         run: uv run ruff format --check app/core app/db app/schemas packages/printstash-core/src
-
-      - name: Check dependency declarations
+      - if: matrix.suite == 'unit'
         run: uv run deptry app/
-
-      - name: Typecheck critical backend modules
+      - if: matrix.suite == 'unit'
         run: uv run pyright
+      - name: Test backend once without external resources
+        run: ./scripts/test.sh pr ${{ matrix.paths }} -q
 
-      - name: Typecheck backend with ty (advisory)
-        run: uv run ty check app/ --exit-zero --quiet
-
-      # `full` includes the `postgres`- and `s3`-marked subsets, which start their
-      # own PostgreSQL and SeaweedFS through backend/tests/containers.py. They used
-      # to need dedicated jobs with a `services:` block and a `docker run`; those
-      # are gone, because running the same tests twice per PR is the duplication
-      # the container module exists to remove.
-      - name: Test backend
-        # The `coverage` lane is `full` under branch coverage plus the coverage gate
-        # (tests/repo/test_coverage_floors.py): the aggregate ratcheted in both
-        # directions, and a floor every module has to clear on its own. Branches are
-        # counted, so a guard clause whose false path never runs is half-covered
-        # rather than covered — the same suite reads 95.07% by lines and 93.35% with
-        # branches, and the second number is the one that says something.
-        run: ./scripts/test.sh coverage -v
-
-  backend-python313:
-    name: Backend compatibility (Python 3.13, advisory)
+  printer-core:
+    name: Printer core quick
     runs-on: ubuntu-latest
-    continue-on-error: true
-    # The full lane includes a serial container-contract pass after the ordinary
-    # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
-    timeout-minutes: 60
+    timeout-minutes: 15
     defaults:
       run:
-        working-directory: backend
+        working-directory: backend/packages/printstash-core
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --extra full --frozen
-
-      - name: Run backend compatibility suite
-        run: ./scripts/test.sh full -q
-
-  flaky-detection:
-    name: Flaky detection (nightly)
-    # An order-dependent test fails perhaps one run in eight, which on a PR reads
-    # as "CI is flaky" and gets a re-run rather than a fix. Five shuffled,
-    # parallel runs on a schedule turn that into a specific named failure with a
-    # seed that reproduces it.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --extra full --frozen
-
-      - name: Run the suite five times with different orderings
-        run: |
-          set -uo pipefail
-          status=0
-          for seed in 1 7 42 99 1234; do
-            echo "::group::seed ${seed}"
-            # The backend coverage lane runs the report-dependent floor tests.
-            uv run pytest tests -q -p randomly --randomly-seed="${seed}" -n 4 \
-              -m "not coverage_gate" \
-              --deselect tests/integration/postgres \
-              > "run-${seed}.log" 2>&1 || status=1
-            tail -1 "run-${seed}.log"
-            echo "::endgroup::"
-          done
-          # Every run must fail the *same* set. A test that appears in one run's
-          # failures and not another's is order-dependent, which is the thing
-          # this job exists to name.
-          for seed in 1 7 42 99 1234; do
-            grep -E '^FAILED ' "run-${seed}.log" | sed 's/ - .*//' | sort > "fails-${seed}.txt"
-          done
-          if ! diff -q fails-1.txt fails-7.txt > /dev/null \
-            || ! diff -q fails-1.txt fails-42.txt > /dev/null \
-            || ! diff -q fails-1.txt fails-99.txt > /dev/null \
-            || ! diff -q fails-1.txt fails-1234.txt > /dev/null; then
-            echo "::error::the failing set differs between orderings — an order-dependent test"
-            sort -u fails-*.txt | comm -13 <(sort fails-1.txt) - || true
-            exit 1
-          fi
-          exit "${status}"
-
-      - name: Upload the run logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: flaky-detection-logs
-          path: backend/run-*.log
-          retention-days: 7
-
-  sqlite-async:
-    name: SQLite async extra
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend with SQLite async capability
-        run: uv sync --extra dev --extra async-db --frozen
-
-      - name: Test optional SQLite async contracts
-        run: uv run pytest tests/integration/db/test_session.py -v -k "async or capability"
+      - run: |
+          uv venv --python 3.11
+          uv pip install --python .venv/bin/python --resolution highest --editable ".[dev,mesh,printers-all,testkit]"
+      - run: .venv/bin/pytest tests -q -m "not coverage_gate"
+      - run: .venv/bin/ruff check src tests
+      - run: .venv/bin/pyright -p pyproject.toml
+      - name: Verify generated frontend contract
+        run: >-
+          .venv/bin/python -m printstash_core.printers.codegen
+          --output ../../../frontend/src/generated/printer-contracts.ts --check
 
   frontend:
-    name: Frontend
+    name: Frontend quick
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      # build already runs typecheck, so there is no second typecheck pass.
+      - run: pnpm build
+      - run: pnpm test
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck frontend
-        run: pnpm typecheck
-
-      - name: Lint frontend
-        run: pnpm lint
-
-      - name: Check frontend formatting
-        run: pnpm format:check
-
-      - name: Unit test frontend
-        run: pnpm test
-
-      # There was no coverage step in this job at all, so the thresholds in
-      # vite.config.ts were never enforced anywhere. `pnpm coverage` measures the
-      # app and both workspace packages and then runs scripts/coverage-gate.mjs,
-      # which carries a two-sided floor per area of the tree.
-      - name: Coverage gate for frontend
-        run: pnpm coverage
-
-      - name: Build frontend
-        run: pnpm build
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Test frontend in browser
-        run: pnpm test:e2e
-
-  browser-extension:
-    name: Browser extension
+  browser-smoke:
+    name: Real-browser smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: browser-extension
+    timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: browser-extension/pnpm-lock.yaml
-
-      - name: Install extension dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Check extension formatting
-        run: pnpm format:check
-
-      - name: Lint extension
-        run: pnpm lint
-
-      - name: Typecheck extension
-        run: pnpm typecheck
-
-      - name: Test extension and build Chrome, Firefox, and Edge
-        run: pnpm test
-
-      - name: Verify Chrome Web Store upload package
-        run: pnpm zip:chrome && pnpm test:store
-
-      - name: Install backend runtime for capture boundary
-        uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-
-      - name: Set up Python for capture boundary
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
-      - name: Install backend dependencies for capture boundary
+      - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --frozen
-
-      - name: Provision ephemeral backend for extension capture
-        working-directory: backend
-        shell: bash
-        run: |
-          capture_root="$(mktemp -d "${RUNNER_TEMP}/printstash-capture.XXXXXX")"
-          echo "PRINTSTASH_EXTENSION_CAPTURE_BASE_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
-          echo "PRINTSTASH_EXTENSION_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
-          VAULT_SETUP_MODE=trusted_network \
-          VAULT_DATA_ROOT="$capture_root" \
-          uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 \
-            >"${RUNNER_TEMP}/printstash-capture-backend.log" 2>&1 &
-          echo $! >"${RUNNER_TEMP}/printstash-capture-backend.pid"
-          for attempt in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:8765/api/v1/health >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat "${RUNNER_TEMP}/printstash-capture-backend.log"
-          exit 1
-
-      - name: Run real backend extension capture boundary
-        run: pnpm test:real-backend-capture
-
-      - name: Tear down ephemeral capture backend
-        if: always()
-        shell: bash
-        run: |
-          if test -f "${RUNNER_TEMP}/printstash-capture-backend.pid"; then
-            kill "$(cat "${RUNNER_TEMP}/printstash-capture-backend.pid")" 2>/dev/null || true
-          fi
-          if test -n "${PRINTSTASH_EXTENSION_CAPTURE_ROOT:-}" \
-            && test -d "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" \
-            && [[ "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" == "${RUNNER_TEMP}/printstash-capture."* ]]; then
-            rm -rf "$PRINTSTASH_EXTENSION_CAPTURE_ROOT"
-          fi
-
-      - name: Locate runner Chrome and ChromeDriver
-        id: browser
-        shell: bash
-        run: |
-          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
-          chromedriver="$(command -v chromedriver || true)"
-          test -n "$chrome" || { echo "No runner-installed Chrome/Chromium found" >&2; exit 1; }
-          test -n "$chromedriver" || { echo "No runner-installed ChromeDriver found" >&2; exit 1; }
-          echo "chrome=$chrome" >> "$GITHUB_OUTPUT"
-          echo "chromedriver=$chromedriver" >> "$GITHUB_OUTPUT"
-
-      - name: Run ChromeDriver
-        shell: bash
-        run: |
-          "${{ steps.browser.outputs.chromedriver }}" --port=4444 --url-base=/ >"${RUNNER_TEMP}/printstash-chromedriver.log" 2>&1 &
-          echo $! >"${RUNNER_TEMP}/printstash-chromedriver.pid"
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:4444/status >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat "${RUNNER_TEMP}/printstash-chromedriver.log"
-          exit 1
-
-      - name: Run loaded Chrome extension smoke
-        env:
-          PRINTSTASH_EXTENSION_BROWSER_BINARY: ${{ steps.browser.outputs.chrome }}
-          PRINTSTASH_EXTENSION_WEBDRIVER_HOST: 127.0.0.1
-          PRINTSTASH_EXTENSION_WEBDRIVER_PORT: "4444"
-          PRINTSTASH_EXTENSION_WEBDRIVER_PATH: /
-          PRINTSTASH_EXTENSION_DIST: ${{ github.workspace }}/browser-extension/.output/chrome-mv3
-        run: pnpm test:e2e
-
-      - name: Stop ChromeDriver
-        if: always()
-        shell: bash
-        run: |
-          if test -f "${RUNNER_TEMP}/printstash-chromedriver.pid"; then
-            kill "$(cat "${RUNNER_TEMP}/printstash-chromedriver.pid")" 2>/dev/null || true
-          fi
-
-      - name: Upload ChromeDriver log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-extension-chromedriver-log
-          path: ${{ runner.temp }}/printstash-chromedriver.log
-
-      - name: Upload Chrome Web Store ZIP
-        uses: actions/upload-artifact@v7
-        with:
-          path: browser-extension/.output/printstash-browser-extension-*-chrome.zip
-          # Upload the tested ZIP itself so it can go straight to the store.
-          archive: false
-          # WXT builds into .output; only the ZIP above is included.
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-
-  e2e-real:
-    name: Real-backend E2E
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      # Backend: the real e2e suite boots uvicorn against a throwaway SQLite DB.
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend dependencies
-        working-directory: backend
-        # Storage-provider E2E exercises WebDAV through the OpenDAL-backed
-        # providers, which is the full image capability rather than the lite
-        # runtime installed by the general real-backend lane.
-        run: uv sync --extra dev --extra full --frozen
-
-      # Frontend: serves a Vite dev server + drives Playwright.
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install frontend dependencies
+      - name: Install frontend
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
+      - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
-
-      - name: Real-backend E2E
+      - name: Verify model lifecycle and backup recovery
         working-directory: frontend
-        run: pnpm test:e2e:real
-
-      - name: Storage-provider E2E
-        working-directory: frontend
-        run: pnpm test:e2e:storage
-
-      - name: Upload Playwright report
+        run: pnpm test:e2e:pr
+      - name: Upload failure evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-real
+          name: playwright-report-pr-smoke
           path: |
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 7
+          if-no-files-found: ignore
+
+  browser-extension:
+    name: Browser extension quick
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: browser-extension
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: browser-extension/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: Build browser variants and run unit tests
+        run: pnpm test
+      - name: Verify Chrome Web Store package
+        run: pnpm zip:chrome && pnpm test:store
+
+  gate:
+    name: PR gate
+    runs-on: ubuntu-latest
+    needs: [backend, printer-core, frontend, browser-smoke, browser-extension]
+    if: ${{ always() }}
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+    steps:
+      - name: Require every quick job to succeed
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS_JSON"

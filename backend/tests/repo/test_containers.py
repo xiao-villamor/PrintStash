@@ -87,3 +87,18 @@ class TestStartContainer:
             containers._start_container(factory)
 
         assert len(created) == containers.CONTAINER_START_ATTEMPTS
+
+
+class TestResourceBoundary:
+    def test_rejects_an_unmarked_container_request_in_the_pr_lane(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PRINTSTASH_TEST_NO_EXTERNAL", "1")
+        started = []
+
+        with pytest.raises(pytest.fail.Exception, match="no-external test lane"):
+            containers._resolve(
+                "unmarked-test", "PostgreSQL", lambda: started.append(True)
+            )
+
+        assert started == []

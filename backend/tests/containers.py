@@ -32,6 +32,7 @@ check only fires for markers a *selected* test carries.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from typing import Any, Callable, NoReturn
@@ -150,6 +151,11 @@ def _resolve(key: str, resource: str, start: Callable[[], str]) -> str:
     Raises rather than returning `None`: a caller that reached here needs the
     service, and handing back nothing would let the test skip itself.
     """
+    if os.environ.get("PRINTSTASH_TEST_NO_EXTERNAL") == "1":
+        pytest.fail(
+            f"{resource} was requested in a no-external test lane. "
+            "Mark this case with its resource marker so it runs in Deep CI."
+        )
     if key not in _resolved:
         require_docker(resource)
         _resolved[key] = start()

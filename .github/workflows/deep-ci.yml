@@ -1,0 +1,447 @@
+name: Deep CI
+
+on:
+  schedule:
+    - cron: "27 4 * * *"
+  workflow_dispatch:
+    inputs:
+      native_clip:
+        description: Validate the pinned, preplaced real CLIP export on both native architectures
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  OPENBLAS_NUM_THREADS: "1"
+
+jobs:
+  similarity-native:
+    name: Similarity native (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install full native dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - name: Check STEP and original ONNX contracts
+        working-directory: backend
+        run: uv run pytest -q tests/integration/modules/media/test_step_geometry.py tests/integration/modules/inference/test_local.py tests/integration/modules/inference/test_worker.py tests/integration/modules/similarity/test_embeddings.py
+      # Only an explicit workflow dispatch retrieves this pinned public export.
+      # Neither the application nor the ordinary PR tests download models.
+      - name: Preplace optional real CLIP export
+        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
+        env:
+          CLIP_DIR: ${{ runner.temp }}/similarity-clip
+        run: |
+          mkdir -p "$CLIP_DIR"
+          base='https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a'
+          curl --fail --location --retry 3 "$base/onnx/vision_model.onnx" --output "$CLIP_DIR/vision_model.onnx"
+          curl --fail --location --retry 3 "$base/onnx/text_model.onnx" --output "$CLIP_DIR/text_model.onnx"
+          curl --fail --location --retry 3 "$base/tokenizer.json" --output "$CLIP_DIR/tokenizer.json"
+          cp backend/tests/fixtures/embeddings/clip-vit-base-patch32-fp32.json "$CLIP_DIR/manifest.json"
+      - name: Validate real CLIP towers and standalone text search
+        if: github.event_name == 'workflow_dispatch' && inputs.native_clip
+        working-directory: backend
+        env:
+          SIMILARITY_CLIP_ASSETS: ${{ runner.temp }}/similarity-clip
+        run: uv run pytest -q tests/integration/modules/inference/preplaced_clip.py
+
+  printer-core:
+    name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+        resolution: ["lowest-direct", "highest"]
+    defaults:
+      run:
+        working-directory: backend/packages/printstash-core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install autonomous package
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install --python .venv/bin/python \
+            --resolution ${{ matrix.resolution }} \
+            --editable ".[dev,mesh,printers-all,testkit]"
+
+      - name: Test autonomous package
+        if: matrix.python != '3.11' || matrix.resolution != 'highest'
+        run: .venv/bin/pytest tests -q -m "not coverage_gate"
+
+      # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
+      # The gate reads the report the measured pass writes, so it cannot run inside
+      # that pass — hence two invocations rather than `--cov-fail-under`, which can
+      # only check the aggregate.
+      - name: Coverage gate for the autonomous package
+        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        # `uv pip install --python .venv/...` rather than `.venv/bin/pip`: the
+        # venv is created by `uv venv`, which does not install pip into it, so
+        # calling it directly exits 127 and this gate never ran.
+        run: |
+          uv pip install --python .venv/bin/python pytest-cov
+          .venv/bin/pytest tests -q -m "not coverage_gate" \
+            --cov --cov-report=term-missing --cov-report=json
+          .venv/bin/pytest tests/repo/test_coverage_floors.py -q --no-cov
+
+      - name: Lint autonomous package
+        run: .venv/bin/ruff check src tests
+
+      - name: Typecheck autonomous package
+        run: .venv/bin/pyright -p pyproject.toml
+
+      - name: Verify generated frontend contract
+        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        run: >-
+          .venv/bin/python -m printstash_core.printers.codegen
+          --output ../../../frontend/src/generated/printer-contracts.ts --check
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Test backend
+        # The `coverage` lane is `full` under branch coverage plus the coverage gate
+        # (tests/repo/test_coverage_floors.py): aggregate and module regression
+        # floors. Branches are
+        # counted, so a guard clause whose false path never runs is half-covered
+        # rather than covered — the same suite reads 95.07% by lines and 93.35% with
+        # branches, and the second number is the one that says something.
+        run: ./scripts/test.sh coverage -q
+
+  backend-python313:
+    name: Backend compatibility (Python 3.13)
+    runs-on: ubuntu-latest
+    # The full lane includes a serial container-contract pass after the ordinary
+    # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Run backend compatibility suite
+        run: ./scripts/test.sh full -q
+
+  frontend-coverage:
+    name: Frontend branch coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # This runs each Vitest suite once under branch coverage.
+      - run: pnpm coverage
+
+  browser-mock:
+    name: Mock-API browser suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-mock
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  browser-real:
+    name: Real-backend browser (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [main, onboarding, environment, storage]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install backend
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run isolated browser suite
+        working-directory: frontend
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          case "$SUITE" in
+            main)
+              pnpm exec playwright test --config=playwright.real.config.ts
+              ;;
+            onboarding)
+              pnpm exec playwright test --config=playwright.onboarding.config.ts
+              PLAYWRIGHT_ONBOARDING_LOST_RESPONSE=1 pnpm exec playwright test --config=playwright.onboarding.config.ts
+              ;;
+            environment)
+              pnpm exec playwright test --config=playwright.environment-admin.config.ts
+              pnpm exec playwright test --config=playwright.migration.config.ts
+              pnpm exec playwright test --config=playwright.ai-search.config.ts
+              ;;
+            storage)
+              pnpm exec playwright test --config=playwright.storage.config.ts
+              pnpm exec playwright test --config=playwright.delivery.config.ts
+              pnpm exec playwright test --config=playwright.critical-backup.config.ts
+              ;;
+            *) exit 2 ;;
+          esac
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-real-${{ matrix.suite }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  browser-extension:
+    name: Browser extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: browser-extension
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: browser-extension/pnpm-lock.yaml
+
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Chrome extension and package it for real-browser tests
+        run: pnpm zip:chrome
+
+      - name: Install backend runtime for capture boundary
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python for capture boundary
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies for capture boundary
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Provision ephemeral backend for extension capture
+        working-directory: backend
+        shell: bash
+        run: |
+          capture_root="$(mktemp -d "${RUNNER_TEMP}/printstash-capture.XXXXXX")"
+          echo "PRINTSTASH_EXTENSION_CAPTURE_BASE_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
+          echo "PRINTSTASH_EXTENSION_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
+          VAULT_SETUP_MODE=trusted_network \
+          VAULT_DATA_ROOT="$capture_root" \
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 \
+            >"${RUNNER_TEMP}/printstash-capture-backend.log" 2>&1 &
+          echo $! >"${RUNNER_TEMP}/printstash-capture-backend.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8765/api/v1/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/printstash-capture-backend.log"
+          exit 1
+
+      - name: Run real backend extension capture boundary
+        run: pnpm test:real-backend-capture
+
+      - name: Tear down ephemeral capture backend
+        if: always()
+        shell: bash
+        run: |
+          if test -f "${RUNNER_TEMP}/printstash-capture-backend.pid"; then
+            kill "$(cat "${RUNNER_TEMP}/printstash-capture-backend.pid")" 2>/dev/null || true
+          fi
+          if test -n "${PRINTSTASH_EXTENSION_CAPTURE_ROOT:-}" \
+            && test -d "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" \
+            && [[ "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" == "${RUNNER_TEMP}/printstash-capture."* ]]; then
+            rm -rf "$PRINTSTASH_EXTENSION_CAPTURE_ROOT"
+          fi
+
+      - name: Locate runner Chrome and ChromeDriver
+        id: browser
+        shell: bash
+        run: |
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          chromedriver="$(command -v chromedriver || true)"
+          test -n "$chrome" || { echo "No runner-installed Chrome/Chromium found" >&2; exit 1; }
+          test -n "$chromedriver" || { echo "No runner-installed ChromeDriver found" >&2; exit 1; }
+          echo "chrome=$chrome" >> "$GITHUB_OUTPUT"
+          echo "chromedriver=$chromedriver" >> "$GITHUB_OUTPUT"
+
+      - name: Run ChromeDriver
+        shell: bash
+        run: |
+          "${{ steps.browser.outputs.chromedriver }}" --port=4444 --url-base=/ >"${RUNNER_TEMP}/printstash-chromedriver.log" 2>&1 &
+          echo $! >"${RUNNER_TEMP}/printstash-chromedriver.pid"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4444/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/printstash-chromedriver.log"
+          exit 1
+
+      - name: Run loaded Chrome extension smoke
+        env:
+          PRINTSTASH_EXTENSION_BROWSER_BINARY: ${{ steps.browser.outputs.chrome }}
+          PRINTSTASH_EXTENSION_WEBDRIVER_HOST: 127.0.0.1
+          PRINTSTASH_EXTENSION_WEBDRIVER_PORT: "4444"
+          PRINTSTASH_EXTENSION_WEBDRIVER_PATH: /
+          PRINTSTASH_EXTENSION_DIST: ${{ github.workspace }}/browser-extension/.output/chrome-mv3
+        run: pnpm test:e2e
+
+      - name: Stop ChromeDriver
+        if: always()
+        shell: bash
+        run: |
+          if test -f "${RUNNER_TEMP}/printstash-chromedriver.pid"; then
+            kill "$(cat "${RUNNER_TEMP}/printstash-chromedriver.pid")" 2>/dev/null || true
+          fi
+
+      - name: Upload ChromeDriver log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension-chromedriver-log
+          path: ${{ runner.temp }}/printstash-chromedriver.log
+
+      - name: Upload Chrome Web Store ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: browser-extension/.output/printstash-browser-extension-*-chrome.zip
+          # Upload the tested ZIP itself so it can go straight to the store.
+          archive: false
+          # WXT builds into .output; only the ZIP above is included.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

@@ -11,6 +11,9 @@ usage() {
 usage: ./scripts/test.sh [lane] [pytest arguments...]
 
 Lanes
+  pr         unit + integration + contract + E2E + repo, once, without slow
+             or container-backed tests. An unmarked request for a service fails.
+             The required PR gate.
   fast       tests/unit + tests/integration, minus `slow`.        (default)
              The feature loop: real SQLite, real routers, no sockets.
   contract   tests/contract — our clients against contract-enforcing fakes
@@ -23,9 +26,9 @@ Lanes
              Includes real remote providers and therefore needs Docker.
   full       everything, including `slow`, minus the coverage gate.
   coverage   `full` under branch coverage, then the coverage gate: aggregate
-             ratchet plus a per-module floor (tests/repo/test_coverage_floors.py).
+             regression floor plus a per-module floor (tests/repo/test_coverage_floors.py).
              Writes term-missing, .coverage-html/index.html and coverage.json.
-             This is the lane CI gates on.
+             Deep CI runs this lane nightly and before a release.
   affected   `--testmon`: only tests whose executed lines changed. Seed it with
              one full run first, and never use it as the only pre-merge gate.
   serial     `full` without xdist. For debugging an ordering or state bug.
@@ -96,15 +99,22 @@ add_paths() {
 }
 
 case "$lane" in
+  pr)
+    add_paths tests/unit tests/integration tests/contract tests/e2e tests/repo
+    export PRINTSTASH_TEST_NO_EXTERNAL=1
+    exec uv run pytest "${parallel[@]}" -m "not slow and not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    ;;
   image)
     exec uv run python -m tests.e2e.runtime_image "${pytest_args[@]}"
     ;;
   fast)
     add_paths tests/unit tests/integration
+    export PRINTSTASH_TEST_NO_EXTERNAL=1
     exec uv run pytest "${parallel[@]}" -m "not slow and not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   contract)
     add_paths tests/contract
+    export PRINTSTASH_TEST_NO_EXTERNAL=1
     exec uv run pytest "${parallel[@]}" -m "not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   e2e)

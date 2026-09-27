@@ -19,179 +19,112 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.image }} (${{ matrix.arch }})
+    name: Build and smoke (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ startsWith(matrix.image, 'printstash-api') && 60 || matrix.image == 'printstash' && 45 || 30 }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         include:
-          - image: printstash-api
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-            build-args: PRINTSTASH_VARIANT=full
-            arch: amd64
+          - arch: amd64
             platform: linux/amd64
             runner: ubuntu-latest
-          - image: printstash-api
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-            build-args: PRINTSTASH_VARIANT=full
-            arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-          - image: printstash-api-lite
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-            build-args: PRINTSTASH_VARIANT=lite
-            arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - image: printstash-api-lite
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-            build-args: PRINTSTASH_VARIANT=lite
-            arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-          - image: printstash-frontend
-            context: ./frontend
-            dockerfile: ./frontend/Dockerfile
-            build-args: ""
-            arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - image: printstash-frontend
-            context: ./frontend
-            dockerfile: ./frontend/Dockerfile
-            build-args: ""
-            arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
-          - image: printstash
-            arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - image: printstash
-            arch: arm64
+          - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ !inputs.canary && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-            type=raw,value=canary,enable=${{ inputs.canary }}
-            type=sha,prefix=canary-,enable=${{ inputs.canary }}
-
-      - name: Build and push platform image by digest
-        if: matrix.image != 'printstash'
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ matrix.build-args }}
-          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
-          cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }},mode=max,ignore-error=true
-
-      - name: Install uv for backend image smoke
-        if: startsWith(matrix.image, 'printstash-api')
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python for backend image smoke
-        if: startsWith(matrix.image, 'printstash-api')
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Test backend image before exporting digest
-        if: startsWith(matrix.image, 'printstash-api')
-        working-directory: backend
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
-          DIGEST: ${{ steps.build.outputs.digest }}
-          VARIANT: ${{ matrix.image == 'printstash-api' && 'full' || 'lite' }}
-        run: |
-          uv sync --extra dev --extra full --frozen
-          image="${IMAGE,,}@${DIGEST}"
-          docker pull "$image"
-          ./scripts/test.sh image --image "$image" --variant "$VARIANT"
-
-      - name: Normalize unified image name
-        if: matrix.image == 'printstash'
-        id: unified-name
+      - name: Normalize image names
+        id: names
         env:
           OWNER: ${{ github.repository_owner }}
-        run: |
-          echo "image=${REGISTRY}/${OWNER,,}/printstash" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push unified image by digest
-        if: matrix.image == 'printstash'
-        id: unified-build
+        run: echo "owner=${OWNER,,}" >> "$GITHUB_OUTPUT"
+      # One BuildKit solve per native architecture. The unified target consumes
+      # the API and frontend targets from this same graph, not another build.
+      - name: Build four platform images by digest
+        id: bake
         uses: docker/bake-action@v7
         with:
-          source: .
           files: docker-bake.hcl
-          targets: unified
+          targets: publish
           set: |
             *.platform=${{ matrix.platform }}
+            *.labels.org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            *.labels.org.opencontainers.image.revision=${{ github.sha }}
+            api.output=type=image,name=ghcr.io/${{ steps.names.outputs.owner }}/printstash-api,push-by-digest=true,name-canonical=true,push=true
+            api-lite.output=type=image,name=ghcr.io/${{ steps.names.outputs.owner }}/printstash-api-lite,push-by-digest=true,name-canonical=true,push=true
+            frontend.output=type=image,name=ghcr.io/${{ steps.names.outputs.owner }}/printstash-frontend,push-by-digest=true,name-canonical=true,push=true
             unified.tags=
-            unified.output=type=image,name=${{ steps.unified-name.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-            unified.labels.org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            unified.labels.org.opencontainers.image.revision=${{ github.sha }}
+            unified.output=type=image,name=ghcr.io/${{ steps.names.outputs.owner }}/printstash,push-by-digest=true,name-canonical=true,push=true
             *.cache-from=type=gha,scope=printstash-${{ matrix.arch }}
+            api-lite.cache-from=type=gha,scope=printstash-lite-${{ matrix.arch }}
             unified.cache-to=type=gha,scope=printstash-${{ matrix.arch }},mode=max,ignore-error=true
-
-      - name: Test unified image before promoting its digest
-        if: matrix.image == 'printstash'
-        id: unified
-        env:
-          IMAGE: ${{ steps.unified-name.outputs.image }}
-          METADATA: ${{ steps.unified-build.outputs.metadata }}
-        run: |
-          digest=$(jq -er '.unified["containerimage.digest"]' <<< "$METADATA")
-          docker pull "${IMAGE}@${digest}"
-          bash backend/scripts/test-unified-image.sh "${IMAGE}@${digest}"
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-
-      - name: Export digest
-        shell: bash
-        env:
-          DIGEST: ${{ steps.build.outputs.digest || steps.unified.outputs.digest }}
-        run: |
-          mkdir -p "${RUNNER_TEMP}/digests"
-          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
+            api-lite.cache-to=type=gha,scope=printstash-lite-${{ matrix.arch }},mode=max,ignore-error=true
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
-          name: digests-${{ matrix.image }}--${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install image test clients once
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - name: Smoke every final image before exporting digests
+        working-directory: backend
+        env:
+          METADATA: ${{ steps.bake.outputs.metadata }}
+          OWNER: ${{ steps.names.outputs.owner }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          for entry in 'api printstash-api full' 'api-lite printstash-api-lite lite'; do
+            read -r target image variant <<< "$entry"
+            digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"]' <<< "$METADATA")
+            reference="ghcr.io/${OWNER}/${image}@${digest}"
+            docker pull "$reference"
+            ./scripts/test.sh image --image "$reference" --variant "$variant"
+          done
+          unified_digest=$(jq -er '.unified["containerimage.digest"]' <<< "$METADATA")
+          unified_image="ghcr.io/${OWNER}/printstash@${unified_digest}"
+          docker pull "$unified_image"
+          bash scripts/test-unified-image.sh "$unified_image"
+          frontend_digest=$(jq -er '.frontend["containerimage.digest"]' <<< "$METADATA")
+          frontend_image="ghcr.io/${OWNER}/printstash-frontend@${frontend_digest}"
+          docker pull "$frontend_image"
+          frontend_container=$(docker run -d -p 127.0.0.1::3000 "$frontend_image")
+          trap 'docker rm -f "$frontend_container" >/dev/null 2>&1 || true' EXIT
+          frontend_port=$(docker port "$frontend_container" 3000/tcp | awk -F: '{print $NF}')
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent "http://127.0.0.1:${frontend_port}/" | grep -q '<html'; then
+              break
+            fi
+            if [[ "$attempt" -eq 30 ]]; then
+              docker logs "$frontend_container"
+              exit 1
+            fi
+            sleep 1
+          done
+          docker rm -f "$frontend_container" >/dev/null
+          trap - EXIT
+          # Each artifact contains all four image digests for exactly one arch.
+          for entry in 'api printstash-api' 'api-lite printstash-api-lite' \
+                       'frontend printstash-frontend' 'unified printstash'; do
+            read -r target image <<< "$entry"
+            digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"]' <<< "$METADATA")
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+            mkdir -p "${RUNNER_TEMP}/digests/${image}"
+            touch "${RUNNER_TEMP}/digests/${image}/${ARCH}--${digest#sha256:}"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/
           if-no-files-found: error
           retention-days: 1
 
@@ -202,32 +135,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - printstash-api
-          - printstash-api-lite
-          - printstash-frontend
-          - printstash
+        image: [printstash-api, printstash-api-lite, printstash-frontend, printstash]
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          pattern: digests-${{ matrix.image }}--*
+          pattern: digests-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Docker metadata
+      - uses: docker/metadata-action@v6
         id: meta
-        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
@@ -237,26 +159,28 @@ jobs:
             type=raw,value=latest,enable=${{ !inputs.canary && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=raw,value=canary,enable=${{ inputs.canary }}
             type=sha,prefix=canary-,enable=${{ inputs.canary }}
-
-      - name: Create and verify multi-platform manifest
-        working-directory: ${{ runner.temp }}/digests
+      - name: Promote both tested native digests
+        working-directory: ${{ runner.temp }}/digests/${{ matrix.image }}
         shell: bash
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
+          set -euo pipefail
           IMAGE="${IMAGE,,}"
           tag_args=()
           while IFS= read -r tag; do
-            if [[ -n "$tag" ]]; then
-              tag_args+=(--tag "$tag")
-            fi
+            [[ -z "$tag" ]] || tag_args+=(--tag "$tag")
           done <<< "$TAGS"
-
+          test "${#tag_args[@]}" -gt 0
           digest_args=()
-          for digest in *; do
+          for arch in amd64 arm64; do
+            mapfile -t files < <(find . -maxdepth 1 -type f -name "${arch}--*" -printf '%f\n')
+            test "${#files[@]}" -eq 1
+            digest="${files[0]#*--}"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || exit 1
             digest_args+=("${IMAGE}@sha256:${digest}")
           done
-
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 2
           docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
           docker buildx imagetools inspect "${tag_args[1]}"

@@ -6,10 +6,26 @@ on:
 permissions:
   actions: read
   contents: read
-  packages: write
 
 jobs:
+  guard:
+    name: Require validated main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check dispatch ref and CI
+        env:
+          REF: ${{ github.ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$REF" != "refs/heads/main" ]]; then
+            echo "::error::Manual images must be built from main"
+            exit 1
+          fi
+          python3 scripts/verify-ci-run.py ci.yml "$GITHUB_SHA"
+
   publish:
+    needs: guard
     permissions:
       actions: read
       contents: read

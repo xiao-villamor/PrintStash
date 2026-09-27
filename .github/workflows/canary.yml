@@ -6,7 +6,6 @@ on:
 permissions:
   actions: read
   contents: read
-  packages: write
 
 concurrency:
   group: ghcr-canary-main
@@ -17,6 +16,7 @@ jobs:
     name: Require main
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
       - name: Check dispatch ref
         env:
           REF: ${{ github.ref }}
@@ -25,16 +25,13 @@ jobs:
             echo "::error::Canary images must be built from main"
             exit 1
           fi
-
-  ci:
-    needs: guard
-    permissions:
-      actions: read
-      contents: read
-    uses: ./.github/workflows/ci.yml
+      - name: Require successful CI for this commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify-ci-run.py ci.yml "$GITHUB_SHA"
 
   publish:
-    needs: [guard, ci]
+    needs: guard
     permissions:
       actions: read
       contents: read

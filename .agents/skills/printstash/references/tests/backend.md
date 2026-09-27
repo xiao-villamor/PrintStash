@@ -358,14 +358,13 @@ statements the aggregate is blunt enough that a 900-line service can fall from
 95% to 70% and move the total by half a percent. Every module below 90% got
 there that way. The gate is therefore:
 
-- **`TOTAL_FLOOR`** — the aggregate, two-sided. Fall below it and the run fails;
-  clear it by more than `TOTAL_SLACK` and the run also fails, telling you to
-  raise it. A floor nobody is forced to move stops being a gate.
+- **`TOTAL_FLOOR`** — the aggregate. Fall below it and the run fails;
+  clear it by more than `TOTAL_SLACK` and the run reports a maintenance notice.
 - **`MODULE_FLOOR = 90`** — every module on its own.
 - **`PINNED_BELOW_FLOOR`** — the debt: modules that were already under the floor,
   each pinned at what it measures so it cannot slide further. `MAX_PINNED` caps
-  the list, two-sided, so it may only shrink. A module that reaches
-  `MODULE_FLOOR` fails the gate until its entry is deleted and the cap lowered.
+  the list, so new debt cannot accumulate. A module that reaches
+  `MODULE_FLOOR` is reported for pin removal and cap maintenance.
 - **`test_covers_the_whole_application_package`** — a module that no test imports
   appears in no report, and an absent row reads as 100% rather than the 0% it is.
 

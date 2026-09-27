@@ -21,7 +21,7 @@ Playwright spec when browser behavior is the point of the change.
 Expand from that set only for a concrete cross-component risk, a failure, or a
 shared seam whose consumers need checking. Choose the next affected files by
 that dependency, then stop once the behavior is verified. CI runs the full
-frontend test and coverage gates for PRs; local full suites are for an explicit
+frontend test gate for PRs and coverage nightly or on demand; local full suites are for an explicit
 full-suite request, release validation, or work on the suite or coverage floors.
 
 ## Run the selected lanes cheapest-first
@@ -98,16 +98,15 @@ isAuthenticated` in storage-config so a member *can* edit, the New-collection
 button is *disabled* rather than toasting, `Checkbox` renders
 `role="checkbox"` not `switch`, `formatGrams` renders `800g` not `800 g`.
 
-## Coverage: the two-sided ratchet
+## Coverage: regression floors
 
 Use this loop when CI reports a floor failure or the task changes coverage
 floors. An ordinary localized UI edit uses its behavior matrix and affected
-tests locally; the PR's CI run supplies the full floor result.
+tests locally; nightly `Deep CI` or a manual run on the release commit supplies
+the full floor result.
 
-Every floor in this repo fails in **both** directions. Below it is a
-regression. Clear it by more than its slack and the run fails until the floor is
-raised — so **a PR that improves coverage sometimes edits a floor, and that edit
-is the point**, not a workaround.
+Every floor fails when coverage falls below it. Clearing it by more than its
+slack prints a maintenance notice; improvement does not fail the run.
 
 Frontend slack is `slackFor(n) = max(0.5, 300/n)`; backend floors live in
 `backend/tests/repo/test_coverage_floors.py` (aggregate + a per-module floor +
@@ -115,12 +114,12 @@ a capped debt list), frontend in `frontend/scripts/coverage-gate.mjs`.
 
 The loop:
 
-1. Run the coverage lane. Read the failure: which floor, which direction.
+1. Run the coverage lane. Read any floor failure or maintenance notice.
 2. **Below** → a behaviour lost its test. Find it and restore it; do not lower
    the floor. Lowering a floor needs a sentence in the PR saying which
    behaviour was deliberately given up.
-3. **Cleared** → raise the floor to just under the new number and re-run.
-4. Repeat until "every floor held."
+3. **Cleared** → consider raising the floor in a focused maintenance change.
+4. Stop when every floor holds.
 
 Two more ratchets work the same way and may only fall, never rise:
 `MAX_CONJUNCTION_NAMES` in `frontend/tests/repo/suite-hygiene.test.ts` and

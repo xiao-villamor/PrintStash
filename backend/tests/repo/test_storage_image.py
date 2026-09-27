@@ -27,18 +27,9 @@ class TestStorageImage:
             (REPO_ROOT / ".github/workflows/container-publish.yml").read_text()
         )
         job = workflow["jobs"]["build"]
-        images = [
-            row
-            for row in job["strategy"]["matrix"]["include"]
-            if row["image"].startswith("printstash-api")
-        ]
+        images = job["strategy"]["matrix"]["include"]
 
-        assert {(row["image"], row["arch"]) for row in images} == {
-            ("printstash-api", "amd64"),
-            ("printstash-api", "arm64"),
-            ("printstash-api-lite", "amd64"),
-            ("printstash-api-lite", "arm64"),
-        }
+        assert {row["arch"] for row in images} == {"amd64", "arm64"}
         assert all(
             row["platform"] == f"linux/{row['arch']}"
             and row["runner"]
@@ -47,28 +38,22 @@ class TestStorageImage:
         )
         steps = job["steps"]
         assert any(
-            step.get("uses", "").startswith("docker/build-push-action@")
-            for step in steps
+            step.get("uses", "").startswith("docker/bake-action@") for step in steps
         )
         smoke = next(
             step
             for step in steps
-            if step.get("name") == "Test backend image before exporting digest"
+            if step.get("name") == "Smoke every final image before exporting digests"
         )
-        assert smoke["if"] == "startsWith(matrix.image, 'printstash-api')"
-        assert smoke["env"]["VARIANT"] == (
-            "${{ matrix.image == 'printstash-api' && 'full' || 'lite' }}"
-        )
-        assert smoke["env"]["DIGEST"] == "${{ steps.build.outputs.digest }}"
-        assert smoke["run"].index('docker pull "$image"') < smoke["run"].index(
+        assert "'api printstash-api full'" in smoke["run"]
+        assert "'api-lite printstash-api-lite lite'" in smoke["run"]
+        assert smoke["run"].index('docker pull "$reference"') < smoke["run"].index(
             "./scripts/test.sh image"
         )
-        assert '--image "$image" --variant "$VARIANT"' in smoke["run"]
+        assert '--image "$reference" --variant "$variant"' in smoke["run"]
         assert steps.index(smoke) < next(
             index
             for index, step in enumerate(steps)
-            if step.get("name") == "Export digest"
+            if step.get("uses", "").startswith("actions/upload-artifact@")
         )
-        assert any(
-            "test-unified-image.sh" in step.get("run", "") for step in steps
-        )
+        assert any("test-unified-image.sh" in step.get("run", "") for step in steps)

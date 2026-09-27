@@ -9,34 +9,42 @@ on:
 permissions:
   actions: read
   contents: read
-  packages: write
 
 jobs:
   # The push trigger's tag glob (v*.*.*) also matches non-semver strings like
   # "vfoo.bar.baz" — this is the strict check. Applies to workflow_dispatch
   # too, so a manual run against a branch ref can't slip past it either.
   guard:
-    name: Validate tag is strict semver
+    name: Validate release commit
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Check ${{ github.ref_name }}
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::ref '${{ github.ref_name }}' is not a strict semver tag (vX.Y.Z)"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::ref '$TAG' is not a strict semver tag (vX.Y.Z)"
             exit 1
           fi
-
-  # Re-run the full CI suite against the tagged commit. A tag that fails tests
-  # must never reach the registry — this gates the publish job below.
-  ci:
-    needs: guard
-    permissions:
-      actions: read
-      contents: read
-    uses: ./.github/workflows/ci.yml
+          python3 scripts/verify-release-version.py "$TAG"
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::release tag is not on main"
+            exit 1
+          }
+      - name: Require successful CI and Deep CI for this commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          python3 scripts/verify-ci-run.py ci.yml "$sha"
+          python3 scripts/verify-ci-run.py deep-ci.yml "$sha"
 
   publish:
-    needs: [guard, ci]
+    needs: guard
     permissions:
       actions: read
       contents: read

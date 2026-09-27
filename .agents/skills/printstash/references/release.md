@@ -9,7 +9,7 @@ sweep). This file is the ordered checklist that ties it together.
 - [ ] Confirm the release scope. Every planned bug or feature is merged through
       its own PR to `main`, together with the migrations, documentation, and
       validation that change requires.
-- [ ] `main` is up to date and its required CI checks are green. Release from
+- [ ] `main` is up to date and its required `PR gate` is green. Release from
       this integrated state; do not collect work on a version-number branch.
 - [ ] Choose X.Y.Z from the merged contents. While 0.x, patches contain fixes
       only; a release containing features increments the minor version.
@@ -31,9 +31,12 @@ sweep). This file is the ordered checklist that ties it together.
       `## X.Y.Z`, restore an empty `## Unreleased`, and verify the entry matches
       the condensed in-app changelog (format in
       [conventions.md](conventions.md)).
-- [ ] Backend: `cd backend && ./scripts/test.sh full -q && uv run ruff check app/ tests/ && uv run pyright`
-- [ ] Frontend: `cd frontend && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build`
-- [ ] Browser extension, when changed: `cd browser-extension && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build`; add affected-browser and e2e runs per [capture.md](capture.md).
+- [ ] Run focused local checks for the release-only metadata changes. The
+      merged commit's `CI` result covers the regular PR gate; `Deep CI` below
+      covers full suites and coverage without repeating them locally.
+- [ ] Browser extension, when changed: run affected local tests and browser
+      flows per [capture.md](capture.md); `CI` builds and tests the package,
+      and `Deep CI` runs its real-backend and ChromeDriver checks.
 - [ ] Upgrade check: previous-release DB → `uv run alembic upgrade head` →
       app boots (self-hosters upgrade from old releases; CI has a
       migration-upgrade job, but run it locally for schema-heavy releases).
@@ -53,6 +56,10 @@ sweep). This file is the ordered checklist that ties it together.
 
 - [ ] If a release-metadata PR was required, merge it to `main`; then update the
       local `main` and verify its HEAD contains the version triple and changelog.
+- [ ] Run `Deep CI` manually on that exact `main` commit after all metadata
+      changes have merged. Wait for a green result. The release workflow checks
+      both `CI` and `Deep CI` for the tag's exact SHA and will stop on an absent,
+      failed or running result; it does not re-run the suites.
 - [ ] Tag that exact `main` commit:
       `git tag vX.Y.Z && git push origin vX.Y.Z`. CI publishes the GHCR image
       and the tag guard checks the version triple.

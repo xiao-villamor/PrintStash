@@ -206,8 +206,8 @@ vitest reaches, not a claim about what is tested — and, more to the point,
 is the only evidence you have.
 
 Floors live in `scripts/coverage-gate.mjs`, not in `vite.config.ts`: vitest
-thresholds can only enforce a lower bound, and every floor here is two-sided —
-exceed it by more than the slack and the run fails, telling you to raise it. There
+thresholds can only enforce a lower bound. Exceeding a floor by more than its
+slack prints a maintenance notice; only a regression fails. There
 is one floor per area (`src/lib/`, `src/components/`, `src/pages/`, `src/`) plus
 one per workspace package, because a single aggregate over 8,530 statements hides
 a whole directory rotting. A file under a directory with no floor also fails the
@@ -227,6 +227,7 @@ pnpm exec vitest run <affected-test-paths>
 ```
 
 Select the files by the changed behavior using [running tests](../running-tests.md).
-CI runs `pnpm test` and `pnpm coverage` across the app and workspace packages;
+PR CI runs `pnpm test` across the app and workspace packages; `Deep CI` runs
+`pnpm coverage` nightly and on demand;
 use those full commands locally for release validation, an explicit request,
 or work on the suite or coverage floors.

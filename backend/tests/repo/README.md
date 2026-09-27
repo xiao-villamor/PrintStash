@@ -14,7 +14,7 @@ change nobody's feature test would.
   so a later SQLite `create_all` loses them. This is the tripwire; the leak and the
   fixture that undoes it are in `tests/integration/postgres/conftest.py`.
 - **`test_coverage_floors.py`** — coverage did not rot, anywhere. The aggregate
-  ratcheted in both directions, a floor every module clears on its own, and a capped
+  regression floor, a floor every module clears on its own, and a capped
   debt list for the ones that do not yet. Reads `coverage.json`, so it carries the
   `coverage_gate` marker and only runs in `./scripts/test.sh coverage`, after the
   measured pass — a gate collected into the run it judges could only ever read the

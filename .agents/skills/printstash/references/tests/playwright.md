@@ -98,8 +98,9 @@ comparing the two builds' numbers).
 
 ## CI
 
-The real and mock-API suites run per PR and in the nightly full-matrix rerun
-(`.github/workflows/ci.yml`). `retries` are on in CI only; a spec that needs
+Two real-backend flows run per PR (`.github/workflows/ci.yml`); all real and
+mock-API suites run nightly and on demand (`.github/workflows/deep-ci.yml`).
+`retries` are on in CI only; a spec that needs
 the retry to pass is flaky — fix the wait, don't lean on the retry.
 
 The performance suite runs on `workflow_dispatch` only

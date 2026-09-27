@@ -1,0 +1,15 @@
+.venv/
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage*
+coverage.json
+tests/
+testdata/
+unified/
+*.sqlite
+*.sqlite-*
+.env
+*.egg-info/

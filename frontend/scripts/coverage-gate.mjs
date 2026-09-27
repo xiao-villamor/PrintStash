@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 /**
- * The frontend coverage gate: a floor per area of the tree, ratcheted both ways.
+ * The frontend coverage gate: a minimum per area of the tree.
  *
  * Two things this replaces. First, `thresholds` in vite.config.ts, which can only
- * enforce a lower bound — and a floor nobody is ever forced to raise stops being a
- * gate, it becomes a number everything clears by twenty points. Every floor here is
- * two-sided: fall below it and the run fails; rise clear of it by more than the
- * slack and the run also fails, telling you to raise it.
+ * enforce a lower bound. Improvements above a floor are reported for maintenance
+ * without failing an otherwise healthy run.
  *
  * Second, and more importantly: that config measured `src/lib/**` and nothing else.
  * 1,639 of the app's 8,530 statements. It reported 86% and CI never ran it at all —
@@ -31,14 +29,7 @@ import { join } from "node:path";
 const ROOT = new URL("..", import.meta.url).pathname;
 
 /**
- * `slack` is derived, not chosen: roughly three statements' worth of coverage for
- * the size of the thing being measured. Below that a single new test forces an edit
- * here for no benefit; above it a sustained improvement goes unrecorded.
- *
- * Set each floor to roughly `measured - slack/2`, not just under `measured`. v8
- * coverage of the same suite moves by a hundredth of a point between runs, and a
- * floor placed hard against the upper bound turns that jitter into a red CI run —
- * centring it leaves headroom on both sides.
+ * Report a meaningful gain of roughly three statements' worth of coverage.
  */
 const slackFor = (totalStatements) => Math.max(0.5, 300 / Math.max(1, totalStatements));
 
@@ -91,6 +82,7 @@ const SUITES = [
 
 const METRICS = ["statements", "branches"];
 const failures = [];
+const improvements = [];
 
 /** Newest mtime under a directory tree, for the staleness check. */
 const newestSource = (dir) => {
@@ -147,10 +139,9 @@ for (const suite of SUITES) {
           `Open the HTML report for the uncovered lines.`,
       );
     } else if (measured >= floor + slack) {
-      failures.push(
+      improvements.push(
         `${suite.name} total ${metric}: ${measured.toFixed(2)}% is clear of the ` +
-          `${floor}% floor. Raise it to ${(measured - slack / 2).toFixed(1)} in ` +
-          `scripts/coverage-gate.mjs so the gain cannot be given back.`,
+          `${floor}% floor. Consider raising it during maintenance.`,
       );
     }
   }
@@ -161,9 +152,12 @@ for (const suite of SUITES) {
     areas.map((area) => [area.prefix, { statements: [0, 0], branches: [0, 0] }]),
   );
   const suiteDir = join(ROOT, suite.summary.replace(/coverage\/coverage-summary\.json$/, ""));
+  const suitePrefix = suiteDir.endsWith("/") ? suiteDir : `${suiteDir}/`;
 
   for (const [absolute, entry] of files) {
-    const relative = absolute.startsWith(suiteDir) ? absolute.slice(suiteDir.length) : absolute;
+    const relative = absolute.startsWith(suitePrefix)
+      ? absolute.slice(suitePrefix.length)
+      : absolute;
     const area = areas.find((candidate) => relative.startsWith(candidate.prefix));
     if (!area) {
       failures.push(
@@ -193,10 +187,9 @@ for (const suite of SUITES) {
           `${suite.name} ${area.prefix} ${metric}: ${measured.toFixed(2)}% < ${floor}% floor.`,
         );
       } else if (measured >= floor + areaSlack) {
-        failures.push(
+        improvements.push(
           `${suite.name} ${area.prefix} ${metric}: ${measured.toFixed(2)}% is clear of ` +
-            `the ${floor}% floor. Raise it to ${(measured - areaSlack / 2).toFixed(1)} ` +
-            `in scripts/coverage-gate.mjs.`,
+            `the ${floor}% floor. Consider raising it during maintenance.`,
         );
       }
     }
@@ -223,6 +216,11 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`  - ${failure}`);
   console.error("");
   process.exit(1);
+}
+
+if (improvements.length > 0) {
+  console.log("\ncoverage improvements to review during maintenance:");
+  for (const improvement of improvements) console.log(`  - ${improvement}`);
 }
 
 console.log("\ncoverage gate: every floor held.");

@@ -16,7 +16,7 @@ import {
 test.describe("backup recovery", () => {
   test(
     "@critical restores a purged model with its Artifact bytes",
-    { tag: "@critical" },
+    { tag: ["@critical", "@pr-smoke"] },
     async ({ page }) => {
       const name = `e2e-backup-recovery-${Date.now()}`;
       const expectedBytes = Buffer.from(gcodeFor(name));

@@ -4,6 +4,11 @@ target "api" {
   args = { PRINTSTASH_VARIANT = "full" }
 }
 
+target "api-lite" {
+  context = "backend"
+  args = { PRINTSTASH_VARIANT = "lite" }
+}
+
 target "frontend" {
   context = "frontend"
 }
@@ -15,4 +20,12 @@ target "unified" {
     frontend-image = "target:frontend"
   }
   tags = ["printstash:local"]
+}
+
+group "publish" {
+  targets = ["api", "api-lite", "frontend", "unified"]
+}
+
+group "default" {
+  targets = ["unified"]
 }

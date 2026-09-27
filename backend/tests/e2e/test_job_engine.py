@@ -42,7 +42,9 @@ from tests.paths import BACKEND_DIR
 _ROLE = "tests.fakes.job_engine_process"
 
 
-@pytest.fixture(params=["sqlite", "postgresql"])
+@pytest.fixture(
+    params=["sqlite", pytest.param("postgresql", marks=pytest.mark.postgres)]
+)
 def vault_env(request, tmp_path: Path) -> dict[str, str]:
     db_url = (
         fresh_postgres_database("job_engine")

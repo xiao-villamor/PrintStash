@@ -46,16 +46,17 @@ docker buildx bake -f docker-bake.hcl unified --load
 PRINTSTASH_IMAGE=printstash PRINTSTASH_VERSION=local docker compose up -d
 ```
 
-The existing **GHCR Release Images** workflow publishes native AMD64 and ARM64
-images on release tags after CI passes. Run **Manual Docker Images** on the
-default branch to publish `latest`. Both use the repository owner's GHCR namespace
+The **GHCR Release Images** workflow publishes native AMD64 and ARM64 images
+on release tags after the same commit passes `CI` and a manual or nightly
+`Deep CI` run. Run **Manual Docker Images** on `main` to publish `latest` after
+its `CI` run passes. Both use the repository owner's GHCR namespace
 and the built-in `GITHUB_TOKEN`; a separate registry password is unnecessary.
-Run **GHCR Canary Images** on `main` to test the selected main commit and publish
+Run **GHCR Canary Images** on `main` after its `CI` run passes to publish
 `canary` plus a `canary-<commit>` tag for each image without changing `latest`.
 For the single-container deployment, set `PRINTSTASH_VERSION=canary` in `.env`.
 Pull-request CI validates the application without building container images.
-The release workflow builds both architectures and runs the unified-image smoke
-test before promoting their digests to shared tags.
+The publication workflow builds all four images once per native architecture,
+smokes each digest, then promotes only the tested digests to shared tags.
 
 On a fork, enable Actions before running the manual workflow. After the first
 publish, open the `printstash` package's settings and change visibility to

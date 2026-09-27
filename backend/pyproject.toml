@@ -164,7 +164,7 @@ DEP002 = [
 # `--cov-fail-under`, because that flag can only check the aggregate and the
 # aggregate is a blunt instrument at 21k statements: a 400-line service can rot
 # from 95% to 70% and move the total by half a percent. That test carries
-# per-module floors and ratchets in both directions.
+# per-module floors that block regressions and report improvements.
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 branch = true

@@ -45,7 +45,7 @@ delegate.
 against contract-enforcing fakes over a real loopback socket), `e2e/` (the whole app
 over ASGITransport), plus `fakes/`, `fixtures/` and `repo/` (repo-level invariants).
 So `app/modules/library/trash.py` ↔ `tests/integration/modules/library/test_trash.py`, and "is this
-module tested?" is one `ls`. Lanes: `./scripts/test.sh fast|contract|e2e|full|coverage`
+module tested?" is one `ls`. Lanes: `./scripts/test.sh fast|pr|contract|e2e|full|coverage`
 (`--help` explains each). Then mock-API Playwright (`frontend/tests/e2e/`,
 `pnpm test:e2e`) and real-backend Playwright (`frontend/tests/e2e-real/`,
 `pnpm test:e2e:real`).
@@ -54,8 +54,13 @@ Printer emulators run standalone for manual testing, e.g.
 (see `.agents/skills/printstash/references/backend.md` for per-provider flags). **Rule: every change
 to production code ships with tests in the same PR — features, fixes,
 refactors, config, migrations alike. A new feature adds one e2e test for its
-headline capability on top.** CI runs everything per-PR plus a
-nightly/`workflow_dispatch` full-matrix re-run.
+headline capability on top.** PR CI runs exhaustive, disjoint backend shards
+without external services or slow tests, plus core, frontend,
+extension and two real-browser smoke flows. `Deep CI` runs coverage, external
+contracts, compatibility matrices and the remaining browser suites nightly and
+on demand. Run it on the release commit before tagging; image publication
+requires its successful result for the exact SHA.
+CI topology, branch protection and timing targets: `docs/ci.md`.
 Any test-related work — writing, changing, deleting, or auditing tests, or
 deciding what a change needs — starts by loading
 `.agents/skills/printstash/references/testing.md`. Its
@@ -65,10 +70,10 @@ suites and closing what they report — a red gate, a floor to raise, a flake, a
 merge that left stubs on renamed seams — follows
 `.agents/skills/printstash/references/running-tests.md`.
 
-Coverage is gated with **branches on** in all three suites, and every floor is
-two-sided — clear it by more than its slack and the run fails until the floor is
-raised, so a PR that improves coverage sometimes edits a floor, and that edit is
-the point. `./scripts/test.sh coverage` (backend, floors in
+Coverage is gated with **branches on** in all three suites. A fall below a floor
+fails; an improvement above its slack is reported for later floor maintenance.
+The full coverage gates run in `Deep CI`, not on every PR. `./scripts/test.sh
+coverage` (backend, floors in
 `tests/repo/test_coverage_floors.py`: aggregate + a floor every module clears +
 a capped debt list), the same lane inside `packages/printstash-core`, and
 `pnpm coverage` (frontend, floors in `frontend/scripts/coverage-gate.mjs`). The

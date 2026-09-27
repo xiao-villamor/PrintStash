@@ -33,6 +33,8 @@ from tests.containers import fresh_postgres_database
 from tests.e2e._processes import vault_environment
 from tests.paths import BACKEND_DIR
 
+pytestmark = pytest.mark.postgres
+
 _ROLE = "tests.fakes.job_engine_process"
 _TIMEOUT_S = 180
 

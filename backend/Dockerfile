@@ -65,19 +65,25 @@ COPY --from=bgcode-builder /opt/libbgcode/share/licenses/libbgcode /usr/local/sh
 
 COPY --chmod=0644 pyproject.toml uv.lock ./
 COPY --chmod=0644 packages/printstash-core/pyproject.toml ./packages/printstash-core/pyproject.toml
-COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
 
-FROM base AS dependencies-lite
+FROM base AS dependencies-common
+# The heavy transitive dependencies depend on lockfiles, not application source.
+RUN uv sync --frozen --no-dev --no-editable --no-install-workspace
+
+FROM dependencies-common AS dependencies-lite
+COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
 RUN uv sync --frozen --no-dev --no-editable \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
 
-FROM base AS dependencies-full
+FROM dependencies-common AS dependencies-full
 COPY --from=opendal-builder /wheels /tmp/opendal-wheels
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-client \
  && rm -rf /var/lib/apt/lists/* \
- && uv sync --frozen --no-dev --no-editable --extra full \
+ && uv sync --frozen --no-dev --no-editable --extra full --no-install-workspace
+COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
+RUN uv sync --frozen --no-dev --no-editable --extra full \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
  && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh' \
  && rm -rf /tmp/opendal-wheels \

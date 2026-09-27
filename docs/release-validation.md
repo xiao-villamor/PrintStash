@@ -36,9 +36,10 @@ Expected:
 - Confirm that the GitHub release is published, not a draft, and points to the
   intended version tag. A local tag or a green branch build is not publication.
 - Inspect the versioned GHCR manifests for `printstash-api`,
-  `printstash-api-lite`, and `printstash-frontend`. All three must contain
+  `printstash-api-lite`, `printstash-frontend`, and `printstash`. All four must contain
   `linux/amd64` and `linux/arm64`; do not use `latest` as the evidence for a
   specific release.
+- Confirm green `CI` and `Deep CI` runs for the tag's exact commit on `main`.
 - Check the published image revision against the tag's commit and retain the
   successful publication workflow URL in the release validation notes.
 - Read the README project status, roadmap opening, changelog, and upgrade notes
@@ -183,7 +184,8 @@ docker build --build-arg PRINTSTASH_VARIANT=lite -t printstash-api-lite backend
 ./scripts/check_api_image_variants.sh printstash-api-full printstash-api-lite
 ```
 
-The publish workflows build both images for `linux/amd64` and `linux/arm64`.
+The publish workflows build both API variants and the frontend and unified images
+for `linux/amd64` and `linux/arm64`.
 The lite image must be at least 700 MiB smaller than full and may not start more
 than 10% slower at the median.
 
