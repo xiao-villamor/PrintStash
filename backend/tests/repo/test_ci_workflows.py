@@ -386,6 +386,8 @@ class TestImageGraph:
             "./scripts/test.sh image",
             "test-unified-image.sh",
             "frontend_container",
+            "--network-alias api",
+            "/api/v1/health",
         ):
             assert expected in smoke["run"]
         merge = workflow["jobs"]["merge"]

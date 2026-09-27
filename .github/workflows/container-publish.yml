@@ -97,20 +97,41 @@ jobs:
           frontend_digest=$(jq -er '.frontend["containerimage.digest"]' <<< "$METADATA")
           frontend_image="ghcr.io/${OWNER}/printstash-frontend@${frontend_digest}"
           docker pull "$frontend_image"
-          frontend_container=$(docker run -d -p 127.0.0.1::3000 "$frontend_image")
-          trap 'docker rm -f "$frontend_container" >/dev/null 2>&1 || true' EXIT
+          api_digest=$(jq -er '.api["containerimage.digest"]' <<< "$METADATA")
+          api_image="ghcr.io/${OWNER}/printstash-api@${api_digest}"
+          network="printstash-smoke-${ARCH}-${GITHUB_RUN_ID}"
+          docker network create "$network" >/dev/null
+          api_container=''
+          frontend_container=''
+          cleanup() {
+            if [[ -n "$frontend_container" ]]; then
+              docker rm -f "$frontend_container" >/dev/null 2>&1 || true
+            fi
+            if [[ -n "$api_container" ]]; then
+              docker rm -f "$api_container" >/dev/null 2>&1 || true
+            fi
+            docker network rm "$network" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          api_container=$(docker run -d --network "$network" --network-alias api \
+            -e VAULT_SETUP_MODE=trusted_network "$api_image")
+          frontend_container=$(docker run -d --network "$network" \
+            -p 127.0.0.1::3000 "$frontend_image")
           frontend_port=$(docker port "$frontend_container" 3000/tcp | awk -F: '{print $NF}')
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent "http://127.0.0.1:${frontend_port}/" | grep -q '<html'; then
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent "http://127.0.0.1:${frontend_port}/" | grep -q '<html' \
+               && curl --fail --silent "http://127.0.0.1:${frontend_port}/api/v1/health" \
+                  | jq -e '.status == "ok"' >/dev/null; then
               break
             fi
-            if [[ "$attempt" -eq 30 ]]; then
+            if [[ "$attempt" -eq 60 ]]; then
+              docker logs "$api_container"
               docker logs "$frontend_container"
               exit 1
             fi
             sleep 1
           done
-          docker rm -f "$frontend_container" >/dev/null
+          cleanup
           trap - EXIT
           # Each artifact contains all four image digests for exactly one arch.
           for entry in 'api printstash-api' 'api-lite printstash-api-lite' \
