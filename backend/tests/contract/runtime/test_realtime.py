@@ -27,6 +27,8 @@ from app.db.url import normalize_database_url
 from app.runtime.realtime import NOTIFY_CHANNEL, PostgresNotifyBus
 from tests.containers import postgres_url
 
+pytestmark = pytest.mark.postgres
+
 _WAIT_S = 10.0
 
 

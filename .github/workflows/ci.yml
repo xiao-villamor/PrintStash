@@ -30,8 +30,10 @@ jobs:
         include:
           - suite: unit
             paths: tests/unit
-          - suite: contract-e2e
-            paths: tests/contract tests/e2e
+          - suite: contract
+            paths: tests/contract
+          - suite: e2e
+            paths: tests/e2e
           - suite: integration-api-routes
             paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
           - suite: integration-api-domains

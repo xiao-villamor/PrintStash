@@ -78,9 +78,7 @@ class TestQuickGate:
             for step in jobs["backend"]["steps"]
             if "ruff" in step.get("run", "") or "pyright" in step.get("run", "")
         ]
-        assert all(
-            step["if"] == "matrix.suite == 'unit'" for step in static_steps
-        )
+        assert all(step["if"] == "matrix.suite == 'unit'" for step in static_steps)
         runner = (REPO_ROOT / "backend/scripts/test.sh").read_text()
         assert (
             "add_paths tests/unit tests/integration tests/contract tests/e2e tests/repo"
@@ -127,6 +125,8 @@ class TestQuickGate:
                 "not slow and not coverage_gate and not postgres and not s3 and not remote_storage and not bgcode",
                 "tests/e2e/test_job_engine.py",
                 "tests/e2e/test_split_topology.py",
+                "tests/contract/runtime/test_realtime.py",
+                "tests/integration/db/migrations/test_multipart_guides_migration.py",
             ],
             cwd=REPO_ROOT / "backend",
             capture_output=True,
@@ -137,6 +137,9 @@ class TestQuickGate:
         assert "[sqlite]" in result.stdout
         assert "[postgresql]" not in result.stdout
         assert "test_split_topology.py::" not in result.stdout
+        assert "test_realtime.py::" not in result.stdout
+        assert "test_postgres_group_delete_detaches_its_guide" not in result.stdout
+        assert "test_upgrade_preserves_a_document_before_linking_it" in result.stdout
 
     def test_runs_two_real_browser_smokes(self) -> None:
         commands = _commands(_workflow("ci.yml")["jobs"]["browser-smoke"])

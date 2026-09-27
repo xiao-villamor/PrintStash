@@ -121,6 +121,7 @@ class TestMultipartGuidesMigration:
         assert "multipart_model_id" in rendered
         assert "ON DELETE SET NULL" in rendered
 
+    @pytest.mark.postgres
     def test_postgres_group_delete_detaches_its_guide(
         self, postgres_migration_engine: Engine
     ) -> None:
