@@ -14,7 +14,11 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
-  use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    trace: "retain-on-failure",
+    serviceWorkers: "block",
+  },
   webServer: [
     {
       command: "bash tests/e2e-real/scripts/start-storage-backend.sh",
@@ -28,7 +32,9 @@ export default defineConfig({
       },
     },
     {
-      command: `VITE_API_URL=${apiBase} ./node_modules/.bin/vite --port ${port} --strictPort --host 127.0.0.1`,
+      // Chromium can lose requests while Vite cold-loads hundreds of modules on
+      // hosted runners. Serve a built bundle so navigation is deterministic.
+      command: `VITE_API_URL=${apiBase} ./node_modules/.bin/vite build && VITE_API_URL=${apiBase} ./node_modules/.bin/vite preview --port ${port} --strictPort --host 127.0.0.1`,
       url: `http://127.0.0.1:${port}`,
       reuseExistingServer: false,
       timeout: 120_000,
