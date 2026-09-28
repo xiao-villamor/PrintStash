@@ -217,13 +217,37 @@ class TestPublicationGuards:
         assert jobs["publish"]["needs"] == "guard"
         assert "ci" not in jobs
 
-    def test_canary_requires_main_ci(self) -> None:
-        jobs = _workflow("canary.yml")["jobs"]
+    def test_nightly_requires_main_ci(self) -> None:
+        jobs = _workflow("nightly.yml")["jobs"]
         guard = _commands(jobs["guard"])
         assert '"$REF" != "refs/heads/main"' in guard
         assert 'scripts/verify-ci-run.py ci.yml "$GITHUB_SHA"' in guard
         assert jobs["publish"]["needs"] == "guard"
+        assert jobs["publish"]["with"] == {"nightly": True}
         assert "ci" not in jobs
+
+    def test_nightly_images_publish_mutable_tag(self) -> None:
+        workflow = _workflow("container-publish.yml")
+        metadata = next(
+            step
+            for step in workflow["jobs"]["merge"]["steps"]
+            if step.get("id") == "meta"
+        )
+        tags = metadata["with"]["tags"]
+
+        assert "type=raw,value=nightly,enable=${{ inputs.nightly }}" in tags
+        assert "type=raw,value=canary" not in tags
+
+    def test_nightly_images_publish_commit_tag(self) -> None:
+        workflow = _workflow("container-publish.yml")
+        metadata = next(
+            step
+            for step in workflow["jobs"]["merge"]["steps"]
+            if step.get("id") == "meta"
+        )
+        tags = metadata["with"]["tags"]
+
+        assert "type=sha,prefix=nightly-,enable=${{ inputs.nightly }}" in tags
 
     def test_manual_images_require_main_ci(self) -> None:
         jobs = _workflow("docker-publish.yml")["jobs"]

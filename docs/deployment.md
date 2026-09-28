@@ -51,9 +51,16 @@ on release tags after the same commit passes `CI` and a manual or nightly
 `Deep CI` run. Run **Manual Docker Images** on `main` to publish `latest` after
 its `CI` run passes. Both use the repository owner's GHCR namespace
 and the built-in `GITHUB_TOKEN`; a separate registry password is unnecessary.
-Run **GHCR Canary Images** on `main` after its `CI` run passes to publish
-`canary` plus a `canary-<commit>` tag for each image without changing `latest`.
-For the single-container deployment, set `PRINTSTASH_VERSION=canary` in `.env`.
+Run **GHCR Nightly Images** manually on `main` after its `CI` run passes:
+
+```bash
+gh workflow run nightly.yml --ref main
+```
+
+It publishes `nightly` plus a `nightly-<commit>` tag for each image without
+changing `latest`.
+For the single-container deployment, set `PRINTSTASH_VERSION=nightly` in `.env`.
+Pin `nightly-<commit>` to test a specific build after later nightly runs.
 Pull-request CI validates the application without building container images.
 The publication workflow builds all four images once per native architecture,
 smokes each digest, then promotes only the tested digests to shared tags.

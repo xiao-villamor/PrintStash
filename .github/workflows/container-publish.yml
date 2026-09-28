@@ -3,8 +3,8 @@ name: Publish Container Images
 on:
   workflow_call:
     inputs:
-      canary:
-        description: Publish Canary tags instead of release or latest tags
+      nightly:
+        description: Publish nightly tags instead of release or latest tags
         type: boolean
         default: false
 
@@ -184,9 +184,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=tag
-            type=raw,value=latest,enable=${{ !inputs.canary && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-            type=raw,value=canary,enable=${{ inputs.canary }}
-            type=sha,prefix=canary-,enable=${{ inputs.canary }}
+            type=raw,value=latest,enable=${{ !inputs.nightly && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=raw,value=nightly,enable=${{ inputs.nightly }}
+            type=sha,prefix=nightly-,enable=${{ inputs.nightly }}
       - name: Promote both tested native digests
         working-directory: ${{ runner.temp }}/digests/${{ matrix.image }}
         shell: bash

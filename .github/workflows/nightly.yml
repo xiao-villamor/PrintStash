@@ -1,4 +1,4 @@
-name: GHCR Canary Images
+name: GHCR Nightly Images
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ghcr-canary-main
+  group: ghcr-nightly-main
   cancel-in-progress: true
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           if [[ "$REF" != "refs/heads/main" ]]; then
-            echo "::error::Canary images must be built from main"
+            echo "::error::Nightly images must be built from main"
             exit 1
           fi
       - name: Require successful CI for this commit
@@ -38,5 +38,5 @@ jobs:
       packages: write
     uses: ./.github/workflows/container-publish.yml
     with:
-      canary: true
+      nightly: true
     secrets: inherit

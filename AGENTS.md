@@ -37,6 +37,9 @@ delegate.
 - Full stack: `docker compose up` (prebuilt image — src edits need vite dev server).
 - Local dev gotcha: `:3000` serves the **prebuilt** image, not HMR. Run the vite
   dev server on a spare port to see `frontend/src` edits at all.
+- GitHub credentials and SSH keys in this workspace belong to the `local` user;
+  the agent shell may run as `root`. Run GitHub operations as `local`, for example
+  `runuser -u local -- gh ...` or `runuser -u local -- git push ...`.
 
 ## Testing
 **The directory a test lives in is its tier**, and `backend/tests/` mirrors `app/`:
