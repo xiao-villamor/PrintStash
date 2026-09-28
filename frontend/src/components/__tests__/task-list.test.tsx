@@ -46,7 +46,7 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
-  it("shows ZIP upload bytes, speed, and estimated time", () => {
+  it("shows ZIP upload metrics", () => {
     renderTaskList([
       task({
         title: "Prepare large.zip",
