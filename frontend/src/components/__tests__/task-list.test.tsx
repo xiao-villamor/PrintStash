@@ -46,6 +46,38 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it("shows ZIP upload bytes, speed, and estimated time", () => {
+    renderTaskList([
+      task({
+        title: "Prepare large.zip",
+        status: "running",
+        progress: 45,
+        archiveUploading: true,
+        archiveSizeBytes: 1024,
+        archiveTransferredBytes: 512,
+        archiveSpeedBytesPerSecond: 256,
+        archiveEtaSeconds: 2,
+      }),
+    ]);
+
+    expect(screen.getByText("Uploaded 512 B of 1 KB (50%)")).toBeVisible();
+    expect(screen.getByText("256 B/s · about 2s remaining")).toBeVisible();
+    expect(screen.getByText("Keep this browser tab open during upload.")).toBeVisible();
+  });
+
+  it("does not invent a speed or ETA before transfer data arrives", () => {
+    renderTaskList([
+      task({
+        status: "running",
+        archiveUploading: true,
+        archiveSizeBytes: 1024,
+      }),
+    ]);
+
+    expect(screen.getByText("Uploading 1 KB. Keep this browser tab open.")).toBeVisible();
+    expect(screen.queryByText(/remaining/)).toBeNull();
+  });
+
   it("links an administrator from a completed library import to preview jobs", () => {
     renderTaskList([task({ status: "completed", jobKind: "ingestion.library_import" })], {
       id: 1,

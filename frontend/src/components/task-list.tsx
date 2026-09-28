@@ -1,7 +1,7 @@
 "use client";
 
 import { ApiError, getErrorMessage } from "@/lib/errors";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDuration } from "@/lib/format";
 import { cancelArchiveTransfer, isArchiveTransferActive } from "@/lib/archive-upload";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -113,11 +113,38 @@ function TaskRow({ task }: { task: TaskItem }) {
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
           )}
           {task.archiveUploading && task.archiveSizeBytes !== undefined && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {uiText("Uploading {size}. Keep this browser tab open.", {
-                size: formatBytes(task.archiveSizeBytes),
-              })}
-            </p>
+            <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+              <p>
+                {task.archiveTransferredBytes === undefined
+                  ? uiText("Uploading {size}. Keep this browser tab open.", {
+                      size: formatBytes(task.archiveSizeBytes),
+                    })
+                  : uiText("Uploaded {sent} of {total} ({percent}%)", {
+                      sent: formatBytes(task.archiveTransferredBytes),
+                      total: formatBytes(task.archiveSizeBytes),
+                      percent: String(
+                        task.archiveSizeBytes > 0
+                          ? Math.min(
+                              100,
+                              Math.round(
+                                (task.archiveTransferredBytes / task.archiveSizeBytes) * 100,
+                              ),
+                            )
+                          : 0,
+                      ),
+                    })}
+              </p>
+              {task.archiveSpeedBytesPerSecond !== undefined &&
+                task.archiveEtaSeconds !== undefined && (
+                  <p>
+                    {uiText("{speed}/s · about {time} remaining", {
+                      speed: formatBytes(task.archiveSpeedBytesPerSecond),
+                      time: formatDuration(Math.ceil(task.archiveEtaSeconds)),
+                    })}
+                  </p>
+                )}
+              <p>{uiText("Keep this browser tab open during upload.")}</p>
+            </div>
           )}
           {active && task.total == null && !task.archiveUploading && (
             <p className="mt-1 text-xs text-muted-foreground">

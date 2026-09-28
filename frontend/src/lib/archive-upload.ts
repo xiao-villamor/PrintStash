@@ -28,10 +28,27 @@ export function cancelArchiveTransfer(taskId: string): boolean {
 export async function startArchiveTransfer(taskId: string, file: File): Promise<void> {
   const controller = new AbortController();
   activeTransfers.set(taskId, controller);
+  const startedAt = performance.now();
   try {
     const form = new FormData();
     form.append("file", file);
-    const response = await inspectArchive(form, controller.signal);
+    const response = await inspectArchive(form, controller.signal, (loaded, total) => {
+      if (controller.signal.aborted) return;
+      const transferred = Math.min(file.size, loaded);
+      const elapsedSeconds = (performance.now() - startedAt) / 1000;
+      const speed = elapsedSeconds >= 0.5 && loaded > 0 ? loaded / elapsedSeconds : undefined;
+      const complete = loaded >= total;
+      updateTask(taskId, {
+        status: "running",
+        detail: complete
+          ? uiText("Upload sent. Waiting for the server.")
+          : uiText("Transferring file"),
+        progress: complete ? 95 : Math.round((loaded / total) * 90),
+        archiveTransferredBytes: transferred,
+        archiveSpeedBytesPerSecond: complete ? undefined : speed,
+        archiveEtaSeconds: complete || !speed ? undefined : (total - loaded) / speed,
+      });
+    });
     if (controller.signal.aborted) return;
     attachTaskToImportJob(taskId, response.job_id);
     toast.info(

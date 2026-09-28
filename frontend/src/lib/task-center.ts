@@ -87,6 +87,9 @@ export interface TaskItem {
   archiveReviewDone?: boolean;
   archiveUploading?: boolean;
   archiveSizeBytes?: number;
+  archiveTransferredBytes?: number;
+  archiveSpeedBytesPerSecond?: number;
+  archiveEtaSeconds?: number;
 }
 
 export function needsArchiveReview(task: TaskItem): boolean {
@@ -369,6 +372,8 @@ export function attachTaskToImportJob(taskId: string, jobId: string): void {
   updateTask(taskId, {
     jobId,
     archiveUploading: false,
+    archiveSpeedBytesPerSecond: undefined,
+    archiveEtaSeconds: undefined,
     status: "pending",
     detail: uiText("Queued · continues in background"),
   });

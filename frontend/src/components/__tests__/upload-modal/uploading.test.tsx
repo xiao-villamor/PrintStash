@@ -21,7 +21,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +31,7 @@ import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artif
 import { queryKeys } from "@/lib/query-client";
 import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
 import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
+import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ExternalLibrary, JobStatus, ModelRead } from "@/types";
 
@@ -211,6 +212,8 @@ function fileInputs(container: HTMLElement) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  FetchBackedXhr.requests = [];
+  vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
   jobSeq += 1;
   // Every ingestion waits on the task centre's job poll rather than starting a
   // second loop, so a test drives the whole pipeline by answering it.
@@ -478,6 +481,36 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("an archive", () => {
+    it("updates transfer progress before the server accepts the ZIP", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "large.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      now.mockReturnValue(3000);
+      act(() => FetchBackedXhr.requests[0].emitProgress(512, 1024));
+
+      expect(listTasks().find((task) => task.title === "Prepare large.zip")).toMatchObject({
+        status: "running",
+        progress: 45,
+        archiveTransferredBytes: 512,
+        archiveSpeedBytesPerSecond: 256,
+        archiveEtaSeconds: 2,
+      });
+      now.mockRestore();
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
+    });
+
     it("shows a task immediately while the ZIP is still transferring", async () => {
       const user = userEvent.setup();
       let finishRequest: ((response: Response) => void) | undefined;
