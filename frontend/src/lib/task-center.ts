@@ -61,6 +61,7 @@ export interface TaskItem {
   createdAt: number;
   updatedAt: number;
   jobId?: string;
+  jobKind?: JobStatus["kind"];
   jobIds?: string[];
   expectedJobCount?: number;
   stage?: JobStatus["stage"];
@@ -421,6 +422,7 @@ function applyJob(job: JobStatus): void {
   const status = taskStatusOf(job.state);
   const patch = {
     jobId: job.job_id,
+    jobKind: job.kind,
     status,
     jobState: job.state,
     progress: job.progress ?? (job.total ? ((job.processed ?? 0) / job.total) * 100 : 0),

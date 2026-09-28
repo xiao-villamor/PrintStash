@@ -12,7 +12,7 @@ import zipfile
 from datetime import datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from printstash_core.imports import CaptureContractError, CaptureManifestV2
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -1753,7 +1753,13 @@ def _portable_aggregate_matches(
     return True
 
 
-def import_archive(session: Session, archive_path: Path, user: User) -> dict[str, int]:
+def import_archive(
+    session: Session,
+    archive_path: Path,
+    user: User,
+    *,
+    progress: Callable[[int, int, int, int, str | None], None] | None = None,
+) -> dict[str, int]:
     assert user.id is not None
     with zipfile.ZipFile(archive_path) as archive:
         infos = archive.infolist()
@@ -1810,6 +1816,11 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
         provenance_contexts = _portable_provenance_contexts(sidecar, manifest)
 
         created_models = created_files = skipped_files = provenance_conflicts = 0
+        total_files = sum(
+            len(model.get("artifacts", [])) for model in manifest["models"]
+        )
+        if progress is not None:
+            progress(0, total_files, 0, 0, None)
         source_models: dict[int, Model] = {}
         source_files: dict[int, File] = {}
         with (
@@ -1935,6 +1946,14 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                                     FileTagLink(file_id=existing.id, tag_id=tag.id)
                                 )
                         session.commit()
+                        if progress is not None:
+                            progress(
+                                created_files + skipped_files,
+                                total_files,
+                                created_files,
+                                skipped_files,
+                                artifact_data["original_filename"],
+                            )
                         continue
                     staged = (
                         Path(tempdir)
@@ -1978,6 +1997,15 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                         )
                         provenance_conflicts += len(merge.conflicting_override_fields)
                     created_files += 1
+                    if progress is not None:
+                        session.commit()
+                        progress(
+                            created_files + skipped_files,
+                            total_files,
+                            created_files,
+                            skipped_files,
+                            artifact_data["original_filename"],
+                        )
                 if model_data.get("starred"):
                     exists = session.exec(
                         select(ModelStar).where(
@@ -2325,12 +2353,34 @@ def run_import_job(
 ) -> None:
     """Durable job boundary for portable imports; partial progress remains visible."""
     registry.update(job_id, stage="ingesting")
+
+    def report(
+        processed: int,
+        total: int,
+        succeeded: int,
+        skipped: int,
+        current_item: str | None,
+    ) -> None:
+        registry.update(
+            job_id,
+            processed=processed,
+            total=total,
+            succeeded=succeeded,
+            skipped=skipped,
+            current_item=current_item,
+        )
+
     try:
         with session_factory.scoped_session() as session:
             user = session.get(User, user_id)
             if user is None:
                 raise ValueError("user_not_found")
-            result = import_archive(session, archive_path, user)
+            result = import_archive(
+                session,
+                archive_path,
+                user,
+                progress=report,
+            )
             lease = session.exec(
                 select(StagingLease).where(StagingLease.job_id == job_id)
             ).first()

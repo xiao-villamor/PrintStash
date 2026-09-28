@@ -2920,6 +2920,7 @@
   "Queued · continues in background": "En cola · continúa en segundo plano",
   "Task status is no longer available. It may have finished while this browser was disconnected.": "El estado de la tarea ya no está disponible. Puede haber terminado mientras este navegador estaba desconectado.",
   "Upload processed": "Carga procesada",
+  "View preview jobs in Background work": "Ver trabajos de vista previa en Trabajo en segundo plano",
   "{count} files processed": "{count} archivos procesados",
   "pending": "Pendiente",
   "running": "En curso",

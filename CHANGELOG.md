@@ -182,6 +182,8 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- Portable ZIP imports now update processed file counts while they run. The completed import task links administrators to Background work, where preview generation has its own queue status.
+
 - Trash GC preview now loads the active plan when another request claims it
   first, so operators can review and abort the existing plan instead of seeing
   an error.

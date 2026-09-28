@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskList } from "@/components/task-list";
+import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { setLocale, uiMessage } from "@/lib/locale";
 import type { TaskItem } from "@/lib/task-center";
 
@@ -24,10 +25,20 @@ function task(overrides: Partial<TaskItem> = {}): TaskItem {
   };
 }
 
-function renderTaskList(tasks: TaskItem[]) {
+function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
   render(
     <MemoryRouter>
-      <TaskList tasks={tasks} onClear={vi.fn<() => void>()} />
+      <AuthContext.Provider
+        value={{
+          user,
+          loading: false,
+          login: async () => {},
+          logout: async () => {},
+          refresh: async () => {},
+        }}
+      >
+        <TaskList tasks={tasks} onClear={vi.fn<() => void>()} />
+      </AuthContext.Provider>
     </MemoryRouter>,
   );
 }
@@ -35,6 +46,30 @@ function renderTaskList(tasks: TaskItem[]) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it("links an administrator from a completed library import to preview jobs", () => {
+    renderTaskList([task({ status: "completed", jobKind: "ingestion.library_import" })], {
+      id: 1,
+      username: "admin",
+      email: null,
+      is_superuser: true,
+    });
+
+    expect(
+      screen.getByRole("link", { name: "View preview jobs in Background work" }),
+    ).toHaveAttribute("href", "/settings?section=work");
+  });
+
+  it("does not offer administrator job details to a member", () => {
+    renderTaskList([task({ status: "completed", jobKind: "ingestion.library_import" })], {
+      id: 2,
+      username: "member",
+      email: null,
+      is_superuser: false,
+    });
+
+    expect(screen.queryByRole("link", { name: "View preview jobs in Background work" })).toBeNull();
+  });
+
   it("updates empty-state copy after a language change", () => {
     renderTaskList([]);
     expect(screen.getByText("No active tasks")).toBeVisible();

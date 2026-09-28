@@ -2920,6 +2920,7 @@
   "Queued · continues in background": "Queued · continues in background",
   "Task status is no longer available. It may have finished while this browser was disconnected.": "Task status is no longer available. It may have finished while this browser was disconnected.",
   "Upload processed": "Upload processed",
+  "View preview jobs in Background work": "View preview jobs in Background work",
   "{count} files processed": "{count} files processed",
   "pending": "pending",
   "running": "running",

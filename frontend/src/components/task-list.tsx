@@ -12,6 +12,8 @@ import {
 } from "@/lib/artifact-upload";
 
 import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/lib/auth-context";
 
 import type { TaskItem } from "@/lib/task-center";
 import { linkTaskToJob, taskTitle, taskDetail, updateTask } from "@/lib/task-center";
@@ -70,6 +72,7 @@ export function TaskList({
 
 function TaskRow({ task }: { task: TaskItem }) {
   useUiLocale();
+  const { user } = useAuth();
   const active = (task.status === "pending" || task.status === "running") && !task.uploadPaused;
   return (
     <div className="px-4 py-3">
@@ -130,6 +133,16 @@ function TaskRow({ task }: { task: TaskItem }) {
             </button>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
+          {task.jobKind === "ingestion.library_import" &&
+            task.status === "completed" &&
+            user?.is_superuser && (
+              <Link
+                to="/settings?section=work"
+                className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {uiText("View preview jobs in Background work")}
+              </Link>
+            )}
         </div>
       </div>
     </div>

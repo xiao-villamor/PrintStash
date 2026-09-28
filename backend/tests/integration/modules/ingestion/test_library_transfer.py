@@ -111,6 +111,64 @@ def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
 
 
 class TestImportArchive:
+    def test_reports_file_progress_before_import_completes(
+        self, db_session: Session, tmp_path: Path, auth_headers: dict[str, str]
+    ) -> None:
+        del auth_headers
+        user, _model, _file = _seed(db_session, tmp_path)
+        second_model = build_model(db_session, name="Second cube", slug="second-cube")
+        second_blob = tmp_path / "files" / "second-cube" / "v1" / "second.stl"
+        second_blob.parent.mkdir(parents=True)
+        second_blob.write_bytes(b"solid second\nendsolid second\n")
+        build_file(
+            db_session,
+            second_model,
+            path=str(second_blob),
+            filename="second.stl",
+            file_type=FileType.STL,
+            size_bytes=second_blob.stat().st_size,
+            sha256=hashlib.sha256(second_blob.read_bytes()).hexdigest(),
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        updates: list[tuple[int, int, int, int, str | None]] = []
+        try:
+            library_transfer.import_archive(
+                db_session,
+                archive_path,
+                user,
+                progress=lambda *counts: updates.append(counts),
+            )
+            assert updates == [
+                (0, 2, 0, 0, None),
+                (1, 2, 0, 1, "cube.stl"),
+                (2, 2, 0, 2, "second.stl"),
+            ]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_reports_created_file_as_it_is_imported(
+        self, db_session: Session, tmp_path: Path, auth_headers: dict[str, str]
+    ) -> None:
+        del auth_headers
+        user, _model, _file = _seed(db_session, tmp_path)
+        archive_path = library_transfer.create_archive(db_session, user)
+        updates: list[tuple[int, int, int, int, str | None]] = []
+        try:
+
+            def change_model(manifest: dict) -> None:
+                manifest["models"][0]["hash"] = "c" * 64
+
+            _rewrite_manifest(archive_path, change_model)
+            library_transfer.import_archive(
+                db_session,
+                archive_path,
+                user,
+                progress=lambda *counts: updates.append(counts),
+            )
+            assert updates == [(0, 1, 0, 0, None), (1, 1, 1, 0, "cube.stl")]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
     def test_imports_models_from_older_archive_with_retired_grouping_data(
         self, db_session: Session, tmp_path: Path, auth_headers: dict[str, str]
     ) -> None:

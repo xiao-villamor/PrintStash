@@ -464,6 +464,32 @@ describe("subscribeTasks", () => {
 });
 
 describe("syncImportJobs", () => {
+  it("shows live portable import counts from the job", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "portable-import",
+        kind: "ingestion.library_import",
+        state: "running",
+        stage: "ingesting",
+        processed: 23,
+        total: 92,
+        succeeded: 22,
+        skipped: 1,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      jobKind: "ingestion.library_import",
+      status: "running",
+      processed: 23,
+      total: 92,
+      progress: 25,
+      detail: "ingesting 23/92 · continues in background",
+    });
+  });
+
   it("passes active task ids to the reconnect source", async () => {
     const taskId = tc.trackImportJob("missed-job", "Recreate Model preview images");
     tc.updateTask(taskId, { status: "running" });
