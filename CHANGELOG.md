@@ -184,6 +184,9 @@ image. See UPGRADE.md before pulling.**
 
 - **3MF imports no longer exhaust container memory on repeated project parts.** Mesh metadata and previews now use a bounded 3MF resource loader that checks placed instances before composing geometry. Over-budget projects keep their original Artifact and embedded preview without crashing the API; existing mesh derivatives are refreshed at the new recipe version. ([#259](https://github.com/xiao-villamor/PrintStash/issues/259))
 
+- Search action buttons now sit inside the search field border, and model names
+  in the field no longer receive browser spellcheck underlines.
+
 - Portable ZIP imports now update processed file counts while they run. The completed import task links administrators to Background work, where preview generation has its own queue status.
 - Library source setup now distinguishes a mounted folder that needs temporary
   write permission for enrollment from one that cannot be read. Testing a

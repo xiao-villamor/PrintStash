@@ -7,6 +7,32 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("search clarity", () => {
+  test("keeps search actions inside the focused field border", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route("**/api/v1/search/status", (route) =>
+      route.fulfill({
+        json: searchStatus({
+          enabled: true,
+          semantic_ready: true,
+          legs: ["lexical", "semantic_text", "thumbnail"],
+        }),
+      }),
+    );
+    await page.goto("/");
+    const input = page.getByRole("searchbox", { name: "Search library" });
+    await input.fill("crimpA");
+    const field = await input.boundingBox();
+    expect(field).not.toBeNull();
+    for (const name of ["Search by image", "Clear search"]) {
+      const action = page.getByRole("button", { name });
+      await expect(action).toBeVisible();
+      const bounds = await action.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.y).toBeGreaterThan(field!.y);
+      expect(bounds!.y + bounds!.height).toBeLessThan(field!.y + field!.height);
+    }
+  });
+
   test("keeps dense results in the full browsing surface", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
