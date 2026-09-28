@@ -224,8 +224,10 @@ def enroll_external_root(session: Session, library: ExternalLibrary) -> External
     root = Path(library.root_path).expanduser().resolve(strict=False)
     if not root.exists() or not root.is_dir():
         raise ExternalRootBindingError("missing", "root_path_missing")
-    if not os.access(root, os.R_OK | os.W_OK):
+    if not os.access(root, os.R_OK):
         raise ExternalRootBindingError("unreadable", "root_path_unreadable")
+    if not os.access(root, os.W_OK):
+        raise ExternalRootBindingError("unreadable", "root_marker_unwritable")
     identity = _installation_identity()
     if not identity:
         raise ExternalRootBindingError("invalid", "installation_identity_missing")

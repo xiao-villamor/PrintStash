@@ -12,6 +12,7 @@ from sqlmodel import Session
 
 from app.api.v1 import storage_connections as storage_connections_api
 from app.db.models import StorageConnection
+from app.modules.backups.backup_destination import BackupDestinationError
 from app.modules.identity.auth import create_access_token
 from app.modules.sources.library_source import LibrarySourceError
 from app.modules.storage.storage_providers import PRESETS
@@ -22,6 +23,29 @@ from tests.integration.modules.sources.external_library._helpers import enable_f
 def _headers(user) -> dict[str, str]:
     token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def shared_sftp_connection_id(client: TestClient, auth_headers: dict) -> int:
+    """The same shared SFTP profile drives listing, backup, and success probes."""
+    response = client.post(
+        "/api/v1/storage-connections",
+        headers=auth_headers,
+        json={
+            "name": "Shared SFTP",
+            "kind": "sftp",
+            "purpose": "both",
+            "configuration": {
+                "host": "nas.example.test",
+                "username": "reader",
+                "host_key": "nas.example.test ssh-ed25519 AAAATEST",
+                "root": "models",
+            },
+            "secrets": {"password": "fixture-password"},
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
 
 
 class TestStorageConnections:
@@ -313,6 +337,87 @@ class TestStorageConnections:
         assert failed.status_code == 409
         assert failed.json()["detail"] == "library_source_list_failed"
         assert missing.status_code == 404
+
+    def test_shared_sftp_probe_reports_library_listing_failure(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        shared_sftp_connection_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def failed_source(*_args, **_kwargs):
+            raise LibrarySourceError("remote_storage_list_failed")
+
+        monkeypatch.setattr(
+            storage_connections_api, "source_from_connection", failed_source
+        )
+        response = client.post(
+            f"/api/v1/storage-connections/{shared_sftp_connection_id}/probe",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "remote_storage_list_failed"
+
+    def test_shared_sftp_probe_confirms_library_listing(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        shared_sftp_connection_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            storage_connections_api,
+            "source_from_connection",
+            lambda *_args, **_kwargs: SimpleNamespace(probe=lambda: 2),
+        )
+        monkeypatch.setattr(
+            storage_connections_api,
+            "destination_from_connection",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                probe=lambda: {"ok": True, "provider": "sftp"}
+            ),
+        )
+
+        response = client.post(
+            f"/api/v1/storage-connections/{shared_sftp_connection_id}/probe",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": True,
+            "provider": "sftp",
+            "library_sample_count": 2,
+        }
+
+    def test_shared_sftp_probe_reports_backup_failure(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        shared_sftp_connection_id: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            storage_connections_api,
+            "source_from_connection",
+            lambda *_args, **_kwargs: SimpleNamespace(probe=lambda: 0),
+        )
+
+        def failed_backup(*_args, **_kwargs):
+            raise BackupDestinationError("storage_connection_probe_failed")
+
+        monkeypatch.setattr(
+            storage_connections_api, "destination_from_connection", failed_backup
+        )
+
+        response = client.post(
+            f"/api/v1/storage-connections/{shared_sftp_connection_id}/probe",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "storage_connection_probe_failed"
 
     def test_probe_reports_an_unavailable_google_drive_transport(
         self,

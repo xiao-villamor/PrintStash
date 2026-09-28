@@ -216,6 +216,27 @@ describe("RemoteStorageConnections", () => {
     ).toBeVisible();
   });
 
+  it("explains a remote library listing failure", async () => {
+    const user = userEvent.setup();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([
+          aStorageConnection({ kind: "sftp", name: "Workshop SFTP", purpose: "both" }),
+        ]),
+        "POST /api/v1/storage-connections/1/probe": json(
+          { detail: "remote_storage_list_failed" },
+          409,
+        ),
+      },
+    });
+    await screen.findByText("Workshop SFTP");
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText(/could not list the remote folder/i)).toBeVisible();
+  });
+
   it("keeps save unavailable until the profile has a name", async () => {
     renderApp(<RemoteStorageConnections />, {
       routes: {

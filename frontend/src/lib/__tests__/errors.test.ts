@@ -32,6 +32,12 @@ describe("ApiError", () => {
   });
 });
 
+describe("getErrorMessage", () => {
+  it("explains an unreadable mounted library folder", () => {
+    expect(getErrorMessage("root_path_unreadable")).toMatch(/container mount and permissions/i);
+  });
+});
+
 describe("parseApiError", () => {
   it("returns the same instance when given an ApiError", () => {
     const original = new ApiError(404, "model_not_found", "body");

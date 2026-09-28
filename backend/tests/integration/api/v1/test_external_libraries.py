@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -224,6 +225,33 @@ class TestCreateLibrary:
             "app.modules.sources.root_binding._create_marker", reject_marker
         )
 
+        response = client.post(
+            "/api/v1/libraries",
+            headers=auth_headers,
+            json={"name": "read-only", "root_path": str(root)},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "root_marker_unwritable"
+        assert db_session.exec(select(ExternalLibrary)).all() == []
+
+    def test_read_only_root_reports_enrollment_write_requirement(
+        self,
+        tmp_path: Path,
+        client: TestClient,
+        db_session: Session,
+        auth_headers: dict,
+        monkeypatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "read-only-nas"
+        root.mkdir()
+
+        import app.modules.sources.root_binding as root_binding
+
+        monkeypatch.setattr(
+            root_binding.os, "access", lambda _root, mode: mode == os.R_OK
+        )
         response = client.post(
             "/api/v1/libraries",
             headers=auth_headers,

@@ -29,6 +29,7 @@ import {
   ExternalLibrariesPanel,
   type ExternalLibrariesApi,
 } from "@/components/external-libraries-panel";
+import { ApiError } from "@/lib/errors";
 import { aJob as aSharedJob, aStorageConnection } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
 import type {
@@ -596,6 +597,22 @@ describe("ExternalLibrariesPanel", () => {
           collection_mode: "mirror",
         }),
       );
+    });
+
+    it("explains the writable mount requirement after enrollment fails", async () => {
+      const user = userEvent.setup();
+      renderPanel({
+        create: vi
+          .fn<(body: ExternalLibraryCreate) => Promise<ExternalLibrary>>()
+          .mockRejectedValue(new ApiError(409, "root_marker_unwritable", "")),
+      });
+      await screen.findByText("NAS models");
+      await user.type(screen.getByLabelText("Source name"), "Attic NAS");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
+
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
+
+      expect(await screen.findByText(/must be writable during enrollment/i)).toBeVisible();
     });
 
     it("adds a read-only remote S3 source through a reusable profile", async () => {

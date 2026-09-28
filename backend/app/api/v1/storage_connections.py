@@ -169,9 +169,15 @@ def probe_connection(
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
     try:
-        if row.purpose.allows(StorageConnectionPurpose.BACKUP):
+        if row.purpose is StorageConnectionPurpose.BACKUP:
             return destination_from_connection(row).probe()
-        sample_count = source_from_connection(row, scan_limits=True).probe()
+        library_sample_count = source_from_connection(row, scan_limits=True).probe()
+        if row.purpose is StorageConnectionPurpose.BOTH:
+            result = destination_from_connection(row).probe()
+            result["library_sample_count"] = library_sample_count
+            return result
+        if row.purpose is not StorageConnectionPurpose.LIBRARY:
+            raise ValueError("storage_connection_purpose_invalid")
     except (
         BackupDestinationError,
         LibrarySourceError,
@@ -180,7 +186,7 @@ def probe_connection(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "ok": True,
-        "sample_count": sample_count,
+        "sample_count": library_sample_count,
         "endpoint_proven": {"listing": True, "read": False},
     }
 
