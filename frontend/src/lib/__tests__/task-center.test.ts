@@ -80,6 +80,44 @@ afterEach(() => {
 });
 
 describe("createTask", () => {
+  it("marks a browser ZIP transfer interrupted after reload", async () => {
+    tc.createTask({ title: "Prepare parts.zip", status: "running", archiveUploading: true });
+
+    vi.resetModules();
+    const reloaded = await loadTaskCenter();
+
+    expect(reloaded.listTasks()[0]).toMatchObject({
+      status: "failed",
+      archiveUploading: false,
+      detail: "ZIP upload interrupted. Select the file again.",
+    });
+  });
+
+  it("keeps the ZIP review destination when the server job completes", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      status: "running",
+      archiveUploading: true,
+      archiveCollection: "parts",
+      archiveTags: ["functional"],
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "archive-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+
+    tc.attachTaskToImportJob(taskId, "archive-job");
+    await tc.syncImportJobs();
+
+    const task = tc.listTasks()[0];
+    expect(task).toMatchObject({
+      jobId: "archive-job",
+      status: "completed",
+      archiveCollection: "parts",
+      archiveTags: ["functional"],
+    });
+    expect(tc.needsArchiveReview(task)).toBe(true);
+  });
+
   it("creates a pending task with a unique id and zero progress", () => {
     const id = tc.createTask({ title: "Upload Cube" });
     const tasks = tc.listTasks();

@@ -354,11 +354,16 @@ export async function sendJson<T>(
   return value;
 }
 
-export async function sendForm<T>(path: string, formData: FormData): Promise<T> {
+export async function sendForm<T>(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(getUrl(path), {
     method: "POST",
     headers: authHeaders(),
     body: formData,
+    signal,
   });
   const value = await handleResponse<T>(res);
   invalidateApiCache(path);

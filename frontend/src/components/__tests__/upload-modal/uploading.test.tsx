@@ -26,6 +26,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UploadModal } from "@/components/upload-modal";
+import { TaskList } from "@/components/task-list";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
 import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
@@ -477,6 +478,72 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("an archive", () => {
+    it("shows a task immediately while the ZIP is still transferring", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const { container, onClose } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "large.zip"));
+
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(listTasks().find((task) => task.title === "Prepare large.zip")).toMatchObject({
+        status: "running",
+        detail: "Transferring file",
+      });
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
+    });
+
+    it("shows a rejected ZIP upload as a failed task", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: {
+          "POST /api/v1/ingest/archive/inspect": json({ detail: "upload_too_large" }, 413),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "oversized.zip"));
+
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.title === "Prepare oversized.zip")?.status).toBe(
+          "failed",
+        ),
+      );
+      expect(listTasks().find((task) => task.title === "Prepare oversized.zip")?.detail).toBe(
+        "upload_too_large",
+      );
+    });
+
+    it("cancels an in-flight ZIP upload from Tasks", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => new Promise<Response>(() => {}) },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "cancel.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+      const task = listTasks().find((item) => item.title === "Prepare cancel.zip");
+      if (!task) throw new Error("ZIP task was not created");
+      renderApp(<TaskList tasks={[task]} onClear={() => {}} />);
+
+      await user.click(screen.getByRole("button", { name: "Cancel upload" }));
+
+      expect(listTasks().find((item) => item.id === task.id)).toMatchObject({
+        status: "failed",
+        detail: "Upload cancelled",
+      });
+    });
+
     async function prepare(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
       setJobSource(async () => [aJob({ kind: "ingestion.archive_inspect", state: "completed" })]);
       await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));

@@ -359,8 +359,8 @@ export function selectCollectionMembers(
   );
 }
 
-export function inspectArchive(formData: FormData): Promise<JobAccepted> {
-  return sendForm<JobAccepted>("/api/v1/ingest/archive/inspect", formData);
+export function inspectArchive(formData: FormData, signal?: AbortSignal): Promise<JobAccepted> {
+  return sendForm<JobAccepted>("/api/v1/ingest/archive/inspect", formData, signal);
 }
 
 export function selectArchiveEntries(

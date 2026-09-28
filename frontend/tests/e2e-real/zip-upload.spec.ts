@@ -32,13 +32,27 @@ test.describe("ZIP upload", () => {
       mimeType: "application/zip",
       buffer: archiveFor(name),
     });
+    let releaseTransfer: (() => void) | undefined;
+    const transferGate = new Promise<void>((resolve) => {
+      releaseTransfer = resolve;
+    });
+    await page.route("**/api/v1/ingest/archive/inspect", async (route) => {
+      await transferGate;
+      await route.continue();
+    });
     await upload.getByRole("button", { name: "Prepare ZIP" }).click();
     await expect(upload).toHaveCount(0);
+    await page.getByRole("button", { name: "Notifications" }).click();
+    const tasksMenu = page.getByRole("dialog");
+    await expect(tasksMenu.getByText(`Prepare ${name}.zip`, { exact: true })).toBeVisible();
+    await expect(tasksMenu.getByText("Transferring file")).toBeVisible();
+    await expect(tasksMenu.getByRole("button", { name: "Cancel upload" })).toBeVisible();
+    if (!releaseTransfer) throw new Error("ZIP transfer did not start");
+    releaseTransfer();
     await expect(page.getByText("ZIP ready. Choose which files to add.")).toBeVisible({
       timeout: 120_000,
     });
 
-    await page.getByRole("button", { name: "Notifications" }).click();
     const prepared = page.getByText(`Prepare ${name}.zip`, { exact: true }).locator("..");
     await expect(prepared.getByText("Ready", { exact: true })).toBeVisible({ timeout: 120_000 });
     await page.getByRole("dialog").getByRole("button", { name: "Choose ZIP files" }).click();

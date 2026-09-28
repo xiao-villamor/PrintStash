@@ -85,6 +85,8 @@ export interface TaskItem {
   archiveCollection?: string | null;
   archiveTags?: string[];
   archiveReviewDone?: boolean;
+  archiveUploading?: boolean;
+  archiveSizeBytes?: number;
 }
 
 export function needsArchiveReview(task: TaskItem): boolean {
@@ -146,7 +148,19 @@ function loadTasks(): TaskItem[] {
     // Only `persist()` writes this key, so the stored payload is a TaskItem[]
     // snapshot; a hand-edited or truncated value falls through to the catch.
     const parsed: TaskItem[] | null = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed) ? keepVisibleTasks(parsed) : [];
+    return Array.isArray(parsed)
+      ? keepVisibleTasks(parsed).map((task) =>
+          task.archiveUploading && (task.status === "pending" || task.status === "running")
+            ? {
+                ...task,
+                archiveUploading: false,
+                status: "failed" as const,
+                detail: uiText("ZIP upload interrupted. Select the file again."),
+                progress: 100,
+              }
+            : task,
+        )
+      : [];
   } catch {
     return [];
   }
@@ -345,6 +359,19 @@ export function linkTaskToJob(taskId: string, jobId: string): void {
   dismissedJobIds.delete(jobId);
   persistDismissedJobIds();
   updateTask(taskId, { jobIds });
+  wakeImportJobSync();
+}
+
+/** Attach a one-job import to an existing browser task without losing its review metadata. */
+export function attachTaskToImportJob(taskId: string, jobId: string): void {
+  dismissedJobIds.delete(jobId);
+  persistDismissedJobIds();
+  updateTask(taskId, {
+    jobId,
+    archiveUploading: false,
+    status: "pending",
+    detail: uiText("Queued · continues in background"),
+  });
   wakeImportJobSync();
 }
 

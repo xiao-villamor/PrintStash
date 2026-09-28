@@ -1,6 +1,8 @@
 "use client";
 
 import { ApiError, getErrorMessage } from "@/lib/errors";
+import { formatBytes } from "@/lib/format";
+import { cancelArchiveTransfer, isArchiveTransferActive } from "@/lib/archive-upload";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import {
@@ -110,7 +112,14 @@ function TaskRow({ task }: { task: TaskItem }) {
           {task.detail && (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
           )}
-          {active && task.total == null && (
+          {task.archiveUploading && task.archiveSizeBytes !== undefined && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {uiText("Uploading {size}. Keep this browser tab open.", {
+                size: formatBytes(task.archiveSizeBytes),
+              })}
+            </p>
+          )}
+          {active && task.total == null && !task.archiveUploading && (
             <p className="mt-1 text-xs text-muted-foreground">
               {uiText("Discovering total… Safe to close this view.")}
             </p>
@@ -147,6 +156,15 @@ function TaskRow({ task }: { task: TaskItem }) {
             </button>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
+          {isArchiveTransferActive(task.id) && (
+            <button
+              type="button"
+              onClick={() => cancelArchiveTransfer(task.id)}
+              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uiText("Cancel upload")}
+            </button>
+          )}
           {needsArchiveReview(task) && (
             <button
               type="button"

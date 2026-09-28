@@ -4028,6 +4028,8 @@
   "Ready to choose ZIP files": "Ready to choose ZIP files",
   "ZIP ready. Choose which files to add.": "ZIP ready. Choose which files to add.",
   "ZIP preparation failed.": "ZIP preparation failed.",
+  "Uploading {size}. Keep this browser tab open.": "Uploading {size}. Keep this browser tab open.",
+  "ZIP upload interrupted. Select the file again.": "ZIP upload interrupted. Select the file again.",
   "Choose files": "Choose files",
   "Choose ZIP files": "Choose ZIP files",
   "This ZIP is not ready for review.": "This ZIP is not ready for review.",

@@ -4028,6 +4028,8 @@
   "Ready to choose ZIP files": "Listo para elegir archivos del ZIP",
   "ZIP ready. Choose which files to add.": "ZIP listo. Elige qué archivos añadir.",
   "ZIP preparation failed.": "No se pudo preparar el ZIP.",
+  "Uploading {size}. Keep this browser tab open.": "Subiendo {size}. Mantén abierta esta pestaña del navegador.",
+  "ZIP upload interrupted. Select the file again.": "Se interrumpió la subida del ZIP. Selecciona el archivo de nuevo.",
   "Choose files": "Elegir archivos",
   "Choose ZIP files": "Elegir archivos del ZIP",
   "This ZIP is not ready for review.": "Este ZIP aún no está listo para revisarlo.",

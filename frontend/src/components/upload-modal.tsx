@@ -22,18 +22,11 @@ import {
   capturePendingImport,
   getModel,
   getVaultConfig,
-  inspectArchive,
   listExternalLibraries,
 } from "@/lib/api";
 import { useCollections, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
-import {
-  createTask,
-  linkTaskToJob,
-  trackImportJob,
-  updateTask,
-  waitForImportJob,
-} from "@/lib/task-center";
+import { createTask, linkTaskToJob, updateTask, waitForImportJob } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
@@ -58,6 +51,7 @@ import { CollectionRead, ExternalLibrary, JobStatus } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
+import { startArchiveTransfer } from "@/lib/archive-upload";
 
 // `webkitdirectory` enables folder selection on a file input but isn't in the
 // standard DOM typings — augment so the JSX attribute typechecks.
@@ -592,30 +586,22 @@ export function UploadModal({
     }
   }
 
-  async function doInspectZip() {
+  function doInspectZip() {
     if (!collectionGate() || submitting || !zipFile) return;
-    setSubmitting(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", zipFile);
-      const response = await inspectArchive(fd);
-      const taskId = trackImportJob(
-        response.job_id,
-        uiMessage("Prepare {value1}", { value1: String(zipFile.name) }),
-      );
-      updateTask(taskId, {
-        archiveCollection: collectionPath || null,
-        archiveTags: [...selectedTags],
-      });
-      toast.info(
-        uiText("ZIP preparation continues in the background. We'll notify you when it's ready."),
-      );
-      close();
-    } catch (err) {
-      toast.error(err);
-    } finally {
-      setSubmitting(false);
-    }
+    const file = zipFile;
+    const taskId = createTask({
+      title: uiMessage("Prepare {value1}", { value1: String(file.name) }),
+      detail: uiText("Transferring file"),
+      status: "running",
+      progress: 0,
+      archiveUploading: true,
+      archiveSizeBytes: file.size,
+      archiveCollection: collectionPath || null,
+      archiveTags: [...selectedTags],
+    });
+    onTaskStarted?.(taskId);
+    void startArchiveTransfer(taskId, file);
+    close();
   }
 
   function doSubmit(e: React.FormEvent) {
@@ -628,7 +614,7 @@ export function UploadModal({
     }
     if (mode === "zip") {
       if (!zipFile) return;
-      void doInspectZip();
+      doInspectZip();
       return;
     }
     if (mode === "bulk") {
