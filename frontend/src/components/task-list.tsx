@@ -140,7 +140,7 @@ function TaskRow({ task }: { task: TaskItem }) {
                 to="/settings?section=work"
                 className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {uiText("View preview jobs in Background work")}
+                {uiText("View preview activity")}
               </Link>
             )}
         </div>

@@ -203,13 +203,15 @@ test.describe("settings route", () => {
   test("background work cancels a queue only after confirmation", async ({ page }) => {
     await page.goto("/settings?section=work");
 
-    await expect(page.getByLabel("Concurrency for derive.native")).toHaveValue("2");
-    // Listed once as a Job kind and once as the kind of a recent failure.
-    await expect(page.getByText("Mesh previews and geometry")).toHaveCount(2);
-    await expect(page.getByText("mock-host")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
     await expect(
-      page.getByText("1 derivatives failed across the library", { exact: false }),
+      page.getByText("Preview or metadata failures across the library: 1", { exact: false }),
     ).toBeVisible();
+    await page.getByText("Advanced controls").click();
+    await page.getByRole("tab", { name: "Worker settings" }).click();
+    await expect(page.getByLabel("Concurrency for derive.native")).toHaveValue("2");
+    await expect(page.getByText("mock-host")).toBeVisible();
+    await page.getByRole("tab", { name: "All work types" }).click();
 
     await page.getByRole("button", { name: "Cancel queued" }).click();
     const dialog = page.getByRole("dialog");
@@ -224,5 +226,31 @@ test.describe("settings route", () => {
       dialog.getByRole("button", { name: "Cancel queued" }).click(),
     ]);
     await expect(page.getByText("4 queued Jobs cancelled")).toBeVisible();
+  });
+
+  test("background work leads a new user to a model's preview status", async ({ page }) => {
+    await page.goto("/settings?section=work", { waitUntil: "networkidle" });
+
+    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "In progress" })).toBeVisible();
+    await expect(page.getByText("2 running", { exact: true })).toBeVisible();
+    await expect(page.getByText("4 waiting", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Open the model and look in Files/)).toBeVisible();
+    await expect(page.getByLabel("Concurrency for derive.native")).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "All work types" })).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Browse models" }).click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test("a mobile work deep link shows its selected settings tab", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/settings?section=work", { waitUntil: "networkidle" });
+
+    const selected = page.getByRole("tab", { name: "Background work" });
+    await expect(selected).toHaveAttribute("aria-selected", "true");
+    await expect(selected).toBeInViewport();
+    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\?section=work$/);
   });
 });

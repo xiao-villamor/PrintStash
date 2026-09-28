@@ -47,6 +47,7 @@ export type {
   JobState,
   JobAccepted,
   JobStatus,
+  DerivativeKind,
   DerivativeState,
   DerivativeRead,
   WorkLane,

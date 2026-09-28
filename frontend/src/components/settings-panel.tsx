@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { collectionDisplayPath } from "@/lib/collection-display";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
 import {
   Bell,
@@ -460,6 +460,15 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
+  const mobileTabsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const tabs = mobileTabsRef.current?.querySelector<HTMLElement>('[role="tablist"]');
+    const selected = tabs?.querySelector<HTMLElement>('[data-active="true"]');
+    if (tabs && selected) {
+      tabs.scrollLeft = selected.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
+    }
+  }, [activeSection, user?.is_superuser]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [releaseStatus, setReleaseStatus] = useState<ReleaseStatus | null>(null);
   const [releaseChecking, setReleaseChecking] = useState(false);
@@ -1796,7 +1805,7 @@ export function SettingsPanel() {
 
         <PageHeader title={t("settings.title")} description={t("settings.description")} />
 
-        <div className="border-b border-border pb-3 lg:hidden">
+        <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
           <TabBar
             tabs={visibleSettingsSections.map((section) => {
               const Icon = section.icon;

@@ -12,6 +12,11 @@ image. See UPGRADE.md before pulling.**
 
 ### Changed
 
+- Background work settings now lead with running, waiting, and failed work and
+  show where to check a model's preview status. Queue tools and worker controls
+  sit in separate views, and mobile Settings links bring the selected tab into
+  view.
+
 - Collection tree badges now count Models in child folders, use the complete
   total when only part of a large library is loaded, and stay visible in the
   default sidebar width.
