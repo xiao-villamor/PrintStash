@@ -1,6 +1,6 @@
 import { inspectArchive } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
-import { uiText } from "@/lib/locale";
+import { uiMessage, uiText } from "@/lib/locale";
 import { attachTaskToImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 
@@ -41,7 +41,7 @@ export async function startArchiveTransfer(taskId: string, file: File): Promise<
       updateTask(taskId, {
         status: "running",
         detail: complete
-          ? uiText("Upload sent. Waiting for the server.")
+          ? uiText("Finishing transfer to PrintStash. ZIP preparation starts next.")
           : uiText("Transferring file"),
         progress: complete ? 95 : Math.round((loaded / total) * 90),
         archiveTransferredBytes: transferred,
@@ -50,6 +50,7 @@ export async function startArchiveTransfer(taskId: string, file: File): Promise<
       });
     });
     if (controller.signal.aborted) return;
+    updateTask(taskId, { title: uiMessage("Prepare {value1}", { value1: file.name }) });
     attachTaskToImportJob(taskId, response.job_id);
     toast.info(
       uiText("ZIP preparation continues in the background. We'll notify you when it's ready."),

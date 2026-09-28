@@ -590,7 +590,7 @@ export function UploadModal({
     if (!collectionGate() || submitting || !zipFile) return;
     const file = zipFile;
     const taskId = createTask({
-      title: uiMessage("Prepare {value1}", { value1: String(file.name) }),
+      title: uiMessage("Upload {value1}", { value1: String(file.name) }),
       detail: uiText("Transferring file"),
       status: "running",
       progress: 0,

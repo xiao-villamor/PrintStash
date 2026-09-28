@@ -119,20 +119,24 @@ function TaskRow({ task }: { task: TaskItem }) {
                   ? uiText("Uploading {size}. Keep this browser tab open.", {
                       size: formatBytes(task.archiveSizeBytes),
                     })
-                  : uiText("Uploaded {sent} of {total} ({percent}%)", {
-                      sent: formatBytes(task.archiveTransferredBytes),
-                      total: formatBytes(task.archiveSizeBytes),
-                      percent: String(
-                        task.archiveSizeBytes > 0
-                          ? Math.min(
-                              100,
-                              Math.round(
-                                (task.archiveTransferredBytes / task.archiveSizeBytes) * 100,
-                              ),
-                            )
-                          : 0,
-                      ),
-                    })}
+                  : task.archiveTransferredBytes >= task.archiveSizeBytes
+                    ? uiText("Sent {total} from this browser (100%)", {
+                        total: formatBytes(task.archiveSizeBytes),
+                      })
+                    : uiText("Uploaded {sent} of {total} ({percent}%)", {
+                        sent: formatBytes(task.archiveTransferredBytes),
+                        total: formatBytes(task.archiveSizeBytes),
+                        percent: String(
+                          task.archiveSizeBytes > 0
+                            ? Math.min(
+                                100,
+                                Math.round(
+                                  (task.archiveTransferredBytes / task.archiveSizeBytes) * 100,
+                                ),
+                              )
+                            : 0,
+                        ),
+                      })}
               </p>
               {task.archiveSpeedBytesPerSecond !== undefined &&
                 task.archiveEtaSeconds !== undefined && (

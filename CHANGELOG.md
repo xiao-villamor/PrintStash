@@ -102,7 +102,9 @@ image. See UPGRADE.md before pulling.**
   only selected 3D files are imported, through a second Job. The upload itself
   appears in Tasks immediately, leaves the form free, and can be cancelled;
   transfer failures remain visible there. During transfer, Tasks shows bytes,
-  percentage, upload speed and estimated time remaining.
+  percentage, upload speed and estimated time remaining. Large ZIPs stream
+  through the web proxy without an extra buffered copy; Tasks distinguishes
+  browser transfer, server receipt and ZIP preparation.
 
 - OrcaSlicer uploads now carry one versioned native metadata context. Exact
   single-object source matches become idempotent `needs_test` G-code Revisions;

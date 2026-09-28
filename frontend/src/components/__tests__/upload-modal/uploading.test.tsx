@@ -496,15 +496,16 @@ describe("UploadModal ingestion", () => {
 
       act(() => FetchBackedXhr.requests[0].emitProgress(1024, 1024));
 
-      expect(listTasks().find((task) => task.title === "Prepare wait.zip")).toMatchObject({
+      expect(listTasks().find((task) => task.title === "Upload wait.zip")).toMatchObject({
         status: "running",
         progress: 95,
-        detail: "Upload sent. Waiting for the server.",
+        detail: "Finishing transfer to PrintStash. ZIP preparation starts next.",
         archiveTransferredBytes: 1024,
         archiveEtaSeconds: undefined,
       });
       finishRequest?.(json(queued()));
       await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      expect(listTasks().find((task) => task.jobId === jobId())?.title).toBe("Prepare wait.zip");
       await syncImportJobs();
     });
 
@@ -525,7 +526,7 @@ describe("UploadModal ingestion", () => {
       now.mockReturnValue(3000);
       act(() => FetchBackedXhr.requests[0].emitProgress(512, 1024));
 
-      expect(listTasks().find((task) => task.title === "Prepare large.zip")).toMatchObject({
+      expect(listTasks().find((task) => task.title === "Upload large.zip")).toMatchObject({
         status: "running",
         progress: 45,
         archiveTransferredBytes: 512,
@@ -553,7 +554,7 @@ describe("UploadModal ingestion", () => {
       await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
 
       expect(onClose).toHaveBeenCalledTimes(1);
-      expect(listTasks().find((task) => task.title === "Prepare large.zip")).toMatchObject({
+      expect(listTasks().find((task) => task.title === "Upload large.zip")).toMatchObject({
         status: "running",
         detail: "Transferring file",
       });
@@ -575,11 +576,11 @@ describe("UploadModal ingestion", () => {
       await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
 
       await waitFor(() =>
-        expect(listTasks().find((task) => task.title === "Prepare oversized.zip")?.status).toBe(
+        expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.status).toBe(
           "failed",
         ),
       );
-      expect(listTasks().find((task) => task.title === "Prepare oversized.zip")?.detail).toBe(
+      expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.detail).toBe(
         "upload_too_large",
       );
     });
@@ -592,7 +593,7 @@ describe("UploadModal ingestion", () => {
       await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "cancel.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
-      const task = listTasks().find((item) => item.title === "Prepare cancel.zip");
+      const task = listTasks().find((item) => item.title === "Upload cancel.zip");
       if (!task) throw new Error("ZIP task was not created");
       renderApp(<TaskList tasks={[task]} onClear={() => {}} />);
 

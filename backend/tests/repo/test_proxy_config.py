@@ -39,6 +39,16 @@ class TestFrontendNginxConf:
 
         assert "client_max_body_size ${NGINX_CLIENT_MAX_BODY_SIZE};" in conf
 
+    def test_archive_upload_streams_to_the_api_without_proxy_body_buffering(self) -> None:
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+        archive_location = conf.split(
+            "location = /api/v1/ingest/archive/inspect {", 1
+        )[1].split("}", 1)[0]
+
+        assert "proxy_request_buffering off;" in archive_location
+        assert "proxy_http_version 1.1;" in archive_location
+        assert "proxy_pass http://api:8000;" in archive_location
+
     def test_frontend_nginx_compresses_static_text_but_not_api_responses(self) -> None:
         conf = (_root() / "frontend" / "nginx.conf").read_text()
 

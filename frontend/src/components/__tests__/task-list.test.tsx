@@ -78,6 +78,25 @@ describe("TaskList", () => {
     expect(screen.queryByText(/remaining/)).toBeNull();
   });
 
+  it("labels completed browser transfer as awaiting server receipt", () => {
+    renderTaskList([
+      task({
+        title: "Prepare large.zip",
+        status: "running",
+        progress: 95,
+        archiveUploading: true,
+        archiveSizeBytes: 1024,
+        archiveTransferredBytes: 1024,
+        detail: "Finishing transfer to PrintStash. ZIP preparation starts next.",
+      }),
+    ]);
+
+    expect(screen.getByText("Sent 1 KB from this browser (100%)")).toBeVisible();
+    expect(
+      screen.getByText("Finishing transfer to PrintStash. ZIP preparation starts next."),
+    ).toBeVisible();
+  });
+
   it("links an administrator from a completed library import to preview jobs", () => {
     renderTaskList([task({ status: "completed", jobKind: "ingestion.library_import" })], {
       id: 1,
