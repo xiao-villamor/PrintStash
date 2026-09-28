@@ -7,6 +7,10 @@ browser flows run in parallel. Configure branch protection to require **PR
 gate** only: it fails if any of those jobs fails or is skipped. Do not add path
 filters to this required workflow.
 
+Migration upgrade tests run in three alphabetic shards so a slow runner does
+not cancel the entire suite at the 15-minute per-job limit. The repository
+test suite checks that every backend test file belongs to exactly one shard.
+
 `Deep CI` runs nightly or by manual dispatch. It checks branch coverage and
 area/module floors, external provider contracts, Python/native compatibility,
 the full browser configurations and the extension's real backend and
