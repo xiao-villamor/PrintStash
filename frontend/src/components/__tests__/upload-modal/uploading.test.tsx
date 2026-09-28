@@ -16,9 +16,8 @@
  * bad file must not abort the queue behind it — that is the difference between
  * losing one model and losing a hundred.
  *
- * An archive is inspected before anything is imported, because the user chooses
- * which entries come in. Importing on inspection would pull in every stray file
- * a downloaded ZIP happens to carry.
+ * ZIP preparation queues a Job and closes the modal. Review resumes from Tasks
+ * after that Job finishes, so a large archive never holds this form open.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -29,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UploadModal } from "@/components/upload-modal";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
-import { listTasks, setJobSource } from "@/lib/task-center";
+import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
 import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ExternalLibrary, JobStatus, ModelRead } from "@/types";
@@ -478,81 +477,41 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("an archive", () => {
-    const inspected = () =>
-      aJob({
-        result: {
-          archive_id: "arch-1",
-          archive_name: "parts.zip",
-          entries: [
-            { name: "cube.stl", size_bytes: 10, file_type: "stl", is_image: false },
-            { name: "readme.txt", size_bytes: 3, file_type: null, is_image: false },
-          ],
-        },
-      });
-
-    /** Pick a ZIP and inspect it, which is the only route to the entry list. */
-    async function inspect(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
-      setJobSource(async () => [inspected()]);
+    async function prepare(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
+      setJobSource(async () => [aJob({ kind: "ingestion.archive_inspect", state: "completed" })]);
       await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "parts.zip"));
-      await user.click(screen.getByRole("button", { name: "Inspect archive" }));
-      await screen.findByText("cube.stl");
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
     }
 
-    it("lists what the archive holds before importing anything", async () => {
-      // Importing on inspection would pull in every stray file a downloaded ZIP
-      // happens to carry.
+    it("queues preparation without importing archive entries", async () => {
       const user = userEvent.setup();
       const { container, requestsWithMethod } = renderUpload();
 
-      await inspect(user, container);
+      await prepare(user, container);
 
       expect(requestsWithMethod("POST").some((call) => call.url.includes("/select"))).toBe(false);
     });
 
-    it("leaves out entries the vault cannot import", async () => {
+    it("closes the upload modal once ZIP preparation is queued", async () => {
       const user = userEvent.setup();
-      const { container } = renderUpload();
+      const { container, onClose } = renderUpload();
 
-      await inspect(user, container);
+      await prepare(user, container);
 
-      expect(screen.queryByText("readme.txt")).toBeNull();
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     });
 
-    it("imports the entries the user kept ticked", async () => {
+    it("tracks the ZIP Job with the selected destination", async () => {
       const user = userEvent.setup();
-      const { container, requestsWithMethod } = renderUpload({
-        routes: { "POST /api/v1/ingest/archive/arch-1/select": json(queued()) },
-      });
-      await inspect(user, container);
-
-      await user.click(screen.getByRole("button", { name: /Import 1 selected/ }));
+      const { container } = renderUpload();
+      await prepare(user, container);
 
       await waitFor(() =>
-        expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
-          names: ["cube.stl"],
-        }),
+        expect(listTasks().some((task) => task.title === "Prepare parts.zip")).toBe(true),
       );
-    });
-
-    it("will not import with nothing selected", async () => {
-      const user = userEvent.setup();
-      const { container } = renderUpload();
-      await inspect(user, container);
-
-      await user.click(screen.getAllByRole("checkbox")[0]);
-
-      expect(screen.getByRole("button", { name: /Import 0 selected/ })).toBeDisabled();
-    });
-
-    it("lets the user back out to the file picker", async () => {
-      const user = userEvent.setup();
-      const { container } = renderUpload();
-      await inspect(user, container);
-
-      await user.click(screen.getByRole("button", { name: "Back" }));
-
-      expect(screen.getByRole("button", { name: "Inspect archive" })).toBeInTheDocument();
     });
   });
 });

@@ -107,6 +107,24 @@ describe("createTask", () => {
     }
     expect(tc.listTasks()).toHaveLength(20);
   });
+
+  it("keeps a prepared ZIP available after newer tasks fill the history", async () => {
+    const reviewId = tc.createTask({
+      title: "Prepare archive.zip",
+      jobId: "archive-1",
+      jobKind: "ingestion.archive_inspect",
+      status: "completed",
+    });
+    for (let i = 0; i < 25; i++) tc.createTask({ title: `other-${i}` });
+
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
+    tc.clearCompletedTasks();
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
+  });
 });
 
 describe("updateTask", () => {

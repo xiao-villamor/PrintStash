@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Optional
@@ -31,6 +32,7 @@ from printstash_core.files import (
     ArchivePolicyError,
     publish_staged_file,
     safe_entry_name,
+    verify_archive_contents,
 )
 from printstash_core.files import (
     extract_selected as extract_selected_archive_entries,
@@ -219,6 +221,27 @@ def inspect_archive(path: Path) -> list[ArchiveEntry]:
         )
     except ArchivePolicyError as exc:
         raise ImportError_(exc.code) from exc
+
+
+def prepare_archive_for_review(
+    path: Path,
+    *,
+    on_chunk: Callable[[], None],
+    on_entry: Callable[[int, int], None],
+) -> list[ArchiveEntry]:
+    """Validate and decompress ZIP contents in the existing ingest Job."""
+    entries = inspect_archive(path)
+    try:
+        verify_archive_contents(
+            path,
+            entries,
+            max_entry_bytes=settings.max_archive_entry_mb * 1024 * 1024,
+            on_chunk=on_chunk,
+            on_entry=on_entry,
+        )
+    except ArchivePolicyError as exc:
+        raise ImportError_(exc.code) from exc
+    return entries
 
 
 def extract_selected(path: Path, names: list[str]) -> list[tuple[Path, str]]:

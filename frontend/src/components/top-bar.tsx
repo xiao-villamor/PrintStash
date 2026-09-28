@@ -25,10 +25,12 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 import { useI18n } from "@/lib/i18n";
 import { TaskList } from "@/components/task-list";
+import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import {
   clearCompletedTasks,
   listTasks,
+  needsArchiveReview,
   subscribeTasks,
   startImportJobSync,
   TaskItem,
@@ -66,6 +68,8 @@ export function TopBar() {
       stopSync();
     };
   }, []);
+
+  useEffect(() => subscribeArchiveReviewRequests(() => setTasksOpen(false)), []);
 
   async function handleLogout() {
     await logout();
@@ -122,7 +126,9 @@ export function TopBar() {
               aria-expanded={tasksOpen}
             >
               <Bell className="h-4 w-4" />
-              {tasks.some((t) => t.status === "pending" || t.status === "running") && (
+              {tasks.some(
+                (t) => t.status === "pending" || t.status === "running" || needsArchiveReview(t),
+              ) && (
                 <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
               )}
             </button>

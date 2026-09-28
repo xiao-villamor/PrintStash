@@ -16,8 +16,15 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 
 import type { TaskItem } from "@/lib/task-center";
-import { linkTaskToJob, taskTitle, taskDetail, updateTask } from "@/lib/task-center";
+import {
+  linkTaskToJob,
+  needsArchiveReview,
+  taskTitle,
+  taskDetail,
+  updateTask,
+} from "@/lib/task-center";
 import { knownUiText } from "@/lib/locale";
+import { requestArchiveReview } from "@/lib/archive-review-events";
 
 export function TaskList({
   tasks,
@@ -41,7 +48,10 @@ export function TaskList({
         <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
           {uiText("Tasks")}
         </span>
-        {tasks.some((task) => task.status === "completed" || task.status === "failed") && (
+        {tasks.some(
+          (task) =>
+            (task.status === "completed" || task.status === "failed") && !needsArchiveReview(task),
+        ) && (
           <button
             type="button"
             onClick={onClear}
@@ -90,7 +100,11 @@ function TaskRow({ task }: { task: TaskItem }) {
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{taskTitle(task)}</p>
             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {task.uploadPaused ? uiText("Paused") : knownUiText(task.status)}
+              {task.uploadPaused
+                ? uiText("Paused")
+                : needsArchiveReview(task)
+                  ? uiText("Ready")
+                  : knownUiText(task.status)}
             </span>
           </div>
           {task.detail && (
@@ -133,6 +147,17 @@ function TaskRow({ task }: { task: TaskItem }) {
             </button>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
+          {needsArchiveReview(task) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (task.jobId) requestArchiveReview(task.jobId);
+              }}
+              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uiText("Choose ZIP files")}
+            </button>
+          )}
           {task.jobKind === "ingestion.library_import" &&
             task.status === "completed" &&
             user?.is_superuser && (

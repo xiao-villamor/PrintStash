@@ -97,6 +97,10 @@ image. See UPGRADE.md before pulling.**
 
 ### Added
 
+- ZIP uploads now prepare and validate their contents as a visible background
+  Job. When ready, a notification and Tasks open a folder-based file picker;
+  only selected 3D files are imported, through a second Job.
+
 - OrcaSlicer uploads now carry one versioned native metadata context. Exact
   single-object source matches become idempotent `needs_test` G-code Revisions;
   named-but-unknown or ambiguous sources fail without orphan rows,

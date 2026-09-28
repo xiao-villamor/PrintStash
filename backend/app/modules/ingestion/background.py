@@ -10,6 +10,7 @@ Job id as its token, so any process can serve it and a restart loses nothing.
 from __future__ import annotations
 
 import zipfile
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,10 @@ from app.schemas.ingest import (
 )
 
 logger = get_logger(__name__)
+
+
+class ArchivePreparationCancelled(Exception):
+    """The owning Job was withdrawn while its ZIP was being read."""
 
 GCODE_SUFFIXES = {".gcode", ".g", ".gco", ".bgcode"}
 MESH_SUFFIXES = {".stl", ".3mf", ".obj", ".step", ".stp", ".dxf"}
@@ -348,22 +353,44 @@ async def import_from_url(
 
 
 def inspect_uploaded_archive(
-    *, job_id: str, staged: Path, original_filename: str
+    *,
+    job_id: str,
+    staged: Path,
+    original_filename: str,
+    cancelled: Callable[[], bool],
 ) -> None:
-    """Inspect an uploaded ZIP the Job already owns and record its manifest."""
+    """Decompress an owned ZIP for validation, then record its review manifest."""
     try:
-        registry.update(job_id, stage="inspecting", current_item=original_filename)
-        entries = importer.inspect_archive(staged)
+        registry.update(job_id, stage="extracting", current_item=original_filename)
+
+        def check_cancelled() -> None:
+            if cancelled():
+                raise ArchivePreparationCancelled()
+
+        entries = importer.prepare_archive_for_review(
+            staged,
+            on_chunk=check_cancelled,
+            on_entry=lambda processed, total: registry.update(
+                job_id, stage="extracting", processed=processed, total=total
+            ),
+        )
+        check_cancelled()
+        importable_count = sum(entry.file_type is not None for entry in entries)
+        if importable_count == 0:
+            raise importer.ImportError_("no_importable_files")
         manifest = _record_archive(
             job_id, archive_name=original_filename, entries=entries, source_url=None
         )
         registry.finish(
             job_id,
             JobOutcome.COMPLETED,
-            processed=len(entries),
-            total=len(entries),
+            processed=importable_count,
+            total=importable_count,
+            succeeded=importable_count,
             result={"kind": "archive_manifest", **manifest.model_dump()},
         )
+    except ArchivePreparationCancelled:
+        return
     except importer.ImportError_ as exc:
         # The archive is refused on its content; no retry can accept it, so the
         # staged bytes are released now rather than at lease expiry.
