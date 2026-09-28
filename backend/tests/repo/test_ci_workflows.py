@@ -376,6 +376,19 @@ class TestImageGraph:
         smoke = next(
             step for step in steps if step.get("name", "").startswith("Smoke every")
         )
+        # Bake metadata can exceed Linux's per-argument environment limit.
+        # The smoke process needs only four small, validated digests.
+        assert "METADATA" not in smoke["env"]
+        assert all(
+            f"{target}['containerimage.digest']" in smoke["env"][name]
+            for name, target in (
+                ("API_DIGEST", ".api"),
+                ("API_LITE_DIGEST", "['api-lite']"),
+                ("FRONTEND_DIGEST", ".frontend"),
+                ("UNIFIED_DIGEST", ".unified"),
+            )
+        )
+        assert "^sha256:[0-9a-f]{64}$" in smoke["run"]
         upload = next(
             step
             for step in steps

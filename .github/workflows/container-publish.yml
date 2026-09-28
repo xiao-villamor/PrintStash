@@ -78,27 +78,34 @@ jobs:
       - name: Smoke every final image before exporting digests
         working-directory: backend
         env:
-          METADATA: ${{ steps.bake.outputs.metadata }}
+          API_DIGEST: ${{ fromJSON(steps.bake.outputs.metadata).api['containerimage.digest'] }}
+          API_LITE_DIGEST: ${{ fromJSON(steps.bake.outputs.metadata)['api-lite']['containerimage.digest'] }}
+          FRONTEND_DIGEST: ${{ fromJSON(steps.bake.outputs.metadata).frontend['containerimage.digest'] }}
+          UNIFIED_DIGEST: ${{ fromJSON(steps.bake.outputs.metadata).unified['containerimage.digest'] }}
           OWNER: ${{ steps.names.outputs.owner }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          for digest in "$API_DIGEST" "$API_LITE_DIGEST" "$FRONTEND_DIGEST" "$UNIFIED_DIGEST"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          done
           for entry in 'api printstash-api full' 'api-lite printstash-api-lite lite'; do
             read -r target image variant <<< "$entry"
-            digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"]' <<< "$METADATA")
+            case "$target" in
+              api) digest="$API_DIGEST" ;;
+              api-lite) digest="$API_LITE_DIGEST" ;;
+              *) exit 1 ;;
+            esac
             reference="ghcr.io/${OWNER}/${image}@${digest}"
             docker pull "$reference"
             ./scripts/test.sh image --image "$reference" --variant "$variant"
           done
-          unified_digest=$(jq -er '.unified["containerimage.digest"]' <<< "$METADATA")
-          unified_image="ghcr.io/${OWNER}/printstash@${unified_digest}"
+          unified_image="ghcr.io/${OWNER}/printstash@${UNIFIED_DIGEST}"
           docker pull "$unified_image"
           bash scripts/test-unified-image.sh "$unified_image"
-          frontend_digest=$(jq -er '.frontend["containerimage.digest"]' <<< "$METADATA")
-          frontend_image="ghcr.io/${OWNER}/printstash-frontend@${frontend_digest}"
+          frontend_image="ghcr.io/${OWNER}/printstash-frontend@${FRONTEND_DIGEST}"
           docker pull "$frontend_image"
-          api_digest=$(jq -er '.api["containerimage.digest"]' <<< "$METADATA")
-          api_image="ghcr.io/${OWNER}/printstash-api@${api_digest}"
+          api_image="ghcr.io/${OWNER}/printstash-api@${API_DIGEST}"
           network="printstash-smoke-${ARCH}-${GITHUB_RUN_ID}"
           docker network create "$network" >/dev/null
           api_container=''
@@ -134,11 +141,11 @@ jobs:
           cleanup
           trap - EXIT
           # Each artifact contains all four image digests for exactly one arch.
-          for entry in 'api printstash-api' 'api-lite printstash-api-lite' \
-                       'frontend printstash-frontend' 'unified printstash'; do
-            read -r target image <<< "$entry"
-            digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"]' <<< "$METADATA")
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          images=(printstash-api printstash-api-lite printstash-frontend printstash)
+          digests=("$API_DIGEST" "$API_LITE_DIGEST" "$FRONTEND_DIGEST" "$UNIFIED_DIGEST")
+          for index in "${!images[@]}"; do
+            image="${images[$index]}"
+            digest="${digests[$index]}"
             mkdir -p "${RUNNER_TEMP}/digests/${image}"
             touch "${RUNNER_TEMP}/digests/${image}/${ARCH}--${digest#sha256:}"
           done
