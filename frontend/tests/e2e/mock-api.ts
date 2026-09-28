@@ -210,6 +210,7 @@ const state = {
   externalLibrariesEnabled: false,
   ingestJobQueued: false,
   thumbnailRebuildQueued: false,
+  previewJobCancelled: false,
   apiKeySequence: 0,
   inboxCaptured: false,
   inboxImported: false,
@@ -234,7 +235,7 @@ function workOverview() {
         scope: "worker",
         partitioned: false,
         queued: 4,
-        running: 2,
+        running: state.previewJobCancelled ? 1 : 2,
       },
       {
         name: "ingest",
@@ -253,7 +254,7 @@ function workOverview() {
         label: "Mesh previews and geometry",
         lane: "derive.native",
         queued: 4,
-        running: 2,
+        running: state.previewJobCancelled ? 1 : 2,
         interrupted: 0,
         failed: 1,
         completed: 120,
@@ -306,6 +307,72 @@ function workOverview() {
   };
 }
 
+function workJobs() {
+  const base = {
+    kind: "derivatives.mesh",
+    priority: "interactive",
+    attempts: 1,
+    resubmits: 0,
+    model_id: null,
+    file_id: null,
+    error: null,
+    retryable: false,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    finished_at: null,
+    committed_at: now,
+    step: null,
+    total_steps: null,
+    result: null,
+    stage: null,
+    current_item: null,
+    processed: 0,
+    total: null,
+    succeeded: 0,
+    deduplicated: 0,
+    skipped: 0,
+    failed: 0,
+    completion: null,
+    failed_items: [],
+  };
+  return [
+    ...(!state.previewJobCancelled
+      ? [
+          {
+            ...base,
+            job_id: "mock-preview-1",
+            label: "Preview of skadis kitchen roll screw",
+            state: "running",
+            model_id: model.id,
+            file_id: 1,
+            started_at: now,
+            stage: "inspecting",
+            current_item: "skadis_kitchen-roll_screw.stl",
+            processed: 1,
+            total: 2,
+            progress: 45,
+          },
+        ]
+      : []),
+    {
+      ...base,
+      job_id: "mock-preview-2",
+      label: "Another model preview",
+      state: "running",
+      started_at: now,
+      progress: 20,
+    },
+    ...Array.from({ length: 4 }, (_, index) => ({
+      ...base,
+      job_id: `mock-preview-queued-${index}`,
+      label: `Queued model preview ${index + 1}`,
+      state: "queued",
+      progress: null,
+    })),
+  ];
+}
+
 function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting") {
   return {
     id: "mock-upload-1",
@@ -337,6 +404,7 @@ export function resetMockApiState(): void {
   state.externalLibrariesEnabled = false;
   state.ingestJobQueued = false;
   state.thumbnailRebuildQueued = false;
+  state.previewJobCancelled = false;
   state.apiKeySequence = 0;
   state.inboxCaptured = false;
   state.inboxImported = false;
@@ -1646,6 +1714,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/jobs") {
+    if (url.searchParams.get("include_system") === "true") {
+      sendJson(res, workJobs());
+      return;
+    }
     sendJson(
       res,
       state.ingestJobQueued
@@ -1675,6 +1747,12 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           ]
         : [],
     );
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/v1/jobs/mock-preview-1/cancel") {
+    state.previewJobCancelled = true;
+    drainRequest(req, () => sendJson(res, { job_id: "mock-preview-1", state: "cancelled" }));
     return;
   }
 

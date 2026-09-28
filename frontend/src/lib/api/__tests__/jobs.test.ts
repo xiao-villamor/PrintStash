@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cancelJob, getJobStatus, listJobs, retryJob } from "@/lib/api/jobs";
+import { cancelJob, getJobStatus, listJobs, listWorkJobs, retryJob } from "@/lib/api/jobs";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -58,6 +58,17 @@ describe("listJobs", () => {
     await listJobs(["thumbnail-job", "upload job"]);
 
     expectRequest("/api/v1/jobs?tracked_job_id=thumbnail-job&tracked_job_id=upload+job");
+  });
+});
+
+describe("listWorkJobs", () => {
+  it("includes system jobs in the administrator's active list", async () => {
+    respondWith([]);
+
+    await listWorkJobs();
+
+    expectRequest("/api/v1/jobs?include_system=true&terminal_limit=0");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
 });
 

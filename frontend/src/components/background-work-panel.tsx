@@ -31,7 +31,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
 import {
   cancelQueuedJobs,
+  cancelJob,
   getWorkOverview,
+  listWorkJobs,
   regenerateDerivatives,
   retryJob,
   setLaneConcurrency,
@@ -46,6 +48,8 @@ import type { DerivativeKind, JobStatus, WorkDefinition, WorkLane, WorkOverview 
 /** The panel's server boundary, so a test drives it without a fetch layer. */
 export interface BackgroundWorkApi {
   overview: () => Promise<WorkOverview>;
+  jobs: () => Promise<JobStatus[]>;
+  cancelJob: (jobId: string) => Promise<JobStatus>;
   setLane: (lane: string, concurrency: number | null) => Promise<WorkOverview>;
   cancelQueued: (definition: string) => Promise<{ cancelled: number }>;
   regenerate: (
@@ -57,6 +61,8 @@ export interface BackgroundWorkApi {
 
 const WORK_API: BackgroundWorkApi = {
   overview: getWorkOverview,
+  jobs: listWorkJobs,
+  cancelJob,
   setLane: setLaneConcurrency,
   cancelQueued: cancelQueuedJobs,
   regenerate: regenerateDerivatives,
@@ -86,6 +92,7 @@ function derivativeLabel(kind: DerivativeKind): string {
 
 type Pending =
   | { kind: "cancel"; definition: WorkDefinition }
+  | { kind: "cancel-job"; job: JobStatus }
   | { kind: "regenerate"; derivative: DerivativeKind };
 
 function SectionHeader({
@@ -171,6 +178,7 @@ function LaneRow({
 export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkApi }) {
   useUiLocale();
   const [overview, setOverview] = useState<WorkOverview | null>(null);
+  const [activeJobs, setActiveJobs] = useState<JobStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -178,10 +186,15 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
   const advancedRef = useRef<HTMLDetailsElement>(null);
 
   const refresh = useCallback(() => {
-    api
-      .overview()
-      .then((next) => {
-        setOverview(next);
+    Promise.all([api.overview(), api.jobs()])
+      .then(([nextOverview, nextJobs]) => {
+        setOverview(nextOverview);
+        setActiveJobs(
+          nextJobs.filter(
+            (job) =>
+              job.state === "queued" || job.state === "running" || job.state === "interrupted",
+          ),
+        );
         setError(null);
       })
       .catch((cause: unknown) => setError(userMessage(cause)));
@@ -203,7 +216,6 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
     () => [...new Set((overview?.definitions ?? []).flatMap((d) => d.derivative_kinds))].sort(),
     [overview],
   );
-  const activeDefinitions = overview?.definitions.filter((d) => d.running > 0 || d.queued > 0);
   const running = overview?.definitions.reduce((total, d) => total + d.running, 0);
   const waiting = overview?.definitions.reduce((total, d) => total + d.queued, 0);
   const staleWorkers = overview?.executors.filter((executor) => executor.stale).length;
@@ -233,6 +245,9 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
       if (action.kind === "cancel") {
         const { cancelled } = await api.cancelQueued(action.definition.name);
         toast.success(uiText("{count} queued Jobs cancelled", { count: cancelled }));
+      } else if (action.kind === "cancel-job") {
+        await api.cancelJob(action.job.job_id);
+        toast.success(uiText("Job cancelled"));
       } else {
         await api.regenerate(action.derivative, "all");
         toast.success(uiText("Re-deriving every {kind}", { kind: action.derivative }));
@@ -348,28 +363,66 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
             title={uiText("In progress")}
             description={uiText("Work that is running or waiting to start.")}
           />
-          {activeDefinitions?.length ? (
+          {activeJobs.length > 0 && (
             <ul className="divide-y divide-border border-b">
-              {activeDefinitions.map((definition) => (
+              {activeJobs.map((job) => (
                 <li
-                  key={definition.name}
-                  className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5"
+                  key={job.job_id}
+                  className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
                 >
-                  <span className="min-w-0 flex-1 text-sm font-medium">{definition.label}</span>
-                  {definition.running > 0 && (
-                    <Badge variant="secondary">
-                      {uiText("{count} running", { count: definition.running })}
-                    </Badge>
-                  )}
-                  {definition.queued > 0 && (
-                    <Badge variant="outline">
-                      {uiText("{count} waiting", { count: definition.queued })}
-                    </Badge>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{job.label ?? job.kind}</span>
+                      <Badge variant={job.state === "running" ? "secondary" : "outline"}>
+                        {job.state === "running"
+                          ? uiText("Running now")
+                          : uiText("Waiting to start")}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {job.current_item ??
+                        (job.stage ? uiText(job.stage) : uiText("Waiting for a worker"))}
+                      {job.total !== null ? ` · ${job.processed} / ${job.total}` : ""}
+                      {job.progress !== null ? ` · ${Math.round(job.progress)}%` : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {job.started_at
+                        ? uiText("Started {when}", { when: formatDateTime(job.started_at) })
+                        : uiText("Queued {when}", { when: formatDateTime(job.created_at) })}
+                    </p>
+                    {job.model_id !== null && (
+                      <Link
+                        to={`/models/${job.model_id}`}
+                        className="mt-1 inline-block text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {uiText("Open model")}
+                      </Link>
+                    )}
+                    {job.progress !== null && (
+                      <div
+                        role="progressbar"
+                        aria-label={job.label ?? job.kind}
+                        aria-valuenow={job.progress}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+                      >
+                        <div className="h-full bg-primary" style={{ width: `${job.progress}%` }} />
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPending({ kind: "cancel-job", job })}
+                  >
+                    {uiText("Cancel job")}
+                  </Button>
                 </li>
               ))}
             </ul>
-          ) : (
+          )}
+          {activeJobs.length === 0 && (
             <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
               {uiText("Nothing is running or waiting right now.")}
             </p>
@@ -617,18 +670,28 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
         title={
           pending?.kind === "cancel"
             ? uiText("Cancel queued {label} Jobs?", { label: pending.definition.label })
-            : uiText("Regenerate every {kind}?", {
-                kind: pending?.kind === "regenerate" ? pending.derivative : "",
-              })
+            : pending?.kind === "cancel-job"
+              ? uiText("Cancel {label}?", { label: pending.job.label ?? pending.job.kind })
+              : uiText("Regenerate every {kind}?", {
+                  kind: pending?.kind === "regenerate" ? pending.derivative : "",
+                })
         }
         description={
           pending?.kind === "cancel"
             ? uiText("Jobs that have not started are withdrawn. Running Jobs finish normally.")
-            : uiText(
-                "Every Artifact is derived again in the background. Current outputs stay visible until their replacements are ready.",
-              )
+            : pending?.kind === "cancel-job"
+              ? uiText("This stops the selected job and releases its pending work.")
+              : uiText(
+                  "Every Artifact is derived again in the background. Current outputs stay visible until their replacements are ready.",
+                )
         }
-        confirmLabel={pending?.kind === "cancel" ? uiText("Cancel queued") : uiText("Regenerate")}
+        confirmLabel={
+          pending?.kind === "cancel"
+            ? uiText("Cancel queued")
+            : pending?.kind === "cancel-job"
+              ? uiText("Cancel job")
+              : uiText("Regenerate")
+        }
       />
     </Card>
   );

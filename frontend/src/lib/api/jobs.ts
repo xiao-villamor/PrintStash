@@ -18,6 +18,11 @@ export function listJobs(trackedJobIds: string[] = []): Promise<JobStatus[]> {
   return getJson<JobStatus[]>(`/api/v1/jobs${query}`, { fresh: true });
 }
 
+/** Administrator's live queue, including system-owned preview and maintenance Jobs. */
+export function listWorkJobs(): Promise<JobStatus[]> {
+  return getJson<JobStatus[]>("/api/v1/jobs?include_system=true&terminal_limit=0", { fresh: true });
+}
+
 /** Withdraw what the Job was doing (the server releases its subject first). */
 export function cancelJob(jobId: string): Promise<JobStatus> {
   return sendJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, "POST", {});

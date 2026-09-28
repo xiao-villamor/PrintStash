@@ -233,14 +233,38 @@ test.describe("settings route", () => {
 
     await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "In progress" })).toBeVisible();
-    await expect(page.getByText("2 running", { exact: true })).toBeVisible();
-    await expect(page.getByText("4 waiting", { exact: true })).toBeVisible();
+    await expect(page.getByText("Preview of skadis kitchen roll screw")).toBeVisible();
+    await expect(
+      page.getByRole("progressbar", { name: "Preview of skadis kitchen roll screw" }),
+    ).toHaveAttribute("aria-valuenow", "45");
     await expect(page.getByText(/Open the model and look in Files/)).toBeVisible();
     await expect(page.getByLabel("Concurrency for derive.native")).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "All work types" })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Browse models" }).click();
     await expect(page).toHaveURL(/\/$/);
+  });
+
+  test("background work stops a selected preview job", async ({ page }) => {
+    await page.goto("/settings?section=work");
+    const preview = page
+      .getByRole("listitem")
+      .filter({ hasText: "Preview of skadis kitchen roll screw" });
+    await expect(preview.getByText("45%", { exact: false })).toBeVisible();
+
+    await preview.getByRole("button", { name: "Cancel job" }).click();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Cancel Preview of skadis kitchen roll screw?",
+    );
+    await Promise.all([
+      page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          request.url().endsWith("/api/v1/jobs/mock-preview-1/cancel"),
+      ),
+      page.getByRole("dialog").getByRole("button", { name: "Cancel job" }).click(),
+    ]);
+    await expect(preview).toHaveCount(0);
   });
 
   test("a mobile work deep link shows its selected settings tab", async ({ page }) => {

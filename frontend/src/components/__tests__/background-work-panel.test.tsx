@@ -33,6 +33,12 @@ let socket: FakeSocket;
 function stubApi(overview: WorkOverview = aWorkOverview(), over: Partial<BackgroundWorkApi> = {}) {
   return {
     overview: vi.fn<BackgroundWorkApi["overview"]>().mockResolvedValue(overview),
+    jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([]),
+    cancelJob: vi
+      .fn<BackgroundWorkApi["cancelJob"]>()
+      .mockImplementation(async (jobId): Promise<JobStatus> =>
+        aJob({ job_id: jobId, state: "cancelled" }),
+      ),
     setLane: vi.fn<BackgroundWorkApi["setLane"]>().mockResolvedValue(overview),
     cancelQueued: vi.fn<BackgroundWorkApi["cancelQueued"]>().mockResolvedValue({ cancelled: 2 }),
     regenerate: vi
@@ -84,6 +90,46 @@ afterEach(() => {
 });
 
 describe("BackgroundWorkPanel", () => {
+  it("shows each active job's progress", async () => {
+    const job = aJob({
+      job_id: "preview-1",
+      label: "Model images",
+      state: "running",
+      stage: "inspecting",
+      progress: 45,
+      processed: 2,
+      total: 4,
+    });
+    renderPanel(
+      stubApi(aWorkOverview(), {
+        jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([job]),
+      }),
+    );
+
+    expect(await screen.findByRole("progressbar", { name: "Model images" })).toBeVisible();
+    expect(screen.getByText(/2 \/ 4 · 45%/)).toBeVisible();
+    expect(screen.getByRole("progressbar", { name: "Model images" })).toHaveAttribute(
+      "aria-valuenow",
+      "45",
+    );
+  });
+
+  it("cancels the selected active job after confirmation", async () => {
+    const user = userEvent.setup();
+    const job = aJob({ job_id: "preview-2", label: "Model images", state: "running" });
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([job]),
+    });
+    renderPanel(api);
+
+    await user.click(await screen.findByRole("button", { name: "Cancel job" }));
+    expect(api.cancelJob).not.toHaveBeenCalled();
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel job" }),
+    );
+    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith("preview-2"));
+  });
+
   it("leads to a model's preview status", async () => {
     renderPanel(stubApi());
 
@@ -123,10 +169,19 @@ describe("BackgroundWorkPanel", () => {
   });
 
   it("shows running work before the technical controls", async () => {
-    renderPanel(stubApi(busyOverview()));
+    renderPanel(
+      stubApi(busyOverview(), {
+        jobs: vi
+          .fn<BackgroundWorkApi["jobs"]>()
+          .mockResolvedValue([
+            aJob({ job_id: "active-preview", label: "Preparing model image", state: "running" }),
+            aJob({ job_id: "waiting-scan", label: "Scanning library", state: "queued" }),
+          ]),
+      }),
+    );
 
-    expect(await screen.findByText("1 running")).toBeVisible();
-    expect(screen.getByText("4 waiting")).toBeVisible();
+    expect(await screen.findByText("Preparing model image")).toBeVisible();
+    expect(screen.getByText("Scanning library")).toBeVisible();
     expect(screen.getByRole("heading", { name: "In progress" })).toBeVisible();
   });
 
