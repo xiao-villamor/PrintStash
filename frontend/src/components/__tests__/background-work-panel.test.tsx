@@ -114,6 +114,28 @@ describe("BackgroundWorkPanel", () => {
     );
   });
 
+  it("links a preview job to its model", async () => {
+    renderPanel(
+      stubApi(aWorkOverview(), {
+        jobs: vi
+          .fn<BackgroundWorkApi["jobs"]>()
+          .mockResolvedValue([
+            aJob({
+              job_id: "preview-model",
+              label: "Model images",
+              state: "running",
+              model_id: 17,
+            }),
+          ]),
+      }),
+    );
+
+    expect(await screen.findByRole("link", { name: "Open model" })).toHaveAttribute(
+      "href",
+      "/models/17",
+    );
+  });
+
   it("cancels the selected active job after confirmation", async () => {
     const user = userEvent.setup();
     const job = aJob({ job_id: "preview-2", label: "Model images", state: "running" });
