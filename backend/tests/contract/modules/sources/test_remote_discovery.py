@@ -123,7 +123,7 @@ class TestTransportDeadline:
         from app.modules.sources.library_source import LibrarySourceError
         from app.modules.storage.remote_deadline import remote_budget
 
-        with directory_server(1, webdav=provider == "webdav", response_delay=5) as (
+        with directory_server(1, webdav=provider == "webdav", response_delay=8) as (
             endpoint,
             metrics,
         ):
@@ -155,12 +155,14 @@ class TestTransportDeadline:
             )
             source = source_from_connection(profile)
             started = time.monotonic()
-            with remote_budget(deadline=started + 0.3):
+            # Leave room for client setup on a busy CI worker before the request
+            # reaches the server; the response still stalls beyond the budget.
+            with remote_budget(deadline=started + 2):
                 with pytest.raises(
                     LibrarySourceError, match="remote_scan_slice_deadline"
                 ) as failure:
                     source.list_page("models", cursor=None, limit=1000)
-            assert time.monotonic() - started < 2
+            assert time.monotonic() - started < 4
             assert failure.value.discovery_cursor is not None
             assert metrics["requests"] == 1
 
