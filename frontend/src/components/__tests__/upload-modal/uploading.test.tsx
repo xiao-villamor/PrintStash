@@ -507,11 +507,19 @@ describe("UploadModal ingestion", () => {
     it("tracks the ZIP Job with the selected destination", async () => {
       const user = userEvent.setup();
       const { container } = renderUpload();
+      await user.click(screen.getByRole("button", { name: "None" }));
+      await user.click(screen.getByRole("option", { name: /Parts/ }));
+      await user.type(screen.getByPlaceholderText("Search or create — press Enter"), "fun");
+      await user.click(screen.getByRole("option", { name: /functional/ }));
       await prepare(user, container);
 
       await waitFor(() =>
         expect(listTasks().some((task) => task.title === "Prepare parts.zip")).toBe(true),
       );
+      expect(listTasks().find((task) => task.title === "Prepare parts.zip")).toMatchObject({
+        archiveCollection: "parts",
+        archiveTags: ["functional"],
+      });
     });
   });
 });
