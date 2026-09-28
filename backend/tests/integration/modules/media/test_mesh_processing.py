@@ -33,6 +33,11 @@ import pytest
 
 from app.core.config import _overlay
 from app.modules.media import mesh_processing
+from app.modules.media.thumbnail_engine import (
+    ThumbnailFailureReason,
+    ThumbnailStrategy,
+)
+from tests.factories.geometry import three_mf
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
 from tests.paths import TESTDATA_DIR
 
@@ -157,6 +162,41 @@ class TestLoadMesh:
         geometry, thumb = result.geometry, result.image
         assert geometry["triangle_count"] is None
         assert thumb == png
+
+    def test_instanced_3mf_over_budget_keeps_embedded_preview(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 50)
+        preview = _slicer_preview_png()
+        path = tmp_path / "repeated.3mf"
+        path.write_bytes(
+            three_mf(
+                assemblies={2: [(1, None)]},
+                build=((2, None),) * 20,
+                extras={"Metadata/thumbnail.png": preview},
+            )
+        )
+        assert mesh_processing._estimate_triangle_count(path) < 50
+
+        result = analyze(path)
+
+        assert result.strategy is ThumbnailStrategy.EMBEDDED
+        assert result.image == preview
+        assert result.geometry["triangle_count"] is None
+
+    def test_instanced_3mf_over_budget_without_preview_reports_resource_limit(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 50)
+        path = tmp_path / "repeated-no-preview.3mf"
+        path.write_bytes(three_mf(assemblies={2: [(1, None)]}, build=((2, None),) * 20))
+        assert mesh_processing._estimate_triangle_count(path) < 50
+
+        result = analyze(path)
+
+        assert result.image is None
+        assert result.geometry["triangle_count"] is None
+        assert result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT
 
     def test_real_dense_mesh_renders(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)

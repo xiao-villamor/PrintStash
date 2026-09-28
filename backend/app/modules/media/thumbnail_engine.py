@@ -185,14 +185,36 @@ class ThumbnailEngine:
                     complete = True
                 else:
                     if not over_cap:
-                        if request.include_fingerprint and suffix == ".3mf":
+                        if suffix == ".3mf":
+                            # The ZIP-size estimate cannot account for repeated
+                            # build/component instances. Trimesh expands those
+                            # placements while loading and can exhaust the API
+                            # process before the post-load face cap runs (#259).
+                            # The resource loader counts expanded faces before
+                            # composing a mesh and bounds XML parsing too.
+                            face_cap = min(
+                                settings.mesh_max_render_triangles,
+                                MAX_ANALYSIS_FACES,
+                            )
+                            ram_cap = mesh_processing._ram_triangle_cap(suffix)
+                            if ram_cap is not None:
+                                face_cap = min(face_cap, ram_cap)
+                            if request.include_fingerprint:
+                                face_cap = min(face_cap, request.triangle_cap)
                             try:
-                                prepared = load_3mf(request.path)
+                                prepared = load_3mf(request.path, max_faces=face_cap)
                                 mesh = prepared.whole_mesh
                             except GeometryError as exc:
-                                fingerprint_result = FingerprintResult(
-                                    "failed", failure_code=exc.code
-                                )
+                                if exc.code in {
+                                    "archive_resource_limit",
+                                    "resource_limit",
+                                    "scene_resource_limit",
+                                }:
+                                    over_cap = True
+                                if request.include_fingerprint:
+                                    fingerprint_result = FingerprintResult(
+                                        "failed", failure_code=exc.code
+                                    )
                         elif request.include_fingerprint and suffix in (
                             ".step",
                             ".stp",
