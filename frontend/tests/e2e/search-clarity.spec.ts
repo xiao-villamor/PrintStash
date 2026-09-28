@@ -176,6 +176,21 @@ test.describe("search clarity", () => {
       page.getByRole("button", { name: "New multipart set", exact: true }),
     ).toBeVisible();
   });
+
+  test("opens Similar models from Library tools", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Library tools", exact: true }).click();
+    await page
+      .getByRole("region", { name: "Library tools" })
+      .getByRole("link", {
+        name: "Similar models",
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/library\/similar$/);
+    await expect(page.getByRole("heading", { name: "Similar models", level: 1 })).toBeVisible();
+  });
 });
 
 for (const viewport of [

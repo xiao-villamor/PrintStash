@@ -70,6 +70,7 @@ import {
   ChevronDown,
   MoreHorizontal,
   Boxes,
+  ScanSearch,
 } from "lucide-react";
 import {
   createCollection,
@@ -2429,6 +2430,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               className="space-y-3 border-b border-border bg-muted/20 px-4 py-3 sm:px-6"
             >
               <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="xs" asChild className="h-9">
+                  <Link href="/library/similar">
+                    <ScanSearch className="h-4 w-4" aria-hidden />
+                    {t("similarity.title")}
+                  </Link>
+                </Button>
                 <Button
                   variant="outline"
                   size="xs"

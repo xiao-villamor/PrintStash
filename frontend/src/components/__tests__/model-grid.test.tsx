@@ -262,6 +262,16 @@ describe("ModelBrowser", () => {
       expect(screen.getByRole("button", { name: "New multipart set" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "New Family" })).not.toBeInTheDocument();
     });
+    it("links to library-wide similar models", async () => {
+      renderVault();
+      await openLibraryTools();
+
+      expect(
+        within(screen.getByRole("region", { name: "Library tools" })).getByRole("link", {
+          name: "Similar models",
+        }),
+      ).toHaveAttribute("href", "/library/similar");
+    });
     it("opens multipart creation from the mobile More menu", async () => {
       const user = userEvent.setup();
       renderVault();

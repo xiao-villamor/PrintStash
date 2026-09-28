@@ -135,8 +135,9 @@ image. See UPGRADE.md before pulling.**
   background-work settings, and the advanced file forwards
   `VAULT_MAX_RENDER_JOBS` and `VAULT_JOBS_INGEST_CONCURRENCY`;
   `VAULT_INGEST_WORKER_COUNT`, which nothing read, is gone.
-- Similar candidates are available from the Model detail Similar tab. Mobile
-  navigation retains library-wide Similar Models discovery.
+- Similar candidates are available from the Model detail Similar tab. The
+  library-wide Similar Models page is linked from Library tools on desktop and
+  remains in mobile navigation.
 - The search bar now uses an icon-only AI control to switch between AI and
   keyword results. Search results use the full browsing surface with visible
   filters and simpler result cards instead of a nested results panel. Print
