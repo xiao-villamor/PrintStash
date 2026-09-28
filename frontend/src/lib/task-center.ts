@@ -144,6 +144,7 @@ let syncSubscribers = 0;
 let syncFailures = 0;
 let syncInFlight = false;
 let syncWakePending = false;
+let taskStoreEpoch = 0;
 
 function loadTasks(): TaskItem[] {
   if (!isBrowser()) return [];
@@ -396,6 +397,30 @@ export function clearCompletedTasks(): void {
   scheduleCleanup();
 }
 
+/** A successful first-run setup starts a new database with no prior Jobs. */
+export function resetTasksForNewSetup(): void {
+  taskStoreEpoch += 1;
+  tasks = [];
+  dismissedJobIds.clear();
+  emittedTerminalJobIds.clear();
+  terminalJobs.clear();
+  for (const jobId of terminalWaiters.keys()) rejectLostJob(jobId);
+  if (cleanupTimer !== null) {
+    clearTimeout(cleanupTimer);
+    cleanupTimer = null;
+  }
+  if (isBrowser()) {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(DISMISSED_JOBS_KEY);
+      localStorage.removeItem(EMITTED_TERMINALS_KEY);
+    } catch {
+      // In-memory state is still reset when browser storage is unavailable.
+    }
+  }
+  emit();
+}
+
 function detailForJob(job: Pick<JobStatus, "state"> & Partial<JobStatus>): string {
   if (job.state === "cancelled") return uiText("Cancelled");
   if (job.state === "interrupted") return uiText("Interrupted · resumes automatically");
@@ -615,6 +640,7 @@ function reconcileLinkedJobDuplicates(): void {
 }
 
 export async function syncImportJobs(): Promise<boolean> {
+  const epoch = taskStoreEpoch;
   // Older clients created a generic server-job row even after the same job had
   // been linked to its user-facing upload task. The grouped owner is the richer
   // record; remove the duplicate before claiming jobs so persisted stuck rows
@@ -628,7 +654,9 @@ export async function syncImportJobs(): Promise<boolean> {
     ),
   ].slice(0, 20);
   const requestedJobIds = new Set(trackedJobIds);
-  const jobs = (await jobSource(trackedJobIds)).filter((job) => !dismissedJobIds.has(job.job_id));
+  const response = await jobSource(trackedJobIds);
+  if (epoch !== taskStoreEpoch) return false;
+  const jobs = response.filter((job) => !dismissedJobIds.has(job.job_id));
   const jobsById = new Map(jobs.map((job) => [job.job_id, job]));
   const claimedJobIds = new Set<string>();
 

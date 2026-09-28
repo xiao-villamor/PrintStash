@@ -198,6 +198,9 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- Completing first-run setup now clears task history left in the browser by a
+  previous installation, so old Jobs no longer appear as failed in a new vault.
+
 - **3MF imports no longer exhaust container memory on repeated project parts.** Mesh metadata and previews now use a bounded 3MF resource loader that checks placed instances before composing geometry. Over-budget projects keep their original Artifact and embedded preview without crashing the API; existing mesh derivatives are refreshed at the new recipe version. ([#259](https://github.com/xiao-villamor/PrintStash/issues/259))
 
 - Search action buttons now sit inside the search field border, and model names

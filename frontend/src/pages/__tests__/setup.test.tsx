@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n";
 import { usePathname } from "@/lib/navigation";
+import { createTask, listTasks } from "@/lib/task-center";
 import SetupPage, { type SetupPageDeps } from "@/pages/setup";
 import type { SetupResponse, SetupStatus, StorageProvider } from "@/types";
 
@@ -295,6 +296,29 @@ describe("SetupPage", () => {
       expect.objectContaining({ username: "admin" }),
     );
   });
+  it("removes tasks from an earlier installation after account creation", async () => {
+    createTask({ title: "reconcile", jobId: "old-install-job", status: "running" });
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+    expect(listTasks()).toHaveLength(0);
+  });
+  it("keeps existing tasks when account creation fails", async () => {
+    const taskId = createTask({ title: "Previous import", jobId: "old-install-job" });
+    vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    await screen.findByRole("alert");
+    expect(listTasks().map((task) => task.id)).toContain(taskId);
+  });
   it("retains the form after a recoverable creation error", async () => {
     vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("data_dir_not_writable"));
     const user = await reachStorage();
@@ -314,6 +338,19 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
     expect(deps.completeSetup).toHaveBeenCalledTimes(1);
+  });
+  it("removes old tasks when account creation succeeded but its response was lost", async () => {
+    createTask({ title: "reconcile", jobId: "old-install-job", status: "running" });
+    const user = await reachStorage();
+    vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("network lost"));
+    vi.mocked(deps.getSetupStatus).mockResolvedValue({ configured: true, user_count: 1 });
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
+    expect(listTasks()).toHaveLength(0);
   });
   it("explains how to connect a populated folder", async () => {
     vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_empty"));

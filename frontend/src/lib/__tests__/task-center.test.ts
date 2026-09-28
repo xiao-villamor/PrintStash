@@ -79,6 +79,46 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("resetTasksForNewSetup", () => {
+  it("forgets old installation tasks before syncing a new installation", async () => {
+    tc.trackImportJob("old-job", "reconcile");
+
+    tc.resetTasksForNewSetup();
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toHaveLength(0);
+    expect(listJobs).toHaveBeenCalledWith([]);
+    expect(localStorage.getItem("printstash:import-tasks:v1")).toBeNull();
+  });
+
+  it("forgets dismissed job ids from the old installation", async () => {
+    const taskId = tc.trackImportJob("reused-job", "Old import");
+    tc.updateTask(taskId, { status: "completed" });
+    tc.clearCompletedTasks();
+    tc.resetTasksForNewSetup();
+    listJobs.mockResolvedValue([aJob({ job_id: "reused-job", state: "running" })]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([{ jobId: "reused-job", status: "running" }]);
+  });
+
+  it("ignores a previous installation job response received after reset", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () => new Promise<JobStatus[]>((resolve) => (deliver = resolve)),
+    );
+    tc.trackImportJob("old-job", "reconcile");
+    const syncing = tc.syncImportJobs();
+
+    tc.resetTasksForNewSetup();
+    deliver([aJob({ job_id: "old-job", state: "running" })]);
+    await syncing;
+
+    expect(tc.listTasks()).toHaveLength(0);
+  });
+});
+
 describe("createTask", () => {
   it("marks a browser ZIP transfer interrupted after reload", async () => {
     tc.createTask({ title: "Prepare parts.zip", status: "running", archiveUploading: true });

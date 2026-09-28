@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { storeLogin } from "@/lib/auth";
+import { resetTasksForNewSetup } from "@/lib/task-center";
 import { useI18n } from "@/lib/i18n";
 import { SetupFrame } from "@/components/setup-frame";
 import { SetupUnavailable } from "@/components/setup-unavailable";
@@ -175,6 +176,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
         },
         session.csrf,
       );
+      resetTasksForNewSetup();
       deps.storeLogin(result.access_token, {
         id: result.user_id,
         username: result.username,
@@ -188,6 +190,7 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
       try {
         const state = await deps.getSetupStatus();
         if (state.configured) {
+          resetTasksForNewSetup();
           setExisting(true);
           return;
         }
