@@ -44,7 +44,7 @@ test.describe("ZIP upload", () => {
     await expect(upload).toHaveCount(0);
     await page.getByRole("button", { name: "Notifications" }).click();
     const tasksMenu = page.getByRole("dialog");
-    await expect(tasksMenu.getByText(`Prepare ${name}.zip`, { exact: true })).toBeVisible();
+    await expect(tasksMenu.getByText(`Upload ${name}.zip`, { exact: true })).toBeVisible();
     await expect(tasksMenu.getByText("Transferring file")).toBeVisible();
     await expect(tasksMenu.getByRole("button", { name: "Cancel upload" })).toBeVisible();
     if (!releaseTransfer) throw new Error("ZIP transfer did not start");
@@ -58,9 +58,11 @@ test.describe("ZIP upload", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Choose ZIP files" }).click();
 
     const review = page.getByRole("dialog", { name: "Choose ZIP files" });
-    await review.getByRole("button", { name: "Animals" }).click();
-    await review.getByRole("button", { name: `Animals/${name}-cat.stl` }).click();
-    await expect(review.getByRole("status")).toHaveText("1 selected");
+    await review.getByRole("button", { name: "Select all 2 ZIP files" }).click();
+    await expect(review.getByRole("status")).toHaveText("2 of 2 files selected");
+    await review.getByRole("button", { name: "Clear selection" }).click();
+    await review.getByRole("button", { name: "Select folder Animals" }).click();
+    await expect(review.getByRole("status")).toHaveText("1 of 2 files selected");
     await review.getByRole("button", { name: "Import 1 selected" }).click();
     await expect(review).toHaveCount(0);
     await page.goto(`/?c=${encodeURIComponent(`${name}/animals`)}`);

@@ -76,9 +76,9 @@ describe("ArchiveReviewDialog", () => {
     const user = userEvent.setup();
     openReview({ entries: [entries[1], entries[0]] });
 
-    await user.click(await screen.findByRole("button", { name: "Animals" }));
+    await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
     expect(
-      within(screen.getByRole("list", { name: "ZIP files" }))
+      within(screen.getByRole("list", { name: "ZIP contents" }))
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
     ).toEqual(["Animals/cat.stl", "Animals/dog.stl"]);
@@ -88,13 +88,13 @@ describe("ArchiveReviewDialog", () => {
     const user = userEvent.setup();
     openReview();
 
-    await user.click(await screen.findByRole("button", { name: "Animals" }));
+    await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
     await user.click(screen.getByRole("button", { name: "Animals/cat.stl" }));
     await user.click(screen.getByRole("button", { name: "ZIP root" }));
-    await user.click(screen.getByRole("button", { name: "Vehicles" }));
+    await user.click(screen.getByRole("button", { name: "Open folder Vehicles" }));
     await user.click(screen.getByRole("button", { name: "Vehicles/car.stl" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("2 selected");
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 3 files selected");
     expect(screen.queryByRole("button", { name: "Animals/cat.stl" })).not.toBeInTheDocument();
   });
 
@@ -102,7 +102,7 @@ describe("ArchiveReviewDialog", () => {
     const user = userEvent.setup();
     const { requestsWithMethod, onClose, taskId } = openReview({ collection: "My Parts" });
 
-    await user.click(await screen.findByRole("button", { name: "Animals" }));
+    await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
     await user.click(screen.getByRole("button", { name: "Animals/dog.stl" }));
     await user.click(screen.getByRole("button", { name: "Import 1 selected" }));
 
@@ -120,7 +120,7 @@ describe("ArchiveReviewDialog", () => {
     const user = userEvent.setup();
     const { requestsWithMethod } = openReview({ collection: "My Parts" });
 
-    await user.click(await screen.findByRole("button", { name: "Animals" }));
+    await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
     await user.click(screen.getByRole("button", { name: "Animals/cat.stl" }));
     await user.selectOptions(screen.getByLabelText("Destination collection"), "");
     await user.click(screen.getByRole("button", { name: "Import 1 selected" }));
@@ -132,9 +132,16 @@ describe("ArchiveReviewDialog", () => {
   it("does not offer unsupported entries for import", async () => {
     openReview();
 
-    await screen.findByRole("button", { name: "Animals" });
+    await screen.findByRole("button", { name: "Open folder Animals" });
     expect(screen.queryByRole("button", { name: "notes.txt" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Import 0 selected" })).toBeDisabled();
+  });
+
+  it("disables bulk selection when no files are importable", async () => {
+    openReview({ entries: [entries[3]] });
+
+    expect(await screen.findByRole("button", { name: "Select all 0 ZIP files" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 0 files selected");
   });
 
   it("shows a recoverable error when the completed Job has no manifest", async () => {
@@ -143,5 +150,97 @@ describe("ArchiveReviewDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("not ready for review");
     expect(screen.queryByRole("button", { name: /Import \d+ selected/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("selects a folder's nested files without opening it", async () => {
+    const user = userEvent.setup();
+    openReview({
+      entries: [
+        ...entries,
+        { name: "Animals/Small/fox.stl", size_bytes: 12, file_type: "stl", is_image: false },
+      ],
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Select folder Animals" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("3 of 4 files selected");
+    expect(screen.getByRole("button", { name: "Deselect folder Animals" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Open folder Animals" })).toBeVisible();
+  });
+
+  it("completes a partially selected folder", async () => {
+    const user = userEvent.setup();
+    openReview();
+
+    await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
+    await user.click(screen.getByRole("button", { name: "Animals/cat.stl" }));
+    await user.click(screen.getByRole("button", { name: "ZIP root" }));
+    expect(screen.getByRole("button", { name: "Select folder Animals" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await user.click(screen.getByRole("button", { name: "Select folder Animals" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 3 files selected");
+  });
+
+  it("deselects a folder without changing another folder", async () => {
+    const user = userEvent.setup();
+    openReview();
+
+    await user.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    await user.click(screen.getByRole("button", { name: "Deselect folder Animals" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 3 files selected");
+    expect(screen.getByRole("button", { name: "Deselect folder Vehicles" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("selects all importable files across folders while search is active", async () => {
+    const user = userEvent.setup();
+    openReview();
+
+    await user.type(await screen.findByRole("textbox", { name: "Search ZIP files" }), "cat");
+    await user.click(screen.getByRole("button", { name: "Select all 3 ZIP files" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("3 of 3 files selected");
+    expect(screen.queryByRole("button", { name: "notes.txt" })).not.toBeInTheDocument();
+  });
+
+  it("clears a bulk selection", async () => {
+    const user = userEvent.setup();
+    openReview();
+
+    await user.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    await user.click(screen.getByRole("button", { name: "Clear selection" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 3 files selected");
+    expect(screen.getByRole("button", { name: "Import 0 selected" })).toBeDisabled();
+  });
+
+  it("submits a selection of 500 files", async () => {
+    const user = userEvent.setup();
+    const manyFiles = Array.from({ length: 500 }, (_, index) => ({
+      name: `Batch/item-${String(index).padStart(3, "0")}.stl`,
+      size_bytes: 12,
+      file_type: "stl" as const,
+      is_image: false,
+    }));
+    const { requestsWithMethod } = openReview({ entries: manyFiles });
+
+    await user.click(await screen.findByRole("button", { name: "Select all 500 ZIP files" }));
+    expect(screen.getByRole("status")).toHaveTextContent("500 of 500 files selected");
+    await user.click(screen.getByRole("button", { name: "Import 500 selected" }));
+
+    await waitFor(() => expect(requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(requestsWithMethod("POST")[0].body)).toEqual({
+      names: manyFiles.map((entry) => entry.name),
+      tags: "favorite",
+    });
   });
 });

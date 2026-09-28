@@ -104,7 +104,9 @@ image. See UPGRADE.md before pulling.**
   transfer failures remain visible there. During transfer, Tasks shows bytes,
   percentage, upload speed and estimated time remaining. Large ZIPs stream
   through the web proxy without an extra buffered copy; Tasks distinguishes
-  browser transfer, server receipt and ZIP preparation.
+  browser transfer, server receipt and ZIP preparation. The ZIP picker has
+  consistent folder and file cards, and can select whole folders or every
+  importable file in one action.
 
 - OrcaSlicer uploads now carry one versioned native metadata context. Exact
   single-object source matches become idempotent `needs_test` G-code Revisions;

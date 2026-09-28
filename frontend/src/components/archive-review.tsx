@@ -125,6 +125,23 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
     });
   }
 
+  function filesInFolder(path: string): ArchiveEntry[] {
+    return importable.filter((entry) => entry.name.startsWith(`${path}/`));
+  }
+
+  function toggleFolder(path: string) {
+    const names = filesInFolder(path).map((entry) => entry.name);
+    setSelected((current) => {
+      const next = new Set(current);
+      const allSelected = names.every((name) => next.has(name));
+      for (const name of names) {
+        if (allSelected) next.delete(name);
+        else next.add(name);
+      }
+      return next;
+    });
+  }
+
   async function importSelected() {
     if (!manifest || selected.size === 0 || submitting || (!user?.is_superuser && !collection))
       return;
@@ -189,6 +206,31 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                 onChange={(event) => setQuery(event.target.value)}
               />
             </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-muted/30 px-3 py-2">
+              <p className="text-xs text-muted-foreground">
+                {uiText("{value1} importable files in this ZIP", {
+                  value1: String(importable.length),
+                })}
+              </p>
+              <div className="flex flex-wrap items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={importable.length === 0 || selected.size === importable.length}
+                  onClick={() => setSelected(new Set(importable.map((entry) => entry.name)))}
+                >
+                  {uiText("Select all {value1} ZIP files", { value1: String(importable.length) })}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={selected.size === 0}
+                  onClick={() => setSelected(new Set())}
+                >
+                  {uiText("Clear selection")}
+                </Button>
+              </div>
+            </div>
             <nav
               aria-label={uiText("Browse ZIP folders")}
               className="flex flex-wrap items-center gap-1 text-sm"
@@ -217,25 +259,6 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
               ))}
             </nav>
             <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
-              {!search && folders.length > 0 && (
-                <ul
-                  aria-label={uiText("Browse ZIP folders")}
-                  className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
-                >
-                  {folders.map((path) => (
-                    <li key={path}>
-                      <Button
-                        variant="outline"
-                        className="h-auto min-h-11 w-full justify-start whitespace-normal break-words text-left"
-                        onClick={() => setFolder(path)}
-                      >
-                        <Folder className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                        {path.split("/").at(-1)}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
               {visibleFiles.length === 0 && (search || folders.length === 0) && (
                 <p className="py-8 text-sm text-muted-foreground">
                   {importable.length === 0
@@ -244,9 +267,66 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                 </p>
               )}
               <ul
-                aria-label={uiText("ZIP files")}
-                className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+                aria-label={uiText("ZIP contents")}
+                className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3"
               >
+                {!search &&
+                  folders.map((path) => {
+                    const children = filesInFolder(path);
+                    const selectedCount = children.filter((entry) =>
+                      selected.has(entry.name),
+                    ).length;
+                    const allSelected = selectedCount === children.length;
+                    const name = path.slice(path.lastIndexOf("/") + 1);
+                    return (
+                      <li key={path} className="min-w-0">
+                        <div
+                          className={`flex h-28 flex-col justify-between gap-2 rounded-lg border p-3 ${allSelected ? "border-primary bg-accent text-accent-foreground" : selectedCount > 0 ? "border-border bg-accent/50 text-accent-foreground" : "border-border bg-card text-card-foreground"}`}
+                        >
+                          <div className="flex min-w-0 items-start gap-2">
+                            <Button
+                              variant="ghost"
+                              className="h-auto min-w-0 flex-1 justify-start gap-2 whitespace-normal p-0 text-left hover:bg-transparent"
+                              aria-label={uiText("Open folder {value1}", { value1: name })}
+                              title={path}
+                              onClick={() => setFolder(path)}
+                            >
+                              <Folder
+                                className="h-5 w-5 shrink-0 text-muted-foreground"
+                                aria-hidden
+                              />
+                              <span className="line-clamp-2 break-words text-sm font-medium">
+                                {name}
+                              </span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              aria-pressed={allSelected}
+                              aria-label={uiText(
+                                allSelected ? "Deselect folder {value1}" : "Select folder {value1}",
+                                { value1: name },
+                              )}
+                              onClick={() => toggleFolder(path)}
+                            >
+                              {allSelected ? (
+                                <CheckSquare className="h-5 w-5" aria-hidden />
+                              ) : (
+                                <Square className="h-5 w-5" aria-hidden />
+                              )}
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {uiText("{value1} of {value2} files selected", {
+                              value1: String(selectedCount),
+                              value2: String(children.length),
+                            })}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
                 {visibleFiles.map((entry) => {
                   const checked = selected.has(entry.name);
                   return (
@@ -256,7 +336,7 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                         aria-pressed={checked}
                         aria-label={entry.name}
                         onClick={() => toggle(entry.name)}
-                        className={`relative flex h-full w-full flex-col gap-2 rounded-lg border p-3 text-left transition-transform duration-press active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "border-primary bg-accent text-accent-foreground" : "border-border bg-card text-card-foreground hover:bg-muted"}`}
+                        className={`flex h-28 w-full flex-col justify-between gap-2 rounded-lg border p-3 text-left transition-transform duration-press active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? "border-primary bg-accent text-accent-foreground" : "border-border bg-card text-card-foreground hover:bg-muted"}`}
                       >
                         <span className="flex w-full items-start justify-between gap-2">
                           <File className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
@@ -266,7 +346,10 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                             <Square className="h-5 w-5 shrink-0" aria-hidden />
                           )}
                         </span>
-                        <span className="break-words text-sm font-medium">
+                        <span
+                          className="line-clamp-2 break-words text-sm font-medium"
+                          title={entry.name}
+                        >
                           {search ? entry.name : segments(entry).at(-1)}
                         </span>
                         <span className="text-xs text-muted-foreground">
@@ -280,7 +363,10 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
             </div>
             <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
               <p role="status" className="text-sm text-muted-foreground">
-                {uiText("{value1} selected", { value1: String(selected.size) })}
+                {uiText("{value1} of {value2} files selected", {
+                  value1: String(selected.size),
+                  value2: String(importable.length),
+                })}
               </p>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
