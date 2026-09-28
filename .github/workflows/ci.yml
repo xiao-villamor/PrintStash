@@ -38,8 +38,10 @@ jobs:
             paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
           - suite: integration-api-domains
             paths: tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
+          - suite: integration-migrations
+            paths: tests/integration/db/migrations
           - suite: integration-platform
-            paths: tests/integration/bootstrap tests/integration/core tests/integration/db tests/integration/main tests/integration/postgres tests/integration/runtime
+            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime
           - suite: integration-domains-a
             paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
           - suite: integration-domains-b
