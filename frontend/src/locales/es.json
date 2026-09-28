@@ -4027,6 +4027,7 @@
   "ZIP preparation continues in the background. We'll notify you when it's ready.": "El ZIP se prepara en segundo plano. Te avisaremos cuando esté listo.",
   "Ready to choose ZIP files": "Listo para elegir archivos del ZIP",
   "ZIP ready. Choose which files to add.": "ZIP listo. Elige qué archivos añadir.",
+  "ZIP preparation failed.": "No se pudo preparar el ZIP.",
   "Choose files": "Elegir archivos",
   "Choose ZIP files": "Elegir archivos del ZIP",
   "This ZIP is not ready for review.": "Este ZIP aún no está listo para revisarlo.",

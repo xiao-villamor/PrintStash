@@ -37,6 +37,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (job.kind === "ingestion.archive_selection" && job.state === "completed") {
           void refreshVaultAfterIngest();
         }
+        if (job.kind === "ingestion.archive_inspect" && job.state === "failed") {
+          toast.error(job.error ?? uiText("ZIP preparation failed."));
+          return;
+        }
         if (job.kind !== "ingestion.archive_inspect" || job.state !== "completed") return;
         toast.successAction(
           uiText("ZIP ready. Choose which files to add."),

@@ -4027,6 +4027,7 @@
   "ZIP preparation continues in the background. We'll notify you when it's ready.": "ZIP preparation continues in the background. We'll notify you when it's ready.",
   "Ready to choose ZIP files": "Ready to choose ZIP files",
   "ZIP ready. Choose which files to add.": "ZIP ready. Choose which files to add.",
+  "ZIP preparation failed.": "ZIP preparation failed.",
   "Choose files": "Choose files",
   "Choose ZIP files": "Choose ZIP files",
   "This ZIP is not ready for review.": "This ZIP is not ready for review.",

@@ -86,6 +86,23 @@ describe("AppShell", () => {
     );
   });
 
+  it("notifies the user when ZIP preparation fails", async () => {
+    renderShell();
+    await screen.findByText("at /");
+
+    window.dispatchEvent(
+      new CustomEvent("printstash:import-job-terminal", {
+        detail: aJob({
+          kind: "ingestion.archive_inspect",
+          state: "failed",
+          error: "no_importable_files",
+        }),
+      }),
+    );
+
+    expect(await screen.findByText("No importable 3D files were found.")).toBeVisible();
+  });
+
   describe("a signed-in user", () => {
     it("renders the page inside the frame", async () => {
       renderShell();
