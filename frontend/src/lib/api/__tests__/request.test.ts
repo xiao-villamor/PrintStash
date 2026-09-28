@@ -153,6 +153,19 @@ describe("sendFormWithProgress", () => {
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it("reports a broken connection as a network failure", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(
+      sendFormWithProgress(
+        "/api/v1/ingest/archive/inspect",
+        new FormData(),
+        new AbortController().signal,
+        () => {},
+      ),
+    ).rejects.toThrow("Failed to fetch");
+  });
 });
 
 describe("getUrl", () => {

@@ -481,6 +481,33 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("an archive", () => {
+    it("shows server acceptance as a separate phase after upload bytes finish", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "wait.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      act(() => FetchBackedXhr.requests[0].emitProgress(1024, 1024));
+
+      expect(listTasks().find((task) => task.title === "Prepare wait.zip")).toMatchObject({
+        status: "running",
+        progress: 95,
+        detail: "Upload sent. Waiting for the server.",
+        archiveTransferredBytes: 1024,
+        archiveEtaSeconds: undefined,
+      });
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
+    });
+
     it("updates transfer progress before the server accepts the ZIP", async () => {
       const user = userEvent.setup();
       let finishRequest: ((response: Response) => void) | undefined;
