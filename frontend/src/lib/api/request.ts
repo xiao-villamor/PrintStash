@@ -354,15 +354,70 @@ export async function sendJson<T>(
   return value;
 }
 
-export async function sendForm<T>(path: string, formData: FormData): Promise<T> {
+export async function sendForm<T>(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(getUrl(path), {
     method: "POST",
     headers: authHeaders(),
     body: formData,
+    signal,
   });
   const value = await handleResponse<T>(res);
   invalidateApiCache(path);
   return value;
+}
+
+/** Multipart transfer with browser upload progress, used for large ZIP archives. */
+export function sendFormWithProgress<T>(
+  path: string,
+  formData: FormData,
+  signal: AbortSignal,
+  onProgress: (loaded: number, total: number) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Upload cancelled", "AbortError"));
+      return;
+    }
+    const request = new XMLHttpRequest();
+    let settled = false;
+    const finish = () => {
+      settled = true;
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = () => request.abort();
+    request.open("POST", getUrl(path));
+    for (const [name, value] of Object.entries(authHeaders()))
+      request.setRequestHeader(name, value);
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0 && !settled)
+        onProgress(event.loaded, event.total);
+    };
+    request.onload = () => {
+      if (settled) return;
+      finish();
+      const response = new Response(request.responseText, { status: request.status });
+      void handleResponse<T>(response).then((value) => {
+        invalidateApiCache(path);
+        resolve(value);
+      }, reject);
+    };
+    request.onerror = () => {
+      if (settled) return;
+      finish();
+      reject(new TypeError("Failed to fetch"));
+    };
+    request.onabort = () => {
+      if (settled) return;
+      finish();
+      reject(new DOMException("Upload cancelled", "AbortError"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    request.send(formData);
+  });
 }
 
 export async function sendAction(path: string, method: "POST" | "DELETE"): Promise<void> {

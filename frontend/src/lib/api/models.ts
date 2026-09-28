@@ -8,6 +8,7 @@ import {
   invalidateApiCache,
   sendAction,
   sendForm,
+  sendFormWithProgress,
   sendJson,
 } from "@/lib/api/request";
 import {
@@ -359,8 +360,15 @@ export function selectCollectionMembers(
   );
 }
 
-export function inspectArchive(formData: FormData): Promise<JobAccepted> {
-  return sendForm<JobAccepted>("/api/v1/ingest/archive/inspect", formData);
+export function inspectArchive(
+  formData: FormData,
+  signal?: AbortSignal,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<JobAccepted> {
+  const path = "/api/v1/ingest/archive/inspect";
+  return signal && onProgress
+    ? sendFormWithProgress<JobAccepted>(path, formData, signal, onProgress)
+    : sendForm<JobAccepted>(path, formData, signal);
 }
 
 export function selectArchiveEntries(

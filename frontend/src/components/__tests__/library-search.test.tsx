@@ -36,6 +36,10 @@ function searchBox(options: RenderAppOptions = {}) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("LibrarySearch", () => {
+  it("does not spellcheck model names in the search field", () => {
+    searchBox();
+    expect(screen.getByRole("searchbox")).toHaveAttribute("spellcheck", "false");
+  });
   it("returns to the library when clearing a submitted search", async () => {
     const user = userEvent.setup();
     searchBox({ at: "/search?q=bracket&parse=1" });

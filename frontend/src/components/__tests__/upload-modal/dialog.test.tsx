@@ -2,10 +2,9 @@
  * Four ways to get something into the library, behind one dialog.
  *
  * Each mode posts a different request and, more importantly, *stops in a
- * different place*. Files and Bulk queue work and close; From URL and From ZIP
- * come back with a manifest the user has to choose from first. Conflating those
- * two shapes is how an import either runs without the user's selection or waits
- * for a selection that was never asked for.
+ * different place*. Files, Bulk, and From ZIP queue work and close; the ZIP
+ * selection is available from Tasks when preparation completes. From URL
+ * opens Pending Imports for review.
  *
  * The submit button is a gate, not a decoration. It stays disabled until the
  * chosen mode actually has its input, and it is disabled outright for a
@@ -52,8 +51,8 @@ function renderUpload(
         "POST /api/v1/ingest/orca": json(QUEUED),
         "POST /api/v1/inbox": json({ id: 3, state: "review" }),
         "POST /api/v1/ingest/archive/inspect": json({
-          archive_id: "arch-1",
-          entries: [{ name: "cube.stl", size_bytes: 10, kind: "mesh" }],
+          job_id: "archive-job-1",
+          state: "queued",
         }),
         ...routes,
       },
@@ -179,7 +178,7 @@ describe("UploadModal", () => {
 
       await user.click(mode("From ZIP"));
 
-      expect(screen.getByRole("button", { name: "Inspect archive" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Prepare ZIP" })).toBeDisabled();
     });
 
     it("accepts a URL once one is typed", async () => {

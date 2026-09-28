@@ -116,6 +116,7 @@ def _archive_inspect(ctx: JobContext) -> None:
         job_id=ctx.job_id,
         staged=_staged_path(ctx.job_id),
         original_filename=request.original_filename or "archive.zip",
+        cancelled=ctx.cancelled,
     )
 
 

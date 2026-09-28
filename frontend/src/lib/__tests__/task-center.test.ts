@@ -80,6 +80,44 @@ afterEach(() => {
 });
 
 describe("createTask", () => {
+  it("marks a browser ZIP transfer interrupted after reload", async () => {
+    tc.createTask({ title: "Prepare parts.zip", status: "running", archiveUploading: true });
+
+    vi.resetModules();
+    const reloaded = await loadTaskCenter();
+
+    expect(reloaded.listTasks()[0]).toMatchObject({
+      status: "failed",
+      archiveUploading: false,
+      detail: "ZIP upload interrupted. Select the file again.",
+    });
+  });
+
+  it("keeps the ZIP review destination when the server job completes", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      status: "running",
+      archiveUploading: true,
+      archiveCollection: "parts",
+      archiveTags: ["functional"],
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "archive-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+
+    tc.attachTaskToImportJob(taskId, "archive-job");
+    await tc.syncImportJobs();
+
+    const task = tc.listTasks()[0];
+    expect(task).toMatchObject({
+      jobId: "archive-job",
+      status: "completed",
+      archiveCollection: "parts",
+      archiveTags: ["functional"],
+    });
+    expect(tc.needsArchiveReview(task)).toBe(true);
+  });
+
   it("creates a pending task with a unique id and zero progress", () => {
     const id = tc.createTask({ title: "Upload Cube" });
     const tasks = tc.listTasks();
@@ -106,6 +144,24 @@ describe("createTask", () => {
       vi.advanceTimersByTime(1);
     }
     expect(tc.listTasks()).toHaveLength(20);
+  });
+
+  it("keeps a prepared ZIP available after newer tasks fill the history", async () => {
+    const reviewId = tc.createTask({
+      title: "Prepare archive.zip",
+      jobId: "archive-1",
+      jobKind: "ingestion.archive_inspect",
+      status: "completed",
+    });
+    for (let i = 0; i < 25; i++) tc.createTask({ title: `other-${i}` });
+
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
+    tc.clearCompletedTasks();
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks().some((task) => task.id === reviewId)).toBe(true);
   });
 });
 

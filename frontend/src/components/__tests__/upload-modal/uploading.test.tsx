@@ -16,21 +16,22 @@
  * bad file must not abort the queue behind it — that is the difference between
  * losing one model and losing a hundred.
  *
- * An archive is inspected before anything is imported, because the user chooses
- * which entries come in. Importing on inspection would pull in every stray file
- * a downloaded ZIP happens to carry.
+ * ZIP preparation queues a Job and closes the modal. Review resumes from Tasks
+ * after that Job finishes, so a large archive never holds this form open.
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UploadModal } from "@/components/upload-modal";
+import { TaskList } from "@/components/task-list";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
-import { listTasks, setJobSource } from "@/lib/task-center";
+import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
 import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
+import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ExternalLibrary, JobStatus, ModelRead } from "@/types";
 
@@ -211,6 +212,8 @@ function fileInputs(container: HTMLElement) {
 
 beforeEach(() => {
   window.localStorage.clear();
+  FetchBackedXhr.requests = [];
+  vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
   jobSeq += 1;
   // Every ingestion waits on the task centre's job poll rather than starting a
   // second loop, so a test drives the whole pipeline by answering it.
@@ -478,81 +481,173 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("an archive", () => {
-    const inspected = () =>
-      aJob({
-        result: {
-          archive_id: "arch-1",
-          archive_name: "parts.zip",
-          entries: [
-            { name: "cube.stl", size_bytes: 10, file_type: "stl", is_image: false },
-            { name: "readme.txt", size_bytes: 3, file_type: null, is_image: false },
-          ],
+    it("shows server acceptance as a separate phase after upload bytes finish", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "wait.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      act(() => FetchBackedXhr.requests[0].emitProgress(1024, 1024));
+
+      expect(listTasks().find((task) => task.title === "Upload wait.zip")).toMatchObject({
+        status: "running",
+        progress: 95,
+        detail: "Finishing transfer to PrintStash. ZIP preparation starts next.",
+        archiveTransferredBytes: 1024,
+        archiveEtaSeconds: undefined,
+      });
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      expect(listTasks().find((task) => task.jobId === jobId())?.title).toBe("Prepare wait.zip");
+      await syncImportJobs();
+    });
+
+    it("updates transfer progress before the server accepts the ZIP", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "large.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      now.mockReturnValue(3000);
+      act(() => FetchBackedXhr.requests[0].emitProgress(512, 1024));
+
+      expect(listTasks().find((task) => task.title === "Upload large.zip")).toMatchObject({
+        status: "running",
+        progress: 45,
+        archiveTransferredBytes: 512,
+        archiveSpeedBytesPerSecond: 256,
+        archiveEtaSeconds: 2,
+      });
+      now.mockRestore();
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
+    });
+
+    it("shows a task immediately while the ZIP is still transferring", async () => {
+      const user = userEvent.setup();
+      let finishRequest: ((response: Response) => void) | undefined;
+      const response = new Promise<Response>((resolve) => {
+        finishRequest = resolve;
+      });
+      const { container, onClose } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => response },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "large.zip"));
+
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(listTasks().find((task) => task.title === "Upload large.zip")).toMatchObject({
+        status: "running",
+        detail: "Transferring file",
+      });
+      finishRequest?.(json(queued()));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
+    });
+
+    it("shows a rejected ZIP upload as a failed task", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: {
+          "POST /api/v1/ingest/archive/inspect": json({ detail: "upload_too_large" }, 413),
         },
       });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "oversized.zip"));
 
-    /** Pick a ZIP and inspect it, which is the only route to the entry list. */
-    async function inspect(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
-      setJobSource(async () => [inspected()]);
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.status).toBe(
+          "failed",
+        ),
+      );
+      expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.detail).toBe(
+        "upload_too_large",
+      );
+    });
+
+    it("cancels an in-flight ZIP upload from Tasks", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => new Promise<Response>(() => {}) },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "cancel.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+      const task = listTasks().find((item) => item.title === "Upload cancel.zip");
+      if (!task) throw new Error("ZIP task was not created");
+      renderApp(<TaskList tasks={[task]} onClear={() => {}} />);
+
+      await user.click(screen.getByRole("button", { name: "Cancel upload" }));
+
+      expect(listTasks().find((item) => item.id === task.id)).toMatchObject({
+        status: "failed",
+        detail: "Upload cancelled",
+      });
+    });
+
+    async function prepare(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
+      setJobSource(async () => [aJob({ kind: "ingestion.archive_inspect", state: "completed" })]);
       await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "parts.zip"));
-      await user.click(screen.getByRole("button", { name: "Inspect archive" }));
-      await screen.findByText("cube.stl");
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
+      await syncImportJobs();
     }
 
-    it("lists what the archive holds before importing anything", async () => {
-      // Importing on inspection would pull in every stray file a downloaded ZIP
-      // happens to carry.
+    it("queues preparation without importing archive entries", async () => {
       const user = userEvent.setup();
       const { container, requestsWithMethod } = renderUpload();
 
-      await inspect(user, container);
+      await prepare(user, container);
 
       expect(requestsWithMethod("POST").some((call) => call.url.includes("/select"))).toBe(false);
     });
 
-    it("leaves out entries the vault cannot import", async () => {
+    it("closes the upload modal once ZIP preparation is queued", async () => {
       const user = userEvent.setup();
-      const { container } = renderUpload();
+      const { container, onClose } = renderUpload();
 
-      await inspect(user, container);
+      await prepare(user, container);
 
-      expect(screen.queryByText("readme.txt")).toBeNull();
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     });
 
-    it("imports the entries the user kept ticked", async () => {
+    it("tracks the ZIP Job with the selected destination", async () => {
       const user = userEvent.setup();
-      const { container, requestsWithMethod } = renderUpload({
-        routes: { "POST /api/v1/ingest/archive/arch-1/select": json(queued()) },
-      });
-      await inspect(user, container);
-
-      await user.click(screen.getByRole("button", { name: /Import 1 selected/ }));
+      const { container } = renderUpload();
+      await user.click(screen.getByRole("button", { name: "None" }));
+      await user.click(screen.getByRole("option", { name: /Parts/ }));
+      await user.type(screen.getByPlaceholderText("Search or create — press Enter"), "fun");
+      await user.click(screen.getByRole("option", { name: /functional/ }));
+      await prepare(user, container);
 
       await waitFor(() =>
-        expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
-          names: ["cube.stl"],
-        }),
+        expect(listTasks().some((task) => task.title === "Prepare parts.zip")).toBe(true),
       );
-    });
-
-    it("will not import with nothing selected", async () => {
-      const user = userEvent.setup();
-      const { container } = renderUpload();
-      await inspect(user, container);
-
-      await user.click(screen.getAllByRole("checkbox")[0]);
-
-      expect(screen.getByRole("button", { name: /Import 0 selected/ })).toBeDisabled();
-    });
-
-    it("lets the user back out to the file picker", async () => {
-      const user = userEvent.setup();
-      const { container } = renderUpload();
-      await inspect(user, container);
-
-      await user.click(screen.getByRole("button", { name: "Back" }));
-
-      expect(screen.getByRole("button", { name: "Inspect archive" })).toBeInTheDocument();
+      expect(listTasks().find((task) => task.title === "Prepare parts.zip")).toMatchObject({
+        archiveCollection: "parts",
+        archiveTags: ["functional"],
+      });
     });
   });
 });

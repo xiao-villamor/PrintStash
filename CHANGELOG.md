@@ -102,6 +102,17 @@ image. See UPGRADE.md before pulling.**
 
 ### Added
 
+- ZIP uploads now prepare and validate their contents as a visible background
+  Job. When ready, a notification and Tasks open a folder-based file picker;
+  only selected 3D files are imported, through a second Job. The upload itself
+  appears in Tasks immediately, leaves the form free, and can be cancelled;
+  transfer failures remain visible there. During transfer, Tasks shows bytes,
+  percentage, upload speed and estimated time remaining. Large ZIPs stream
+  through the web proxy without an extra buffered copy; Tasks distinguishes
+  browser transfer, server receipt and ZIP preparation. The ZIP picker has
+  consistent folder and file cards, and can select whole folders or every
+  importable file in one action.
+
 - OrcaSlicer uploads now carry one versioned native metadata context. Exact
   single-object source matches become idempotent `needs_test` G-code Revisions;
   named-but-unknown or ambiguous sources fail without orphan rows,
@@ -188,6 +199,9 @@ image. See UPGRADE.md before pulling.**
 ### Fixed
 
 - **3MF imports no longer exhaust container memory on repeated project parts.** Mesh metadata and previews now use a bounded 3MF resource loader that checks placed instances before composing geometry. Over-budget projects keep their original Artifact and embedded preview without crashing the API; existing mesh derivatives are refreshed at the new recipe version. ([#259](https://github.com/xiao-villamor/PrintStash/issues/259))
+
+- Search action buttons now sit inside the search field border, and model names
+  in the field no longer receive browser spellcheck underlines.
 
 - Portable ZIP imports now update processed file counts while they run. The completed import task links administrators to Background work, where preview generation has its own queue status.
 - Library source setup now distinguishes a mounted folder that needs temporary

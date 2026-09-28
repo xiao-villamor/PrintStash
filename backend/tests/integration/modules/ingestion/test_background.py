@@ -561,6 +561,61 @@ class TestImportFromUrl:
 
 
 class TestInspectUploadedArchive:
+    def test_refuses_an_archive_without_importable_files(
+        self, db_session: Session, owner: User, tmp_path: Path, job_id: str
+    ) -> None:
+        use_local_storage(tmp_path)
+        staged = _leased_archive(db_session, owner, job_id)
+        with zipfile.ZipFile(staged, "w") as archive:
+            archive.writestr("notes.txt", "No models here")
+
+        ingest_background.inspect_uploaded_archive(
+            job_id=job_id,
+            staged=staged,
+            original_filename="staged.zip",
+            cancelled=lambda: False,
+        )
+
+        status = jobs.get(job_id)
+        assert status is not None
+        assert (status.state, status.error) == ("failed", "no_importable_files")
+        assert not staged.exists()
+
+    def test_reports_prepared_file_count_on_the_job(
+        self, db_session: Session, owner: User, tmp_path: Path, job_id: str
+    ) -> None:
+        use_local_storage(tmp_path)
+        staged = _leased_archive(db_session, owner, job_id)
+
+        ingest_background.inspect_uploaded_archive(
+            job_id=job_id,
+            staged=staged,
+            original_filename="staged.zip",
+            cancelled=lambda: False,
+        )
+
+        status = jobs.get(job_id)
+        assert status is not None
+        assert (status.state, status.processed, status.total) == ("completed", 1, 1)
+
+    def test_stops_before_publishing_a_cancelled_archive(
+        self, db_session: Session, owner: User, tmp_path: Path, job_id: str
+    ) -> None:
+        use_local_storage(tmp_path)
+        staged = _leased_archive(db_session, owner, job_id)
+
+        ingest_background.inspect_uploaded_archive(
+            job_id=job_id,
+            staged=staged,
+            original_filename="staged.zip",
+            cancelled=lambda: True,
+        )
+
+        db_session.expire_all()
+        request = db_session.get(IngestRequest, job_id)
+        assert request is not None
+        assert json.loads(request.manifest_json) == {}
+
     def test_records_the_archive_manifest_on_the_request(
         self, db_session: Session, owner: User, tmp_path: Path, job_id: str
     ) -> None:
@@ -568,7 +623,7 @@ class TestInspectUploadedArchive:
         staged = _leased_archive(db_session, owner, job_id)
 
         ingest_background.inspect_uploaded_archive(
-            job_id=job_id, staged=staged, original_filename="staged.zip"
+            job_id=job_id, staged=staged, original_filename="staged.zip", cancelled=lambda: False
         )
 
         db_session.expire_all()
@@ -590,7 +645,7 @@ class TestInspectUploadedArchive:
             importer, "inspect_archive", side_effect=ImportError_("archive_zip_bomb")
         ):
             ingest_background.inspect_uploaded_archive(
-                job_id=job_id, staged=staged, original_filename="staged.zip"
+                job_id=job_id, staged=staged, original_filename="staged.zip", cancelled=lambda: False
             )
 
         status = jobs.get(job_id)
@@ -607,7 +662,7 @@ class TestInspectUploadedArchive:
             importer, "inspect_archive", side_effect=ImportError_("archive_zip_bomb")
         ):
             ingest_background.inspect_uploaded_archive(
-                job_id=job_id, staged=staged, original_filename="staged.zip"
+                job_id=job_id, staged=staged, original_filename="staged.zip", cancelled=lambda: False
             )
 
         assert not staged.exists()
@@ -623,7 +678,7 @@ class TestInspectUploadedArchive:
         ):
             with pytest.raises(RuntimeError, match="boom"):
                 ingest_background.inspect_uploaded_archive(
-                    job_id=job_id, staged=staged, original_filename="staged.zip"
+                    job_id=job_id, staged=staged, original_filename="staged.zip", cancelled=lambda: False
                 )
 
         # Kept for the retry the runner's failure makes possible.

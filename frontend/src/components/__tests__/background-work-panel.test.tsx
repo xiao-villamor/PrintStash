@@ -117,16 +117,14 @@ describe("BackgroundWorkPanel", () => {
   it("links a preview job to its model", async () => {
     renderPanel(
       stubApi(aWorkOverview(), {
-        jobs: vi
-          .fn<BackgroundWorkApi["jobs"]>()
-          .mockResolvedValue([
-            aJob({
-              job_id: "preview-model",
-              label: "Model images",
-              state: "running",
-              model_id: 17,
-            }),
-          ]),
+        jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([
+          aJob({
+            job_id: "preview-model",
+            label: "Model images",
+            state: "running",
+            model_id: 17,
+          }),
+        ]),
       }),
     );
 

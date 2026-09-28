@@ -8,6 +8,7 @@ from .archives import (
     inspect_archive,
     safe_entry_name,
     safe_subdir,
+    verify_archive_contents,
 )
 from .hashing import sha256_file, sha256_stream
 from .storage import (
@@ -36,6 +37,7 @@ __all__ = [
     "inspect_archive",
     "safe_entry_name",
     "safe_subdir",
+    "verify_archive_contents",
     "sha256_file",
     "sha256_stream",
     "slugify",

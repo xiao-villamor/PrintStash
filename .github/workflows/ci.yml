@@ -38,8 +38,14 @@ jobs:
             paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
           - suite: integration-api-domains
             paths: tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
-          - suite: integration-migrations
-            paths: tests/integration/db/migrations
+          # Migration upgrades are costly enough that one shard can hit the
+          # 15-minute job limit on a slower runner. Keep the file sets disjoint.
+          - suite: integration-migrations-a
+            paths: tests/integration/db/migrations/test_[a-i]*.py
+          - suite: integration-migrations-b
+            paths: tests/integration/db/migrations/test_[j-m]*.py
+          - suite: integration-migrations-c
+            paths: tests/integration/db/migrations/test_[n-z]*.py
           - suite: integration-platform
             paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime
           - suite: integration-domains-a

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "@/lib/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 
 import { BottomNavBar } from "@/components/bottom-nav-bar";
@@ -11,6 +11,12 @@ import { MobileFilterProvider } from "@/lib/mobile-filter-provider";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Localized } from "@/components/ui/localized";
+import { ArchiveReviewDialog } from "@/components/archive-review";
+import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
+import { subscribeImportJobCompletions } from "@/lib/task-center";
+import { toast } from "@/lib/toast";
+import { uiText } from "@/lib/locale";
+import { refreshVaultAfterIngest } from "@/lib/query-client";
 
 const CHROMELESS_PREFIXES = ["/setup", "/login", "/getting-started"];
 
@@ -21,6 +27,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const chromeless = CHROMELESS_PREFIXES.some((p) => pathname.startsWith(p));
   const isVault = pathname === "/";
+  const [archiveJobId, setArchiveJobId] = useState<string | null>(null);
+
+  useEffect(() => subscribeArchiveReviewRequests(setArchiveJobId), []);
+
+  useEffect(
+    () =>
+      subscribeImportJobCompletions((job) => {
+        if (job.kind === "ingestion.archive_selection" && job.state === "completed") {
+          void refreshVaultAfterIngest();
+        }
+        if (job.kind === "ingestion.archive_inspect" && job.state === "failed") {
+          toast.error(job.error ?? uiText("ZIP preparation failed."));
+          return;
+        }
+        if (job.kind !== "ingestion.archive_inspect" || job.state !== "completed") return;
+        toast.successAction(
+          uiText("ZIP ready. Choose which files to add."),
+          uiText("Choose files"),
+          () => setArchiveJobId(job.job_id),
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     const titleKey: MessageKey | null =
@@ -94,6 +123,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               </div>
               <BottomNavBar />
+              {archiveJobId && (
+                <ArchiveReviewDialog
+                  key={archiveJobId}
+                  jobId={archiveJobId}
+                  onClose={() => setArchiveJobId(null)}
+                />
+              )}
             </div>
           </MobileFilterProvider>
         )}

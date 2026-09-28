@@ -1,6 +1,6 @@
 "use client";
 
-import { uiMessage, type MessageDescriptor } from "@/lib/locale";
+import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 import { collectionDisplayPath } from "@/lib/collection-display";
@@ -22,19 +22,11 @@ import {
   capturePendingImport,
   getModel,
   getVaultConfig,
-  inspectArchive,
   listExternalLibraries,
-  selectArchiveEntries,
 } from "@/lib/api";
 import { useCollections, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
-import {
-  createTask,
-  linkTaskToJob,
-  trackImportJob,
-  updateTask,
-  waitForImportJob,
-} from "@/lib/task-center";
+import { createTask, linkTaskToJob, updateTask, waitForImportJob } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
@@ -55,16 +47,11 @@ import {
   MESH_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
-import {
-  ArchiveManifest,
-  CollectionRead,
-  ExternalLibrary,
-  IngestJobResult,
-  JobStatus,
-} from "@/types";
+import { CollectionRead, ExternalLibrary, JobStatus } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
+import { startArchiveTransfer } from "@/lib/archive-upload";
 
 // `webkitdirectory` enables folder selection on a file input but isn't in the
 // standard DOM typings — augment so the JSX attribute typechecks.
@@ -157,11 +144,6 @@ export function UploadModal({
   const [urlValue, setUrlValue] = useState("");
   const [zipFile, setZipFile] = useState<File | null>(null);
   const zipRef = useRef<HTMLInputElement>(null);
-  const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
-  // Selected ids: archive entry names, model file ids, or collection member ids
-  // — only one manifest is ever active at a time, so a single set is enough.
-  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
-  const reviewing = manifest !== null;
   const [modelName, setModelName] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -320,8 +302,6 @@ export function UploadModal({
     setBulkFiles([]);
     setUrlValue("");
     setZipFile(null);
-    setManifest(null);
-    setSelectedEntries(new Set());
     setModelName("");
     setPickedCollection(null);
     setSelectedTags([]);
@@ -571,10 +551,6 @@ export function UploadModal({
     }
   }
 
-  // Modal workflows await Task Center's common terminal event; they never
-  // start a second polling loop of their own.
-  const waitForJobInline = (jid: string) => waitForImportJob(jid);
-
   function collectionGate(): boolean {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
@@ -585,25 +561,6 @@ export function UploadModal({
       return false;
     }
     return true;
-  }
-
-  function startImportTask(jobId: string, title: string | MessageDescriptor) {
-    const taskId = trackImportJob(jobId, title);
-    void (async () => {
-      try {
-        await waitForJob(jobId, taskId, {
-          progressStart: 10,
-          progressEnd: 100,
-          pendingDetail: "Waiting for the vault to start importing",
-          runningDetail: "Importing files",
-          completedDetail: "Import processed",
-          completeTask: true,
-        });
-        await onUploaded();
-      } catch (err) {
-        toast.error(err);
-      }
-    })();
   }
 
   async function runUrlImport() {
@@ -629,71 +586,27 @@ export function UploadModal({
     }
   }
 
-  async function doInspectZip() {
+  function doInspectZip() {
     if (!collectionGate() || submitting || !zipFile) return;
-    setSubmitting(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", zipFile);
-      const response = await inspectArchive(fd);
-      trackImportJob(
-        response.job_id,
-        uiMessage("Inspect {value1}", { value1: String(zipFile.name) }),
-      );
-      const status = await waitForJobInline(response.job_id);
-      if (status.state !== "completed")
-        throw new Error(status.error || "Archive inspection failed");
-      const result: IngestJobResult = status.result ?? {};
-      const m: ArchiveManifest = {
-        archive_id: String(result.archive_id),
-        archive_name: String(result.archive_name),
-        entries: result.entries ?? [],
-      };
-      showManifest(m);
-    } catch (err) {
-      toast.error(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function showManifest(m: ArchiveManifest) {
-    setManifest(m);
-    setSelectedEntries(new Set(m.entries.filter((e) => e.file_type).map((e) => e.name)));
-  }
-
-  async function doImportSelected() {
-    if (!manifest || submitting) return;
-    const names = [...selectedEntries];
-    if (names.length === 0) {
-      toast.warning(uiText("Nothing selected"), uiText("Pick at least one file to import."));
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const res = await selectArchiveEntries(manifest.archive_id, {
-        names,
-        collection: collectionPath || undefined,
-        tags: selectedTags.length ? selectedTags.join(",") : undefined,
-      });
-      startImportTask(
-        res.job_id,
-        uiMessage("Import {value1}", { value1: String(manifest.archive_name) }),
-      );
-      close();
-    } catch (err) {
-      toast.error(err);
-      setSubmitting(false);
-    }
+    const file = zipFile;
+    const taskId = createTask({
+      title: uiMessage("Upload {value1}", { value1: String(file.name) }),
+      detail: uiText("Transferring file"),
+      status: "running",
+      progress: 0,
+      archiveUploading: true,
+      archiveSizeBytes: file.size,
+      archiveCollection: collectionPath || null,
+      archiveTags: [...selectedTags],
+    });
+    onTaskStarted?.(taskId);
+    void startArchiveTransfer(taskId, file);
+    close();
   }
 
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
-    if (manifest) {
-      void doImportSelected();
-      return;
-    }
     if (mode === "url") {
       if (!urlValue.trim()) return;
       void runUrlImport();
@@ -701,7 +614,7 @@ export function UploadModal({
     }
     if (mode === "zip") {
       if (!zipFile) return;
-      void doInspectZip();
+      doInspectZip();
       return;
     }
     if (mode === "bulk") {
@@ -773,15 +686,6 @@ export function UploadModal({
     setSelectedTags((p) => (p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug]));
   }
 
-  function toggleEntry(name: string) {
-    setSelectedEntries((p) => {
-      const next = new Set(p);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }
-
   return (
     <ModalShell
       open={open}
@@ -829,7 +733,7 @@ export function UploadModal({
 
         <form onSubmit={doSubmit} className="p-6 space-y-5">
           {/* Mode tabs */}
-          {!reviewing && !onboarding && (
+          {!onboarding && (
             <div className="flex gap-1 rounded border border-outline-variant p-1">
               {(
                 [
@@ -891,16 +795,6 @@ export function UploadModal({
                 {t("setup.fileFormats")}
               </p>
             </div>
-          ) : manifest ? (
-            <ManifestList
-              manifest={manifest}
-              selected={selectedEntries}
-              onToggle={toggleEntry}
-              onBack={() => {
-                setManifest(null);
-                setSelectedEntries(new Set());
-              }}
-            />
           ) : mode === "files" ? (
             <div className="space-y-3">
               <FileSlot
@@ -965,7 +859,7 @@ export function UploadModal({
 
           {/* Model name (single-file uploads only; URL imports take their
                   name from the downloaded file/page) */}
-          {!reviewing && mode === "files" && (
+          {mode === "files" && (
             <div>
               <label
                 htmlFor="upload-model-name"
@@ -1192,29 +1086,21 @@ export function UploadModal({
               disabled={
                 submitting ||
                 (!user?.is_superuser && !collectionPath) ||
-                (reviewing
-                  ? selectedEntries.size === 0
-                  : mode === "files"
-                    ? !meshFile && !gcodeFile
-                    : mode === "bulk"
-                      ? bulkFiles.length === 0
-                      : mode === "url"
-                        ? !urlValue.trim()
-                        : !zipFile)
+                (mode === "files"
+                  ? !meshFile && !gcodeFile
+                  : mode === "bulk"
+                    ? bulkFiles.length === 0
+                    : mode === "url"
+                      ? !urlValue.trim()
+                      : !zipFile)
               }
               className="min-h-11"
             >
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {reviewing
-                    ? uiText("Importing…")
-                    : mode === "zip"
-                      ? uiText("Inspecting…")
-                      : uiText("Working…")}
+                  {mode === "zip" ? uiText("Preparing ZIP…") : uiText("Working…")}
                 </>
-              ) : reviewing ? (
-                uiText("Import {value1} selected", { value1: String(selectedEntries.size) })
               ) : mode === "bulk" ? (
                 bulkFiles.length > 0 ? (
                   uiText("counts.uploadModels", { count: bulkFiles.length })
@@ -1224,7 +1110,7 @@ export function UploadModal({
               ) : mode === "url" ? (
                 uiText("Review URL")
               ) : mode === "zip" ? (
-                uiText("Inspect archive")
+                uiText("Prepare ZIP")
               ) : onboarding ? (
                 t("setup.addModel")
               ) : (
@@ -1503,68 +1389,6 @@ export function BulkFiles({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-function ManifestList({
-  manifest,
-  selected,
-  onToggle,
-  onBack,
-}: {
-  manifest: ArchiveManifest;
-  selected: Set<string>;
-  onToggle: (name: string) => void;
-  onBack: () => void;
-}) {
-  useUiLocale();
-  const importable = manifest.entries.filter((e) => e.file_type);
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase truncate">
-          {uiText("{value1} · {value2} importable", {
-            value1: String(manifest.archive_name ?? ""),
-            value2: String(importable.length ?? ""),
-          })}
-        </span>
-        <button
-          type="button"
-          onClick={onBack}
-          className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
-        >
-          {uiText("Back")}
-        </button>
-      </div>
-      <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
-        {importable.length === 0 ? (
-          <div className="px-3 py-3 font-mono text-2xs text-on-surface-variant/70">
-            {uiText("No importable 3D files in this archive.")}
-          </div>
-        ) : (
-          importable.map((e) => (
-            <label
-              key={e.name}
-              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-container-low"
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(e.name)}
-                onChange={() => onToggle(e.name)}
-                className="accent-primary"
-              />
-              <span className="text-xs text-on-surface truncate flex-1">{e.name}</span>
-              <span className="font-mono text-3xs uppercase text-on-surface-variant flex-shrink-0">
-                {e.file_type}
-              </span>
-              <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
-                {formatBytes(e.size_bytes)}
-              </span>
-            </label>
-          ))
-        )}
-      </div>
     </div>
   );
 }

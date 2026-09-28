@@ -124,6 +124,37 @@ def inspect_archive(
     return entries
 
 
+def verify_archive_contents(
+    path: Path,
+    entries: list[ArchiveEntry],
+    *,
+    max_entry_bytes: int,
+    on_chunk: Callable[[], None],
+    on_entry: Callable[[int, int], None],
+) -> None:
+    """Decompress importable entries without publishing bytes before review.
+
+    Reading to EOF verifies each entry's CRC. The ZIP remains the sole staged
+    object until the user chooses which files to import.
+    """
+    importable = [entry for entry in entries if entry.file_type is not None]
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for index, entry in enumerate(importable, start=1):
+                size = 0
+                with archive.open(entry.name) as source:
+                    while chunk := source.read(1024 * 1024):
+                        on_chunk()
+                        size += len(chunk)
+                        if size > max_entry_bytes or size > entry.size_bytes:
+                            raise ArchivePolicyError("archive_entry_too_large")
+                if size != entry.size_bytes:
+                    raise ArchivePolicyError("archive_invalid")
+                on_entry(index, len(importable))
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+        raise ArchivePolicyError("archive_invalid") from exc
+
+
 def extract_selected(
     path: Path,
     names: list[str],

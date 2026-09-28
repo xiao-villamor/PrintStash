@@ -200,6 +200,7 @@ export function LibrarySearch() {
               type="search"
               maxLength={512}
               autoComplete="off"
+              spellCheck={false}
               aria-label={t("aiSearch.searchLibrary")}
               aria-haspopup="dialog"
               aria-expanded={open && !!value.trim()}
@@ -240,7 +241,7 @@ export function LibrarySearch() {
                   variant="ghost"
                   size="icon"
                   type="button"
-                  className={value ? "hidden sm:inline-flex" : undefined}
+                  className={value ? "hidden h-8 w-8 sm:inline-flex" : "h-8 w-8"}
                   aria-label={t("aiSearch.searchByImage")}
                   title={t("aiSearch.searchByImage")}
                   onClick={() => {
@@ -256,6 +257,7 @@ export function LibrarySearch() {
                   variant="ghost"
                   size="icon"
                   type="button"
+                  className="h-8 w-8"
                   aria-label={t("nav.clearSearch")}
                   onClick={() => {
                     changeValue("");

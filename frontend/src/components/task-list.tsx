@@ -1,6 +1,8 @@
 "use client";
 
 import { ApiError, getErrorMessage } from "@/lib/errors";
+import { formatBytes, formatDuration } from "@/lib/format";
+import { cancelArchiveTransfer, isArchiveTransferActive } from "@/lib/archive-upload";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import {
@@ -16,8 +18,15 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 
 import type { TaskItem } from "@/lib/task-center";
-import { linkTaskToJob, taskTitle, taskDetail, updateTask } from "@/lib/task-center";
+import {
+  linkTaskToJob,
+  needsArchiveReview,
+  taskTitle,
+  taskDetail,
+  updateTask,
+} from "@/lib/task-center";
 import { knownUiText } from "@/lib/locale";
+import { requestArchiveReview } from "@/lib/archive-review-events";
 
 export function TaskList({
   tasks,
@@ -41,7 +50,10 @@ export function TaskList({
         <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
           {uiText("Tasks")}
         </span>
-        {tasks.some((task) => task.status === "completed" || task.status === "failed") && (
+        {tasks.some(
+          (task) =>
+            (task.status === "completed" || task.status === "failed") && !needsArchiveReview(task),
+        ) && (
           <button
             type="button"
             onClick={onClear}
@@ -90,13 +102,55 @@ function TaskRow({ task }: { task: TaskItem }) {
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{taskTitle(task)}</p>
             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {task.uploadPaused ? uiText("Paused") : knownUiText(task.status)}
+              {task.uploadPaused
+                ? uiText("Paused")
+                : needsArchiveReview(task)
+                  ? uiText("Ready")
+                  : knownUiText(task.status)}
             </span>
           </div>
           {task.detail && (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
           )}
-          {active && task.total == null && (
+          {task.archiveUploading && task.archiveSizeBytes !== undefined && (
+            <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+              <p>
+                {task.archiveTransferredBytes === undefined
+                  ? uiText("Uploading {size}. Keep this browser tab open.", {
+                      size: formatBytes(task.archiveSizeBytes),
+                    })
+                  : task.archiveTransferredBytes >= task.archiveSizeBytes
+                    ? uiText("Sent {total} from this browser (100%)", {
+                        total: formatBytes(task.archiveSizeBytes),
+                      })
+                    : uiText("Uploaded {sent} of {total} ({percent}%)", {
+                        sent: formatBytes(task.archiveTransferredBytes),
+                        total: formatBytes(task.archiveSizeBytes),
+                        percent: String(
+                          task.archiveSizeBytes > 0
+                            ? Math.min(
+                                100,
+                                Math.round(
+                                  (task.archiveTransferredBytes / task.archiveSizeBytes) * 100,
+                                ),
+                              )
+                            : 0,
+                        ),
+                      })}
+              </p>
+              {task.archiveSpeedBytesPerSecond !== undefined &&
+                task.archiveEtaSeconds !== undefined && (
+                  <p>
+                    {uiText("{speed}/s · about {time} remaining", {
+                      speed: formatBytes(task.archiveSpeedBytesPerSecond),
+                      time: formatDuration(Math.ceil(task.archiveEtaSeconds)),
+                    })}
+                  </p>
+                )}
+              <p>{uiText("Keep this browser tab open during upload.")}</p>
+            </div>
+          )}
+          {active && task.total == null && !task.archiveUploading && (
             <p className="mt-1 text-xs text-muted-foreground">
               {uiText("Discovering total… Safe to close this view.")}
             </p>
@@ -133,6 +187,26 @@ function TaskRow({ task }: { task: TaskItem }) {
             </button>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
+          {isArchiveTransferActive(task.id) && (
+            <button
+              type="button"
+              onClick={() => cancelArchiveTransfer(task.id)}
+              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uiText("Cancel upload")}
+            </button>
+          )}
+          {needsArchiveReview(task) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (task.jobId) requestArchiveReview(task.jobId);
+              }}
+              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uiText("Choose ZIP files")}
+            </button>
+          )}
           {task.jobKind === "ingestion.library_import" &&
             task.status === "completed" &&
             user?.is_superuser && (

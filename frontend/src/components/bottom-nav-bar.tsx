@@ -26,6 +26,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Drawer } from "@/components/ui/drawer";
 import { TaskList } from "@/components/task-list";
+import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { clearCompletedTasks, listTasks, subscribeTasks, type TaskItem } from "@/lib/task-center";
 import { listPendingImports } from "@/lib/api";
 
@@ -82,6 +83,8 @@ export function BottomNavBar() {
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user?.is_superuser);
 
   useEffect(() => subscribeTasks(() => setTasks(listTasks())), []);
+
+  useEffect(() => subscribeArchiveReviewRequests(() => setOpenedOnPath(null)), []);
 
   useEffect(() => {
     let active = true;

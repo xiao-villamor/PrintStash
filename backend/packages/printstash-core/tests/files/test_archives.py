@@ -41,6 +41,7 @@ from printstash_core.files import (
     inspect_archive,
     safe_entry_name,
     safe_subdir,
+    verify_archive_contents,
 )
 
 FILE_TYPES = {".stl": "stl", ".3mf": "3mf", ".gcode": "gcode"}
@@ -170,6 +171,46 @@ class TestInspectArchive:
         # provider error, not a `BadZipFile` traceback in the import job.
         with pytest.raises(ArchivePolicyError, match="archive_invalid"):
             _inspect(path)
+
+
+class TestVerifyArchiveContents:
+    def test_decompresses_supported_files_before_review(self, tmp_path: Path) -> None:
+        path = _archive(
+            tmp_path / "bundle.zip",
+            {"parts/a.stl": b"solid", "parts/b.gcode": b"G1 X1", "notes.txt": b"ignored"},
+        )
+        progress: list[tuple[int, int]] = []
+
+        verify_archive_contents(
+            path,
+            _inspect(path),
+            max_entry_bytes=1024,
+            on_chunk=lambda: None,
+            on_entry=lambda processed, total: progress.append((processed, total)),
+        )
+
+        assert progress == [(1, 2), (2, 2)]
+        assert sorted(item.name for item in tmp_path.iterdir()) == ["bundle.zip"]
+
+    def test_refuses_corrupt_entry_bytes(self, tmp_path: Path) -> None:
+        path = _archive(tmp_path / "bundle.zip", {"part.stl": b"solid"})
+        entries = _inspect(path)
+        path.write_bytes(path.read_bytes().replace(b"solid", b"other", 1))
+
+        with pytest.raises(ArchivePolicyError, match="archive_invalid"):
+            verify_archive_contents(
+                path, entries, max_entry_bytes=1024, on_chunk=lambda: None,
+                on_entry=lambda _processed, _total: None,
+            )
+
+    def test_refuses_bytes_beyond_the_review_limit(self, tmp_path: Path) -> None:
+        path = _archive(tmp_path / "bundle.zip", {"part.stl": b"solid"})
+
+        with pytest.raises(ArchivePolicyError, match="archive_entry_too_large"):
+            verify_archive_contents(
+                path, _inspect(path), max_entry_bytes=4, on_chunk=lambda: None,
+                on_entry=lambda _processed, _total: None,
+            )
 
 
 class TestExtractSelected:

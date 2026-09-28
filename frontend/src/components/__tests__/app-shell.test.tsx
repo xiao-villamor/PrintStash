@@ -25,6 +25,8 @@ import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "@/components/app-shell";
+import { queryClient, queryKeys } from "@/lib/query-client";
+import { aJob } from "@/test-support/factories";
 import {
   adminSession,
   json,
@@ -68,6 +70,39 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("refreshes the vault when selected ZIP files finish importing", async () => {
+    renderShell();
+    await screen.findByText("at /");
+    queryClient.setQueryData(queryKeys.models, []);
+
+    window.dispatchEvent(
+      new CustomEvent("printstash:import-job-terminal", {
+        detail: aJob({ kind: "ingestion.archive_selection", state: "completed" }),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(true),
+    );
+  });
+
+  it("notifies the user when ZIP preparation fails", async () => {
+    renderShell();
+    await screen.findByText("at /");
+
+    window.dispatchEvent(
+      new CustomEvent("printstash:import-job-terminal", {
+        detail: aJob({
+          kind: "ingestion.archive_inspect",
+          state: "failed",
+          error: "no_importable_files",
+        }),
+      }),
+    );
+
+    expect(await screen.findByText("No importable 3D files were found.")).toBeVisible();
+  });
+
   describe("a signed-in user", () => {
     it("renders the page inside the frame", async () => {
       renderShell();

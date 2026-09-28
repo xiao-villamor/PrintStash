@@ -44,6 +44,7 @@ export function taskStatusOf(state: JobState): TaskStatus {
 }
 
 function titleForJob(job: JobStatus): MessageDescriptor | string {
+  if (job.kind === "ingestion.archive_inspect") return uiMessage("Prepare ZIP");
   if (job.kind.startsWith("ingestion.")) {
     return uiMessage("Import");
   }
@@ -81,6 +82,23 @@ export interface TaskItem {
   uploadSessionId?: string;
   uploadPaused?: boolean;
   failedItems?: Array<{ name: string; reason: string; retryable: boolean }>;
+  archiveCollection?: string | null;
+  archiveTags?: string[];
+  archiveReviewDone?: boolean;
+  archiveUploading?: boolean;
+  archiveSizeBytes?: number;
+  archiveTransferredBytes?: number;
+  archiveSpeedBytesPerSecond?: number;
+  archiveEtaSeconds?: number;
+}
+
+export function needsArchiveReview(task: TaskItem): boolean {
+  return (
+    task.jobKind === "ingestion.archive_inspect" &&
+    task.status === "completed" &&
+    !task.archiveReviewDone &&
+    task.jobId !== undefined
+  );
 }
 
 const TASK_EVENT = "printstash:tasks-changed";
@@ -133,10 +151,27 @@ function loadTasks(): TaskItem[] {
     // Only `persist()` writes this key, so the stored payload is a TaskItem[]
     // snapshot; a hand-edited or truncated value falls through to the catch.
     const parsed: TaskItem[] | null = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.slice(0, 20) : [];
+    return Array.isArray(parsed)
+      ? keepVisibleTasks(parsed).map((task) =>
+          task.archiveUploading && (task.status === "pending" || task.status === "running")
+            ? {
+                ...task,
+                archiveUploading: false,
+                status: "failed" as const,
+                detail: uiText("ZIP upload interrupted. Select the file again."),
+                progress: 100,
+              }
+            : task,
+        )
+      : [];
   } catch {
     return [];
   }
+}
+
+function keepVisibleTasks(items: TaskItem[]): TaskItem[] {
+  let ordinary = 0;
+  return items.filter((item) => needsArchiveReview(item) || ordinary++ < 20);
 }
 
 function loadDismissedJobIds(): Set<string> {
@@ -257,10 +292,12 @@ export function taskTitle(task: TaskItem): string {
 
 export function taskDetail(task: TaskItem): string | undefined {
   if (task.detailMessage) return uiText(task.detailMessage.key, task.detailMessage.values);
+  if (task.archiveReviewDone) return uiText("Files selected for import");
   if (task.status === "failed" && task.error) return getErrorMessage(task.error);
   if ((task.jobId || task.jobIds?.length) && task.stage && task.status !== "failed") {
     return detailForJob({
       job_id: task.jobId,
+      kind: task.jobKind,
       state: task.jobState ?? (task.status === "pending" ? "queued" : task.status),
       stage: task.stage,
       processed: task.processed,
@@ -284,7 +321,7 @@ export function taskDetail(task: TaskItem): string | undefined {
 export function createTask(input: TaskPatch & { title: TaskText }): string {
   const now = Date.now();
   const id = `${now}-${Math.random().toString(36).slice(2, 8)}`;
-  tasks = [
+  tasks = keepVisibleTasks([
     {
       id,
       ...taskTextPatch(input),
@@ -296,7 +333,7 @@ export function createTask(input: TaskPatch & { title: TaskText }): string {
       updatedAt: now,
     },
     ...tasks,
-  ].slice(0, 20);
+  ]);
   persist();
   emit();
   scheduleCleanup();
@@ -328,13 +365,31 @@ export function linkTaskToJob(taskId: string, jobId: string): void {
   wakeImportJobSync();
 }
 
+/** Attach a one-job import to an existing browser task without losing its review metadata. */
+export function attachTaskToImportJob(taskId: string, jobId: string): void {
+  dismissedJobIds.delete(jobId);
+  persistDismissedJobIds();
+  updateTask(taskId, {
+    jobId,
+    archiveUploading: false,
+    archiveSpeedBytesPerSecond: undefined,
+    archiveEtaSeconds: undefined,
+    status: "pending",
+    detail: uiText("Queued · continues in background"),
+  });
+  wakeImportJobSync();
+}
+
 export function clearCompletedTasks(): void {
   for (const task of tasks) {
-    if (task.status !== "completed" && task.status !== "failed") continue;
+    if ((task.status !== "completed" && task.status !== "failed") || needsArchiveReview(task))
+      continue;
     if (task.jobId) dismissedJobIds.add(task.jobId);
     for (const jobId of task.jobIds ?? []) dismissedJobIds.add(jobId);
   }
-  tasks = tasks.filter((task) => task.status !== "completed" && task.status !== "failed");
+  tasks = tasks.filter((task) =>
+    task.status !== "completed" && task.status !== "failed" ? true : needsArchiveReview(task),
+  );
   persistDismissedJobIds();
   persist();
   emit();
@@ -348,6 +403,7 @@ function detailForJob(job: Pick<JobStatus, "state"> & Partial<JobStatus>): strin
   const count = job.total == null ? "" : ` ${job.processed ?? 0}/${job.total}`;
   const item = job.current_item ? ` · ${job.current_item}` : "";
   if (job.state === "completed") {
+    if (job.kind === "ingestion.archive_inspect") return uiText("Ready to choose ZIP files");
     if (job.completion === "partial") {
       return uiText("{succeeded} succeeded · {failed} failed", {
         succeeded: job.succeeded ?? 0,
