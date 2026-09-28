@@ -59,6 +59,13 @@ def _emit(**payload) -> None:
     print(json.dumps(payload), flush=True)
 
 
+def _publish_marker(marker: Path, file_id: int) -> None:
+    """Make the file visible only after its id has been written."""
+    staged = marker.with_name(f".{marker.name}.tmp")
+    staged.write_text(str(file_id))
+    staged.replace(marker)
+
+
 def _set_up(client: TestClient) -> None:
     """Complete first-run setup and authenticate ``client`` as the owner."""
     from app.core.config import settings
@@ -86,7 +93,7 @@ def stall(marker: Path) -> None:
     from app.modules.derivatives import producers
 
     def held(file_id: int):
-        marker.write_text(str(file_id))
+        _publish_marker(marker, file_id)
         while True:  # the parent kills this process here
             time.sleep(1)
 
@@ -130,7 +137,7 @@ def stall_backup(marker: Path) -> None:
     from app.modules.derivatives import producers
 
     def held(file_id: int):
-        marker.write_text(str(file_id))
+        _publish_marker(marker, file_id)
         while True:  # the parent kills this process here
             time.sleep(1)
 
