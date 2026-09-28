@@ -155,7 +155,14 @@ function TaskRow({ task }: { task: TaskItem }) {
               {uiText("Discovering total… Safe to close this view.")}
             </p>
           )}
-          <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
+          <div
+            role="progressbar"
+            aria-label={uiText("Progress")}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={task.progress}
+            className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+          >
             <div
               className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-destructive" : "bg-primary"}`}
               style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}

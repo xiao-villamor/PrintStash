@@ -926,6 +926,7 @@
   "When": "When",
   "State": "State",
   "Progress": "Progress",
+  "{succeeded} of {total} models imported · continues in background": "{succeeded} of {total} models imported · continues in background",
   "Started": "Started",
   "Finished": "Finished",
   "No access": "No access",

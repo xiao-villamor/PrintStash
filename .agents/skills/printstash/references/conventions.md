@@ -17,7 +17,8 @@ chore/dependency-refresh
 
 Use the conventional type that matches the change (`feat`, `fix`, `perf`,
 `refactor`, `docs`, `test`, `chore`, or `ci`), followed by an issue number when
-one exists and a short kebab-case slug. Merge every branch through its own PR;
+one exists and a short kebab-case slug. Never prefix a branch with `codex/`.
+Merge every branch through its own PR;
 do not aggregate unrelated work on a version-number branch.
 
 A release is assembled from completed PRs already merged to `main`. If branch

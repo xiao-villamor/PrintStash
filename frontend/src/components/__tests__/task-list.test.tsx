@@ -46,6 +46,22 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it("exposes the ZIP import percentage on its progress bar", () => {
+    renderTaskList([
+      task({
+        title: "Import parts.zip",
+        status: "running",
+        jobKind: "ingestion.archive_selection",
+        progress: 50,
+      }),
+    ]);
+
+    expect(screen.getByRole("progressbar", { name: "Progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
+    );
+  });
+
   it("shows ZIP upload metrics", () => {
     renderTaskList([
       task({

@@ -449,6 +449,11 @@ function detailForJob(job: Pick<JobStatus, "state"> & Partial<JobStatus>): strin
     return job.error
       ? getErrorMessage(job.error)
       : uiText("Import failed before anything was added");
+  if (job.kind === "ingestion.archive_selection" && job.stage === "ingesting" && job.total != null)
+    return uiText("{succeeded} of {total} models imported · continues in background", {
+      succeeded: job.succeeded ?? 0,
+      total: job.total,
+    });
   return uiText("{stage}{count}{item} · continues in background", { stage, count, item });
 }
 

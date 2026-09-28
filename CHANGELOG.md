@@ -198,6 +198,8 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- ZIP imports now show how many selected Models have been imported while work is running. The task progress bar advances for each file attempted, including files that fail or are skipped.
+
 - Completing first-run setup now clears task history left in the browser by a
   previous installation, so old Jobs no longer appear as failed in a new vault.
 

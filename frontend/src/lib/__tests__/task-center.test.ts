@@ -560,6 +560,46 @@ describe("subscribeTasks", () => {
 });
 
 describe("syncImportJobs", () => {
+  it("shows the number of ZIP models imported while the job runs", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-import",
+        kind: "ingestion.archive_selection",
+        state: "running",
+        stage: "ingesting",
+        processed: 2,
+        succeeded: 1,
+        failed: 1,
+        total: 4,
+        progress: 50,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "1 of 4 models imported · continues in background",
+    );
+  });
+
+  it("uses the live ZIP job percentage for task progress", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-import",
+        kind: "ingestion.archive_selection",
+        state: "running",
+        stage: "ingesting",
+        processed: 2,
+        total: 4,
+        progress: 50,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0].progress).toBe(50);
+  });
+
   it("shows live portable import counts from the job", async () => {
     listJobs.mockResolvedValue([
       aJob({

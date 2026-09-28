@@ -309,7 +309,7 @@ def _ingest_one_file(
 
     Returns a result dict (``model_id``/``file_id``/``name`` on success, or
     ``name``/``error`` on failure), or ``None`` if the suffix is not importable
-    (the caller skips it without counting it as a step).
+    (the caller records it as a skipped step).
 
     ``original_filename`` may carry an archive-relative path; only its basename
     is used for the suffix, model name, and stored filename. Callers that want
@@ -397,7 +397,9 @@ def import_assets(
     override = model_name.strip() if model_name and total == 1 else None
     registry.update(job_id, total_steps=total, total=total, stage="ingesting")
     results: list[dict] = []
-    done = 0
+    succeeded = 0
+    failed = 0
+    skipped = 0
     for index, staged_file in enumerate(staged_files):
         if isinstance(staged_file, StagedAsset):
             staged, rel_name = (
@@ -433,16 +435,29 @@ def import_assets(
             provenance_context=provenance_context,
         )
         if res is None:
-            continue
-        if isinstance(staged_file, StagedAsset):
-            res = {
-                **res,
-                "source_selection_id": staged_file.source_selection_id,
-                "result_key": staged_file.result_key,
-            }
-        results.append(res)
-        done += 1
-        registry.update(job_id, step=done, progress=done / total * 100)
+            skipped += 1
+        else:
+            if isinstance(staged_file, StagedAsset):
+                res = {
+                    **res,
+                    "source_selection_id": staged_file.source_selection_id,
+                    "result_key": staged_file.result_key,
+                }
+            results.append(res)
+            if res.get("model_id"):
+                succeeded += 1
+            elif res.get("error"):
+                failed += 1
+        processed = index + 1
+        registry.update(
+            job_id,
+            step=processed,
+            processed=processed,
+            succeeded=succeeded,
+            failed=failed,
+            skipped=skipped,
+            progress=processed / total * 100,
+        )
 
     imported = [r for r in results if r.get("model_id")]
     failures = [r for r in results if r.get("error")]
@@ -452,7 +467,7 @@ def import_assets(
         JobOutcome.COMPLETED if imported else JobOutcome.FAILED,
         model_id=imported[0]["model_id"] if imported else None,
         result={"imported": len(imported), "total": total, "items": results},
-        processed=len(results),
+        processed=total,
         total=total,
         succeeded=len(imported),
         deduplicated=deduplicated,
