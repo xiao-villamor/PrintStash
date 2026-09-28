@@ -37,13 +37,17 @@ host mount is undesirable or unavailable.
 ## Create A Remote Connection
 
 1. Open **Settings > Remote storage** and create an S3, WebDAV, SFTP or Google
-   Drive connection whose use includes **Library sources**. Credentials are
+   Drive connection whose use includes **Library sources**. Choose **Library
+   sources** for a read-only SFTP account; **Backups + libraries** also tests
+   backup access. Credentials are
    encrypted in the database and never returned by the API after creation.
 2. Test the connection. For a connection used by both Library sources and backup
    replicas, the test checks that the Library root can be listed and that the
    backup destination is reachable. A failed test does not change source files.
-   A connection can still be saved and selected as a source, but scans cannot
-   use it until the failing connection settings or permissions are corrected.
+   A connection can still be saved and selected as a source. If Library listing
+   succeeds but backup access fails, Library scans can still use it; change its
+   use to **Library sources** unless it also needs backup access. A Library
+   listing failure must be corrected before scans can use the connection.
 3. Open **Settings > Library sources**, enable the feature, add a source, select
    the connection and enter an optional source path.
 4. Run **Scan now**, then open and download a representative linked Artifact.

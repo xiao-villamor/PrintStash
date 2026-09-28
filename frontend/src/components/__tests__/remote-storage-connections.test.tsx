@@ -139,6 +139,7 @@ describe("RemoteStorageConnections", () => {
     await user.paste("google-secret");
     await user.click(screen.getByLabelText("Refresh token"));
     await user.paste("google-refresh");
+    await user.click(screen.getByRole("button", { name: "Backups + libraries" }));
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
@@ -171,6 +172,29 @@ describe("RemoteStorageConnections", () => {
       purpose: "library",
     });
     expect(usage).toHaveValue("library");
+  });
+
+  it("returns to Library-only use after editing a shared connection", async () => {
+    const user = userEvent.setup();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+      },
+    });
+    await screen.findByText("Workshop storage");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("button", { name: "Backups + libraries" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel editing" }));
+
+    expect(screen.getByRole("button", { name: "Library sources" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("pauses a connection without changing its uses", async () => {
@@ -235,6 +259,27 @@ describe("RemoteStorageConnections", () => {
     await user.click(screen.getByRole("button", { name: "Test" }));
 
     expect(await screen.findByText(/could not list the remote folder/i)).toBeVisible();
+  });
+
+  it("explains that a shared profile can list the Library but cannot probe backups", async () => {
+    const user = userEvent.setup();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([
+          aStorageConnection({ kind: "sftp", name: "Workshop SFTP", purpose: "both" }),
+        ]),
+        "POST /api/v1/storage-connections/1/probe": json(
+          { detail: "storage_connection_backup_probe_failed" },
+          409,
+        ),
+      },
+    });
+    await screen.findByText("Workshop SFTP");
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText(/Library listing succeeded/i)).toBeVisible();
   });
 
   it("keeps save unavailable until the profile has a name", async () => {
@@ -366,6 +411,7 @@ describe("RemoteStorageConnections preset selection", () => {
     await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
     expect(JSON.parse(view.requestsWithMethod("POST")[0].body)).toMatchObject({
       kind: "sftp",
+      purpose: "library",
       configuration: { provider: "hetzner_storage_box", port: 23 },
       secrets: { password: "test-password" },
     });

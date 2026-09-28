@@ -417,7 +417,7 @@ class TestStorageConnections:
         )
 
         assert response.status_code == 409
-        assert response.json()["detail"] == "storage_connection_probe_failed"
+        assert response.json()["detail"] == "storage_connection_backup_probe_failed"
 
     def test_probe_reports_an_unavailable_google_drive_transport(
         self,

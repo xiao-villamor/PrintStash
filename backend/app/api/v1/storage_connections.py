@@ -173,7 +173,12 @@ def probe_connection(
             return destination_from_connection(row).probe()
         library_sample_count = source_from_connection(row, scan_limits=True).probe()
         if row.purpose is StorageConnectionPurpose.BOTH:
-            result = destination_from_connection(row).probe()
+            try:
+                result = destination_from_connection(row).probe()
+            except (BackupDestinationError, StorageConfigurationError) as exc:
+                raise HTTPException(
+                    status_code=409, detail="storage_connection_backup_probe_failed"
+                ) from exc
             result["library_sample_count"] = library_sample_count
             return result
         if row.purpose is not StorageConnectionPurpose.LIBRARY:

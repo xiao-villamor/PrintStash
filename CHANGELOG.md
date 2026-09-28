@@ -186,7 +186,9 @@ image. See UPGRADE.md before pulling.**
 - Library source setup now distinguishes a mounted folder that needs temporary
   write permission for enrollment from one that cannot be read. Testing a
   shared remote connection also checks Library source listing, and failed
-  listings show a useful message instead of a server-reachability error (#262).
+  listings show a useful message instead of a server-reachability error. New
+  remote connections default to Library-only use, so a read-only SFTP account
+  is not tested for backup access unless selected (#262).
 
 - Trash GC preview now loads the active plan when another request claims it
   first, so operators can review and abort the existing plan instead of seeing

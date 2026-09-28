@@ -2995,6 +2995,7 @@
   "root_path_unreadable": "PrintStash no puede leer esta carpeta de biblioteca. Comprueba el montaje del contenedor y los permisos.",
   "root_path_missing": "La carpeta de la biblioteca no está disponible. Comprueba la ruta y el montaje.",
   "remote_storage_list_failed": "PrintStash no pudo listar la carpeta remota. Comprueba la ruta, las credenciales y los permisos de lectura.",
+  "storage_connection_backup_probe_failed": "Se pudo listar la biblioteca, pero no se pudo verificar el acceso para copias de seguridad. Usa esta conexión solo para fuentes de biblioteca o comprueba la configuración y los permisos de copia de seguridad.",
   "library_source_list_failed": "PrintStash no pudo listar la fuente de biblioteca. Comprueba la ruta, las credenciales y los permisos de lectura.",
   "restart_failed": "No se ha podido reiniciar el servidor. Consulta sus registros e inténtalo de nuevo.",
   "Use source title": "Usar el título de origen",

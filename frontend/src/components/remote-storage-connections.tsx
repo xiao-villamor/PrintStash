@@ -118,7 +118,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   const [name, setName] = useState("");
   const [providerId, setProviderId] = useState("s3");
   const [category, setCategory] = useState<ProviderCategory>("s3_compatible");
-  const [purpose, setPurpose] = useState<StorageConnectionPurpose>("both");
+  const [purpose, setPurpose] = useState<StorageConnectionPurpose>("library");
   const [values, setValues] = useState<StorageProviderConfigValues>({
     root: "PrintStash",
     region: "auto",
@@ -197,7 +197,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   function resetForm() {
     setEditing(null);
     setName("");
-    setValues(selected ? providerDefaults(selected, use) : {});
+    setPurpose("library");
+    setValues(selected ? providerDefaults(selected, "library") : {});
   }
   function chooseProvider(provider: StorageProvider) {
     setProviderId(provider.id);

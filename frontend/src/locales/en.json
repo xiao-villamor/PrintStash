@@ -2995,6 +2995,7 @@
   "root_path_unreadable": "PrintStash cannot read this library folder. Check the container mount and permissions.",
   "root_path_missing": "The library folder is unavailable. Check its path and mount.",
   "remote_storage_list_failed": "PrintStash could not list the remote folder. Check its path, credentials, and read permissions.",
+  "storage_connection_backup_probe_failed": "Library listing succeeded, but backup access could not be verified. Use this connection for Library sources only, or check its backup settings and permissions.",
   "library_source_list_failed": "PrintStash could not list the Library source. Check its path, credentials, and read permissions.",
   "restart_failed": "The server could not restart. Check the server logs and try again.",
   "Use source title": "Use source title",
