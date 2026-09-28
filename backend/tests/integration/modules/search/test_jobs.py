@@ -111,7 +111,7 @@ class TestIndexSource:
     ) -> None:
         assert _pending(jobs.IndexSource(), db_session) == []
 
-    def test_a_building_generation_is_index_work(
+    def test_a_building_generation_is_owned_by_its_build_job(
         self, db_session: Session, generation_setup
     ) -> None:
         actor, endpoint = generation_setup
@@ -123,7 +123,133 @@ class TestIndexSource:
 
         items = _pending(jobs.IndexSource(), db_session)
 
-        assert [item.subject_key for item in items] == ["search/index"]
+        assert items == []
+
+    def test_an_active_embedding_retry_waits_until_due(
+        self,
+        db_session: Session,
+        generation_setup,
+        healthy_embeddings,
+        work_engine,
+        make_model,
+        make_search_passage,
+        make_search_index_failure,
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        model = make_model("Later component")
+        passage = make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+        due_at = utcnow() + timedelta(minutes=2)
+        make_search_index_failure(
+            generation, passage, state="retry", attempts=1, retry_after=due_at
+        )
+        generation.phase = "backfill"
+        db_session.add(generation)
+        db_session.commit()
+        source = jobs.IndexSource()
+
+        assert _pending(source, db_session) == []
+        wake = source.next_due(db_session, now=utcnow())
+        assert wake is not None and abs((wake - due_at).total_seconds()) < 1
+
+    def test_a_failed_active_index_does_not_restart_until_retried(
+        self, db_session: Session, generation_setup, healthy_embeddings, work_engine
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        generation.phase = "verify_failed"
+        generation.error_code = "embedding_dimension_mismatch"
+        db_session.add(generation)
+        db_session.commit()
+
+        assert _pending(jobs.IndexSource(), db_session) == []
+
+    def test_a_due_active_embedding_retry_is_index_work(
+        self,
+        db_session: Session,
+        generation_setup,
+        healthy_embeddings,
+        work_engine,
+        make_model,
+        make_search_passage,
+        make_search_index_failure,
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        model = make_model("Due component")
+        passage = make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+        make_search_index_failure(
+            generation,
+            passage,
+            state="retry",
+            attempts=1,
+            retry_after=utcnow() - timedelta(seconds=1),
+        )
+        generation.phase = "backfill"
+        db_session.add(generation)
+        db_session.commit()
+
+        assert [
+            item.subject_key for item in _pending(jobs.IndexSource(), db_session)
+        ] == ["search/index"]
+
+    def test_retrying_an_active_index_wakes_vector_work(
+        self,
+        db_session: Session,
+        generation_setup,
+        healthy_embeddings,
+        work_engine,
+        make_model,
+        make_search_passage,
+        make_search_index_failure,
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        model = make_model("Retried component")
+        passage = make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+        make_search_index_failure(generation, passage)
+
+        generations.retry_quarantine(db_session, proposal.id, proposal.version_token)
+        db_session.commit()
+        work_engine.drain()
+
+        db_session.expire_all()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        assert generation.state == "active"
+        total, indexed, quarantined = generations.counts(db_session, generation)
+        assert (total, indexed, quarantined) == (2, 2, 0)
 
     def test_a_passage_projected_after_the_build_is_indexed(
         self,
@@ -222,6 +348,118 @@ class TestGenerationJob:
         status = job_rows.get(proposal.job_id)
         assert status is not None and status.state == "completed"
         assert status.result == {"generation_id": proposal.id}
+
+    def test_a_manually_activated_build_releases_its_job_when_ready(
+        self, db_session: Session, generation_setup, healthy_embeddings, work_engine
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(
+                endpoint_id=endpoint.id, index_backend="numpy", auto_activate=False
+            ),
+        )
+        db_session.commit()
+
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+
+        db_session.expire_all()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        status = job_rows.get(proposal.job_id)
+        assert (generation.state, generation.phase) == ("building", "ready")
+        assert status is not None and status.state == "completed"
+        assert _pending(jobs.GenerationSource(), db_session) == []
+
+    def test_a_manual_build_tracks_a_new_job_for_later_content(
+        self,
+        db_session: Session,
+        generation_setup,
+        healthy_embeddings,
+        work_engine,
+        make_search_projection_request,
+        make_model,
+    ) -> None:
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(
+                endpoint_id=endpoint.id, index_backend="numpy", auto_activate=False
+            ),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+
+        make_search_projection_request(ContentSource("model", make_model().id))
+        nudge(JobKind.SEARCH_PROJECT)
+        work_engine.drain()
+
+        db_session.expire_all()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        assert generation.job_id != proposal.job_id
+        assert generation.phase == "ready"
+        total, indexed, _ = generations.counts(db_session, generation)
+        assert total == indexed == 2
+        status = job_rows.get(generation.job_id)
+        assert status is not None and status.state == "completed"
+
+    def test_a_quarantined_build_fails_its_job(
+        self, db_session: Session, generation_setup, healthy_embeddings, work_engine
+    ) -> None:
+        actor, endpoint = generation_setup
+        healthy_embeddings.poison = "Assembly guide"
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+
+        db_session.expire_all()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        status = job_rows.get(proposal.job_id)
+        assert (generation.state, generation.phase) == ("building", "verify_failed")
+        assert status is not None
+        assert (status.state, status.error) == (
+            "failed",
+            "search_generation_verify_failed",
+        )
+        assert _pending(jobs.GenerationSource(), db_session) == []
+
+    def test_retrying_a_failed_build_tracks_a_new_job(
+        self, db_session: Session, generation_setup, healthy_embeddings, work_engine
+    ) -> None:
+        actor, endpoint = generation_setup
+        healthy_embeddings.poison = "Assembly guide"
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+
+        healthy_embeddings.poison = None
+        generations.retry_quarantine(db_session, proposal.id, proposal.version_token)
+        db_session.commit()
+        db_session.expire_all()
+        resumed = db_session.get(IndexGeneration, proposal.id)
+        assert resumed.job_id != proposal.job_id
+
+        nudge(JobKind.SEARCH_GENERATION)
+        work_engine.drain()
+
+        db_session.expire_all()
+        assert db_session.get(IndexGeneration, proposal.id).state == "active"
+        status = job_rows.get(resumed.job_id)
+        assert status is not None and status.state == "completed"
 
     def test_a_running_build_keeps_projecting_library_changes(
         self,

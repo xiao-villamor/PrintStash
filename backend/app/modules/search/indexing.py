@@ -6,9 +6,10 @@ import secrets
 import struct
 import time
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from printstash_core.inference import EmbeddingError, EmbeddingInput
+from printstash_core.inference import EmbeddingSpace as Space
 from printstash_core.inference.context import InferenceContext
 from printstash_core.search.passages import SubjectType
 from sqlalchemy import case, delete, literal, or_, update
@@ -37,6 +38,7 @@ from app.modules.storage.capacity import CapacityManager, CapacityReservationHan
 from app.runtime import maintenance
 
 MAX_ATTEMPTS = 3
+RECONCILE_PAGE_SIZE = 16
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ def claim(session: Session) -> tuple[int, str] | None:
             ),
             IndexGeneration.version_token.is_not(None),
             col(IndexGeneration.cancel_requested).is_(False),
+            IndexGeneration.phase != "verify_failed",
             available,
         )
         .order_by(IndexGeneration.last_activity_at, IndexGeneration.id)
@@ -160,6 +163,25 @@ def pending(session: Session, generation: IndexGeneration) -> list[WorkInput]:
             )
         )
     return work
+
+
+def deferred_retry_at(
+    session: Session, generation: IndexGeneration, space: Space
+) -> datetime | None:
+    """Earliest retry still owed to a current, eligible passage."""
+    return session.exec(
+        select(SearchIndexFailure.retry_after)
+        .join(SearchPassage, SearchPassage.id == SearchIndexFailure.passage_id)
+        .where(
+            SearchIndexFailure.generation_id == generation.id,
+            SearchIndexFailure.state == "retry",
+            SearchIndexFailure.retry_after > utcnow(),
+            SearchIndexFailure.input_hash == SearchPassage.content_hash,
+            SearchPassage.id.in_(generations.eligible(session, space)),
+        )
+        .order_by(SearchIndexFailure.retry_after)
+        .limit(1)
+    ).first()
 
 
 def publish(
@@ -281,6 +303,7 @@ def record_failure(
         )
     )
     generation.error_code = code
+    generation.phase = "backfill"
     generation.passage_after_id = item.passage_id
     generation.verified_at = None
     session.add(generation)
@@ -326,17 +349,33 @@ class IndexProcessor:
 
     def _reconcile(self, session: Session, generation: IndexGeneration) -> None:
         kinds = tuple(SubjectType)
-        kind = kinds[generation.reconcile_kind]
-        key = f"g{generation.id}:{generation.reconcile_kind}"
-        reconcile_partition(session, kind, checkpoint_key=key)
+        # The source and orphan cursors can wrap on different calls. Track each
+        # completed sweep as a separate stage; requiring both to be zero on
+        # the same call can loop forever after the first sweep creates passages.
+        # Existing 0..3 kind checkpoints resume conservatively: an upgrade may
+        # repeat a completed sweep, but it cannot skip a required one.
+        stage = generation.reconcile_kind
+        kind_index = stage // 2
+        kind = kinds[kind_index]
+        key = f"g{generation.id}:{kind_index}"
+        # Keep each SQLite write transaction short enough for foreground jobs
+        # to acquire the writer lock between search pages.
+        reconcile_partition(
+            session, kind, limit=RECONCILE_PAGE_SIZE, checkpoint_key=key
+        )
         cursor = session.exec(
             select(SearchReconciliationState).where(
                 SearchReconciliationState.subject_type == key
             )
         ).one()
-        if cursor.partition_after_id == 0 and cursor.orphan_after_id == 0:
-            generation.reconcile_kind += 1
-        if generation.reconcile_kind >= len(kinds):
+        if stage % 2 == 0 and cursor.partition_after_id == 0:
+            # A small/settled kind can finish both streams in this same unit.
+            generation.reconcile_kind = stage + (
+                2 if cursor.orphan_after_id == 0 else 1
+            )
+        elif stage % 2 == 1 and cursor.orphan_after_id == 0:
+            generation.reconcile_kind = stage + 1
+        if generation.reconcile_kind >= len(kinds) * 2:
             generation.reconcile_kind = 0
             generation.phase = (
                 "backfill" if generation.phase == "reconcile" else "verify"
@@ -449,6 +488,18 @@ class IndexProcessor:
                     return True
                 space = generations.contract(session, generation)
                 work = pending(session, generation)
+                if (
+                    work
+                    and generation.state == "building"
+                    and generation.phase == "ready"
+                    and not generation.auto_activate
+                ):
+                    generations.ensure_build_job(session, generation)
+                    generation.phase = "backfill"
+                    generation.verified_at = None
+                    session.add(generation)
+                    session.commit()
+                    return False
                 provider = embedding_provider(session, space)
                 verify = not work and generation.phase == "verify"
                 if verify and generation.index_state == "building":
@@ -458,6 +509,8 @@ class IndexProcessor:
                         return True
                 if not work and not verify:
                     if generation.state == "active" and generation.phase == "ready":
+                        return False
+                    if deferred_retry_at(session, generation, space) is not None:
                         return False
                     if generation.state == "building" and generation.phase not in {
                         "ready",
@@ -585,7 +638,7 @@ class IndexProcessor:
                         generation.phase = "verify_failed"
                     session.add(generation)
                     session.commit()
-            return True
+            return exc.code != "embedding_compute_busy"
         finally:
             if batch_reservation is not None:
                 batch_reservation.release()
@@ -604,7 +657,29 @@ class IndexProcessor:
                         generations.activate(
                             session, generation_id, generation.version_token
                         )
-                    except OperationError:
+                    except OperationError as exc:
                         session.rollback()
+                        if exc.code in {
+                            "search_generation_busy",
+                            "search_ai_disabled",
+                        }:
+                            time.sleep(1.0)
+                        else:
+                            generation = session.get(
+                                IndexGeneration, generation_id, populate_existing=True
+                            )
+                            if (
+                                generation is not None
+                                and generation.state == "building"
+                            ):
+                                generation.phase = (
+                                    "backfill"
+                                    if exc.code == "search_generation_incomplete"
+                                    else "verify_failed"
+                                )
+                                generation.verified_at = None
+                                generation.error_code = exc.code
+                                session.add(generation)
+                                session.commit()
                 # A building generation's own ``search.generation`` Job reports
                 # its progress and its end.

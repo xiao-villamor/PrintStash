@@ -13,6 +13,7 @@ from app.db.models import (
     PassageVector,
     SearchIndexFailure,
     SearchPassage,
+    SearchReconciliationState,
 )
 from app.db.session import get_session_factory
 from app.modules.search import generations, indexing
@@ -136,6 +137,83 @@ class TestPublicationWork:
 
 
 class TestIndexProcessor:
+    def test_indexes_a_library_larger_than_one_reconciliation_page(
+        self, db_session, generation_setup, healthy_embeddings, make_model
+    ):
+        actor, endpoint = generation_setup
+        for index in range(124):
+            make_model(f"Large library part {index}")
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        processor = indexing.IndexProcessor(get_session_factory())
+
+        for _ in range(80):
+            processor.work_one()
+            db_session.rollback()
+            generation = db_session.get(IndexGeneration, proposal.id)
+            if generation.state == "active":
+                break
+        else:
+            raise AssertionError("large library index did not activate")
+
+        total, indexed, quarantined = generations.counts(db_session, generation)
+        assert total == indexed >= 124
+        assert quarantined == 0
+
+    def test_finishes_reconciliation_when_partitions_end_on_different_passes(
+        self,
+        db_session,
+        generation_setup,
+        healthy_embeddings,
+        make_model,
+        make_search_passage,
+    ):
+        actor, endpoint = generation_setup
+        models = [make_model(f"Part {index}") for index in range(17)]
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        processor = indexing.IndexProcessor(get_session_factory())
+
+        processor.work_one()
+        db_session.expire_all()
+        cursor = db_session.exec(
+            select(SearchReconciliationState).where(
+                SearchReconciliationState.subject_type == f"g{proposal.id}:0"
+            )
+        ).one()
+        assert (cursor.partition_after_id, cursor.orphan_after_id) == (16, 0)
+        indexed_models = set(
+            db_session.exec(
+                select(SearchPassage.subject_id).where(
+                    SearchPassage.subject_type == "model"
+                )
+            ).all()
+        )
+        for model in models:
+            if model.id not in indexed_models:
+                make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+                break
+
+        processor.work_one()
+        db_session.expire_all()
+        assert cursor.partition_after_id == 0
+        assert cursor.orphan_after_id > 0
+
+        for _ in range(8):
+            processor.work_one()
+            db_session.rollback()
+            if db_session.get(IndexGeneration, proposal.id).phase == "backfill":
+                break
+        else:
+            raise AssertionError("reconciliation did not reach backfill")
+
     def test_retries_a_transient_provider_outage(
         self, db_session, generation_setup, healthy_embeddings, advance_indexing
     ):
@@ -170,6 +248,64 @@ class TestIndexProcessor:
         db_session.expire_all()
         assert db_session.exec(select(SearchIndexFailure)).all() == []
         assert len(db_session.exec(select(PassageVector)).all()) == 1
+
+    def test_waits_for_a_deferred_embedding_retry(
+        self, db_session, generation_setup, healthy_embeddings, advance_indexing
+    ):
+        from app.modules.inference.transport import EndpointError
+
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        advance_indexing(4)
+
+        def disconnected():
+            raise EndpointError("inference_network_unavailable")
+
+        healthy_embeddings.before_reply = disconnected
+        advance_indexing(1)
+
+        assert indexing.IndexProcessor(get_session_factory()).work_one() is False
+        db_session.expire_all()
+        generation = db_session.get(IndexGeneration, proposal.id)
+        assert generation.phase == "backfill"
+        assert generation.error_code == "inference_network_unavailable"
+        assert db_session.exec(select(PassageVector)).all() == []
+
+    def test_marks_an_active_index_as_backfilling_after_embedding_failure(
+        self,
+        db_session,
+        generation_setup,
+        healthy_embeddings,
+        advance_generation,
+        make_model,
+        make_search_passage,
+    ):
+        from app.modules.inference.transport import EndpointError
+
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        advance_generation(proposal.id)
+        model = make_model("New fitting")
+        make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+
+        def disconnected():
+            raise EndpointError("inference_network_unavailable")
+
+        healthy_embeddings.before_reply = disconnected
+        indexing.IndexProcessor(get_session_factory()).work_one()
+        db_session.expire_all()
+
+        generation = db_session.get(IndexGeneration, proposal.id)
+        assert (generation.state, generation.phase) == ("active", "backfill")
+        assert db_session.exec(select(SearchIndexFailure.state)).all() == ["retry"]
 
     def test_reports_idle_for_a_settled_active_generation(
         self, db_session, generation_setup, healthy_embeddings, advance_generation
@@ -236,8 +372,9 @@ class TestIndexProcessor:
         monkeypatch.setattr(
             indexing, "embedding_provider", lambda *args: SimpleNamespace(embed=busy)
         )
-        advance_indexing(10)
+        worked = advance_indexing(10)
         db_session.expire_all()
+        assert worked[-1] is False
         assert db_session.exec(select(SearchIndexFailure)).all() == []
         generation = db_session.get(IndexGeneration, proposal.id)
         assert generation.state == "building"
@@ -428,8 +565,21 @@ class TestIndexProcessor:
                 query_prefix="Replacement query: ",
             ),
         )
+        db_session.commit()
         if fault == "dimension":
             healthy_embeddings.dimension = 8
+            for attempt in (1, 2):
+                for _ in range(40):
+                    advance_indexing(1)
+                    db_session.rollback()
+                    failure = db_session.exec(select(SearchIndexFailure)).first()
+                    if failure is not None and failure.attempts == attempt:
+                        break
+                else:
+                    raise AssertionError("embedding failure was not recorded")
+                failure.retry_after = datetime(2000, 1, 1)
+                db_session.add(failure)
+                db_session.commit()
         else:
             healthy_embeddings.poison = "Replacement query: "
 
@@ -693,6 +843,72 @@ class TestIndexProcessor:
         advance_generation(proposal.id)
         db_session.expire_all()
 
+        assert db_session.get(IndexGeneration, proposal.id).state == "active"
+
+    def test_reports_a_permanent_auto_activation_conflict(
+        self,
+        db_session,
+        generation_setup,
+        healthy_embeddings,
+        advance_indexing,
+        monkeypatch,
+    ):
+        from app.core.errors import OperationError
+
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+
+        def conflicting_cutover(_session, _generation_id, _version_token):
+            raise OperationError("search_active_changed")
+
+        monkeypatch.setattr(generations, "activate", conflicting_cutover)
+        advance_indexing(20)
+        db_session.expire_all()
+
+        generation = db_session.get(IndexGeneration, proposal.id)
+        assert (generation.state, generation.phase, generation.error_code) == (
+            "building",
+            "verify_failed",
+            "search_active_changed",
+        )
+
+    def test_rechecks_a_build_after_content_changes_during_auto_activation(
+        self,
+        db_session,
+        generation_setup,
+        healthy_embeddings,
+        advance_indexing,
+        monkeypatch,
+    ):
+        from app.core.errors import OperationError
+
+        actor, endpoint = generation_setup
+        proposal = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(endpoint_id=endpoint.id, index_backend="numpy"),
+        )
+        db_session.commit()
+        actual_activate = generations.activate
+        attempts = 0
+
+        def changed_once(session, generation_id, version_token):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OperationError("search_generation_incomplete")
+            return actual_activate(session, generation_id, version_token)
+
+        monkeypatch.setattr(generations, "activate", changed_once)
+        advance_indexing(25)
+        db_session.expire_all()
+
+        assert attempts == 2
         assert db_session.get(IndexGeneration, proposal.id).state == "active"
 
 

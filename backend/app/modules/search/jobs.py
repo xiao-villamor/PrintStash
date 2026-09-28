@@ -40,6 +40,8 @@ from app.db.models import (
     IndexGeneration,
     JobKind,
     LaneName,
+    SearchIndexFailure,
+    SearchPassage,
     SearchProjectionRequest,
     SubjectCaption,
     WorkPriority,
@@ -202,29 +204,44 @@ def _generation_work(session: Session):
 
 
 class IndexSource:
-    """Pending while an active generation has work or a retired one awaits pruning.
+    """Pending while a settled generation has new work or one awaits pruning.
 
-    A building generation is its own ``search.generation`` Job, but the unit
-    serves whichever generation is due; this keeps active ones current. A
-    settled generation is not done for good: a passage projected after its
-    build is owed a vector in it too.
+    An in-progress building generation has its own ``search.generation`` Job.
+    A manually prepared one can become ready before activation; new content
+    reopens a tracked build Job. Active generations keep indexing later passages.
     """
 
     def pending(self, session: Session, *, now: datetime, limit: int) -> list[WorkItem]:
         if not _enabled(session):
             return []
         behind = session.exec(
-            _generation_work(session)
+            select(IndexGeneration)
             .where(
-                ~(
-                    (IndexGeneration.state == "active")
-                    & (IndexGeneration.phase == "ready")
-                )
+                col(IndexGeneration.id).in_(_generation_work(session)),
+                IndexGeneration.state == "active",
+                col(IndexGeneration.phase).notin_(("ready", "verify_failed")),
             )
-            .limit(1)
-        ).first()
-        if behind is None:
-            behind = self._owed_passage(session)
+            .order_by(IndexGeneration.id)
+            .limit(8)
+        ).all()
+        from app.modules.search import generations, visual_sources
+        from app.modules.search.indexing import deferred_retry_at
+        from app.modules.search.indexing import pending as owed_inputs
+
+        actionable = False
+        for generation in behind:
+            if generation.phase == "backfill":
+                space = generations.contract(session, generation)
+                if space.profile not in visual_sources.PROFILES:
+                    if (
+                        not owed_inputs(session, generation)
+                        and deferred_retry_at(session, generation, space) is not None
+                    ):
+                        continue
+            actionable = True
+            break
+        if not actionable:
+            actionable = self._owed_passage(session) is not None
         prunable = session.exec(
             select(IndexGeneration.id)
             .where(
@@ -234,13 +251,13 @@ class IndexSource:
             )
             .limit(1)
         ).first()
-        if behind is None and prunable is None:
+        if not actionable and prunable is None:
             return []
         return [WorkItem(subject_key="search/index")]
 
     @staticmethod
     def _owed_passage(session: Session) -> int | None:
-        """A settled generation missing a vector it can index now, if any.
+        """A settled active or manually prepared generation missing a vector.
 
         Uses the unit's own work query, so a quarantined passage, or one
         waiting out its retry, is not reported as owed (which would start a
@@ -252,8 +269,12 @@ class IndexSource:
         settled = session.exec(
             select(IndexGeneration).where(
                 col(IndexGeneration.id).in_(_generation_work(session)),
-                IndexGeneration.state == "active",
                 IndexGeneration.phase == "ready",
+                (IndexGeneration.state == "active")
+                | (
+                    (IndexGeneration.state == "building")
+                    & col(IndexGeneration.auto_activate).is_(False)
+                ),
             )
         ).all()
         for generation in settled:
@@ -270,14 +291,30 @@ class IndexSource:
         return None
 
     def next_due(self, session: Session, *, now: datetime) -> datetime | None:
-        later = session.exec(
+        retention = session.exec(
             select(func.min(IndexGeneration.retain_until)).where(
                 col(IndexGeneration.state).in_(("retired", "cancelled", "failed")),
                 IndexGeneration.version_token.is_not(None),
                 IndexGeneration.retain_until > now,
             )
         ).first()
-        return ensure_utc(later) if later is not None else None
+        retry = session.exec(
+            select(func.min(SearchIndexFailure.retry_after))
+            .join(
+                IndexGeneration,
+                IndexGeneration.id == SearchIndexFailure.generation_id,
+            )
+            .join(SearchPassage, SearchPassage.id == SearchIndexFailure.passage_id)
+            .where(
+                IndexGeneration.state == "active",
+                IndexGeneration.phase == "backfill",
+                SearchIndexFailure.state == "retry",
+                SearchIndexFailure.retry_after > now,
+                SearchIndexFailure.input_hash == SearchPassage.content_hash,
+            )
+        ).first()
+        due = [ensure_utc(value) for value in (retention, retry) if value is not None]
+        return min(due) if due else None
 
 
 def _index_unit() -> bool:
@@ -296,7 +333,10 @@ class GenerationSource:
     def pending(self, session: Session, *, now: datetime, limit: int) -> list[WorkItem]:
         rows = session.exec(
             select(IndexGeneration.id, IndexGeneration.actor_id)
-            .where(IndexGeneration.state == "building")
+            .where(
+                IndexGeneration.state == "building",
+                col(IndexGeneration.phase).notin_(("ready", "verify_failed")),
+            )
             .order_by(col(IndexGeneration.id))
             .limit(limit)
         ).all()
@@ -335,6 +375,10 @@ def _generation_progress(ctx: JobContext, generation_id: int) -> str | None:
                 "error_code": generation.error_code,
             },
         )
+        if generation.phase == "verify_failed":
+            return "verify_failed"
+        if generation.phase == "ready" and not generation.auto_activate:
+            return "ready"
     return None
 
 
@@ -351,6 +395,17 @@ def _build(ctx: JobContext) -> None:
         settled = _generation_progress(ctx, generation_id)
         if settled == "active":
             ctx.update(progress=100, result={"generation_id": generation_id})
+            return
+        if settled == "ready":
+            ctx.update(progress=100, result={"generation_id": generation_id})
+            return
+        if settled == "verify_failed":
+            ctx.finish(
+                JobOutcome.FAILED,
+                error="search_generation_verify_failed",
+                retryable=False,
+                result={"state": settled, "generation_id": generation_id},
+            )
             return
         if settled is not None:
             ctx.finish(

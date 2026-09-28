@@ -140,6 +140,23 @@ describe("AI Search settings", () => {
     expect(screen.getByRole("button", { name: "Build new index" })).toBeDisabled();
   });
 
+  it("labels reconciliation without reporting vector progress", async () => {
+    await settingsPanel({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({
+            state: "building",
+            phase: "reconcile",
+            eligible: 124,
+            indexed: 0,
+          }),
+        ]),
+      },
+    });
+    expect(screen.getByText("Checking library content")).toBeVisible();
+    expect(screen.queryByText("0 / 124 passages indexed")).toBeNull();
+  });
+
   it("explains an estimate exceeding the storage budget", async () => {
     await settingsPanel({
       routes: {

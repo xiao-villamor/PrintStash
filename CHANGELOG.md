@@ -203,6 +203,19 @@ image. See UPGRADE.md before pulling.**
 - Search action buttons now sit inside the search field border, and model names
   in the field no longer receive browser spellcheck underlines.
 
+- AI Search index builds now finish library reconciliation even when its source
+  and orphan scans finish on different passes. Smaller reconciliation pages
+  release SQLite writer locks sooner. Deferred embedding failures wait for their
+  scheduled retry; failed builds and manually activated builds release their
+  background jobs, while a retry or later content change starts a tracked job.
+  Automatic activation reports permanent errors and rechecks changed content.
+  Active indexes sleep until a deferred embedding retry is due and wake when an
+  administrator retries a failed input. Local embedding contention yields the
+  search lane for interactive inference. Index ETAs now use recent completed
+  vectors, so time spent reconciling or stuck before backfill is excluded.
+  Guided setup names the current phase, shows vector counts only during indexing,
+  offers failed builds a retry, and discloses that local AI uses the CPU.
+
 - Portable ZIP imports now update processed file counts while they run. The completed import task links administrators to Background work, where preview generation has its own queue status.
 - Library source setup now distinguishes a mounted folder that needs temporary
   write permission for enrollment from one that cannot be read. Testing a

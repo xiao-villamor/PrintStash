@@ -390,6 +390,24 @@ pending provider/model/transform choices. Catalog entries show pinned provenance
 license, languages and measured asset size. Downloads require explicit action;
 preplaced models require verification. History exposes progress, last activity,
 measured ETA when available, valid cancel/retry/activate actions and failures.
+Guided setup shows the current preparation phase. Passage reconciliation runs
+before vector indexing, so its progress has no vector count; the indexed/eligible
+count and measured ETA appear during backfill. Local ONNX inference uses the CPU
+only. A GPU on the host does not accelerate this provider; a separately configured
+embedding server may use different hardware.
+The ETA uses recent completed vectors and remains unknown until at least four
+vectors provide a measurable rate; time spent in reconciliation does not inflate
+it.
+Reconciliation checkpoints each small source and orphan page so a build can
+resume after interruption without holding SQLite's writer lock through a whole
+library scan. Provider failures with a retry time stay in backfill until due;
+quarantined inputs or a permanent verification error stop the build Job and
+remain visible for administrator retry. A manually activated build releases its
+Job once verified; later content starts a new tracked build before activation.
+Active indexes schedule delayed embedding retries without continuously
+resubmitting their indexing Job. Retrying an active index wakes that Job. When
+local compute is busy serving an interactive request, indexing yields the search
+lane and resumes later without quarantining the passage.
 The resource estimate does no inference or job creation; it counts the current
 Passage projection and includes conservative vector/index overhead and the
 existing generations. Backfill admission checks capacity again as content grows.

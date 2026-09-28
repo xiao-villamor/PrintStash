@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from statistics import median
 
 from printstash_core.inference import EmbeddingError
 from printstash_core.inference import EmbeddingSpace as Space
@@ -24,9 +25,11 @@ from sqlmodel import Session, col, select
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
+    ACTIVE_JOB_STATES,
     EmbeddingSpace,
     IndexGeneration,
     InferenceEndpoint,
+    Job,
     JobKind,
     PassageVector,
     SearchGenerationLease,
@@ -187,7 +190,7 @@ def read(session: Session, generation: IndexGeneration) -> GenerationRead:
         last_activity_at=ensure_utc(generation.last_activity_at)
         if generation.last_activity_at
         else None,
-        eta_seconds=work_seconds(generation, max(0, total - indexed))
+        eta_seconds=work_seconds(session, generation, max(0, total - indexed))
         if generation.state == "building" and generation.phase == "backfill"
         else None,
     )
@@ -203,16 +206,32 @@ def list_generations(session: Session) -> list[GenerationRead]:
     return [read(session, row) for row in rows]
 
 
-def work_seconds(generation: IndexGeneration, remaining: int) -> int | None:
-    """A measured average, including local overhead, rather than a model-size guess."""
-    if not generation.last_activity_at or generation.processed <= 0:
+def work_seconds(
+    session: Session, generation: IndexGeneration, remaining: int
+) -> int | None:
+    """Estimate from recent completed vectors, excluding preparation and idle time."""
+    if generation.processed < 4:
         return None
-    elapsed = (
-        ensure_utc(generation.last_activity_at) - ensure_utc(generation.created_at)
-    ).total_seconds()
-    if elapsed <= 0:
+    statement = select(PassageVector.created_at).where(
+        PassageVector.generation_id == generation.id
+    )
+    if generation.activated_at is not None:
+        statement = statement.where(PassageVector.created_at <= generation.activated_at)
+    timestamps = list(
+        reversed(
+            session.exec(statement.order_by(PassageVector.id.desc()).limit(32)).all()
+        )
+    )
+    if len(timestamps) < 4:
         return None
-    return max(0, round(remaining * elapsed / generation.processed))
+    intervals = [
+        (ensure_utc(end) - ensure_utc(start)).total_seconds()
+        for start, end in zip(timestamps, timestamps[1:], strict=False)
+        if end > start
+    ]
+    if len(intervals) < 3:
+        return None
+    return max(0, round(remaining * median(intervals)))
 
 
 def occupied_bytes(session: Session) -> int:
@@ -267,7 +286,7 @@ def estimate(session: Session, proposal: GenerationProposal) -> GenerationEstima
         existing_bytes=occupied,
         budget_bytes=budget,
         fits_budget=required + occupied <= budget,
-        estimated_seconds=work_seconds(prior, total) if prior else None,
+        estimated_seconds=work_seconds(session, prior, total) if prior else None,
     )
 
 
@@ -547,17 +566,7 @@ def _prepare_space(
         session.add(generation)
         session.flush()  # Unique building/profile rejects a competing proposal here.
         # The build is a Job: it drives this generation and reports its progress.
-        from app.modules.search.subjects import generation_subject
-        from app.modules.work import service as work_service
-        from app.modules.work.submission import nudge_after_commit
-
-        generation.job_id = work_service.request(
-            session,
-            definition=JobKind.SEARCH_GENERATION,
-            subject_key=generation_subject(generation.id),  # type: ignore[arg-type]
-            owner_user_id=actor.id,
-        )
-        nudge_after_commit(session, JobKind.SEARCH_GENERATION)
+        ensure_build_job(session, generation)
         vector_index.prepare(session, generation)
         session.add(generation)
         audit.record(
@@ -715,6 +724,12 @@ def retry_quarantine(
     row.phase = "backfill"
     row.error_code = None
     row.verified_at = None
+    if row.state == "building":
+        ensure_build_job(session, row)
+    else:
+        from app.modules.work.submission import nudge_after_commit
+
+        nudge_after_commit(session, JobKind.SEARCH_INDEX)
     session.add(row)
     audit.record(
         session,
@@ -723,6 +738,27 @@ def retry_quarantine(
         resource_id=row.id,
     )
     return read(session, row)
+
+
+def ensure_build_job(session: Session, generation: IndexGeneration) -> None:
+    """Keep a building generation linked to the Job driving its current attempt."""
+    if generation.state != "building":
+        raise ValueError("search_generation_not_building")
+    previous = session.get(Job, generation.job_id) if generation.job_id else None
+    if previous is not None and previous.state in ACTIVE_JOB_STATES:
+        return
+    from app.modules.search.subjects import generation_subject
+    from app.modules.work import service as work_service
+    from app.modules.work.submission import nudge_after_commit
+
+    generation.job_id = work_service.request(
+        session,
+        definition=JobKind.SEARCH_GENERATION,
+        subject_key=generation_subject(generation.id),  # type: ignore[arg-type]
+        owner_user_id=generation.actor_id,
+    )
+    session.add(generation)
+    nudge_after_commit(session, JobKind.SEARCH_GENERATION)
 
 
 def pin(session: Session, generation_id: int) -> str:

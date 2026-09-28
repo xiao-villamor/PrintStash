@@ -45,7 +45,14 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
     queryKey: ["ai-search", "generations"],
     queryFn: listSearchGenerations,
     refetchInterval: (query) =>
-      query.state.data?.some((generation) => generation.state === "building") ? 5000 : false,
+      query.state.data?.some(
+        (generation) =>
+          generation.state === "building" &&
+          generation.phase !== "ready" &&
+          generation.phase !== "verify_failed",
+      )
+        ? 5000
+        : false,
   });
   const downloads = useQuery({
     queryKey: ["ai-search", "downloads"],
@@ -680,11 +687,16 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {statusLabel(`aiSearch.phase.${generation.phase}`)} ·{" "}
-                  {t("aiSearch.indexProgress", {
-                    indexed: generation.indexed,
-                    total: generation.eligible,
-                  })}
+                  {statusLabel(`aiSearch.phase.${generation.phase}`)}
+                  {(generation.phase === "backfill" || generation.phase === "ready") && (
+                    <>
+                      {" · "}
+                      {t("aiSearch.indexProgress", {
+                        indexed: generation.indexed,
+                        total: generation.eligible,
+                      })}
+                    </>
+                  )}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {generation.index_dimension} · {generation.quantization} ·{" "}

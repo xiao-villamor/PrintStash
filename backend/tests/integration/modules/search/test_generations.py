@@ -1,6 +1,6 @@
 """Building, verification and cutover preserve the current serving generation."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from printstash_core.search.passages import SearchSubject, SubjectType
@@ -587,19 +587,65 @@ class TestEstimate:
         assert db_session.exec(select(IndexGeneration.id)).all() == before
         assert healthy_embeddings.requests == []
 
-    def test_reports_measured_generation_eta(self, db_session, generation_setup):
+    def test_reports_measured_generation_eta(
+        self,
+        db_session,
+        generation_setup,
+        make_model,
+        make_search_passage,
+        make_passage_vector,
+    ):
         actor, endpoint = generation_setup
         result = generations.prepare(
             db_session, actor, GenerationProposal(endpoint_id=endpoint.id)
         )
         row = db_session.get(IndexGeneration, result.id)
-        row.created_at = utcnow() - timedelta(seconds=60)
-        row.last_activity_at = row.created_at + timedelta(seconds=60)
-        row.processed = 10
+        row.created_at = datetime(2025, 1, 1)
+        row.last_activity_at = datetime(2026, 1, 1, 0, 0, 6)
+        row.processed = 4
         row.phase = "backfill"
         db_session.add(row)
         db_session.flush()
+        for index in range(5):
+            model = make_model(f"ETA part {index}")
+            passage = make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+            if index < 4:
+                make_passage_vector(
+                    row,
+                    passage=passage,
+                    created_at=datetime(2026, 1, 1, 0, 0, 2 * index),
+                )
         result = generations.read(db_session, row)
         assert result.created_at == ensure_utc(row.created_at)
         assert result.last_activity_at == ensure_utc(row.last_activity_at)
-        assert result.eta_seconds == result.eligible * 6
+        assert (result.eligible, result.indexed, result.eta_seconds) == (5, 4, 2)
+
+    @pytest.mark.parametrize("samples", [0, 1, 2, 3])
+    def test_hides_eta_without_enough_measured_vectors(
+        self,
+        db_session,
+        generation_setup,
+        make_model,
+        make_search_passage,
+        make_passage_vector,
+        samples,
+    ):
+        actor, endpoint = generation_setup
+        result = generations.prepare(
+            db_session, actor, GenerationProposal(endpoint_id=endpoint.id)
+        )
+        row = db_session.get(IndexGeneration, result.id)
+        row.processed = samples
+        row.phase = "backfill"
+        db_session.add(row)
+        for index in range(4):
+            model = make_model(f"Early ETA part {index}")
+            passage = make_search_passage(SearchSubject(SubjectType.MODEL, model.id))
+            if index < samples:
+                make_passage_vector(
+                    row,
+                    passage=passage,
+                    created_at=datetime(2026, 1, 1, 0, 0, 2 * index),
+                )
+
+        assert generations.read(db_session, row).eta_seconds is None
