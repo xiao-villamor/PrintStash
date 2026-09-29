@@ -55,7 +55,10 @@ def _load(
             failure_code="sampled_oversized_source",
         )
     if file_type == "3mf":
-        prepared = load_3mf(path)
+        prepared = load_3mf(
+            path,
+            max_faces=min(triangle_cap, mesh_processing._load_face_budget(".3mf")),
+        )
     else:
         mesh = (
             mesh_processing._load_step_mesh_isolated(path, include_brep=include_brep)

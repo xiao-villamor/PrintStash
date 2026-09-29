@@ -19,6 +19,13 @@
 ### Fixed
 
 - The Settings Maintenance heading now uses the same framed section treatment as neighboring tabs.
+- Opening the 3D viewer, converting to STL, and geometry comparison no longer
+  expand a 3MF's repeated parts before checking their size. These paths still
+  used a loader that composed every placed instance first, so a small project
+  file that places one part many times could exhaust the API's memory
+  ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). They now
+  share the bounded 3MF resource loader and the same face budget as thumbnail
+  generation; an over-budget project is refused instead.
 - Backup history disables replica retries when a run has no completed archive
   record. Its guidance now refers to that run instead of implying that existing
   backup archives have been lost.

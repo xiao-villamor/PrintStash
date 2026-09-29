@@ -318,6 +318,17 @@ def _ram_triangle_cap(suffix: str) -> Optional[int]:
     return max(int(budget / per_tri), 1)
 
 
+def _load_face_budget(suffix: str) -> int:
+    """Faces a loader may admit for *suffix*: the static, analysis and RAM ceilings.
+
+    The single answer for every path that parses a mesh into memory, so a caller
+    cannot pick a looser bound than the one the thumbnail engine enforces.
+    """
+    budget = min(int(settings.mesh_max_render_triangles), MAX_ANALYSIS_FACES)
+    ram_cap = _ram_triangle_cap(suffix)
+    return budget if ram_cap is None else min(budget, ram_cap)
+
+
 def _exceeds_cap(path: Path, *, file_type: str | None = None) -> bool:
     """True when *path* is too expensive to hand to trimesh (#24, #29).
 
@@ -559,6 +570,28 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
         return None
 
 
+def _load_3mf_mesh(path: Path, suffix: str):
+    """One `trimesh.Trimesh` for a 3MF, or None when it is invalid or over budget.
+
+    trimesh expands repeated build/component placements while it loads, so a few
+    KiB of XML can allocate for millions of faces before any post-load check runs
+    (#259). The resource loader counts the expanded faces first and bounds the XML
+    it parses, so every 3MF entry point shares that guard rather than the
+    size-based estimate, which cannot see placements.
+    """
+    from printstash_core.mesh.similarity import GeometryError
+
+    from app.modules.media.mesh_resources import load_3mf
+
+    try:
+        return load_3mf(path, max_faces=_load_face_budget(suffix)).whole_mesh
+    except GeometryError as exc:
+        logger.warning(
+            "mesh_processing: 3MF load refused for %s (%s)", path.name, exc.code
+        )
+        return None
+
+
 def _load_mesh(path: Path, *, file_type: str | None = None):
     """Return a single `trimesh.Trimesh` for *path*, or None on failure."""
     import trimesh
@@ -566,6 +599,8 @@ def _load_mesh(path: Path, *, file_type: str | None = None):
     suffix = _canonical_suffix(path, file_type)
     if suffix in (".step", ".stp"):
         return _load_step_mesh_isolated(path)
+    if suffix == ".3mf":
+        return _load_3mf_mesh(path, suffix)
 
     try:
         # Load the scene rather than asking trimesh for a mesh directly. 3MF

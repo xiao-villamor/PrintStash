@@ -1,11 +1,14 @@
 """Getting a mesh object out of a file, in whatever shape the file arrives.
 
 `_load_mesh` is the one place `trimesh` is called, and it exists to absorb the
-variety of what that call returns. A `.3mf` or `.glb` usually loads as a
+variety of what that call returns. A `.glb` or `.obj` usually loads as a
 *Scene* rather than a mesh — one geometry, or several, or none that are meshes at
 all — and every caller above this function wants a single mesh or nothing. A
 `None` here means "no thumbnail, no geometry", which is a fine outcome; an
 unhandled type means a traceback in a background scan.
+
+3MF is routed around trimesh entirely: trimesh expands repeated build/component
+placements while it loads, so 3MF goes through the bounded resource loader (#259).
 
 STEP is the exception and runs out-of-process. Tessellating a CAD file is
 unbounded work on untrusted input: a modest STEP can expand into hundreds of
@@ -93,7 +96,7 @@ class TestLoadMesh:
     ) -> None:
 
         empty_scene = trimesh.Scene()  # no geometry at all
-        p = tmp_path / "empty.3mf"
+        p = tmp_path / "empty.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: empty_scene)
         assert mesh_processing._load_mesh(p) is None
@@ -113,7 +116,7 @@ class TestLoadMesh:
             def dump(self, *_args: object, **_kwargs: object):
                 raise ValueError("component graph references a missing object")
 
-        p = tmp_path / "broken-graph.3mf"
+        p = tmp_path / "broken-graph.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: UnflattenableScene())
 
@@ -132,7 +135,7 @@ class TestLoadMesh:
         scene = trimesh.Scene()
         scene.add_geometry(trimesh.creation.box(extents=[5, 5, 5]), node_name="a")
         scene.add_geometry(trimesh.creation.box(extents=[3, 3, 3]), node_name="b")
-        p = tmp_path / "unjoinable.3mf"
+        p = tmp_path / "unjoinable.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
 
@@ -150,7 +153,7 @@ class TestLoadMesh:
         scene = trimesh.Scene()
         box = trimesh.creation.box(extents=[5, 5, 5])
         scene.add_geometry(box, node_name="a")
-        p = tmp_path / "single.3mf"
+        p = tmp_path / "single.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
         mesh = mesh_processing._load_mesh(p)

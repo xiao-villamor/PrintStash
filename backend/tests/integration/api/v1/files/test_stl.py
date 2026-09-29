@@ -21,7 +21,10 @@ from fastapi.testclient import TestClient
 
 from app.core.config import _overlay
 from app.modules.storage.storage_backend.runtime import get_backend
-from tests.fixtures.three_mf_projects import build_3d_builder_component_project
+from tests.fixtures.three_mf_projects import (
+    build_3d_builder_component_project,
+    build_instanced_project,
+)
 
 CONVERTED = b"converted-stl-bytes"
 
@@ -135,6 +138,51 @@ class TestFileAsStl:
 
         assert response.status_code == 200, response.text
         assert response.content == CONVERTED
+
+    def test_refuses_a_3mf_whose_placements_exceed_the_budget_without_trimesh(
+        self,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+        make_model,
+        make_file,
+        remove_blob,
+    ) -> None:
+        """#259: the viewer route must not expand placements in the API process.
+
+        The file is a few KiB, so the size estimate admits it; only the resource
+        loader's expanded-face count sees 3,600 faces against a 1,000-face budget.
+        The viewer is the one place a user can trigger this on demand, so it has
+        to answer with an error rather than hand the file to trimesh.
+        """
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        scene_loads: list[str] = []
+        monkeypatch.setattr(
+            trimesh,
+            "load_scene",
+            lambda *a, **k: scene_loads.append("called") or trimesh.Scene(),
+        )
+        model = make_model("stl-instanced")
+        key = "instanced.3mf"
+        payload = build_instanced_project(300)
+        get_backend().write_bytes(payload, key)
+        sha = hashlib.sha256(payload).hexdigest()
+        row = make_file(
+            model,
+            filename="instanced.3mf",
+            ftype="3mf",
+            path=key,
+            sha256=sha,
+            size_bytes=len(payload),
+        )
+        remove_blob(get_backend().stl_cache_key(sha))
+
+        response = client.get(f"/api/v1/files/{row.id}/stl", headers=auth_headers)
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "stl_conversion_failed"
+        assert scene_loads == []
 
     def test_denies_conversion_before_materialization_when_headroom_is_unavailable(
         self,

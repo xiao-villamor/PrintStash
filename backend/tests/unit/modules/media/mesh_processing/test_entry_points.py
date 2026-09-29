@@ -43,7 +43,10 @@ import trimesh
 from app.core.config import _overlay
 from app.modules.media import mesh_processing, mesh_render
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
-from tests.fixtures.three_mf_projects import build_3d_builder_component_project
+from tests.fixtures.three_mf_projects import (
+    build_3d_builder_component_project,
+    build_instanced_project,
+)
 
 from .._meshes import (
     _fake_mesh,
@@ -559,6 +562,23 @@ class TestRenderThumbnail:
         assert analyze(p, include_geometry=False, reason="repair").image is None
 
 
+def _forbid_trimesh_scene_load(monkeypatch) -> list[str]:
+    """Record every `trimesh.load_scene` call instead of raising from it.
+
+    `_load_mesh` swallows exceptions and answers `None`, so a stub that raises
+    makes "the guard refused" and "the unbounded loader ran and failed" look the
+    same. A recorded call cannot be mistaken for a refusal.
+    """
+    calls: list[str] = []
+
+    def record(*args, **kwargs):
+        calls.append(str(args[0]) if args else "")
+        raise RuntimeError("unbounded trimesh scene load")
+
+    monkeypatch.setattr(trimesh, "load_scene", record)
+    return calls
+
+
 class TestToStlBytes:
     def test_to_stl_bytes_refuses_over_cap_mesh(
         self, tmp_path: Path, monkeypatch
@@ -608,6 +628,52 @@ class TestToStlBytes:
             np.asarray([[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]),
             atol=1e-5,
         )
+
+    def test_to_stl_bytes_refuses_a_3mf_whose_placements_exceed_the_budget(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """#259: the byte-size estimate cannot see repeated component placements.
+
+        300 placements of a 12-triangle part is ~20 KiB of XML, which the size
+        estimate prices at ~300 triangles — far under the cap — while the
+        expanded scene is 3,600. trimesh expands placements while it loads, so
+        the guard has to be the resource loader, which counts the expanded faces
+        before it composes anything. The viewer route reaches this function.
+        """
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        path = tmp_path / "instanced.3mf"
+        path.write_bytes(build_instanced_project(300))
+        assert not mesh_processing._exceeds_cap(path)  # the estimate is fooled
+        scene_loads = _forbid_trimesh_scene_load(monkeypatch)
+
+        assert mesh_processing.to_stl_bytes(path) is None
+        assert scene_loads == []
+
+    def test_extract_geometry_refuses_a_3mf_whose_placements_exceed_the_budget(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        path = tmp_path / "instanced.3mf"
+        path.write_bytes(build_instanced_project(300))
+        scene_loads = _forbid_trimesh_scene_load(monkeypatch)
+
+        assert mesh_processing.extract_geometry(path)["triangle_count"] is None
+        assert scene_loads == []
+
+    def test_to_stl_bytes_converts_an_instanced_3mf_inside_the_budget(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        path = tmp_path / "few.3mf"
+        path.write_bytes(build_instanced_project(10))
+        scene_loads = _forbid_trimesh_scene_load(monkeypatch)
+
+        converted = mesh_processing.to_stl_bytes(path)
+
+        assert converted is not None
+        mesh = trimesh.load_mesh(io.BytesIO(converted), file_type="stl", process=False)
+        assert len(mesh.faces) == 120
+        assert scene_loads == []
 
     def test_to_stl_bytes_fails_closed_on_a_3mf_it_cannot_open(
         self, tmp_path: Path

@@ -192,13 +192,7 @@ class ThumbnailEngine:
                             # process before the post-load face cap runs (#259).
                             # The resource loader counts expanded faces before
                             # composing a mesh and bounds XML parsing too.
-                            face_cap = min(
-                                settings.mesh_max_render_triangles,
-                                MAX_ANALYSIS_FACES,
-                            )
-                            ram_cap = mesh_processing._ram_triangle_cap(suffix)
-                            if ram_cap is not None:
-                                face_cap = min(face_cap, ram_cap)
+                            face_cap = mesh_processing._load_face_budget(suffix)
                             if request.include_fingerprint:
                                 face_cap = min(face_cap, request.triangle_cap)
                             try:

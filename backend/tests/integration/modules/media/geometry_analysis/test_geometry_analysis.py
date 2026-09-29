@@ -5,8 +5,9 @@ import pytest
 import trimesh
 from printstash_core.mesh.similarity import GeometryError
 
-from app.modules.media import geometry_analysis
+from app.modules.media import geometry_analysis, mesh_resources
 from tests.factories.geometry import tetrahedron
+from tests.fixtures.three_mf_projects import build_instanced_project
 
 
 @pytest.fixture
@@ -101,6 +102,33 @@ class TestVerifyPaths:
             geometry_analysis.verify_paths(
                 path, path, first_type="obj", second_type="obj", triangle_cap=100
             )
+
+    def test_bounds_a_3mf_by_the_callers_cap_before_composing_the_scene(
+        self, tmp_path, monkeypatch
+    ):
+        """The cap is a load budget, not only a check on the finished mesh.
+
+        300 placements of a 12-face part is 3,600 faces from a few KiB of XML, so
+        the size estimate admits it. Loading against the global analysis ceiling
+        instead of the caller's cap composed every placement and only then found
+        it over budget (#259).
+        """
+        composed = []
+        real = mesh_resources.compose_scene
+        monkeypatch.setattr(
+            mesh_resources,
+            "compose_scene",
+            lambda scene: composed.append(scene) or real(scene),
+        )
+        path = tmp_path / "instanced.3mf"
+        path.write_bytes(build_instanced_project(300))
+
+        with pytest.raises(GeometryError, match="scene_resource_limit"):
+            geometry_analysis.verify_paths(
+                path, path, first_type="3mf", second_type="3mf", triangle_cap=1000
+            )
+
+        assert composed == []
 
 
 class TestEmbeddingViews:
