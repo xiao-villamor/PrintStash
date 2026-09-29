@@ -25,6 +25,7 @@ from app.db.models import (
     Model,
     User,
 )
+from tests import factories
 
 
 @pytest.fixture
@@ -83,13 +84,22 @@ def make_file(db_session: Session):
 
 @pytest.fixture
 def make_collection(db_session: Session):
-    def build(name: str, *, path: str | None = None, **overrides: Any) -> Collection:
-        slug = overrides.pop("slug", name.lower().replace(" ", "-"))
-        row = Collection(name=name, slug=slug, path=path or slug, **overrides)
-        db_session.add(row)
-        db_session.commit()
-        db_session.refresh(row)
-        return row
+    """The factory's builder, plus an explicit ``path`` for callers that pin one.
+
+    It used to construct the row itself and silently ignored ``parent=``,
+    leaving a child whose path claimed it was a root.
+    """
+
+    def build(
+        name: str,
+        *,
+        path: str | None = None,
+        parent: Collection | None = None,
+        **overrides: Any,
+    ) -> Collection:
+        if path is not None:
+            overrides["path"] = path
+        return factories.build_collection(db_session, name, parent=parent, **overrides)
 
     return build
 

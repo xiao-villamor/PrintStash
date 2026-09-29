@@ -108,6 +108,20 @@ class TestListCollectionChildren:
 
         assert response.json()["items"][0]["child_count"] == 2, response.text
 
+    def test_counts_every_collection_nested_at_any_depth_below(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+    ) -> None:
+        parts = make_collection("Parts")
+        brackets = make_collection("Brackets", parent=parts)
+        make_collection("Small", parent=brackets)
+
+        response = client.get(CHILDREN, headers=auth_headers)
+
+        assert response.json()["items"][0]["descendant_count"] == 2, response.text
+
     def test_labels_a_child_with_its_ancestors_names(
         self,
         client: TestClient,

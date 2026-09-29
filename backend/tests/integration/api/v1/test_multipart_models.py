@@ -1014,6 +1014,20 @@ class TestMultipartModels:
         assert response.status_code == 403
         assert response.json()["detail"] == "collection_permission_denied"
 
+    def test_labels_a_listed_set_with_its_collections_names(
+        self, client, auth_headers, make_collection, make_multipart_model
+    ) -> None:
+        parts = make_collection("Parts")
+        make_multipart_model(
+            "Kit", collection=make_collection("Wall Kits", parent=parts)
+        )
+
+        response = client.get("/api/v1/multipart-models", headers=auth_headers)
+
+        assert response.json()[0]["collection_label"] == "Parts/Wall Kits", (
+            response.text
+        )
+
     def test_user_without_collection_access_sees_no_aggregates_or_candidates(
         self, client, auth_headers, make_collection, make_user, headers_for
     ) -> None:

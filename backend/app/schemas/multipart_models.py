@@ -18,6 +18,8 @@ class MultipartModelListItem(BaseModel):
     description: Optional[str] = None
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
     part_count: int = 0
     model_count: int = 0
     guide_count: int = 0

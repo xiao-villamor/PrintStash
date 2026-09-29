@@ -245,6 +245,8 @@ class ModelListItem(BaseModel):
     slug: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
     source_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     tags: List[str] = []
@@ -284,6 +286,8 @@ class OutlinerModelRead(BaseModel):
     name: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
 
 
 class ModelFilters(BaseModel):
@@ -588,12 +592,15 @@ class CollectionRead(BaseModel):
 class CollectionNodeRead(CollectionRead):
     """One collection in the lazily loaded tree.
 
-    ``model_count`` covers the whole subtree. ``display_path`` joins the names of
+    ``model_count`` covers the whole subtree, as ``descendant_count`` does for
+    collections. ``display_path`` joins the names of
     the ancestors the caller can see, so a row can be labelled without the tree
     above it having been loaded.
     """
 
     child_count: int
+    # Every collection below this one, at any depth.
+    descendant_count: int
     display_path: str
 
 

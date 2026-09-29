@@ -19,10 +19,10 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import Model
+from app.db.models import CollectionRole, Model
 from tests.factories import build_model
 
-OUTLINER_FIELDS = {"id", "name", "collection", "collection_id"}
+OUTLINER_FIELDS = {"id", "name", "collection", "collection_id", "collection_label"}
 PRINTER_FILTERS = [
     pytest.param({"printer_id": 1}, id="printer_id"),
     pytest.param({"printer_presence": "any"}, id="printer_presence"),
@@ -205,6 +205,45 @@ class TestPageModels:
         assert response.status_code == 400, response.text
         assert response.json()["detail"] == "invalid_model_cursor"
 
+    def test_labels_an_item_with_its_collections_names(
+        self, client: TestClient, auth_headers, make_collection, make_model
+    ) -> None:
+        parts = make_collection("Parts")
+        make_model(
+            "Labelled", collection=make_collection("Wall Brackets", parent=parts)
+        )
+
+        response = client.get("/api/v1/models/page", headers=auth_headers)
+
+        assert response.json()["items"][0]["collection_label"] == "Parts/Wall Brackets"
+
+    def test_leaves_an_item_outside_any_collection_unlabelled(
+        self, client: TestClient, auth_headers, make_model
+    ) -> None:
+        make_model("Loose")
+
+        response = client.get("/api/v1/models/page", headers=auth_headers)
+
+        assert response.json()["items"][0]["collection_label"] is None
+
+    def test_labels_a_viewers_item_without_ancestors_above_the_grant(
+        self,
+        client: TestClient,
+        make_collection,
+        make_model,
+        make_user,
+        grant_role,
+        headers_for,
+    ) -> None:
+        brackets = make_collection("Brackets", parent=make_collection("Parts"))
+        make_model("Shared", collection=brackets)
+        viewer = make_user("label-reader")
+        grant_role(viewer, brackets, CollectionRole.VIEW)
+
+        response = client.get("/api/v1/models/page", headers=headers_for(viewer))
+
+        assert response.json()["items"][0]["collection_label"] == "Brackets"
+
     def test_rejects_a_limit_past_the_cap(
         self, client: TestClient, auth_headers
     ) -> None:
@@ -253,7 +292,7 @@ class TestOutlinerModels:
         assert response.status_code == 200, response.text
         assert row.id in {item["id"] for item in response.json()}
 
-    def test_returns_only_the_four_fields_the_tree_needs(
+    def test_returns_only_the_fields_the_tree_needs(
         self, client: TestClient, auth_headers, make_model
     ) -> None:
         row = make_model("Outliner Leaf")
@@ -263,6 +302,16 @@ class TestOutlinerModels:
         # This feeds a tree of thousands of leaves; anything more is bytes wasted.
         leaf = next(item for item in response.json() if item["id"] == row.id)
         assert set(leaf) == OUTLINER_FIELDS
+
+    def test_labels_a_leaf_with_its_collections_names(
+        self, client: TestClient, auth_headers, make_collection, make_model
+    ) -> None:
+        parts = make_collection("Parts")
+        make_model("Leaf", collection=make_collection("Wall Brackets", parent=parts))
+
+        response = client.get("/api/v1/models/outliner", headers=auth_headers)
+
+        assert response.json()[0]["collection_label"] == "Parts/Wall Brackets"
 
     @pytest.mark.parametrize("query", PRINTER_FILTERS)
     def test_refuses_a_printer_filter_from_an_ordinary_user(

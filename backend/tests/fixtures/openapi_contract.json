@@ -3416,10 +3416,14 @@
         "type": "object"
       },
       "CollectionNodeRead": {
-        "description": "One collection in the lazily loaded tree.\n\n``model_count`` covers the whole subtree. ``display_path`` joins the names of\nthe ancestors the caller can see, so a row can be labelled without the tree\nabove it having been loaded.",
+        "description": "One collection in the lazily loaded tree.\n\n``model_count`` covers the whole subtree, as ``descendant_count`` does for\ncollections. ``display_path`` joins the names of\nthe ancestors the caller can see, so a row can be labelled without the tree\nabove it having been loaded.",
         "properties": {
           "child_count": {
             "title": "Child Count",
+            "type": "integer"
+          },
+          "descendant_count": {
+            "title": "Descendant Count",
             "type": "integer"
           },
           "display_path": {
@@ -3488,6 +3492,7 @@
           "slug",
           "path",
           "child_count",
+          "descendant_count",
           "display_path"
         ],
         "title": "CollectionNodeRead",
@@ -9665,6 +9670,17 @@
             ],
             "title": "Collection Id"
           },
+          "collection_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Label"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -10775,6 +10791,17 @@
             ],
             "title": "Collection Id"
           },
+          "collection_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Label"
+          },
           "cover_image_uploaded": {
             "default": false,
             "title": "Cover Image Uploaded",
@@ -10918,6 +10945,17 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "collection_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Label"
           },
           "cover_image_uploaded": {
             "default": false,
@@ -11790,6 +11828,17 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "collection_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Label"
           },
           "id": {
             "title": "Id",

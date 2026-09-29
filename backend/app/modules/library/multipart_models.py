@@ -33,6 +33,7 @@ from app.db.models import (
 from app.db.projections import content_changed
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.modules.library import collection_tree
 from app.schemas.documents import DocumentListItem
 from app.schemas.multipart_models import (
     MultipartChoiceWrite,
@@ -275,8 +276,11 @@ def _list_item(
     aggregate: MultipartModel,
     *,
     starred: bool,
+    labels: dict[str, str],
 ) -> MultipartModelListItem:
+    """One list row; *labels* are the page's collection labels, resolved once."""
     parts, model_count = _parts(session, user, int(aggregate.id))
+    collection = _collection_path(session, aggregate.collection_id)
     readable_members = [
         member for part in parts for member in part.models if member.available
     ]
@@ -298,8 +302,9 @@ def _list_item(
         name=aggregate.name,
         slug=aggregate.slug,
         description=aggregate.description,
-        collection=_collection_path(session, aggregate.collection_id),
+        collection=collection,
         collection_id=aggregate.collection_id,
+        collection_label=labels.get(collection) if collection is not None else None,
         part_count=len(parts),
         model_count=model_count,
         guide_count=len(guides),
@@ -336,6 +341,9 @@ def read(session: Session, user: User, aggregate: MultipartModel) -> MultipartMo
         user,
         aggregate,
         starred=int(aggregate.id) in _starred_ids(session, user, [int(aggregate.id)]),
+        labels=collection_tree.collection_labels(
+            session, user, [_collection_path(session, aggregate.collection_id)]
+        ),
     )
     parts, _ = _parts(session, user, int(aggregate.id))
     return MultipartModelRead(
@@ -412,8 +420,12 @@ def list_visible(
     ).all()
     row_ids = [int(row.id) for row in rows if row.id is not None]
     starred = _starred_ids(session, user, row_ids)
+    labels = collection_tree.collection_labels(
+        session, user, (_collection_path(session, row.collection_id) for row in rows)
+    )
     return [
-        _list_item(session, user, row, starred=int(row.id) in starred) for row in rows
+        _list_item(session, user, row, starred=int(row.id) in starred, labels=labels)
+        for row in rows
     ]
 
 

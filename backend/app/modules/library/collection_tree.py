@@ -18,7 +18,7 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy import select as sa_select
@@ -112,10 +112,16 @@ def _prefixes(path: str) -> list[str]:
     return ["/".join(parts[: index + 1]) for index in range(len(parts))]
 
 
-def _subtree_model_counts(
+@dataclass(frozen=True)
+class _Subtree:
+    models: int
+    collections: int
+
+
+def _subtree_counts(
     session: Session, rows: Sequence[_Row], visible: SelectOfScalar[int]
-) -> dict[str, int]:
-    """Live Models in each row's subtree, keyed by path, counted in SQL.
+) -> dict[str, _Subtree]:
+    """Live Models and collections below each row, keyed by path, counted in SQL.
 
     One grouped join returns a row per page item, however large its subtree:
     materialising a root's 25,000 descendants in Python to roll them up cost
@@ -139,12 +145,18 @@ def _subtree_model_counts(
         .group_by(Model.collection_id)
         .subquery()
     )
-    counts = dict(
-        session.execute(
-            sa_select(page.path, func.sum(direct.c.models))
+    counts = {
+        path: _Subtree(models=int(models), collections=int(collections) - 1)
+        for path, models, collections in session.execute(
+            sa_select(
+                page.path,
+                func.coalesce(func.sum(direct.c.models), 0),
+                # The row itself is in its own subtree; the rest are below it.
+                func.count(below.id),
+            )
             .select_from(page)
             .join(below, in_subtree)
-            .join(direct, direct.c.collection_id == below.id)
+            .outerjoin(direct, direct.c.collection_id == below.id)
             .where(
                 page.id.in_([row.id for row in rows]),
                 live(below),
@@ -152,8 +164,8 @@ def _subtree_model_counts(
             )
             .group_by(page.path)
         ).all()
-    )
-    return {row.path: counts.get(row.path, 0) for row in rows}
+    }
+    return {row.path: counts[row.path] for row in rows}
 
 
 def _child_counts(session: Session, ids: list[int]) -> dict[int, int]:
@@ -186,32 +198,59 @@ def collection_tags(
     return result
 
 
-def _display_paths(
-    session: Session, rows: Sequence[_Row], visible: SelectOfScalar[int]
+def _labels(
+    session: Session, paths: Iterable[str], visible: SelectOfScalar[int]
 ) -> dict[str, str]:
-    """Each row's visible ancestry as names, root first: ``Parts/Brackets``.
+    """Each path's visible ancestry as names, root first: ``Parts/Brackets``.
 
     Ancestors above what the caller can see are left out, as the tree leaves
-    them out.
+    them out. One query binding only the paths asked for: each path's ancestors
+    are found by the same prefix test the subtree counts use, so a deeper tree
+    does not mean more parameters.
     """
-    prefixes = sorted({prefix for row in rows for prefix in _prefixes(row.path)})
-    if not prefixes:
+    wanted = sorted(set(paths))
+    if not wanted:
         return {}
-    names = dict(
-        session.execute(
-            sa_select(Collection.path, Collection.name).where(
-                live(Collection),
-                Collection.id.in_(visible),  # type: ignore[union-attr]
-                Collection.path.in_(prefixes),  # type: ignore[union-attr]
-            )
-        ).all()
+    target = aliased(Collection)
+    ancestor = aliased(Collection)
+    is_ancestor = or_(
+        ancestor.path == target.path,
+        func.substr(target.path, 1, func.length(ancestor.path) + 1)
+        == ancestor.path + "/",
     )
-    return {
-        row.path: "/".join(
-            names[prefix] for prefix in _prefixes(row.path) if prefix in names
+    chains: dict[str, list[tuple[str, str]]] = {}
+    for path, ancestor_path, name in session.execute(
+        sa_select(target.path, ancestor.path, ancestor.name)
+        .select_from(target)
+        .join(ancestor, is_ancestor)
+        .where(
+            target.path.in_(wanted),
+            live(ancestor),
+            ancestor.id.in_(visible),
         )
-        for row in rows
+    ).all():
+        chains.setdefault(path, []).append((ancestor_path, name))
+    return {
+        path: "/".join(
+            name for _, name in sorted(chains.get(path, []), key=lambda a: len(a[0]))
+        )
+        for path in wanted
     }
+
+
+def collection_labels(
+    session: Session, user: User, paths: Iterable[str | None]
+) -> dict[str, str]:
+    """Labels for the collections a page of items sits in, keyed by path.
+
+    Lets a card name its folder (``Parts/Brackets``) without the client holding
+    the whole tree. Items outside any collection have no label.
+    """
+    return _labels(
+        session,
+        (path for path in paths if path is not None),
+        rbac.accessible_collection_ids_stmt(session, user),
+    )
 
 
 def _nodes(
@@ -221,13 +260,13 @@ def _nodes(
     visible: SelectOfScalar[int],
 ) -> list[CollectionNodeRead]:
     ids = [row.id for row in rows]
-    totals = _subtree_model_counts(session, rows, visible)
+    subtrees = _subtree_counts(session, rows, visible)
     children = _child_counts(session, ids) if ids else {}
     roles = rbac.effective_roles_for_paths(
         session, user, ((row.id, row.path) for row in rows)
     )
     tags = collection_tags(session, ids) if ids else {}
-    display = _display_paths(session, rows, visible)
+    display = _labels(session, (row.path for row in rows), visible)
     return [
         CollectionNodeRead(
             id=row.id,
@@ -235,11 +274,12 @@ def _nodes(
             slug=row.slug,
             path=row.path,
             parent_id=row.parent_id,
-            model_count=totals[row.path],
+            model_count=subtrees[row.path].models,
             effective_role=roles[row.id],
             tags=tags.get(row.id, []),
             has_readme=row.has_readme,
             child_count=children.get(row.id, 0),
+            descendant_count=subtrees[row.path].collections,
             display_path=display[row.path],
         )
         for row in rows

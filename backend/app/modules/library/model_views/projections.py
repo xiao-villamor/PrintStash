@@ -29,6 +29,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.modules.library import collection_tree
 from app.modules.printing.costing import (
     cost_profiles,
     match_cost_profile,
@@ -276,6 +277,9 @@ def _hydrate_list_rows(
     roles = rbac.effective_roles_for_collections(
         session, user, (m.collection_id for m in rows)
     )
+    labels = collection_tree.collection_labels(
+        session, user, (collection_name_for(m) for m in rows)
+    )
     out: list[ModelListItem] = []
     for model in rows:
         assert model.id is not None
@@ -288,6 +292,7 @@ def _hydrate_list_rows(
                 slug=model.slug,
                 collection=collection_name_for(model),
                 collection_id=model.collection_id,
+                collection_label=labels.get(collection_name_for(model) or ""),
                 source_url=model.source_url,
                 effective_role=roles.get(model.collection_id),
                 tags=sorted(tag.name for tag in model.tags),

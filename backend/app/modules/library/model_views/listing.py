@@ -11,6 +11,7 @@ from app.db.models import (
     Model,
     User,
 )
+from app.modules.library import collection_tree
 from app.schemas.models import (
     ModelFilters,
     ModelListItem,
@@ -101,12 +102,16 @@ def outliner_items(
         .order_by(func.lower(Model.name).asc(), Model.id.asc())  # type: ignore[attr-defined]
         .limit(limit)
     ).all()
+    labels = collection_tree.collection_labels(
+        session, user, (collection_name_for(model) for model in rows)
+    )
     return [
         OutlinerModelRead(
             id=model.id,
             name=model.name,
             collection=collection_name_for(model),
             collection_id=model.collection_id,
+            collection_label=labels.get(collection_name_for(model) or ""),
         )
         for model in rows
     ]
