@@ -53,6 +53,11 @@
 
 ### Performance
 
+- **3MF geometry loads about 1.6 times faster.** The bounded 3MF loader read
+  every vertex and triangle attribute with a Python call per value; it now
+  hands each column to NumPy in one pass. A 320,000-face project went from
+  3.1 s to 1.9 s. Memory use is unchanged, and malformed attributes are still
+  refused as an invalid package.
 - **Large libraries load their collection tree in about a second.** A library
   with 9,000 collections and 40,000 Models took over a minute to show its
   sidebar, because each collection's model count was checked against every

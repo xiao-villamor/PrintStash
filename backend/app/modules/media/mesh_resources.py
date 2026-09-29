@@ -63,6 +63,37 @@ def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
     )
 
 
+_NAMESPACES = {"c": CORE_NS}
+
+
+def _count(mesh: Any, path: str) -> int:
+    """Child count computed inside libxml2, without an element proxy per child."""
+    return int(mesh.xpath(f"count({path})", namespaces=_NAMESPACES))
+
+
+def _attribute_columns(
+    mesh: Any, path: str, names: tuple[str, ...], dtype: Any, count: int
+) -> Any:
+    """Read ``names`` from every ``path`` element as a ``(count, len(names))`` array.
+
+    One XPath per attribute hands NumPy a flat list of strings that it converts in
+    C, instead of a Python ``float(node.attrib[key])`` per coordinate. An element
+    that lacks one of the attributes makes that column short, which is refused
+    here rather than silently shifting every later row.
+    """
+    import numpy as np
+
+    columns = []
+    for name in names:
+        values = mesh.xpath(
+            f"{path}/@{name}", namespaces=_NAMESPACES, smart_strings=False
+        )
+        if len(values) != count:
+            raise GeometryError("invalid_3mf")
+        columns.append(values)
+    return np.array(columns, dtype=dtype).T.copy()
+
+
 def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh:
     """Parse bounded XML resources once; never flatten away resource placement.
 
@@ -171,39 +202,32 @@ def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh
                         resource_id = f"{name}#{_object_id(obj.get('id'))}"
                         mesh = obj.find(f"{{{CORE_NS}}}mesh")
                         if mesh is not None:
-                            nodes = mesh.findall(
-                                f"{{{CORE_NS}}}vertices/{{{CORE_NS}}}vertex"
-                            )
-                            triangles = mesh.findall(
-                                f"{{{CORE_NS}}}triangles/{{{CORE_NS}}}triangle"
-                            )
-                            total_vertices += len(nodes)
-                            total_faces += len(triangles)
+                            vertex_count = _count(mesh, "c:vertices/c:vertex")
+                            triangle_count = _count(mesh, "c:triangles/c:triangle")
+                            total_vertices += vertex_count
+                            total_faces += triangle_count
                             if (
                                 total_faces > max_faces
                                 or total_vertices > MAX_ANALYSIS_VERTICES
                             ):
                                 raise GeometryError("resource_limit")
                             vertices = (
-                                np.array(
-                                    [
-                                        [
-                                            float(node.attrib[key])
-                                            for key in ("x", "y", "z")
-                                        ]
-                                        for node in nodes
-                                    ],
-                                    dtype=np.float64,
-                                ).reshape((-1, 3))
+                                _attribute_columns(
+                                    mesh,
+                                    "c:vertices/c:vertex",
+                                    ("x", "y", "z"),
+                                    np.float64,
+                                    vertex_count,
+                                )
                                 * unit
                             )
-                            faces = np.array(
-                                [
-                                    [int(tri.attrib[key]) for key in ("v1", "v2", "v3")]
-                                    for tri in triangles
-                                ],
-                                dtype=np.int64,
-                            ).reshape((-1, 3))
+                            faces = _attribute_columns(
+                                mesh,
+                                "c:triangles/c:triangle",
+                                ("v1", "v2", "v3"),
+                                np.int64,
+                                triangle_count,
+                            )
                             objects.append(MeshResource(resource_id, vertices, faces))
                         else:
                             children = obj.findall(

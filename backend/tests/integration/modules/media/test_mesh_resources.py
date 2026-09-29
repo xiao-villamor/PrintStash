@@ -201,3 +201,128 @@ class TestProductionResources:
         )
         with pytest.raises(GeometryError, match="invalid_resource_path"):
             load_3mf(path)
+
+
+_CORE_OPEN = (
+    b'<?xml version="1.0" encoding="UTF-8"?>'
+    b'<model unit="%s" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+    b"<resources>"
+)
+_CORE_CLOSE = b'</resources><build><item objectid="1"/></build></model>'
+
+
+def _raw_mesh_3mf(vertices: bytes, triangles: bytes, *, unit: bytes = b"millimeter"):
+    """A one-object 3MF whose vertex and triangle XML is written by hand.
+
+    The factory in `tests.factories.geometry` only emits well-formed numbers, so
+    the attribute-level cases (whitespace, a missing coordinate, a float where an
+    index belongs) need the XML spelled out.
+    """
+    model = (
+        _CORE_OPEN % unit
+        + b'<object id="1" type="model"><mesh><vertices>'
+        + vertices
+        + b"</vertices><triangles>"
+        + triangles
+        + b"</triangles></mesh></object>"
+        + _CORE_CLOSE
+    )
+    return content.zip_bytes({"3D/3dmodel.model": model})
+
+
+_TRIANGLE = b'<triangle v1="0" v2="1" v3="2"/>'
+_VERTICES = (
+    b'<vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/>'
+    b'<vertex x="0" y="2" z="0.5"/>'
+)
+
+
+class TestMeshAttributeParsing:
+    def test_reads_exact_coordinates_and_indices_in_document_order(self, tmp_path):
+        path = tmp_path / "exact.3mf"
+        path.write_bytes(_raw_mesh_3mf(_VERTICES, _TRIANGLE, unit=b"centimeter"))
+
+        mesh = load_3mf(path).whole_mesh
+
+        np.testing.assert_array_equal(
+            mesh.vertices, np.array([[0, 0, 0], [10, 0, 0], [0, 20, 5]], dtype=float)
+        )
+        np.testing.assert_array_equal(mesh.faces, [[0, 1, 2]])
+
+    def test_accepts_padded_numbers_and_exponents(self, tmp_path):
+        path = tmp_path / "padded.3mf"
+        vertices = (
+            b'<vertex x=" 1.5 " y="-2e1" z="3"/><vertex x="0" y="0" z="0"/>'
+            b'<vertex x="1" y="1" z="1"/>'
+        )
+        path.write_bytes(_raw_mesh_3mf(vertices, b'<triangle v1=" 0" v2="1 " v3="2"/>'))
+
+        mesh = load_3mf(path).whole_mesh
+
+        np.testing.assert_array_equal(mesh.vertices[0], [1.5, -20.0, 3.0])
+        np.testing.assert_array_equal(mesh.faces, [[0, 1, 2]])
+
+    def test_reads_every_object_mesh_of_a_multi_object_package(self, tmp_path):
+        path = tmp_path / "two.3mf"
+        one = (
+            b'<object id="%d" type="model"><mesh><vertices>'
+            + _VERTICES
+            + b"</vertices>"
+            b"<triangles>" + _TRIANGLE + b"</triangles></mesh></object>"
+        )
+        model = (
+            _CORE_OPEN % b"millimeter"
+            + one % 1
+            + one % 2
+            + b'</resources><build><item objectid="1"/><item objectid="2"/></build></model>'
+        )
+        path.write_bytes(content.zip_bytes({"3D/3dmodel.model": model}))
+
+        prepared = load_3mf(path)
+
+        assert len(prepared.scene.instances) == 2
+        assert len(prepared.whole_mesh.faces) == 2
+
+    @pytest.mark.parametrize(
+        "vertices,triangles",
+        [
+            (_VERTICES.replace(b' z="0.5"', b"", 1), _TRIANGLE),
+            (_VERTICES.replace(b'x="1"', b'x="one"', 1), _TRIANGLE),
+            (_VERTICES, b'<triangle v1="0" v2="1"/>'),
+            (_VERTICES, b'<triangle v1="0" v2="1" v3="1.5"/>'),
+            (_VERTICES, b'<triangle v1="0" v2="1" v3="two"/>'),
+        ],
+        ids=[
+            "vertex-missing-z",
+            "vertex-non-numeric",
+            "triangle-missing-v3",
+            "triangle-float-index",
+            "triangle-non-numeric",
+        ],
+    )
+    def test_refuses_a_malformed_attribute_as_an_invalid_package(
+        self, tmp_path, vertices, triangles
+    ):
+        path = tmp_path / "bad.3mf"
+        path.write_bytes(_raw_mesh_3mf(vertices, triangles))
+
+        with pytest.raises(GeometryError, match="invalid_3mf"):
+            load_3mf(path)
+
+    def test_refuses_a_non_finite_coordinate(self, tmp_path):
+        path = tmp_path / "nan.3mf"
+        path.write_bytes(
+            _raw_mesh_3mf(_VERTICES.replace(b'y="2"', b'y="nan"', 1), _TRIANGLE)
+        )
+
+        with pytest.raises(GeometryError, match="nonfinite_geometry"):
+            load_3mf(path)
+
+    def test_a_mesh_without_triangles_is_refused_as_a_degenerate_surface(
+        self, tmp_path
+    ):
+        path = tmp_path / "flat.3mf"
+        path.write_bytes(_raw_mesh_3mf(_VERTICES, b""))
+
+        with pytest.raises(GeometryError, match="degenerate_surface"):
+            load_3mf(path)
