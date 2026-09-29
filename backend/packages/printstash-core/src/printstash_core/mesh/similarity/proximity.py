@@ -25,29 +25,59 @@ if TYPE_CHECKING:
 class _Node:
     low: Array
     high: Array
-    indices: Indices | None
+    geometry: _TriangleGeometry | None
     left: _Node | None = None
     right: _Node | None = None
+
+
+@dataclass(frozen=True)
+class _TriangleGeometry:
+    vertices: Array
+    ab: Array
+    ac: Array
+    normal: Array
+    normal_square: Array
+    d00: Array
+    d01: Array
+    d11: Array
+
+
+def _prepare_triangles(triangles: Array) -> _TriangleGeometry:
+    import numpy as np
+
+    a, b, c = (triangles[:, index] for index in range(3))
+    ab, ac = b - a, c - a
+    normal = np.cross(ab, ac)
+    return _TriangleGeometry(
+        triangles,
+        ab,
+        ac,
+        normal,
+        np.einsum("ij,ij->i", normal, normal),
+        np.einsum("ij,ij->i", ab, ab),
+        np.einsum("ij,ij->i", ab, ac),
+        np.einsum("ij,ij->i", ac, ac),
+    )
 
 
 class SurfaceProximity:
     def __init__(self, surface: Surface):
         import numpy as np
 
-        self.triangles = surface.vertices[surface.faces]
-        low, high = self.triangles.min(axis=1), self.triangles.max(axis=1)
+        triangles = surface.vertices[surface.faces]
+        low, high = triangles.min(axis=1), triangles.max(axis=1)
         centers = (low + high) / 2
 
         def build(indices: Indices) -> _Node:
             lo, hi = low[indices].min(axis=0), high[indices].max(axis=0)
             if len(indices) <= 32:
-                return _Node(lo, hi, indices)
+                return _Node(lo, hi, _prepare_triangles(triangles[indices]))
             axis = int(np.argmax(np.ptp(centers[indices], axis=0)))
             order = indices[np.argsort(centers[indices, axis], kind="stable")]
             middle = len(order) // 2
             return _Node(lo, hi, None, build(order[:middle]), build(order[middle:]))
 
-        self.root = build(np.arange(len(self.triangles)))
+        self.root = build(np.arange(len(triangles)))
 
     def closest(
         self, points: Array, *, max_work: int = 32_000_000
@@ -67,7 +97,7 @@ class SurfaceProximity:
         nearest = np.empty_like(points, dtype=np.float64)
         ids = np.arange(len(points))
         stack = [(self.root, ids, False)]
-        if self.root.indices is None:
+        if self.root.geometry is None:
             # First establish a real distance upper bound from one nearby leaf
             # per point. Starting every point at infinity made a left-first walk
             # test distant triangles before reaching its own region of the mesh.
@@ -82,7 +112,7 @@ class SurfaceProximity:
             ids = ids[np.einsum("ij,ij->i", delta, delta) <= best[ids] + 1e-20]
             if not len(ids):
                 continue
-            if node.indices is None:
+            if node.geometry is None:
                 assert node.left is not None and node.right is not None
                 if seed:
                     left_delta = np.maximum(
@@ -109,33 +139,31 @@ class SurfaceProximity:
                 else:
                     stack.extend(((node.right, ids, False), (node.left, ids, False)))
                 continue
-            work += len(ids) * len(node.indices)
+            work += len(ids) * len(node.geometry.vertices)
             if work > max_work:
                 raise GeometryError("proximity_work_limit")
-            triangles = self.triangles[node.indices]
             for start in range(0, len(ids), 128):
                 subset = ids[start : start + 128]
-                distance, closest = _leaf(points[subset], triangles)
+                distance, closest = _leaf(points[subset], node.geometry)
                 improved = distance < best[subset]
                 best[subset[improved]] = distance[improved]
                 nearest[subset[improved]] = closest[improved]
         return np.sqrt(best), nearest
 
 
-def _leaf(points: Array, triangles: Array) -> tuple[Array, Array]:
+def _leaf(points: Array, geometry: _TriangleGeometry) -> tuple[Array, Array]:
     import numpy as np
 
+    triangles = geometry.vertices
     a, b, c = (triangles[:, index] for index in range(3))
-    ab, ac = b - a, c - a
-    normal = np.cross(ab, ac)
-    normal_square = np.einsum("ij,ij->i", normal, normal)
+    ab, ac = geometry.ab, geometry.ac
+    normal = geometry.normal
+    normal_square = geometry.normal_square
     offset = points[:, None, :] - a
     height = np.einsum("pti,ti->pt", offset, normal) / normal_square
     projected = points[:, None, :] - height[:, :, None] * normal
     ap = projected - a
-    d00 = np.einsum("ij,ij->i", ab, ab)
-    d01 = np.einsum("ij,ij->i", ab, ac)
-    d11 = np.einsum("ij,ij->i", ac, ac)
+    d00, d01, d11 = geometry.d00, geometry.d01, geometry.d11
     d20 = np.einsum("pti,ti->pt", ap, ab)
     d21 = np.einsum("pti,ti->pt", ap, ac)
     # |ab x ac|² avoids cancellation in d00*d11-d01² on narrow facets.

@@ -41,6 +41,9 @@ def prepare_surface(vertices: NDArray[Any], faces: NDArray[Any]) -> Surface:
     """Return a centered analysis surface while retaining its original origin."""
     import numpy as np
 
+    # Trimesh exposes tracking ndarray subclasses. Their hooks otherwise follow
+    # every temporary through the thousands of proximity queries in a scan.
+    vertices, faces = np.asarray(vertices), np.asarray(faces)
     validate_mesh_arrays(vertices, faces, FingerprintBudget())
     try:
         with np.errstate(over="raise", invalid="raise", divide="raise"):

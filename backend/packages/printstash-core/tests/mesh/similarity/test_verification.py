@@ -15,6 +15,25 @@ from printstash_core.mesh.similarity.verification import verify_meshes
 
 
 class TestVerifyMeshes:
+    @pytest.mark.parametrize("stretch", [1, 1.002], ids=["exact", "near-shape"])
+    def test_preserves_evidence_for_array_subclasses(self, tetra, stretch):
+        class TrackedArray(np.ndarray):
+            pass
+
+        vertices, faces = tetra
+        right = vertices * [1, 1, stretch]
+
+        plain = verify_meshes(vertices, faces, right, faces, sample_points=256)
+        tracked = verify_meshes(
+            vertices.view(TrackedArray),
+            faces.view(TrackedArray),
+            right.view(TrackedArray),
+            faces.view(TrackedArray),
+            sample_points=256,
+        )
+
+        assert tracked == plain
+
     @pytest.mark.parametrize("scale", [1, 0.5, 2, 25.4], ids=str)
     def test_verifies_uniform_scale(self, tetra, scale):
         vertices, faces = tetra

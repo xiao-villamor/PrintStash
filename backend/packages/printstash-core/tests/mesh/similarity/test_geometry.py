@@ -20,6 +20,18 @@ from printstash_core.mesh.similarity.geometry import (
 
 
 class TestPrepareSurface:
+    def test_discards_input_array_subclass_before_analysis(self, cube):
+        class TrackedArray(np.ndarray):
+            pass
+
+        vertices, faces = cube
+        surface = prepare_surface(vertices.view(TrackedArray), faces)
+
+        assert type(surface.vertices) is np.ndarray
+        np.testing.assert_array_equal(
+            surface.vertices, prepare_surface(vertices, faces).vertices
+        )
+
     def test_preserves_verification_metrics(self, cube):
         vertices, faces = cube
         surface = prepare_surface(vertices + [30, -20, 40], faces)

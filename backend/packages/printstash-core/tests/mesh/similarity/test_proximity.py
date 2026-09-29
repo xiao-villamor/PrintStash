@@ -9,6 +9,19 @@ from printstash_core.mesh.similarity.proximity import SurfaceProximity
 
 
 class TestSurfaceProximity:
+    def test_repeated_queries_preserve_exact_projection(self):
+        surface = prepare_surface(
+            np.array([[0.0, 0, 0], [3, 0, 0], [0, 3, 0]]), np.array([[0, 1, 2]])
+        )
+        proximity = SurfaceProximity(surface)
+
+        first, _ = proximity.closest(np.array([[1.0, 1, 2]]) - surface.centroid)
+        second, closest = proximity.closest(np.array([[2.0, 2, 0]]) - surface.centroid)
+
+        np.testing.assert_allclose(first, [2])
+        np.testing.assert_allclose(second, [np.sqrt(0.5)])
+        np.testing.assert_allclose(closest + surface.centroid, [[1.5, 1.5, 0]])
+
     def test_projects_onto_triangle_features(self):
         surface = prepare_surface(
             np.array([[0.0, 0, 0], [3, 0, 0], [0, 3, 0]]), np.array([[0, 1, 2]])
