@@ -238,7 +238,7 @@ _VERTICES = (
 
 
 class TestMeshAttributeParsing:
-    def test_reads_exact_coordinates_and_indices_in_document_order(self, tmp_path):
+    def test_reads_the_mesh_exactly_as_written(self, tmp_path):
         path = tmp_path / "exact.3mf"
         path.write_bytes(_raw_mesh_3mf(_VERTICES, _TRIANGLE, unit=b"centimeter"))
 
@@ -249,7 +249,7 @@ class TestMeshAttributeParsing:
         )
         np.testing.assert_array_equal(mesh.faces, [[0, 1, 2]])
 
-    def test_accepts_padded_numbers_and_exponents(self, tmp_path):
+    def test_accepts_padded_numbers_with_exponents(self, tmp_path):
         path = tmp_path / "padded.3mf"
         vertices = (
             b'<vertex x=" 1.5 " y="-2e1" z="3"/><vertex x="0" y="0" z="0"/>'
