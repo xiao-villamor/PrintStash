@@ -18,8 +18,10 @@ import pytest
 from sqlmodel import delete
 
 from app.db.models import File, Metadata, Model
+from app.modules.work.jobs import jobs
 from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
 from tests.e2e._jobs import completed_job, create_backup
+from tests.e2e._jobs import settle as settle_jobs
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
@@ -38,6 +40,30 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
 
 
 class TestBackupRestore:
+    @pytest.mark.asyncio
+    async def test_manual_backup_exposes_worker_phases_through_the_jobs_api(
+        self, api, tmp_path
+    ):
+        headers = await _setup_and_login(api, tmp_path)
+        accepted = await api.post("/api/v1/backups", headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        job_id = accepted.json()["job_id"]
+        seen = []
+        jobs.subscribe(
+            lambda status: seen.append(status) if status.job_id == job_id else None
+        )
+
+        settle_jobs()
+
+        phases = [status.stage for status in seen]
+        assert "snapshotting" in phases
+        assert "archiving" in phases
+        assert "verifying" in phases
+        assert "publishing" in phases
+        response = await api.get(f"/api/v1/jobs/{job_id}", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "completed"
+
     @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_restores_after_unused_archive_inspection(

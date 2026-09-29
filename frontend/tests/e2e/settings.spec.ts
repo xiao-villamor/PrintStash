@@ -23,6 +23,57 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("settings route", () => {
+  test("scheduled backup progress appears in Tasks", async ({ page }) => {
+    const now = "2026-01-01T00:00:00Z";
+    await page.route("**/api/v1/jobs**", async (route) => {
+      if (new URL(route.request().url()).pathname !== "/api/v1/jobs") {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        json: [
+          {
+            job_id: "scheduled-backup-1",
+            kind: "backups.automatic",
+            state: "running",
+            priority: "backfill",
+            attempts: 1,
+            resubmits: 0,
+            model_id: null,
+            file_id: null,
+            error: null,
+            retryable: false,
+            created_at: now,
+            updated_at: now,
+            started_at: now,
+            finished_at: null,
+            committed_at: null,
+            step: 1,
+            total_steps: 1,
+            label: "Automatic backups",
+            progress: null,
+            result: null,
+            stage: "archiving",
+            current_item: null,
+            processed: 4,
+            total: 10,
+            succeeded: 0,
+            deduplicated: 0,
+            skipped: 0,
+            failed: 0,
+            completion: null,
+            failed_items: [],
+          },
+        ],
+      });
+    });
+    await page.goto("/settings?section=backup");
+
+    await page.getByRole("button", { name: "Notifications" }).click();
+
+    await expect(page.getByText("Archiving 4 of 10 files · continues in background")).toBeVisible();
+  });
+
   test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
     await page.goto("/settings?section=trash");
     await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();

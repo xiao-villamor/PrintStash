@@ -850,6 +850,122 @@ describe("syncImportJobs", () => {
     expect(tc.taskTitle(tc.listTasks()[0])).toBe("Backup");
   });
 
+  it("describes manual backup archive progress from its Job", async () => {
+    tc.trackImportJob("backup-progress", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "backup-progress",
+        kind: "backups.create",
+        state: "running",
+        stage: "archiving",
+        processed: 3,
+        total: 8,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Archiving 3 of 8 files · continues in background",
+    );
+  });
+
+  it("describes the scheduled backup publication destination", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "scheduled-backup",
+        kind: "backups.automatic",
+        state: "running",
+        stage: "publishing",
+        current_item: "Offsite",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Publishing backup to Offsite · continues in background",
+    );
+  });
+
+  it("shows a scheduled backup that finished before the browser discovered it", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "fast-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        completion: "complete",
+        updated_at: "2026-06-14T11:59:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        jobId: "fast-scheduled-backup",
+        status: "completed",
+        detail: "Backup created",
+      },
+    ]);
+  });
+
+  it("does not restore an older scheduled backup after clearing the latest", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "older-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-14T10:00:00Z",
+      }),
+      aJob({
+        job_id: "latest-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-14T11:00:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+    expect(tc.listTasks().map((task) => task.jobId)).toEqual(["latest-scheduled-backup"]);
+
+    tc.clearCompletedTasks();
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("ignores stale scheduled backup history", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "stale-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-12T11:00:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("reports a partial backup instead of a generic Job count", async () => {
+    tc.trackImportJob("partial-backup", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "partial-backup",
+        kind: "backups.create",
+        state: "completed",
+        completion: "partial",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe("Backup created; some destinations failed");
+  });
+
   it("titles a discovered import Job as an import", async () => {
     listJobs.mockResolvedValue([
       aJob({ job_id: "url-job", kind: "ingestion.url", label: "ingestion.url", state: "running" }),

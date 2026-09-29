@@ -485,6 +485,23 @@ class TestFinish:
 
 
 class TestListForUser:
+    def test_an_administrator_sees_scheduled_backups_in_tasks(
+        self, store: JobStore, owner: User, make_job
+    ) -> None:
+        automatic = make_job(kind=JobKind.BACKUPS_AUTOMATIC)
+        make_job(kind=JobKind.DERIVATIVES_MESH)
+
+        listed = store.list_for_user(owner.id, is_superuser=True)  # type: ignore[arg-type]
+
+        assert [job.job_id for job in listed] == [automatic.id]
+
+    def test_a_regular_user_cannot_see_scheduled_backups(
+        self, store: JobStore, owner: User, make_job
+    ) -> None:
+        make_job(kind=JobKind.BACKUPS_AUTOMATIC)
+
+        assert store.list_for_user(owner.id) == []  # type: ignore[arg-type]
+
     def test_reconnect_listing_respects_owner_permissions(
         self, store: JobStore, owner: User, other_owner: User, make_job
     ) -> None:

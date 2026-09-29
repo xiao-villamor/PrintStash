@@ -366,8 +366,9 @@ class JobStore:
     ) -> list[JobStatus]:
         """Active Jobs, the most recent terminal ones, and any tracked by id.
 
-        A user sees only Jobs they own. An administrator additionally sees
-        system Jobs (no owner) when ``include_system`` asks for them.
+        A user sees only Jobs they own. An administrator sees user-owned Jobs
+        and scheduled backups in Tasks; other system Jobs (no owner) require
+        ``include_system`` so high-volume maintenance does not bury Tasks.
         """
         terminal_limit = max(0, min(100, terminal_limit))
         with get_session_factory().scoped_session() as session:
@@ -375,7 +376,12 @@ class JobStore:
             if is_superuser and include_system:
                 pass
             elif is_superuser:
-                scope.append(col(Job.owner_user_id).is_not(None))
+                scope.append(
+                    or_(
+                        col(Job.owner_user_id).is_not(None),
+                        col(Job.kind) == JobKind.BACKUPS_AUTOMATIC,
+                    )
+                )
             else:
                 scope.append(Job.owner_user_id == user_id)
             if kinds is not None:

@@ -6992,6 +6992,11 @@
                   "extracting",
                   "hashing",
                   "ingesting",
+                  "snapshotting",
+                  "archiving",
+                  "verifying",
+                  "publishing",
+                  "finalizing",
                   "completed"
                 ],
                 "type": "string"

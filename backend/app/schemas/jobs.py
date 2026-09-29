@@ -17,13 +17,18 @@ from app.db.models.types import (
     WorkPriority,
 )
 
-ImportStage = Literal[
+JobStage = Literal[
     "resolving",
     "downloading",
     "inspecting",
     "extracting",
     "hashing",
     "ingesting",
+    "snapshotting",
+    "archiving",
+    "verifying",
+    "publishing",
+    "finalizing",
     "completed",
 ]
 JobCompletion = Literal["complete", "partial"]
@@ -79,7 +84,7 @@ class JobStatus(BaseModel):
     label: Optional[str] = None
     progress: Optional[float] = None
     result: Optional[dict[str, Any]] = None
-    stage: Optional[ImportStage] = None
+    stage: Optional[JobStage] = None
     current_item: Optional[str] = None
     processed: int = 0
     total: Optional[int] = None

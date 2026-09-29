@@ -3,8 +3,9 @@
 Every route that accepts background work returns a ``job_id``; this is where the
 user follows it, cancels it, or retries it. The API's promises are about who
 sees what: a user sees only their own Jobs, another user's Job is a 404 rather
-than a 403 (an id is not a way to learn that a Job exists), and system Jobs
-reach an administrator only when asked for. Cancel withdraws the intent before
+than a 403 (an id is not a way to learn that a Job exists), and scheduled
+backups reach an administrator's Tasks without exposing other system Jobs.
+Cancel withdraws the intent before
 stopping the execution, so the reconciler cannot bring a cancelled import back;
 retry is refused whenever the subject can no longer be worked.
 
@@ -112,6 +113,33 @@ class TestListJobs:
         )
 
         assert [job["job_id"] for job in response.json()] == [system.id]
+
+    def test_an_administrator_sees_scheduled_backup_progress_in_tasks(
+        self, client: TestClient, admin: User, make_job
+    ) -> None:
+        automatic = make_job(
+            kind=JobKind.BACKUPS_AUTOMATIC,
+            status_json=json.dumps({"stage": "archiving", "processed": 2, "total": 5}),
+        )
+
+        response = client.get("/api/v1/jobs", headers=_headers(admin))
+
+        assert response.status_code == 200, response.text
+        assert [job["job_id"] for job in response.json()] == [automatic.id]
+        assert (response.json()[0]["stage"], response.json()[0]["processed"]) == (
+            "archiving",
+            2,
+        )
+
+    def test_a_regular_user_cannot_list_scheduled_backup_progress(
+        self, client: TestClient, owner: User, make_job
+    ) -> None:
+        make_job(kind=JobKind.BACKUPS_AUTOMATIC)
+
+        response = client.get("/api/v1/jobs", headers=_headers(owner))
+
+        assert response.status_code == 200, response.text
+        assert response.json() == []
 
     def test_a_user_asking_for_system_jobs_is_refused(
         self, client: TestClient, owner: User

@@ -109,7 +109,7 @@ function TaskRow({ task }: { task: TaskItem }) {
                   : knownUiText(task.status)}
             </span>
           </div>
-          {task.detail && (
+          {(task.detail || task.stage) && (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
           )}
           {task.archiveUploading && task.archiveSizeBytes !== undefined && (
@@ -153,26 +153,30 @@ function TaskRow({ task }: { task: TaskItem }) {
           {active &&
             task.total == null &&
             !task.archiveUploading &&
-            task.similarityRunId === undefined && (
+            task.similarityRunId === undefined &&
+            task.jobKind !== "backups.create" &&
+            task.jobKind !== "backups.automatic" && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {uiText("Discovering total… Safe to close this view.")}
               </p>
             )}
-          {(task.similarityRunId === undefined || task.status === "completed") && (
-            <div
-              role="progressbar"
-              aria-label={uiText("Progress")}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={task.progress}
-              className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
-            >
+          {(task.similarityRunId === undefined || task.status === "completed") &&
+            task.jobKind !== "backups.create" &&
+            task.jobKind !== "backups.automatic" && (
               <div
-                className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-destructive" : "bg-primary"}`}
-                style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}
-              />
-            </div>
-          )}
+                role="progressbar"
+                aria-label={uiText("Progress")}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={task.progress}
+                className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+              >
+                <div
+                  className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-destructive" : "bg-primary"}`}
+                  style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}
+                />
+              </div>
+            )}
           {!!task.failedItems?.length && (
             <details className="mt-2 text-xs text-muted-foreground">
               <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

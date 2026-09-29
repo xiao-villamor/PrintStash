@@ -115,6 +115,7 @@ const STORAGE_KEY = "printstash:import-tasks:v1";
 const DISMISSED_JOBS_KEY = "printstash:dismissed-import-jobs:v1";
 const TERMINAL_EVENT = "printstash:import-job-terminal";
 const EMITTED_TERMINALS_KEY = "printstash:emitted-import-terminals:v1";
+const SCHEDULED_BACKUP_NOTICE_MS = 24 * 60 * 60 * 1000;
 
 declare global {
   interface WindowEventMap {
@@ -433,6 +434,39 @@ export function resetTasksForNewSetup(): void {
 function detailForJob(job: Pick<JobStatus, "state"> & Partial<JobStatus>): string {
   if (job.state === "cancelled") return uiText("Cancelled");
   if (job.state === "interrupted") return uiText("Interrupted · resumes automatically");
+  if (job.kind === "backups.create" || job.kind === "backups.automatic") {
+    if (job.state === "completed") {
+      return job.completion === "partial"
+        ? uiText("Backup created; some destinations failed")
+        : uiText("Backup created");
+    }
+    if (job.state === "failed")
+      return job.error ? getErrorMessage(job.error) : uiText("Backup failed");
+    if (job.stage === null || job.stage === undefined) return uiText("Waiting for backup worker");
+    switch (job.stage) {
+      case "snapshotting":
+        return uiText("Snapshotting database · continues in background");
+      case "archiving":
+        return job.total === null || job.total === undefined
+          ? uiText("Archiving files · continues in background")
+          : uiText("Archiving {processed} of {total} files · continues in background", {
+              processed: job.processed ?? 0,
+              total: job.total,
+            });
+      case "verifying":
+        return uiText("Verifying backup archive · continues in background");
+      case "publishing":
+        return job.current_item
+          ? uiText("Publishing backup to {destination} · continues in background", {
+              destination: knownUiText(job.current_item),
+            })
+          : uiText("Publishing backup · continues in background");
+      case "finalizing":
+        return uiText("Finishing backup · continues in background");
+      default:
+        throw new Error(`invalid_backup_stage:${job.stage}`);
+    }
+  }
   const stage = knownUiText(job.stage ?? (job.state === "queued" ? "pending" : job.state));
   const count = job.total == null ? "" : ` ${job.processed ?? 0}/${job.total}`;
   const item = job.current_item ? ` · ${job.current_item}` : "";
@@ -493,7 +527,7 @@ function rejectLostJob(jobId: string): void {
   terminalWaiters.delete(jobId);
 }
 
-function applyJob(job: JobStatus): void {
+function applyJob(job: JobStatus, recentScheduledTerminalId: string | null): void {
   if (dismissedJobIds.has(job.job_id)) return;
   const existing = tasks.find(
     (task) => task.jobId === job.job_id || task.jobIds?.includes(job.job_id),
@@ -502,8 +536,9 @@ function applyJob(job: JobStatus): void {
   // tracked job can still observe completion after a reload. Do not turn that
   // history into new Task Center rows: repeated syncs could otherwise evict
   // freshly queued browser-local uploads before they receive their job IDs.
-  // Unknown active jobs are still discovered below and become reconnectable.
-  if (!existing && isTerminal(job)) return;
+  // The latest recent scheduled backup is the exception: it may have finished
+  // before this browser saw it running.
+  if (!existing && isTerminal(job) && job.job_id !== recentScheduledTerminalId) return;
   if (existing?.status === "completed" || existing?.status === "failed") {
     if (isTerminal(job)) publishTerminal(job);
     return;
@@ -740,6 +775,20 @@ export async function syncImportJobs(): Promise<boolean> {
   ]);
   if (epoch !== taskStoreEpoch) return false;
   similarityRuns.forEach(applySimilarityRun);
+  const latestScheduledTerminal = response
+    .filter((job) => job.kind === "backups.automatic" && isTerminal(job))
+    .reduce<JobStatus | null>(
+      (latest, job) =>
+        latest === null || Date.parse(job.updated_at) > Date.parse(latest.updated_at)
+          ? job
+          : latest,
+      null,
+    );
+  const recentScheduledTerminalId =
+    latestScheduledTerminal !== null &&
+    Date.now() - Date.parse(latestScheduledTerminal.updated_at) <= SCHEDULED_BACKUP_NOTICE_MS
+      ? latestScheduledTerminal.job_id
+      : null;
   const jobs = response.filter((job) => !dismissedJobIds.has(job.job_id));
   const jobsById = new Map(jobs.map((job) => [job.job_id, job]));
   const claimedJobIds = new Set<string>();
@@ -753,7 +802,9 @@ export async function syncImportJobs(): Promise<boolean> {
     if (groupedJobs.length) applyGroupedJobs(task, groupedJobs);
   }
 
-  jobs.filter((job) => !claimedJobIds.has(job.job_id)).forEach(applyJob);
+  jobs
+    .filter((job) => !claimedJobIds.has(job.job_id))
+    .forEach((job) => applyJob(job, recentScheduledTerminalId));
 
   const unavailableDetail =
     "Task status is no longer available. It may have finished while this browser was disconnected.";

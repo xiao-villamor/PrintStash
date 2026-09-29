@@ -26,6 +26,11 @@
   ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). They now
   share the bounded 3MF resource loader and the same face budget as thumbnail
   generation; an over-budget project is refused instead.
+- Manual and scheduled backup tasks now show database snapshot, file archiving,
+  archive verification, destination publication and finalization progress in
+  Tasks and Background work, including the number of files archived. Scheduled
+  backups now appear in administrators' Tasks while they run, and the latest
+  completed scheduled backup remains visible if it finished before reconnect.
 - Backup history disables replica retries when a run has no completed archive
   record. Its guidance now refers to that run instead of implying that existing
   backup archives have been lost.

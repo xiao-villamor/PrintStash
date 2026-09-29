@@ -488,6 +488,11 @@ export interface JobStatus {
     | "extracting"
     | "hashing"
     | "ingesting"
+    | "snapshotting"
+    | "archiving"
+    | "verifying"
+    | "publishing"
+    | "finalizing"
     | "completed"
     | null;
   current_item: string | null;

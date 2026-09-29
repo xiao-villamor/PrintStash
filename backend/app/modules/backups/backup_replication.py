@@ -11,6 +11,7 @@ from app.core.logging import get_logger
 from app.db.models import OwnedStorageObject, StorageObjectState
 from app.db.session import get_session_factory
 from app.modules.backups import backup_runs
+from app.modules.backups.backup.contracts import BackupProgress, BackupStage
 from app.modules.backups.backup_destination import destination_from_connection
 from app.modules.storage.storage_backend.contracts import CreationReceipt
 from app.modules.storage.storage_backend.local import LocalStorageBackend
@@ -70,6 +71,7 @@ def publish_archive(
     archive_sha256: str,
     target,
     remote_destinations,
+    progress: BackupProgress | None = None,
 ):
     from app.modules.backups.backup.contracts import _BACKUP_S3_PREFIX, BackupMeta
     from app.modules.backups.backup.targets import (
@@ -82,6 +84,8 @@ def publish_archive(
     created_sources: list[BackupMeta] = []
 
     if keep_local:
+        if progress is not None:
+            progress(BackupStage.PUBLISHING, destination="Local")
         try:
             local_backend = LocalStorageBackend()
             local_namespace = local_backend.namespace_for(str(archive_path))
@@ -149,6 +153,8 @@ def publish_archive(
 
     # Upload to S3 if configured
     if target:
+        if progress is not None:
+            progress(BackupStage.PUBLISHING, destination="S3")
         s3 = target.client
         bucket = target.bucket
         try:
@@ -253,6 +259,8 @@ def publish_archive(
     # destination never invalidates the already committed local archive, and a
     # failure at one provider does not prevent the remaining replicas.
     for result_id, destination in remote_destinations:
+        if progress is not None:
+            progress(BackupStage.PUBLISHING, destination=destination.name)
         try:
             remote_key = destination.key(archive_name)
             backup_runs.publication_started(

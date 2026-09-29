@@ -49,6 +49,86 @@ def _runs(env: BackupEnv) -> list[BackupRun]:
 
 
 class TestCreate:
+    def test_reports_partial_publication_in_the_job_status(
+        self,
+        backup_env: BackupEnv,
+        work_engine: InlineJobEngine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.modules.backups.backup.contracts import BackupMeta
+
+        def partial_backup(**_kwargs: object) -> BackupMeta:
+            return BackupMeta(
+                id="partial-backup",
+                created_at="2026-01-01T00:00:00Z",
+                size_bytes=100,
+                storage_backend="local",
+                file_count=1,
+                app_version="0.14.0",
+                path="partial.tar.gz",
+                outcome="partial",
+            )
+
+        monkeypatch.setattr(
+            backup_jobs.backup_creation, "create_backup", partial_backup
+        )
+
+        job_id = _manual_backup(backup_env, work_engine)
+
+        status = jobs.get(job_id)
+        assert status is not None and status.completion == "partial"
+
+    def test_reports_archive_phases(
+        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Widget", content=b"solid progress\n")
+        seen = []
+        jobs.subscribe(lambda status: seen.append(status))
+
+        job_id = _manual_backup(backup_env, work_engine)
+
+        updates = [status for status in seen if status.job_id == job_id]
+        stages = [status.stage for status in updates]
+        assert list(dict.fromkeys(stage for stage in stages if stage is not None)) == [
+            "snapshotting",
+            "archiving",
+            "verifying",
+            "publishing",
+            "finalizing",
+            "completed",
+        ]
+
+    def test_reports_archived_file_count(
+        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Widget", content=b"solid count\n")
+        seen = []
+        jobs.subscribe(lambda status: seen.append(status))
+
+        job_id = _manual_backup(backup_env, work_engine)
+
+        updates = [status for status in seen if status.job_id == job_id]
+        assert [(s.processed, s.total) for s in updates if s.stage == "archiving"] == [
+            (0, 1),
+            (1, 1),
+        ]
+
+    def test_reports_the_destination_being_published(
+        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+    ) -> None:
+        seen = []
+        jobs.subscribe(lambda status: seen.append(status))
+
+        job_id = _manual_backup(backup_env, work_engine)
+
+        assert [
+            status.current_item
+            for status in seen
+            if status.job_id == job_id
+            and status.stage == "publishing"
+            and status.current_item
+        ] == ["Local"]
+
     def test_archives_a_manual_backup(
         self, backup_env: BackupEnv, work_engine: InlineJobEngine
     ) -> None:
@@ -106,6 +186,27 @@ class TestAutomatic:
         assert [run.trigger for run in _runs(backup_env)] == [
             BackupTrigger.AUTOMATIC.value
         ]
+
+    def test_reports_the_same_progress_as_manual_backups(
+        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+    ) -> None:
+        _config(
+            backup_env,
+            automatic_backups_enabled=True,
+            automatic_backup_time_utc="00:00",
+        )
+        seen = []
+        jobs.subscribe(lambda status: seen.append(status))
+
+        self._run(work_engine)
+
+        stages = [
+            status.stage for status in seen if status.kind == JobKind.BACKUPS_AUTOMATIC
+        ]
+        assert "snapshotting" in stages
+        assert "verifying" in stages
+        assert "publishing" in stages
+        assert "finalizing" in stages
 
     def test_archives_once_however_often_the_schedule_is_reconciled(
         self, backup_env: BackupEnv, work_engine: InlineJobEngine

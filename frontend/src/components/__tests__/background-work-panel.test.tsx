@@ -114,6 +114,25 @@ describe("BackgroundWorkPanel", () => {
     );
   });
 
+  it("shows the backup archive file count in background work", async () => {
+    renderPanel(
+      stubApi(aWorkOverview(), {
+        jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([
+          aJob({
+            job_id: "backup-archive",
+            kind: "backups.automatic",
+            state: "running",
+            stage: "archiving",
+            processed: 4,
+            total: 10,
+          }),
+        ]),
+      }),
+    );
+
+    expect(await screen.findByText("archiving files · 4 / 10")).toBeVisible();
+  });
+
   it("links a preview job to its model", async () => {
     renderPanel(
       stubApi(aWorkOverview(), {

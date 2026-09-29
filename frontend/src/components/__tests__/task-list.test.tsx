@@ -74,6 +74,22 @@ describe("TaskList", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
+  it("shows backup stage details instead of the unknown-total hint", () => {
+    renderTaskList([
+      task({
+        title: "Backup",
+        status: "running",
+        jobKind: "backups.create",
+        jobId: "backup-1",
+        stage: "snapshotting",
+      }),
+    ]);
+
+    expect(screen.getByText("Snapshotting database · continues in background")).toBeVisible();
+    expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
   it("exposes the ZIP import percentage on its progress bar", () => {
     renderTaskList([
       task({

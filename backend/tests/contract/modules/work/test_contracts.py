@@ -64,6 +64,23 @@ def _submission(
 
 
 class TestRunning:
+    def test_exposes_progress_reported_inside_a_step(self, harness: Harness) -> None:
+        def report(ctx) -> None:
+            ctx.update(stage="archiving", processed=3, total=8)
+
+        job_id = harness.job(PLAIN, "progress/1", behaviour=report)
+        seen: list[tuple[str, str | None, int, int | None]] = []
+        jobs.subscribe(
+            lambda status: seen.append(
+                (status.job_id, status.stage, status.processed, status.total)
+            )
+        )
+
+        work_submission.submit(job_id)
+        harness.settle()
+
+        assert (job_id, "archiving", 3, 8) in seen
+
     def test_runs_a_jobs_steps_in_order_to_completion(self, harness: Harness) -> None:
         job_id = harness.job(PLAIN, "plain/1")
 

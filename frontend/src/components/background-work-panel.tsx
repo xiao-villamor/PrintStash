@@ -41,7 +41,7 @@ import {
 import { subscribeEvents } from "@/lib/events";
 import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { currentLocale, uiText } from "@/lib/locale";
+import { currentLocale, knownUiText, uiText } from "@/lib/locale";
 import { toast } from "@/lib/toast";
 import type { DerivativeKind, JobStatus, WorkDefinition, WorkLane, WorkOverview } from "@/types";
 
@@ -380,9 +380,23 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {job.current_item ??
-                        (job.stage ? uiText(job.stage) : uiText("Waiting for a worker"))}
-                      {job.total !== null ? ` · ${job.processed} / ${job.total}` : ""}
+                      {job.kind === "backups.create" || job.kind === "backups.automatic" ? (
+                        <>
+                          {job.stage ? uiText(job.stage) : uiText("Waiting for a worker")}
+                          {job.stage === "publishing" && job.current_item
+                            ? ` · ${knownUiText(job.current_item)}`
+                            : ""}
+                          {job.total !== null && job.stage === "archiving"
+                            ? ` · ${job.processed} / ${job.total}`
+                            : ""}
+                        </>
+                      ) : (
+                        <>
+                          {job.current_item ??
+                            (job.stage ? uiText(job.stage) : uiText("Waiting for a worker"))}
+                          {job.total !== null ? ` · ${job.processed} / ${job.total}` : ""}
+                        </>
+                      )}
                       {job.progress !== null ? ` · ${Math.round(job.progress)}%` : ""}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
