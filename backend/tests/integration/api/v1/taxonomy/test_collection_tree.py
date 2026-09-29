@@ -286,6 +286,73 @@ class TestListCollectionChildren:
 
 
 class TestLookupCollection:
+    def test_returns_a_saved_collection_by_id(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+    ) -> None:
+        parts = make_collection("Parts")
+        brackets = make_collection("Brackets", parent=parts)
+
+        response = client.get(LOOKUP, params={"id": brackets.id}, headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection"]["display_path"] == "Parts/Brackets"
+
+    def test_answers_an_unknown_id_with_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.get(LOOKUP, params={"id": 999999}, headers=auth_headers)
+
+        assert response.status_code == 404, response.text
+
+    def test_hides_a_trashed_collection_by_id(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+    ) -> None:
+        trashed = make_collection("Binned", deleted_at=utcnow())
+
+        response = client.get(LOOKUP, params={"id": trashed.id}, headers=auth_headers)
+
+        assert response.status_code == 404, response.text
+
+    def test_hides_a_collection_id_the_viewer_cannot_see(
+        self,
+        client: TestClient,
+        make_collection: MakeCollection,
+        make_user: MakeUser,
+        headers_for: HeadersFor,
+    ) -> None:
+        private = make_collection("Private")
+        viewer = make_user("id-lookup-outsider")
+
+        response = client.get(
+            LOOKUP, params={"id": private.id}, headers=headers_for(viewer)
+        )
+
+        assert response.status_code == 404, response.text
+
+    def test_requires_exactly_one_lookup_key(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        absent = client.get(LOOKUP, headers=auth_headers)
+        duplicated = client.get(
+            LOOKUP, params={"path": "parts", "id": 1}, headers=auth_headers
+        )
+
+        assert absent.status_code == 422, absent.text
+        assert duplicated.status_code == 422, duplicated.text
+
+    def test_rejects_a_nonpositive_id(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.get(LOOKUP, params={"id": 0}, headers=auth_headers)
+
+        assert response.status_code == 422, response.text
+
     def test_returns_the_collection_at_a_path(
         self,
         client: TestClient,
@@ -343,6 +410,11 @@ class TestLookupCollection:
 
     def test_requires_authentication(self, client: TestClient) -> None:
         response = client.get(LOOKUP, params={"path": "parts"})
+
+        assert response.status_code == 401, response.text
+
+    def test_requires_authentication_for_id(self, client: TestClient) -> None:
+        response = client.get(LOOKUP, params={"id": 1})
 
         assert response.status_code == 401, response.text
 

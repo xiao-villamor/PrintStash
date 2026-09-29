@@ -23,8 +23,8 @@ import {
   getCollectionReadme,
   listCollectionChildren,
   listCollectionPermissions,
-  listCollections,
   lookupCollection,
+  lookupCollectionById,
   listTags,
   moveCollection,
   renameCollection,
@@ -49,11 +49,12 @@ afterEach(() => {
 });
 
 describe("collections", () => {
-  it("lists the tree", async () => {
-    respondWith([{ id: 1, name: "Functional", path: "functional" }]);
+  it("looks up a saved collection by id", async () => {
+    respondWith({ collection: { id: 1, name: "Functional" }, ancestors: [] });
 
-    expect(await listCollections()).toHaveLength(1);
-    expectRequest("/api/v1/collections");
+    await lookupCollectionById(1);
+
+    expectRequest("/api/v1/collections/lookup?id=1");
   });
 
   it("creates one", async () => {

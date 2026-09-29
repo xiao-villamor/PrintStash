@@ -153,14 +153,21 @@ def list_collection_children(
 @router.get(
     "/collections/lookup",
     response_model=CollectionLookupRead,
-    summary="Find a collection by path, with its visible ancestors",
+    summary="Find a collection by path or id, with its visible ancestors",
 )
 def lookup_collection(
-    path: str = Query(..., min_length=1, max_length=512),
+    path: Optional[str] = Query(None, min_length=1, max_length=512),
+    collection_id: Optional[int] = Query(None, alias="id", ge=1),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> CollectionLookupRead:
-    return collection_tree.lookup(session, current_user, path)
+    if path is not None and collection_id is not None:
+        raise HTTPException(status_code=422, detail="collection_lookup_requires_path_or_id")
+    if path is not None:
+        return collection_tree.lookup(session, current_user, path)
+    if collection_id is not None:
+        return collection_tree.lookup_by_id(session, current_user, collection_id)
+    raise HTTPException(status_code=422, detail="collection_lookup_requires_path_or_id")
 
 
 @router.get(

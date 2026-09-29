@@ -11,10 +11,6 @@ import {
   TagRead,
 } from "@/types";
 
-export function listCollections(options?: GetJsonOptions): Promise<CollectionRead[]> {
-  return getJson<CollectionRead[]>("/api/v1/collections", options);
-}
-
 /** One page of a collection's children, or of the caller's top level when `parentId` is null. */
 export function listCollectionChildren(
   parentId: number | null,
@@ -31,6 +27,11 @@ export function listCollectionChildren(
 export function lookupCollection(path: string): Promise<CollectionLookupRead> {
   const params = new URLSearchParams({ path });
   return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, { fresh: true });
+}
+
+/** Resolve a previously saved collection id without walking the tree. */
+export function lookupCollectionById(id: number): Promise<CollectionLookupRead> {
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?id=${id}`, { fresh: true });
 }
 
 /** Collections whose name contains `query`, held at `minRole` or above. */

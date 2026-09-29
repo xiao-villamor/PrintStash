@@ -36,16 +36,15 @@ def make_model(db_session: Session):
     def build(name: str = "Bracket", **overrides: Any) -> Model:
         made["n"] += 1
         slug = overrides.pop("slug", f"model-{made['n']}")
-        row = Model(
-            name=name,
+        collection = overrides.pop("collection", None)
+        return factories.build_model(
+            db_session,
+            name,
+            collection=collection,
             slug=slug,
             hash=f"{made['n']:064d}",
             **overrides,
         )
-        db_session.add(row)
-        db_session.commit()
-        db_session.refresh(row)
-        return row
 
     return build
 

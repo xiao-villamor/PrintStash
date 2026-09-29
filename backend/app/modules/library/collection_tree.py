@@ -345,6 +345,20 @@ def lookup(session: Session, user: User, path: str) -> CollectionLookupRead:
     return CollectionLookupRead(collection=nodes[-1], ancestors=nodes[:-1])
 
 
+def lookup_by_id(session: Session, user: User, collection_id: int) -> CollectionLookupRead:
+    """Resolve one visible collection by id without loading a collection list."""
+    visible = rbac.accessible_collection_ids_stmt(session, user)
+    path = session.exec(
+        select(Collection.path).where(
+            Collection.id == collection_id,
+            Collection.id.in_(visible),  # type: ignore[union-attr]
+        )
+    ).first()
+    if path is None:
+        raise OperationError("collection_not_found", kind=ErrorKind.NOT_FOUND)
+    return lookup(session, user, path)
+
+
 def search(
     session: Session,
     user: User,

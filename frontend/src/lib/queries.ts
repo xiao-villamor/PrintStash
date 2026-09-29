@@ -18,7 +18,6 @@ import {
   getSpoolmanStatus,
   getVaultConfig,
   getVaultStats,
-  listCollections,
   listFilamentProfiles,
   listFleetQueue,
   listModelPage,
@@ -32,6 +31,7 @@ import {
   listTags,
   listCollectionChildren,
   lookupCollection,
+  lookupCollectionById,
   searchCollections,
   type StatsPeriod,
 } from "@/lib/api";
@@ -39,7 +39,6 @@ import { queryKeys } from "@/lib/query-client";
 import type {
   CollectionLookupRead,
   CollectionPage,
-  CollectionRead,
   CollectionRole,
   Dashboard,
   FleetSummary,
@@ -80,7 +79,7 @@ import type {
  * The api-layer reads these hooks depend on, gathered into one collaborator.
  *
  * Every production render uses `defaultQueryApi` — the context default — so no
- * provider is required and the call sites stay `useCollections()`. Tests wrap
+ * provider is required. Tests wrap
  * the tree in `QueryApiProvider` to drive the hooks against an in-memory
  * implementation instead of intercepting this module's imports.
  */
@@ -93,7 +92,6 @@ export const defaultQueryApi = {
   getSpoolmanStatus,
   getVaultConfig,
   getVaultStats,
-  listCollections,
   listFilamentProfiles,
   listFleetQueue,
   listModelPage,
@@ -107,6 +105,7 @@ export const defaultQueryApi = {
   listTags,
   listCollectionChildren,
   lookupCollection,
+  lookupCollectionById,
   searchCollections,
 };
 
@@ -119,14 +118,6 @@ export const QueryApiProvider = QueryApiContext.Provider;
 
 function useQueryApi(): QueryApi {
   return useContext(QueryApiContext);
-}
-
-export function useCollections() {
-  const api = useQueryApi();
-  return useQuery<CollectionRead[]>({
-    queryKey: queryKeys.collections,
-    queryFn: () => api.listCollections({ fresh: true }),
-  });
 }
 
 function collectionReadmeOptions(api: QueryApi, collectionId: number) {
@@ -164,6 +155,19 @@ export function useCollectionLookup(path: string | null) {
     },
     enabled: path !== null && path !== "",
     placeholderData: keepPreviousData,
+  });
+}
+
+/** A saved collection id and its named path; idle while no id is selected. */
+export function useCollectionLookupById(id: number | null) {
+  const api = useQueryApi();
+  return useQuery<CollectionLookupRead>({
+    queryKey: queryKeys.collectionLookupById(id),
+    queryFn: () => {
+      if (id === null) throw new Error("Collection lookup requires an id");
+      return api.lookupCollectionById(id);
+    },
+    enabled: id !== null,
   });
 }
 
@@ -215,7 +219,7 @@ export function useTags() {
  * added on one screen shows up on every other without a manual reload.
  *
  * `fresh: true` bypasses the legacy in-memory cache in `request.ts` so TanStack
- * Query stays the single source of truth, matching `useCollections`/`useTags`.
+ * Query stays the single source of truth, matching the other taxonomy hooks.
  */
 export function usePrinters(options?: { enabled?: boolean; refetchInterval?: number }) {
   const api = useQueryApi();

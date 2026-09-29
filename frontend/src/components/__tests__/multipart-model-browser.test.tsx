@@ -3,16 +3,13 @@ import "@testing-library/jest-dom/vitest";
 
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
-import {
-  MultipartModelBrowser,
-  MultipartModelDetailPage,
-} from "@/components/multipart-model-browser";
+import { MultipartModelDetailPage } from "@/components/multipart-model-browser";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { aCollectionNode } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
-import type { CollectionRead, MultipartModelListItem, MultipartModelRead } from "@/types";
+import type { CollectionRead, MultipartModelRead } from "@/types";
 
 function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead {
   return {
@@ -75,287 +72,6 @@ const collection: CollectionRead = {
   tags: [],
   has_readme: false,
 };
-
-function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
-  return {
-    id: 7,
-    name: "Desk organiser",
-    slug: "desk-organiser",
-    description: null,
-    collection: "parts",
-    collection_id: 3,
-    collection_label: "Parts",
-    part_count: 2,
-    model_count: 3,
-    guide_count: 0,
-    cover_model_id: null,
-    cover_image_url: null,
-    cover_image_uploaded: false,
-    cover_thumbnail_url: null,
-    starred: false,
-    member_model_ids: [],
-    tags: [],
-    effective_role: "admin",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
-
-function renderBrowser(
-  items: MultipartModelListItem[] = [aListItem()],
-  routes: Record<string, Response> = {},
-) {
-  return renderApp(
-    <MultipartModelBrowser collection="parts" collections={[collection]} canCreate />,
-    {
-      routes: { "GET /api/v1/multipart-models": json(items), ...routes },
-    },
-  );
-}
-
-function LocationProbe() {
-  return <output aria-label="current location">{useLocation().pathname}</output>;
-}
-
-describe("MultipartModelBrowser", () => {
-  it("lists grouping counts", async () => {
-    renderBrowser([aListItem({ guide_count: 2 })]);
-
-    expect(await screen.findByRole("link", { name: /Desk organiser/ })).toBeVisible();
-    expect(screen.getByText("2 parts")).toBeVisible();
-    expect(screen.getByText("3 models")).toBeVisible();
-    expect(screen.getByText(/2 guides/)).toBeVisible();
-  });
-
-  it("shows an external image on a multipart card", async () => {
-    const coverImageUrl = "https://images.example.test/desk-organiser.webp";
-    const { container } = renderBrowser([
-      aListItem({ cover_image_url: coverImageUrl, cover_thumbnail_url: coverImageUrl }),
-    ]);
-
-    await screen.findByRole("link", { name: /Desk organiser/ });
-
-    expect(container.querySelector("img")).toHaveAttribute("src", coverImageUrl);
-  });
-
-  it("requests the typed search filter", async () => {
-    const user = userEvent.setup();
-    const { requests } = renderBrowser();
-
-    await screen.findByRole("link", { name: /Desk organiser/ });
-    await user.type(screen.getByRole("textbox", { name: /Search .*models/i }), "handle");
-
-    await waitFor(() => {
-      expect(requests().some((request) => request.url.includes("q=handle"))).toBe(true);
-    });
-  });
-
-  it("sorts sets by name", async () => {
-    const user = userEvent.setup();
-    renderBrowser([
-      aListItem({ id: 8, name: "Zebra stand" }),
-      aListItem({ id: 9, name: "Adapter kit" }),
-    ]);
-
-    await screen.findByRole("link", { name: /Zebra stand/ });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Sort" }), "name");
-
-    expect(
-      screen
-        .getAllByRole("link")
-        .filter((link) => link.getAttribute("href")?.startsWith("/multipart-models/"))
-        .map((link) => link.textContent),
-    ).toEqual([expect.stringContaining("Adapter kit"), expect.stringContaining("Zebra stand")]);
-  });
-
-  it("combines selected structure filters", async () => {
-    renderApp(
-      <MultipartModelBrowser
-        collection={null}
-        structures={["variants", "empty"]}
-        canCreate
-        onCreate={() => undefined}
-      />,
-      {
-        routes: {
-          "GET /api/v1/multipart-models": json([
-            aListItem({ id: 8, name: "Variant handle", part_count: 1, model_count: 2 }),
-            aListItem({ id: 9, name: "Fixed base", part_count: 1, model_count: 1 }),
-            aListItem({ id: 10, name: "Empty kit", part_count: 0, model_count: 0 }),
-          ]),
-        },
-      },
-    );
-
-    expect(await screen.findByRole("link", { name: /Variant handle/ })).toBeVisible();
-    expect(screen.queryByRole("link", { name: /Fixed base/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Empty kit/ })).toBeVisible();
-  });
-
-  it("filters sets that have guides", async () => {
-    renderApp(
-      <MultipartModelBrowser collection={null} guidesOnly canCreate onCreate={() => undefined} />,
-      {
-        routes: {
-          "GET /api/v1/multipart-models": json([
-            aListItem({ id: 8, name: "Assembly kit", guide_count: 1 }),
-            aListItem({ id: 9, name: "Undocumented kit", guide_count: 0 }),
-          ]),
-        },
-      },
-    );
-
-    expect(await screen.findByRole("link", { name: /Assembly kit/ })).toBeVisible();
-    expect(screen.queryByRole("link", { name: /Undocumented kit/ })).not.toBeInTheDocument();
-  });
-
-  it("shows the empty list action", async () => {
-    renderBrowser([]);
-
-    expect(await screen.findByText("No multipart models yet")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "New multipart set" })).toHaveLength(2);
-  });
-
-  it("surfaces a list request error", async () => {
-    renderBrowser([], { "GET /api/v1/multipart-models": json({ detail: "offline" }, 500) });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't load multipart models. Try again.",
-    );
-  });
-
-  it("localizes a permission error in Spanish", async () => {
-    renderApp(<MultipartModelBrowser collection="parts" collections={[collection]} canCreate />, {
-      locale: "es",
-      routes: {
-        "GET /api/v1/multipart-models": json({ detail: "collection_permission_denied" }, 403),
-      },
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "No tienes permiso para acceder a este modelo multiparte.",
-    );
-    expect(screen.queryByText("collection_permission_denied")).not.toBeInTheDocument();
-  });
-
-  it("localizes a network error in Spanish", async () => {
-    renderApp(<MultipartModelBrowser collection="parts" collections={[collection]} canCreate />, {
-      locale: "es",
-      routes: {
-        "GET /api/v1/multipart-models": () => {
-          throw new TypeError("Failed to fetch");
-        },
-      },
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "No se ha podido conectar con PrintStash. Comprueba el servidor e inténtalo de nuevo.",
-    );
-    expect(screen.queryByText("network_unreachable")).not.toBeInTheDocument();
-  });
-
-  it("uses a Spanish fallback for an unknown error detail", async () => {
-    renderApp(<MultipartModelBrowser collection="parts" collections={[collection]} canCreate />, {
-      locale: "es",
-      routes: {
-        "GET /api/v1/multipart-models": json({ detail: "unexpected_database_shape" }, 500),
-      },
-    });
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "No se han podido cargar los modelos multiparte. Inténtalo de nuevo.",
-    );
-    expect(screen.queryByText("unexpected_database_shape")).not.toBeInTheDocument();
-  });
-
-  it("validates a name before creating", async () => {
-    const user = userEvent.setup();
-    renderBrowser([]);
-
-    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
-
-    expect(screen.getByRole("button", { name: "Create multipart set" })).toBeDisabled();
-  });
-
-  it("creates a grouping then opens its editor", async () => {
-    const user = userEvent.setup();
-    const detail = aMultipart({ name: "New organiser" });
-    const { requests, requestsWithMethod } = renderApp(
-      <>
-        <MultipartModelBrowser collection="parts" collections={[collection]} canCreate />
-        <LocationProbe />
-      </>,
-      {
-        routes: {
-          "GET /api/v1/multipart-models": json([]),
-          "POST /api/v1/multipart-models": json(detail),
-        },
-      },
-    );
-
-    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
-    await user.type(screen.getByRole("textbox", { name: "Name" }), "New organiser");
-    await user.type(screen.getByRole("textbox", { name: "Description" }), "Desk accessories");
-    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
-
-    await waitFor(() => {
-      expect(requests().some((request) => request.url.endsWith("/api/v1/multipart-models"))).toBe(
-        true,
-      );
-    });
-    await waitFor(() => {
-      expect(screen.getByLabelText("current location")).toHaveTextContent("/multipart-models/7");
-    });
-    expect(JSON.parse(requestsWithMethod("POST")[0].body)).toMatchObject({
-      name: "New organiser",
-      description: "Desk accessories",
-      collection_id: 3,
-    });
-  });
-
-  it("creates a grouping in the chosen collection", async () => {
-    const user = userEvent.setup();
-    const { requestsWithMethod } = renderApp(
-      <MultipartModelBrowser collection={null} collections={[collection]} canCreate />,
-      {
-        routes: {
-          "GET /api/v1/multipart-models": json([]),
-          "POST /api/v1/multipart-models": json(aMultipart()),
-          ...collectionTreeRoutes([collection]),
-        },
-      },
-    );
-
-    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
-    await user.type(screen.getByRole("textbox", { name: "Name" }), "Filed organiser");
-    await user.click(await screen.findByRole("option", { name: new RegExp(collection.name) }));
-    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
-
-    expect(JSON.parse(requestsWithMethod("POST")[0].body).collection_id).toBe(3);
-  });
-
-  it("keeps the form draft after a friendly create error", async () => {
-    const user = userEvent.setup();
-    renderApp(<MultipartModelBrowser collection="parts" collections={[collection]} canCreate />, {
-      routes: {
-        "GET /api/v1/multipart-models": json([]),
-        "POST /api/v1/multipart-models": json({ detail: "multipart_model_invalid" }, 400),
-      },
-    });
-
-    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
-    const name = screen.getByRole("textbox", { name: "Name" });
-    await user.type(name, "My organiser");
-    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
-
-    expect(
-      await screen.findByText(
-        "Couldn't create this multipart model. Check the name and try again.",
-      ),
-    ).toBeVisible();
-    expect(name).toHaveValue("My organiser");
-  });
-});
 
 describe("MultipartModelDetailPage", () => {
   it("offers the first part action from the empty overview", async () => {
@@ -468,7 +184,7 @@ describe("MultipartModelDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
 
     expect(screen.getByRole("textbox", { name: "Description" })).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Collection" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collection" })).toBeVisible();
   });
 
   it("edits tags only from the multipart edit page", async () => {
@@ -769,19 +485,25 @@ describe("MultipartModelDetailPage", () => {
   it("saves the selected collection", async () => {
     const user = userEvent.setup();
     const detail = aMultipart();
-    const saved = { ...detail, collection: collection.path, collection_id: collection.id };
+    const saved = {
+      ...detail,
+      collection: collection.path,
+      collection_id: collection.id,
+      collection_label: "Parts",
+    };
     const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
       routePath: "/multipart-models/:id",
       routes: {
-        "GET /api/v1/collections": json([collection]),
+        ...collectionTreeRoutes([collection]),
         "GET /api/v1/multipart-models/7": json(detail),
         "PUT /api/v1/multipart-models/7": json(saved),
       },
     });
 
     await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
-    await user.selectOptions(screen.getByRole("combobox", { name: "Collection" }), "3");
+    await user.click(screen.getByRole("button", { name: "Collection" }));
+    await user.click(await screen.findByRole("option", { name: /Parts/ }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(JSON.parse(requestsWithMethod("PUT")[0].body).collection_id).toBe(3);
@@ -1090,6 +812,7 @@ describe("MultipartModelDetailPage", () => {
 function renderPickerPage(
   routes: import("@/test-support/render").RouteTable = {},
   detail = aMultipart(),
+  collections: CollectionRead[] = [],
 ) {
   return renderApp(<MultipartModelDetailPage />, {
     at: "/multipart-models/7",
@@ -1097,13 +820,41 @@ function renderPickerPage(
     routes: {
       "GET /api/v1/multipart-models/7": json(detail),
       "GET /api/v1/multipart-models/7/candidates": json([model, alternative]),
-      "GET /api/v1/collections": json([]),
+      ...collectionTreeRoutes(collections),
       ...routes,
     },
   });
 }
 
 describe("ModelPicker", () => {
+  it("loads another folder page only when requested", async () => {
+    const user = userEvent.setup();
+    const { requests } = renderPickerPage({
+      "GET /api/v1/collections/children": (url) =>
+        json(
+          new URL(url, "http://test").searchParams.has("cursor")
+            ? {
+                items: [aCollectionNode({ id: 4, name: "Bases", path: "bases" })],
+                next_cursor: null,
+              }
+            : {
+                items: [aCollectionNode({ id: 3, name: "Parts", path: "parts" })],
+                next_cursor: "next",
+              },
+        ),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Add a part" }));
+    expect(await screen.findByRole("button", { name: "Parts" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Bases" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show more folders" }));
+
+    expect(await screen.findByRole("button", { name: "Bases" })).toBeVisible();
+    expect(
+      requests().filter((request) => request.url.includes("/collections/children")),
+    ).toHaveLength(2);
+  });
+
   it("adds multiple separate parts", async () => {
     const user = userEvent.setup();
     renderPickerPage();
@@ -1143,18 +894,18 @@ describe("ModelPicker", () => {
 
   it("preserves selection across nested collections", async () => {
     const user = userEvent.setup();
-    const { requests } = renderPickerPage({
-      "GET /api/v1/collections": json([
-        collection,
-        { ...collection, id: 4, name: "Bases", path: "parts/bases", parent_id: 3 },
-      ]),
-      "GET /api/v1/multipart-models/7/candidates": (url) =>
-        json(
-          new URL(url, "http://localhost").searchParams.get("collection") === "parts/bases"
-            ? [alternative]
-            : [model],
-        ),
-    });
+    const { requests } = renderPickerPage(
+      {
+        "GET /api/v1/multipart-models/7/candidates": (url) =>
+          json(
+            new URL(url, "http://localhost").searchParams.get("collection") === "parts/bases"
+              ? [alternative]
+              : [model],
+          ),
+      },
+      aMultipart(),
+      [collection, { ...collection, id: 4, name: "Bases", path: "parts/bases", parent_id: 3 }],
+    );
 
     await user.click(await screen.findByRole("button", { name: "Add a part" }));
     await user.click(await screen.findByRole("button", { name: /^Desk base$/ }));
@@ -1171,19 +922,22 @@ describe("ModelPicker", () => {
 
   it("returns to a parent collection through its breadcrumb", async () => {
     const user = userEvent.setup();
-    renderPickerPage({
-      "GET /api/v1/collections": json([
+    renderPickerPage(
+      {
+        "GET /api/v1/multipart-models/7/candidates": (url) =>
+          json(
+            new URL(url, "http://localhost").searchParams.get("collection") === "parts/bases"
+              ? [alternative]
+              : [model],
+          ),
+      },
+      aMultipart(),
+      [
         collection,
         { ...collection, id: 4, name: "Bases", path: "parts/bases", parent_id: 3 },
         { ...collection, id: 5, name: "Mounts", path: "parts/mounts", parent_id: 3 },
-      ]),
-      "GET /api/v1/multipart-models/7/candidates": (url) =>
-        json(
-          new URL(url, "http://localhost").searchParams.get("collection") === "parts/bases"
-            ? [alternative]
-            : [model],
-        ),
-    });
+      ],
+    );
 
     await user.click(await screen.findByRole("button", { name: "Add a part" }));
     await user.click(await screen.findByRole("button", { name: /^Desk base$/ }));
@@ -1338,12 +1092,12 @@ describe("ModelPicker", () => {
   it("retries a failed collection request", async () => {
     const user = userEvent.setup();
     const { route } = renderPickerPage({
-      "GET /api/v1/collections": json({ detail: "offline" }, 500),
+      "GET /api/v1/collections/children": json({ detail: "offline" }, 500),
     });
 
     await user.click(await screen.findByRole("button", { name: "Add a part" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load collections.");
-    route({ "GET /api/v1/collections": json([collection]) });
+    route({ ...collectionTreeRoutes([collection]) });
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByRole("button", { name: "Parts" })).toBeVisible();
@@ -1351,13 +1105,18 @@ describe("ModelPicker", () => {
 
   it("returns to all models through the breadcrumb", async () => {
     const user = userEvent.setup();
-    renderPickerPage({
-      "GET /api/v1/collections": json([collection]),
-      "GET /api/v1/multipart-models/7/candidates": (url) =>
-        json(
-          new URL(url, "http://localhost").searchParams.get("collection") ? [alternative] : [model],
-        ),
-    });
+    renderPickerPage(
+      {
+        "GET /api/v1/multipart-models/7/candidates": (url) =>
+          json(
+            new URL(url, "http://localhost").searchParams.get("collection")
+              ? [alternative]
+              : [model],
+          ),
+      },
+      aMultipart(),
+      [collection],
+    );
 
     await user.click(await screen.findByRole("button", { name: "Add a part" }));
     await user.click(await screen.findByRole("button", { name: "Parts" }));
@@ -1373,7 +1132,7 @@ describe("ModelPicker", () => {
 
   it("shows accessible child collections without their parent", async () => {
     const user = userEvent.setup();
-    renderPickerPage({ "GET /api/v1/collections": json([{ ...collection, parent_id: 99 }]) });
+    renderPickerPage({}, aMultipart(), [{ ...collection, parent_id: 99 }]);
 
     await user.click(await screen.findByRole("button", { name: "Add a part" }));
 

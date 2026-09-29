@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aCollection } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { SimilarityQueue } from "@/components/similarity-queue";
 import { aSimilarityCandidate, aSimilarityRun, similarityStatus } from "@/test-support/similarity";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -12,7 +13,7 @@ function renderQueue(options: RenderAppOptions = {}, modelId?: number) {
     ...options,
     routes: {
       "GET /api/v1/similarity/status": json(similarityStatus()),
-      "GET /api/v1/collections": json([]),
+      ...collectionTreeRoutes([aCollection({ id: 8, name: "Parts", path: "parts" })]),
       "GET /api/v1/similarity/candidates": json({ items: [], next_cursor: null }),
       ...options.routes,
     },
@@ -131,7 +132,6 @@ describe("Queue navigation", () => {
     const user = userEvent.setup();
     const app = renderQueue({
       routes: {
-        "GET /api/v1/collections": json([aCollection({ id: 8, path: "parts" })]),
         "GET /api/v1/similarity/candidates": (url) =>
           json({
             items:
@@ -144,7 +144,12 @@ describe("Queue navigation", () => {
     });
     await screen.findByText("No candidates to review");
     await user.click(screen.getByText("More filters"));
-    await user.selectOptions(screen.getByRole("combobox", { name: label }), value);
+    if (key === "collection_id") {
+      await user.selectOptions(screen.getByRole("combobox", { name: label }), "pick");
+      await user.click(await screen.findByRole("option", { name: /Parts/ }));
+    } else {
+      await user.selectOptions(screen.getByRole("combobox", { name: label }), value);
+    }
     await waitFor(() =>
       expect(
         new URL(

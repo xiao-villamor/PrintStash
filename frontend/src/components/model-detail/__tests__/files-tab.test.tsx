@@ -40,6 +40,7 @@ const updatedModel: ModelRead = {
   hash: "a".repeat(64),
   collection: null,
   collection_id: null,
+  collection_label: null,
   description: null,
   source_url: null,
   effective_role: "admin",

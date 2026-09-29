@@ -37,6 +37,7 @@ const api: InboxDetailApi = {
   getPendingImport: vi.fn<InboxDetailApi["getPendingImport"]>(),
   importPendingImport: vi.fn<InboxDetailApi["importPendingImport"]>(),
   retryPendingImport: vi.fn<InboxDetailApi["retryPendingImport"]>(),
+  searchCollections: vi.fn<InboxDetailApi["searchCollections"]>(),
   updatePendingImport: vi.fn<InboxDetailApi["updatePendingImport"]>(),
 };
 
@@ -79,10 +80,29 @@ function itemInState(state: string): InboxItem {
 }
 
 function renderPage(collections: CollectionRead[] = []) {
+  const nodes = collections.map((collection) => ({
+    ...collection,
+    child_count: 0,
+    descendant_count: 0,
+    display_path: collection.name,
+  }));
   return render(
     <I18nProvider>
       <QueryClientProvider client={new QueryClient()}>
-        <QueryApiProvider value={{ ...defaultQueryApi, listCollections: async () => collections }}>
+        <QueryApiProvider
+          value={{
+            ...defaultQueryApi,
+            searchCollections: async (query) => ({
+              items: nodes.filter((node) => node.name.toLowerCase().includes(query.toLowerCase())),
+              next_cursor: null,
+            }),
+            lookupCollectionById: async (id) => {
+              const node = nodes.find((candidate) => candidate.id === id);
+              if (!node) throw new Error("Collection not found");
+              return { collection: node, ancestors: [] };
+            },
+          }}
+        >
           <MemoryRouter initialEntries={["/inbox/7"]}>
             <Routes>
               <Route path="/inbox/:id" element={<InboxDetailPage api={api} />} />
@@ -111,6 +131,7 @@ describe("InboxDetailPage", () => {
       effective_role: "admin",
     });
     vi.mocked(api.dismissPendingImport).mockResolvedValue();
+    vi.mocked(api.searchCollections).mockResolvedValue({ items: [], next_cursor: null });
     vi.mocked(api.updatePendingImport).mockResolvedValue(reviewItem);
   });
 
@@ -146,7 +167,7 @@ describe("InboxDetailPage", () => {
     expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]);
   });
 
-  it("reuses an existing root collection with the capture title", async () => {
+  it("reuses an existing root collection found by name", async () => {
     const existing: CollectionRead = {
       id: 12,
       name: "Calibration cube",
@@ -159,6 +180,10 @@ describe("InboxDetailPage", () => {
       has_readme: false,
     };
     vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    vi.mocked(api.searchCollections).mockResolvedValue({
+      items: [{ ...existing, child_count: 0, descendant_count: 0, display_path: existing.name }],
+      next_cursor: null,
+    });
     vi.mocked(api.importPendingImport).mockResolvedValue({
       ...reviewItem,
       state: "completed",
@@ -169,11 +194,123 @@ describe("InboxDetailPage", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
 
     await waitFor(() => expect(api.updatePendingImport).toHaveBeenCalled());
+    expect(api.searchCollections).toHaveBeenCalledWith("Calibration cube", "edit", null);
     expect(api.createCollection).not.toHaveBeenCalled();
     expect(api.updatePendingImport).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ collection_id: 12 }),
     );
+  });
+
+  it("finds a same-named root after an earlier page of nested matches", async () => {
+    const match = {
+      id: 12,
+      name: "Calibration cube",
+      slug: "calibration-cube",
+      path: "calibration-cube",
+      parent_id: null,
+      model_count: 2,
+      effective_role: "edit" as const,
+      tags: [],
+      has_readme: false,
+      child_count: 0,
+      descendant_count: 0,
+      display_path: "Calibration cube",
+    };
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    vi.mocked(api.searchCollections)
+      .mockResolvedValueOnce({
+        items: [{ ...match, id: 11, path: "other/calibration-cube", parent_id: 8 }],
+        next_cursor: "second-page",
+      })
+      .mockResolvedValueOnce({ items: [match], next_cursor: null });
+    vi.mocked(api.importPendingImport).mockResolvedValue({
+      ...reviewItem,
+      state: "completed",
+      completion: "complete",
+    });
+    renderPage();
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+
+    await waitFor(() => expect(api.updatePendingImport).toHaveBeenCalled());
+    expect(api.searchCollections).toHaveBeenNthCalledWith(
+      2,
+      "Calibration cube",
+      "edit",
+      "second-page",
+    );
+    expect(api.createCollection).not.toHaveBeenCalled();
+    expect(api.updatePendingImport).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ collection_id: 12 }),
+    );
+  });
+
+  it("stops the import when destination search fails", async () => {
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    vi.mocked(api.searchCollections).mockRejectedValue(new Error("Search unavailable"));
+    renderPage();
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+
+    await waitFor(() => expect(api.searchCollections).toHaveBeenCalledOnce());
+    expect(api.createCollection).not.toHaveBeenCalled();
+    expect(api.updatePendingImport).not.toHaveBeenCalled();
+    expect(api.importPendingImport).not.toHaveBeenCalled();
+  });
+
+  it("picks an existing destination through a bounded search", async () => {
+    const parts: CollectionRead = {
+      id: 12,
+      name: "Parts",
+      slug: "parts",
+      path: "parts",
+      parent_id: null,
+      model_count: 2,
+      effective_role: "edit",
+      tags: [],
+      has_readme: false,
+    };
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    vi.mocked(api.importPendingImport).mockResolvedValue({ ...reviewItem, state: "completed" });
+    const user = userEvent.setup();
+    renderPage([parts]);
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Destination" }), "pick");
+    expect(screen.getByRole("button", { name: "Import selected" })).toBeDisabled();
+    await user.click(await screen.findByRole("option", { name: /Parts/ }));
+    await user.click(screen.getByRole("button", { name: "Import selected" }));
+
+    await waitFor(() =>
+      expect(api.updatePendingImport).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ collection_id: 12 }),
+      ),
+    );
+    expect(api.createCollection).not.toHaveBeenCalled();
+  });
+
+  it("labels a saved destination by its id lookup", async () => {
+    const parts: CollectionRead = {
+      id: 12,
+      name: "Parts",
+      slug: "parts",
+      path: "parts",
+      parent_id: null,
+      model_count: 2,
+      effective_role: "edit",
+      tags: [],
+      has_readme: false,
+    };
+    vi.mocked(api.getPendingImport).mockResolvedValue({ ...reviewItem, target_collection_id: 12 });
+    renderPage([parts]);
+
+    const destination = await screen.findByRole("combobox", { name: "Destination" });
+    await waitFor(() =>
+      expect(within(destination).getByRole("option", { name: "Parts" })).toBeVisible(),
+    );
+    expect(destination).toHaveValue("12");
   });
 
   it("deletes the pending item after explicit confirmation", async () => {

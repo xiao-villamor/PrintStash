@@ -144,6 +144,7 @@ class ModelRead(BaseModel):
     hash: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    collection_label: Optional[str]
     description: Optional[str] = None
     source_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None

@@ -51,6 +51,7 @@ export const queryKeys = {
   // invalidates `collections` refreshes every loaded level, lookup and search.
   collectionChildren: (parentId: number | null) => ["collections", "children", parentId] as const,
   collectionLookup: (path: string | null) => ["collections", "lookup", path] as const,
+  collectionLookupById: (id: number | null) => ["collections", "lookup-id", id] as const,
   collectionSearch: (query: string, minRole: CollectionRole) =>
     ["collections", "search", query, minRole] as const,
   tags: ["tags"] as const,

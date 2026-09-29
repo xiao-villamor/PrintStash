@@ -1013,7 +1013,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/collections/lookup") {
-    const found = mockCollections().find((row) => row.path === url.searchParams.get("path"));
+    const path = url.searchParams.get("path");
+    const id = url.searchParams.get("id");
+    const found = mockCollections().find((row) =>
+      path !== null ? row.path === path : id !== null && row.id === Number(id),
+    );
     if (found === undefined) sendJson(res, { detail: "collection_not_found" }, 404);
     else sendJson(res, { collection: mockNode(found), ancestors: [] });
     return;

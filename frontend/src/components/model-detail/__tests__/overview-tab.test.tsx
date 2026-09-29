@@ -19,10 +19,11 @@ import type { ModelRead } from "@/types";
 
 const editor: ModelMetaEditor = {
   collection: "",
+  collectionLabel: null,
   setCollection: () => {},
   catOpen: false,
   setCatOpen: () => {},
-  collections: [],
+  allowRoot: true,
   description: "",
   setDescription: () => {},
   sourceUrl: "",
@@ -45,6 +46,7 @@ const model: ModelRead = {
   hash: "hash",
   collection: null,
   collection_id: null,
+  collection_label: null,
   description: null,
   source_url: null,
   effective_role: "admin",

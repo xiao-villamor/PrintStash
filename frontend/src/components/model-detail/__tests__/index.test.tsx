@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelDetail } from "@/components/model-detail";
 import { queryKeys } from "@/lib/query-client";
 import { aCollection } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { FileRead, ModelRead } from "@/types";
 
@@ -58,6 +59,7 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     hash: "h".repeat(16),
     collection: "parts",
     collection_id: 1,
+    collection_label: "Parts",
     description: null,
     source_url: null,
     effective_role: "admin",
@@ -74,12 +76,7 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
 function renderDetail(options: RenderAppOptions & { model?: ModelRead } = {}) {
   const { model = aModel(), seed = [], routes = {}, ...rest } = options;
   return renderApp(<ModelDetail model={model} />, {
-    seed: [
-      [queryKeys.collections, [aCollection()]],
-      [queryKeys.tags, []],
-      [queryKeys.printers, []],
-      ...seed,
-    ],
+    seed: [[queryKeys.tags, []], [queryKeys.printers, []], ...seed],
     routes: {
       "GET /api/v1/models/1": json(model),
       "GET /api/v1/models/1/print-jobs": json([]),
@@ -87,7 +84,7 @@ function renderDetail(options: RenderAppOptions & { model?: ModelRead } = {}) {
       "GET /api/v1/models/1/provenance": json({ sources: [] }),
       "GET /api/v1/models/1/shares": json([]),
       "GET /api/v1/printers": json([]),
-      "GET /api/v1/collections": json([aCollection()]),
+      ...collectionTreeRoutes([aCollection()]),
       "GET /api/v1/tags": json([]),
       ...routes,
     },
@@ -118,6 +115,33 @@ afterEach(() => {
 
 describe("ModelDetail", () => {
   describe("collection navigation", () => {
+    it("shows the detail label without loading the whole collection tree", async () => {
+      const { requests } = renderDetail({
+        model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
+      });
+
+      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
+      expect(
+        requests().filter(
+          (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
+        ),
+      ).toEqual([]);
+    });
+
+    it("offers editable destinations through collection search", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderDetail();
+      await openEdit(user);
+
+      await user.click(screen.getByRole("button", { name: "Parts" }));
+      expect(await screen.findByRole("option", { name: /Parts/ })).toBeVisible();
+      expect(
+        requests().some(
+          (call) => new URL(call.url, "http://test").searchParams.get("min_role") === "edit",
+        ),
+      ).toBe(true);
+    });
+
     it.each([
       { label: "containing collection", collection: "parts", expected: "/?c=parts" },
       {

@@ -59,8 +59,12 @@ export function collectionTreeRoutes(collections: CollectionRead[]): RouteTable 
       return json(page(collections.filter((c) => c.parent_id === Number(parent))));
     },
     "GET /api/v1/collections/lookup": (url) => {
-      const path = new URL(url, "http://test").searchParams.get("path") ?? "";
-      const found = collections.find((collection) => collection.path === path);
+      const params = new URL(url, "http://test").searchParams;
+      const path = params.get("path");
+      const id = params.get("id");
+      const found = collections.find((collection) =>
+        id !== null ? collection.id === Number(id) : collection.path === path,
+      );
       if (found === undefined) return json({ detail: "collection_not_found" }, 404);
       const ancestors: CollectionRead[] = [];
       for (let at = parentOf(found); at; at = parentOf(at)) ancestors.unshift(at);

@@ -1,7 +1,6 @@
 "use client";
 
 import { uiText } from "@/lib/locale";
-import { collectionDisplayPath } from "@/lib/collection-display";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useMemo, useRef, useState } from "react";
@@ -29,12 +28,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CollectionPicker } from "@/components/collection-picker";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { Checkbox } from "@/components/ui/checkbox";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
-import { useCollections, useMultipartModels, useTags } from "@/lib/queries";
+import { useCollectionChildren, useCollectionLookup, useTags } from "@/lib/queries";
 import {
   createMultipartModel,
   deleteDocument,
@@ -58,7 +57,7 @@ import { useRouter, useSearchParams } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useParams } from "react-router-dom";
 import type {
-  CollectionRead,
+  CollectionNodeRead,
   MultipartModelCandidate,
   MultipartModelListItem,
   MultipartModelRead,
@@ -390,201 +389,6 @@ export function NewMultipartModelModal({
   );
 }
 
-export type MultipartStructureFilter = "variants" | "fixed" | "empty";
-
-const STRUCTURE_FILTERS: MultipartStructureFilter[] = ["variants", "fixed", "empty"];
-
-export function MultipartModelBrowser({
-  collection,
-  collections = [],
-  structures = [],
-  guidesOnly = false,
-  canCreate,
-  onCreate,
-  onStructuresChange,
-  onGuidesOnlyChange,
-}: {
-  collection: string | null;
-  collections?: CollectionRead[];
-  structures?: MultipartStructureFilter[];
-  guidesOnly?: boolean;
-  canCreate: boolean;
-  onCreate?: () => void;
-  onStructuresChange?: (value: MultipartStructureFilter[]) => void;
-  onGuidesOnlyChange?: (value: boolean) => void;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"updated" | "name" | "parts">("updated");
-  const [createOpen, setCreateOpen] = useState(false);
-  const current = collections.find((item) => item.path === collection);
-  const collectionChoice = current ? { id: current.id, path: current.path } : null;
-  const { data: availableTags = [] } = useTags();
-  const requestCreate = onCreate ?? (() => setCreateOpen(true));
-  function toggleStructure(value: MultipartStructureFilter) {
-    onStructuresChange?.(
-      structures.includes(value)
-        ? structures.filter((current) => current !== value)
-        : [...structures, value],
-    );
-  }
-  const {
-    data: items = [],
-    isLoading,
-    error,
-  } = useMultipartModels({
-    collection: collection ?? undefined,
-    direct: true,
-    q: query || undefined,
-    limit: 100,
-  });
-  const sortedItems = useMemo(() => {
-    const rows = items.filter((item) => {
-      if (guidesOnly && item.guide_count === 0) return false;
-      if (structures.length > 0) {
-        const matchesStructure = structures.some((structure) => {
-          if (structure === "variants") return item.model_count > item.part_count;
-          if (structure === "fixed") {
-            return item.part_count > 0 && item.model_count === item.part_count;
-          }
-          return item.part_count === 0;
-        });
-        if (!matchesStructure) return false;
-      }
-      return true;
-    });
-    if (sort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
-    if (sort === "parts") return rows.sort((a, b) => b.part_count - a.part_count);
-    return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [guidesOnly, items, sort, structures]);
-
-  return (
-    <section className="flex-1 px-4 py-5 sm:px-6">
-      {!onCreate && (
-        <NewMultipartModelModal
-          key={collectionChoice?.id ?? "vault"}
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          collection={collectionChoice}
-        />
-      )}
-      <div className="w-full space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex w-full max-w-xl items-center gap-2">
-            <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-            <Input
-              aria-label={t("multipart.searchModels")}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("multipart.searchModels")}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>{t("multipart.sort")}</span>
-            <select
-              value={sort}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === "updated" || value === "name" || value === "parts") {
-                  setSort(value);
-                }
-              }}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="updated">{t("multipart.sortUpdated")}</option>
-              <option value="name">{t("multipart.sortName")}</option>
-              <option value="parts">{t("multipart.sortParts")}</option>
-            </select>
-          </label>
-          {!onCreate && (
-            <Button type="button" onClick={requestCreate} disabled={!canCreate}>
-              <Plus className="h-4 w-4" /> {t("multipart.new")}
-            </Button>
-          )}
-        </div>
-        <fieldset className="grid gap-1 rounded-md border border-border bg-muted/30 p-2 md:hidden">
-          <legend className="px-1 text-xs font-medium text-muted-foreground">
-            {t("multipart.filters")}
-          </legend>
-          <div className="grid grid-cols-2 gap-1">
-            {STRUCTURE_FILTERS.map((value) => (
-              <label
-                key={value}
-                className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted"
-              >
-                <Checkbox
-                  checked={structures.includes(value)}
-                  onChange={() => toggleStructure(value)}
-                />
-                <span>{t(`multipart.structure.${value}`)}</span>
-              </label>
-            ))}
-            <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted">
-              <Checkbox checked={guidesOnly} onChange={() => onGuidesOnlyChange?.(!guidesOnly)} />
-              <span>{t("multipart.withGuides")}</span>
-            </label>
-          </div>
-        </fieldset>
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {multipartError(error, t, "multipart.loadError")}
-          </p>
-        )}
-        {isLoading ? (
-          <div
-            className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"
-            aria-busy="true"
-          >
-            {[1, 2, 3].map((item) => (
-              <Card key={item} className="aspect-square animate-pulse bg-muted/40" />
-            ))}
-          </div>
-        ) : sortedItems.length === 0 ? (
-          <EmptyState
-            title={
-              query || structures.length > 0 || guidesOnly
-                ? t("multipart.noFilteredSets")
-                : t("multipart.empty")
-            }
-            description={
-              query || structures.length > 0 || guidesOnly
-                ? t("multipart.noFilteredSetsHelp")
-                : t("multipart.emptyDescription")
-            }
-            action={
-              !query && structures.length === 0 && !guidesOnly && canCreate ? (
-                <Button onClick={requestCreate}>{t("multipart.new")}</Button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
-            {sortedItems.map((item) => (
-              <MultipartModelCard
-                key={item.id}
-                item={item}
-                collectionLabel={collectionDisplayPath(collections, item.collection)}
-                availableTags={availableTags}
-                onDataChange={() => {
-                  void Promise.all([
-                    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-                    queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-                  ]);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function modelLabel(model: MultipartModelCandidate, unavailable: string): string {
   return model.available && model.name ? model.name : unavailable;
 }
@@ -606,14 +410,11 @@ function ModelPicker({
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [collection, setCollection] = useState<CollectionRead | null>(null);
+  const [collection, setCollection] = useState<CollectionNodeRead | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Map<number, MultipartModelCandidate>>(new Map());
-  const {
-    data: collections = [],
-    isError: collectionsError,
-    refetch: retryCollections,
-  } = useCollections();
+  const children = useCollectionChildren(collection?.id ?? null, { enabled: open });
+  const lookup = useCollectionLookup(collection?.path ?? null);
   const {
     data: candidates = [],
     isLoading,
@@ -625,20 +426,13 @@ function ModelPicker({
     direct: collection !== null,
     offset,
   });
-  const ancestors = collections
-    .filter(
-      (item) => collection?.path === item.path || collection?.path.startsWith(`${item.path}/`),
-    )
-    .sort((a, b) => a.path.length - b.path.length);
-  const collectionIds = new Set(collections.map((item) => item.id));
-  const folders = collections
-    .filter((item) =>
-      collection
-        ? item.parent_id === collection.id
-        : item.parent_id === null || !collectionIds.has(item.parent_id),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
-  function navigate(next: CollectionRead | null) {
+  const ancestors = lookup.data
+    ? [...lookup.data.ancestors, lookup.data.collection]
+    : collection
+      ? [collection]
+      : [];
+  const folders = children.data?.pages.flatMap((page) => page.items) ?? [];
+  function navigate(next: CollectionNodeRead | null) {
     setCollection(next);
     setOffset(0);
   }
@@ -695,10 +489,10 @@ function ModelPicker({
           ))}
         </nav>
         <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
-          {collectionsError && (
+          {children.isError && (
             <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm">
               <span>{t("multipart.collectionsError")}</span>
-              <Button variant="outline" size="sm" onClick={() => void retryCollections()}>
+              <Button variant="outline" size="sm" onClick={() => void children.refetch()}>
                 {t("multipart.retry")}
               </Button>
             </div>
@@ -721,6 +515,16 @@ function ModelPicker({
                 </li>
               ))}
             </ul>
+          )}
+          {children.hasNextPage && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={children.isFetchingNextPage}
+              onClick={() => void children.fetchNextPage()}
+            >
+              {uiText("Show more folders")}
+            </Button>
           )}
           {isLoading && (
             <p role="status" className="py-8 text-sm text-muted-foreground">
@@ -968,11 +772,9 @@ function MultipartMemberCard({ model }: { model: MultipartModelCandidate }) {
 
 function MultipartOverview({
   model,
-  collections,
   onAddFirst,
 }: {
   model: MultipartModelRead;
-  collections: CollectionRead[];
   onAddFirst?: () => void;
 }) {
   useUiLocale();
@@ -1059,7 +861,7 @@ function MultipartOverview({
                   {t("multipart.collectionLabel")}
                 </dt>
                 <dd className="mt-1 text-sm font-medium text-foreground">
-                  {collectionDisplayPath(collections, model.collection) || t("multipart.vaultOnly")}
+                  {model.collection_label || t("multipart.vaultOnly")}
                 </dd>
               </div>
             </dl>
@@ -1283,7 +1085,6 @@ export function MultipartModelDetailPage() {
   const id = Number(params.id);
   const { t } = useI18n();
   const { user } = useAuth();
-  const { data: collections = [] } = useCollections();
   const { data: availableTags = [] } = useTags();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -1296,6 +1097,7 @@ export function MultipartModelDetailPage() {
   const [persistedModel, setPersistedModel] = useState<MultipartModelRead | null>(null);
   const [draft, setDraft] = useState<MultipartModelRead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
   const [picker, setPicker] = useState({ open: false, part: -1, session: 0 });
   function openPicker(part: number) {
     setPicker((current) => ({ open: true, part, session: current.session + 1 }));
@@ -1314,16 +1116,6 @@ export function MultipartModelDetailPage() {
   const model = draft ?? savedModel;
   const canEdit =
     !!user?.is_superuser || model?.effective_role === "edit" || model?.effective_role === "admin";
-  const writableCollections = useMemo(
-    () =>
-      collections.filter(
-        (collection) =>
-          !!user?.is_superuser ||
-          collection.effective_role === "edit" ||
-          collection.effective_role === "admin",
-      ),
-    [collections, user?.is_superuser],
-  );
   const usedIds = useMemo(
     () => new Set((model?.parts ?? []).flatMap((part) => part.models.map((member) => member.id))),
     [model?.parts],
@@ -1750,33 +1542,46 @@ export function MultipartModelDetailPage() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="multipart-collection" className="block text-sm font-medium">
+                  <span className="block text-sm font-medium">
                     {t("multipart.collectionLabel")}
-                  </label>
-                  <select
-                    id="multipart-collection"
-                    aria-describedby="multipart-collection-help"
-                    value={model.collection_id ?? ""}
-                    onChange={(event) => {
-                      const collectionId = event.target.value ? Number(event.target.value) : null;
-                      setDraft({
-                        ...model,
-                        collection_id: collectionId,
-                        collection:
-                          writableCollections.find((collection) => collection.id === collectionId)
-                            ?.path ?? null,
-                      });
-                    }}
-                    disabled={!canEdit}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  </span>
+                  <DropdownMenu
+                    open={collectionPickerOpen}
+                    onOpenChange={setCollectionPickerOpen}
+                    role="dialog"
+                    align="start"
+                    contentClassName="w-80 max-w-[90vw] p-2"
+                    trigger={
+                      <button
+                        type="button"
+                        data-menu-trigger
+                        onClick={() => setCollectionPickerOpen((open) => !open)}
+                        disabled={!canEdit}
+                        aria-haspopup="dialog"
+                        aria-expanded={collectionPickerOpen}
+                        aria-label={t("multipart.collectionLabel")}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                      >
+                        {model.collection_label || t("multipart.vaultOnly")}
+                      </button>
+                    }
                   >
-                    <option value="">{t("multipart.vaultOnly")}</option>
-                    {writableCollections.map((collection) => (
-                      <option key={collection.id} value={collection.id}>
-                        {collectionDisplayPath(collections, collection.path)}
-                      </option>
-                    ))}
-                  </select>
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={model.collection ?? ""}
+                      noneLabel={user?.is_superuser ? t("multipart.vaultOnly") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                      onSelect={(collection) => {
+                        setDraft({
+                          ...model,
+                          collection_id: collection?.id ?? null,
+                          collection: collection?.path ?? null,
+                          collection_label: collection?.display_path ?? null,
+                        });
+                        setCollectionPickerOpen(false);
+                      }}
+                    />
+                  </DropdownMenu>
                   <span
                     id="multipart-collection-help"
                     className="block text-xs text-muted-foreground"
@@ -1977,11 +1782,7 @@ export function MultipartModelDetailPage() {
           />
         </div>
       ) : (
-        <MultipartOverview
-          model={model}
-          collections={collections}
-          onAddFirst={canEdit ? beginAddingFirst : undefined}
-        />
+        <MultipartOverview model={model} onAddFirst={canEdit ? beginAddingFirst : undefined} />
       )}
     </div>
   );

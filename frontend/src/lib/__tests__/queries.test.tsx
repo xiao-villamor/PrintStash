@@ -36,9 +36,9 @@ import {
   defaultQueryApi,
   useCollectionChildren,
   useCollectionLookup,
+  useCollectionLookupById,
   useCollectionReadme,
   useCollectionSearch,
-  useCollections,
   useFilamentProfiles,
   useLibraryPrefetch,
   useModelFacets,
@@ -52,7 +52,6 @@ import {
   type QueryApi,
 } from "@/lib/queries";
 import type {
-  CollectionRead,
   FilamentProfileRead,
   ModelFacetsRead,
   ModelListItem,
@@ -78,10 +77,10 @@ const stubs = {
   getCollectionReadme: vi.fn<QueryApi["getCollectionReadme"]>(),
   listCollectionChildren: vi.fn<QueryApi["listCollectionChildren"]>(),
   lookupCollection: vi.fn<QueryApi["lookupCollection"]>(),
+  lookupCollectionById: vi.fn<QueryApi["lookupCollectionById"]>(),
   searchCollections: vi.fn<QueryApi["searchCollections"]>(),
   getModelFacets: vi.fn<QueryApi["getModelFacets"]>(),
   getVaultStats: vi.fn<QueryApi["getVaultStats"]>(),
-  listCollections: vi.fn<QueryApi["listCollections"]>(),
   listFilamentProfiles: vi.fn<QueryApi["listFilamentProfiles"]>(),
   listModelPage: vi.fn<QueryApi["listModelPage"]>(),
   listMultipartModels: vi.fn<QueryApi["listMultipartModels"]>(),
@@ -94,18 +93,6 @@ const stubs = {
 const api: QueryApi = { ...defaultQueryApi, ...stubs };
 
 const TIMESTAMP = "2026-01-01T00:00:00Z";
-
-const collection: CollectionRead = {
-  id: 1,
-  name: "Brackets",
-  slug: "brackets",
-  path: "Brackets",
-  parent_id: null,
-  model_count: 1,
-  effective_role: null,
-  tags: [],
-  has_readme: false,
-};
 
 const tag: TagRead = { id: 1, name: "petg", slug: "petg", model_count: 1 };
 
@@ -211,9 +198,9 @@ function wrapper(options: { staleTime?: number } = {}) {
 }
 
 beforeEach(() => {
-  stubs.listCollections.mockResolvedValue([collection]);
   stubs.listCollectionChildren.mockResolvedValue({ items: [aCollectionNode()], next_cursor: null });
   stubs.lookupCollection.mockResolvedValue({ collection: aCollectionNode(), ancestors: [] });
+  stubs.lookupCollectionById.mockResolvedValue({ collection: aCollectionNode(), ancestors: [] });
   stubs.searchCollections.mockResolvedValue({ items: [aCollectionNode()], next_cursor: null });
   stubs.listTags.mockResolvedValue([tag]);
   stubs.listPrinters.mockResolvedValue([printer]);
@@ -278,11 +265,17 @@ describe("taxonomy hooks", () => {
     expect(stubs.searchCollections).toHaveBeenCalledWith("bracket", "edit", null);
   });
 
-  it("useCollections fetches with fresh:true and exposes data", async () => {
-    const { result } = renderHook(() => useCollections(), { wrapper: wrapper() });
+  it("resolves a saved collection by id", async () => {
+    const { result } = renderHook(() => useCollectionLookupById(1), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([collection]);
-    expect(stubs.listCollections).toHaveBeenCalledWith({ fresh: true });
+    expect(result.current.data?.collection.id).toBe(1);
+    expect(stubs.lookupCollectionById).toHaveBeenCalledWith(1);
+  });
+
+  it("leaves id lookup idle without a collection", () => {
+    const { result } = renderHook(() => useCollectionLookupById(null), { wrapper: wrapper() });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(stubs.lookupCollectionById).not.toHaveBeenCalled();
   });
 
   it("useTags fetches with fresh:true", async () => {

@@ -25,6 +25,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "@/components/settings-panel";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { queryKeys } from "@/lib/query-client";
 import {
   aCollection,
@@ -154,7 +155,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/config": json(VAULT_CONFIG),
       "GET /api/v1/auth/api-keys": json([]),
       "GET /api/v1/admin/users": json([]),
-      "GET /api/v1/collections": json([]),
+      ...collectionTreeRoutes([aCollection({ id: 5, name: "Parts" })]),
       "GET /api/v1/printers": json([]),
       "GET /api/v1/libraries": json([]),
       "GET /api/v1/notifications": json({ enabled: false, channels: [] }),
@@ -595,20 +596,67 @@ describe("SettingsPanel", () => {
   });
 
   describe("collection access", () => {
+    async function pickParts(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole("button", { name: "Select collection" }));
+      await user.click(await screen.findByRole("option", { name: /Parts/ }));
+    }
+
+    it("loads permissions only for the selected collection", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        at: "/settings?section=access",
+        routes: { "GET /api/v1/collections/5/permissions": json([]) },
+      });
+      await screen.findByRole("button", { name: "Select collection" });
+
+      expect(requests().filter((call) => call.url.includes("/permissions"))).toEqual([]);
+      expect(
+        requests().filter(
+          (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
+        ),
+      ).toEqual([]);
+
+      await pickParts(user);
+
+      await waitFor(() =>
+        expect(
+          requests().filter((call) => call.url.includes("/collections/5/permissions")),
+        ).toHaveLength(1),
+      );
+    });
+
+    it("offers a retry when the selected collection's grants fail to load", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        at: "/settings?section=access",
+        routes: { "GET /api/v1/collections/5/permissions": json({ detail: "unavailable" }, 503) },
+      });
+      await pickParts(user);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Collection access could not be loaded.",
+      );
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() =>
+        expect(
+          requests().filter((call) => call.url.includes("/collections/5/permissions")),
+        ).toHaveLength(2),
+      );
+    });
+
     it("grants the role the admin chose", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([]),
           "PUT /api/v1/collections/5/permissions/2": json(aCollectionPermission()),
         },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
       await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
-      await user.selectOptions(screen.getByLabelText("Collection"), "5");
+      await pickParts(user);
 
       await user.click(screen.getByRole("button", { name: "Grant" }));
 
@@ -624,10 +672,7 @@ describe("SettingsPanel", () => {
     it("cannot grant before a user is chosen", async () => {
       // The grant is per user *and* per collection; a half-filled form would
       // otherwise send a request naming nobody.
-      renderSettings({
-        at: "/settings?section=access",
-        routes: { "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]) },
-      });
+      renderSettings({ at: "/settings?section=access" });
 
       expect(await screen.findByRole("button", { name: "Grant" })).toBeDisabled();
     });
@@ -652,12 +697,12 @@ describe("SettingsPanel", () => {
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
         },
       });
 
       await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      await pickParts(user);
 
       expect(await screen.findByTitle("Remove collection access")).toBeInTheDocument();
     });
@@ -668,13 +713,13 @@ describe("SettingsPanel", () => {
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
           "DELETE /api/v1/collections/5/permissions/2": json(null, 204),
         },
       });
 
       await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      await pickParts(user);
 
       await user.click(await screen.findByTitle("Remove collection access"));
 

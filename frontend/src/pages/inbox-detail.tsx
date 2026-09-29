@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,6 +20,7 @@ import {
   getPendingImport,
   importPendingImport,
   retryPendingImport,
+  searchCollections,
   updatePendingImport,
 } from "@/lib/api";
 import { createCompletionChainedPoller } from "@/lib/completion-chained-polling";
@@ -26,10 +28,9 @@ import { formatBytes } from "@/lib/format";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
 import { useRouter } from "@/lib/navigation";
-import { useCollections } from "@/lib/queries";
-import { collectionDisplayPath } from "@/lib/collection-display";
+import { useCollectionLookupById } from "@/lib/queries";
 import { toast } from "@/lib/toast";
-import type { InboxManifestFile, InboxItem } from "@/types";
+import type { CollectionNodeRead, InboxManifestFile, InboxItem } from "@/types";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
 
 export interface InboxDetailApi {
@@ -38,6 +39,7 @@ export interface InboxDetailApi {
   getPendingImport: typeof getPendingImport;
   importPendingImport: typeof importPendingImport;
   retryPendingImport: typeof retryPendingImport;
+  searchCollections: typeof searchCollections;
   updatePendingImport: typeof updatePendingImport;
 }
 
@@ -47,12 +49,14 @@ const defaultInboxDetailApi: InboxDetailApi = {
   getPendingImport,
   importPendingImport,
   retryPendingImport,
+  searchCollections,
   updatePendingImport,
 };
 
 const ACTIVE_STATES = new Set<InboxItem["state"]>(["captured", "resolving", "importing"]);
 const NEW_COLLECTION = "new";
 const NO_COLLECTION = "none";
+const PICK_COLLECTION = "pick";
 
 function files(item: InboxItem): InboxManifestFile[] {
   return item.manifest.kind === "archive"
@@ -138,11 +142,20 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const { id } = useParams();
   const inboxId = Number(id);
   const router = useRouter();
-  const collections = useCollections().data ?? [];
   const [item, setItem] = useState<InboxItem | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [tags, setTags] = useState("");
   const [destination, setDestination] = useState<string>(NEW_COLLECTION);
+  const [pickedCollection, setPickedCollection] = useState<CollectionNodeRead | null>(null);
+  const destinationId =
+    destination !== NEW_COLLECTION &&
+    destination !== NO_COLLECTION &&
+    destination !== PICK_COLLECTION
+      ? Number(destination)
+      : null;
+  const savedCollection = useCollectionLookupById(destinationId);
+  const destinationCollection =
+    pickedCollection?.id === destinationId ? pickedCollection : savedCollection.data?.collection;
   const [collectionName, setCollectionName] = useState("");
   const [busy, setBusy] = useState(false);
   // The import/retry endpoint returns the pre-worker row, which can still be
@@ -165,6 +178,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
           setDestination(
             next.target_collection_id === null ? NEW_COLLECTION : String(next.target_collection_id),
           );
+          setPickedCollection(null);
           setCollectionName(
             capturedTitle(next) || t("inbox.defaultCollectionName", { id: String(next.id) }),
           );
@@ -211,16 +225,23 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   };
   const resolveDestination = async (): Promise<number | null> => {
     if (destination === NO_COLLECTION) return null;
+    if (destination === PICK_COLLECTION) throw new Error("Choose a collection before importing");
     if (destination !== NEW_COLLECTION) return Number(destination);
 
     const name = collectionName.trim();
-    const existing = collections.find(
-      (collection) => collection.parent_id === null && collection.name === name,
-    );
-    if (existing) {
-      setDestination(String(existing.id));
-      return existing.id;
-    }
+    // Search is paged, so a same-named root cannot be missed behind nested matches.
+    let cursor: string | null = null;
+    do {
+      const page = await api.searchCollections(name, "edit", cursor);
+      const existing = page.items.find(
+        (collection) => collection.parent_id === null && collection.name === name,
+      );
+      if (existing) {
+        setDestination(String(existing.id));
+        return existing.id;
+      }
+      cursor = page.next_cursor;
+    } while (cursor !== null);
     const created = await api.createCollection({ name, parent_id: null });
     setDestination(String(created.id));
     return created.id;
@@ -416,13 +437,32 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 >
                   <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
                   <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
-                  {collections.map((collection) => (
-                    <option key={collection.id} value={collection.id}>
-                      {collectionDisplayPath(collections, collection.path)}
+                  <option value={PICK_COLLECTION}>{uiText("Choose existing collection")}</option>
+                  {destinationId !== null && (
+                    <option value={destinationId}>
+                      {destinationCollection?.display_path ??
+                        uiText("Collection #{value1}", { value1: String(destinationId) })}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
+              {destination === PICK_COLLECTION && (
+                <CollectionPicker
+                  minRole="edit"
+                  selectedPath={null}
+                  emptyLabel={uiText("No editable collections.")}
+                  onSelect={(collection) => {
+                    if (collection === null) throw new Error("A collection is required");
+                    setPickedCollection(collection);
+                    setDestination(String(collection.id));
+                  }}
+                />
+              )}
+              {destinationId !== null && savedCollection.isError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {uiText("Folders could not be loaded.")}
+                </p>
+              )}
               {destination === NEW_COLLECTION && (
                 <div>
                   <label htmlFor={collectionNameId} className="block text-sm font-medium">
@@ -467,7 +507,11 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 <Button
                   className="w-full"
                   onClick={() => void importSelected()}
-                  disabled={selected.length === 0 || collectionNameMissing}
+                  disabled={
+                    selected.length === 0 ||
+                    collectionNameMissing ||
+                    destination === PICK_COLLECTION
+                  }
                   loading={busy}
                 >
                   {t("inbox.importSelected")}

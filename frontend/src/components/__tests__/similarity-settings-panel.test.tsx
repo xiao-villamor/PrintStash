@@ -4,7 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SimilaritySettingsPanel } from "@/components/similarity-settings-panel";
 import { aSimilarityRun, similaritySettings, similarityStatus } from "@/test-support/similarity";
-import { aModel, anExternalLibrary } from "@/test-support/factories";
+import { aCollection, aModel, anExternalLibrary } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import { listTasks, resetTasksForNewSetup, trackSimilarityRun } from "@/lib/task-center";
 
@@ -14,7 +15,7 @@ function renderSettings(options: RenderAppOptions = {}) {
     routes: {
       "GET /api/v1/similarity/status": json(similarityStatus()),
       "GET /api/v1/similarity/runs": json({ items: [], next_cursor: null }),
-      "GET /api/v1/collections": json([]),
+      ...collectionTreeRoutes([aCollection({ id: 5, name: "Parts", path: "parts" })]),
       "GET /api/v1/libraries": json([]),
       "POST /api/v1/similarity/selection-preview": json({ total: 0, by_class: {} }),
       "PATCH /api/v1/similarity/settings": json(similaritySettings({ enabled: false })),
@@ -192,6 +193,32 @@ describe("Scoped analysis", () => {
         app.requestsWithMethod("POST").find((request) => request.url.endsWith("/runs"))?.body,
       ).toBe(JSON.stringify({ scope: "sources", ids: [7] })),
     );
+  });
+
+  it("starts a selected collection without loading the whole tree", async () => {
+    const user = userEvent.setup();
+    const app = renderSettings({
+      routes: { "POST /api/v1/similarity/runs": json(aSimilarityRun()) },
+    });
+    const scope = await screen.findByRole("combobox", { name: "Analysis scope" });
+
+    await user.selectOptions(scope, "pick");
+    expect(screen.getByRole("button", { name: "Start analysis" })).toBeDisabled();
+    await user.click(await screen.findByRole("option", { name: /Parts/ }));
+    await user.click(screen.getByRole("button", { name: "Start analysis" }));
+
+    await waitFor(() =>
+      expect(
+        app.requestsWithMethod("POST").find((request) => request.url.endsWith("/runs"))?.body,
+      ).toBe(JSON.stringify({ scope: "collections", ids: [5] })),
+    );
+    expect(
+      app
+        .requests()
+        .filter(
+          (request) => new URL(request.url, "http://test").pathname === "/api/v1/collections",
+        ),
+    ).toEqual([]);
   });
   it("starts only checked Models", async () => {
     const user = userEvent.setup();

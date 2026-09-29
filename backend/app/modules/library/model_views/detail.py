@@ -25,7 +25,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.modules.identity import rbac
-from app.modules.library import provenance
+from app.modules.library import collection_tree, provenance
 from app.schemas.models import (
     ModelRead,
     TrashedSourceFileRead,
@@ -160,6 +160,10 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         ).first()
         is not None
     )
+    collection_path = collection_name_for(m)
+    collection_label = collection_tree.collection_labels(session, user, [collection_path]).get(
+        collection_path
+    )
 
     return ModelRead(
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
@@ -167,8 +171,9 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         name=m.name,
         slug=m.slug,
         hash=m.hash,
-        collection=collection_name_for(m),
+        collection=collection_path,
         collection_id=m.collection_id,
+        collection_label=collection_label,
         description=m.description,
         source_url=m.source_url,
         effective_role=role,

@@ -31,10 +31,9 @@ async function grant(
     .getByRole("combobox")
     .filter({ has: page.getByRole("option", { name: "Select user" }) })
     .selectOption({ label: username });
-  await card
-    .getByRole("combobox")
-    .filter({ has: page.getByRole("option", { name: "Select collection" }) })
-    .selectOption({ label: colName });
+  await card.getByRole("button", { name: "Select collection" }).click();
+  await card.getByRole("dialog").getByPlaceholder("Find destination").fill(colName);
+  await card.getByRole("option", { name: new RegExp(`^${colName} `) }).click();
   await card
     .getByRole("combobox")
     .filter({ has: page.getByRole("option", { name: "Admin", exact: true }) })

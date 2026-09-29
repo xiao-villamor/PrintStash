@@ -42,7 +42,7 @@ import {
   unstarModel,
   updateModel,
 } from "@/lib/api";
-import { useCollections, useTags } from "@/lib/queries";
+import { useTags } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
@@ -159,12 +159,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
   const [editCollection, setEditCollection] = useState(model.collection || "");
+  const [editCollectionLabel, setEditCollectionLabel] = useState(model.collection_label);
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
   const [catOpen, setCatOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
-  // Shared taxonomy lists come from the TanStack Query cache (deduped across
-  // the app, refetched on focus + after any mutation).
-  const { data: collections = [] } = useCollections();
   const { data: tags = [] } = useTags();
   // Read once at mount; the panel that edits these lives on another route, so
   // there is nothing to re-sync while this view is open.
@@ -315,6 +313,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     setEditDescription(model.description || "");
     setEditSourceUrl(model.source_url || "");
     setEditCollection(model.collection || "");
+    setEditCollectionLabel(model.collection_label);
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
@@ -921,10 +920,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     editing={editing}
                     editor={{
                       collection: editCollection,
-                      setCollection: setEditCollection,
+                      collectionLabel: editCollectionLabel,
+                      setCollection: (path, label) => {
+                        setEditCollection(path);
+                        setEditCollectionLabel(label);
+                      },
                       catOpen,
                       setCatOpen,
-                      collections,
+                      allowRoot: !!user?.is_superuser,
                       description: editDescription,
                       setDescription: setEditDescription,
                       sourceUrl: editSourceUrl,

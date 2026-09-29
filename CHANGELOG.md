@@ -36,7 +36,11 @@
   loads one folder level at a time and starts collapsed on a first visit,
   except along the path to the current folder. Move, upload, ZIP review and
   new Multipart Model destinations use search instead of loading every folder.
-  Model cards receive their folder names from the server.
+  Model cards and detail pages receive their folder names from the server.
+  Multipart Model browsing loads one folder page at a time; Pending Import and
+  Similar Models collection scopes use search. Settings loads grants only for
+  the collection an administrator selects, avoiding a permissions request for
+  every collection when the page opens.
 
 ## 0.14.0
 

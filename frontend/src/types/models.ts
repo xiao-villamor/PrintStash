@@ -81,6 +81,7 @@ export interface ModelRead {
   hash: string;
   collection: string | null;
   collection_id: number | null;
+  collection_label: string | null;
   description: string | null;
   source_url: string | null;
   effective_role: CollectionRole | null;

@@ -8,10 +8,11 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { ApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
+import { useQuery } from "@tanstack/react-query";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
+import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
   Boxes,
@@ -51,6 +52,7 @@ import {
   Upload,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -108,7 +110,6 @@ import {
   listUnownedLocalBackups,
   listUnownedRemoteBackups,
   listCollectionPermissions,
-  listCollections,
   listPrinterPermissions,
   listPrinters,
   listApiKeys,
@@ -173,8 +174,7 @@ import { waitForImportJob } from "@/lib/task-center";
 import { prepareBrowserExtensionSetup } from "@/lib/browser-extension-setup";
 import type {
   ApiKeyRead,
-  CollectionPermissionRead,
-  CollectionRead,
+  CollectionNodeRead,
   CollectionRole,
   PrinterPermissionRead,
   PrinterRead,
@@ -487,14 +487,22 @@ export function SettingsPanel() {
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
-  const [accessCollections, setAccessCollections] = useState<CollectionRead[]>([]);
-  const [collectionPermissions, setCollectionPermissions] = useState<CollectionPermissionRead[]>(
-    [],
-  );
+  const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
+  const [accessPickerOpen, setAccessPickerOpen] = useState(false);
   const [accessUserId, setAccessUserId] = useState<number | "">("");
-  const [accessCollectionId, setAccessCollectionId] = useState<number | "">("");
   const [accessRole, setAccessRole] = useState<CollectionRole>("view");
-  const [accessBusy, setAccessBusy] = useState<"load" | "save" | string | null>(null);
+  const [accessBusy, setAccessBusy] = useState<"save" | string | null>(null);
+  const accessCollectionId = accessCollection?.id;
+  const collectionPermissionsQuery = useQuery({
+    queryKey: ["collection-permissions", accessCollectionId],
+    queryFn: () => {
+      if (accessCollectionId === undefined)
+        throw new Error("Collection access requires a selection");
+      return listCollectionPermissions(accessCollectionId);
+    },
+    enabled: !!user?.is_superuser && accessCollectionId !== undefined,
+  });
+  const collectionPermissions = collectionPermissionsQuery.data ?? [];
   const [accessPrinters, setAccessPrinters] = useState<PrinterRead[]>([]);
   const [printerPermissions, setPrinterPermissions] = useState<PrinterPermissionRead[]>([]);
   const [printerAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
@@ -587,23 +595,6 @@ export function SettingsPanel() {
     setUsers(await listAdminUsers());
   }, [user]);
 
-  const refreshCollectionAccess = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setAccessBusy("load");
-    try {
-      const rows = await listCollections();
-      const permissionGroups = await Promise.all(
-        rows.map((collection) => listCollectionPermissions(collection.id)),
-      );
-      setAccessCollections(rows);
-      setCollectionPermissions(permissionGroups.flat());
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
-    }
-  }, [user]);
-
   const refreshPrinterAccess = useCallback(async () => {
     if (!user?.is_superuser) return;
     setPrinterAccessBusy("load");
@@ -662,10 +653,9 @@ export function SettingsPanel() {
       // the call but not the `await` inside it, and reads the in-flight flags as cascades.
       // oxlint-disable-next-line react/set-state-in-effect -- results are applied after the fetch resolves
       refreshUsers().catch(() => {});
-      refreshCollectionAccess().catch(() => {});
       refreshPrinterAccess().catch(() => {});
     }
-  }, [user, refreshUsers, refreshCollectionAccess, refreshPrinterAccess]);
+  }, [user, refreshUsers, refreshPrinterAccess]);
 
   const loadTrash = useCallback(async () => {
     if (!user) {
@@ -1204,13 +1194,13 @@ export function SettingsPanel() {
   }
 
   async function saveCollectionAccess() {
-    if (!accessUserId || !accessCollectionId) return;
+    if (!accessUserId || !accessCollection) return;
     setAccessBusy("save");
     try {
-      await updateCollectionPermission(Number(accessCollectionId), Number(accessUserId), {
+      await updateCollectionPermission(accessCollection.id, Number(accessUserId), {
         role: accessRole,
       });
-      await refreshCollectionAccess();
+      await collectionPermissionsQuery.refetch();
       toast.success(uiText("Collection access saved."));
     } catch (e) {
       toast.error(e);
@@ -1223,9 +1213,7 @@ export function SettingsPanel() {
     setAccessBusy(`${collectionId}:${userId}`);
     try {
       await deleteCollectionPermission(collectionId, userId);
-      setCollectionPermissions((current) =>
-        current.filter((row) => row.collection_id !== collectionId || row.user_id !== userId),
-      );
+      await collectionPermissionsQuery.refetch();
       toast.success(uiText("Collection access removed."));
     } catch (e) {
       toast.error(e);
@@ -1638,13 +1626,6 @@ export function SettingsPanel() {
   const selectedUserPermissions = accessUserId
     ? collectionPermissions.filter((row) => row.user_id === Number(accessUserId))
     : [];
-  const collectionById = new Map(accessCollections.map((row) => [row.id, row]));
-  const selectedUserGrantedCollectionIds = new Set(
-    selectedUserPermissions.map((row) => row.collection_id),
-  );
-  const grantableCollections = accessCollections.filter(
-    (row) => !selectedUserGrantedCollectionIds.has(row.id),
-  );
   const selectedPrinterPermissions = printerAccessUserId
     ? printerPermissions.filter((row) => row.user_id === Number(printerAccessUserId))
     : [];
@@ -2240,13 +2221,13 @@ export function SettingsPanel() {
                     action={
                       <button
                         type="button"
-                        onClick={refreshCollectionAccess}
-                        disabled={accessBusy === "load"}
+                        onClick={() => void collectionPermissionsQuery.refetch()}
+                        disabled={!accessCollection || collectionPermissionsQuery.isFetching}
                         className={BTN_ICON}
                         title={uiText("Refresh collection access")}
                       >
                         <RefreshCw
-                          className={`h-4 w-4 ${accessBusy === "load" ? "animate-spin" : ""}`}
+                          className={`h-4 w-4 ${collectionPermissionsQuery.isFetching ? "animate-spin" : ""}`}
                         />
                       </button>
                     }
@@ -2261,10 +2242,8 @@ export function SettingsPanel() {
                             value={accessUserId}
                             onChange={(event) => {
                               setAccessUserId(event.target.value ? Number(event.target.value) : "");
-                              setAccessCollectionId("");
                             }}
                             className={INPUT}
-                            disabled={accessBusy === "load"}
                           >
                             <option value="">{uiText("Select user")}</option>
                             {nonSuperUsers.map((row) => (
@@ -2274,28 +2253,40 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <label className="block space-y-1">
+                        <div className="block space-y-1">
                           <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                             {uiText("Collection")}
                           </span>
-                          <select
-                            value={accessCollectionId}
-                            onChange={(event) =>
-                              setAccessCollectionId(
-                                event.target.value ? Number(event.target.value) : "",
-                              )
+                          <DropdownMenu
+                            open={accessPickerOpen}
+                            onOpenChange={setAccessPickerOpen}
+                            role="dialog"
+                            align="start"
+                            contentClassName="w-80 max-w-[90vw] p-2"
+                            trigger={
+                              <button
+                                type="button"
+                                data-menu-trigger
+                                onClick={() => setAccessPickerOpen((open) => !open)}
+                                aria-haspopup="dialog"
+                                aria-expanded={accessPickerOpen}
+                                className={`${INPUT} w-full text-left`}
+                              >
+                                {accessCollection?.display_path ?? uiText("Select collection")}
+                              </button>
                             }
-                            className={INPUT}
-                            disabled={!accessUserId || accessBusy === "load"}
                           >
-                            <option value="">{uiText("Select collection")}</option>
-                            {grantableCollections.map((row) => (
-                              <option key={row.id} value={row.id}>
-                                {collectionDisplayPath(grantableCollections, row.path)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            <CollectionPicker
+                              minRole="view"
+                              selectedPath={accessCollection?.path ?? null}
+                              emptyLabel={uiText("No collections found.")}
+                              onSelect={(collection) => {
+                                setAccessCollection(collection);
+                                setAccessPickerOpen(false);
+                              }}
+                            />
+                          </DropdownMenu>
+                        </div>
                         <label className="block space-y-1">
                           <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                             {uiText("Role")}
@@ -2306,7 +2297,7 @@ export function SettingsPanel() {
                               setAccessRole(selectedOption(COLLECTION_ROLES, event.target.value))
                             }
                             className={INPUT}
-                            disabled={!accessUserId || !accessCollectionId || accessBusy === "load"}
+                            disabled={!accessUserId || !accessCollection}
                           >
                             <option value="view">{uiText("View")}</option>
                             <option value="edit">{uiText("Edit")}</option>
@@ -2316,7 +2307,7 @@ export function SettingsPanel() {
                         <button
                           type="button"
                           onClick={saveCollectionAccess}
-                          disabled={!accessUserId || !accessCollectionId || accessBusy === "save"}
+                          disabled={!accessUserId || !accessCollection || accessBusy === "save"}
                           className={`${BTN_PRIMARY} self-end`}
                         >
                           {accessBusy === "save" ? (
@@ -2334,7 +2325,26 @@ export function SettingsPanel() {
                           <span>{uiText("Role")}</span>
                           <span>{uiText("Remove")}</span>
                         </div>
-                        {!accessUserId ? (
+                        {!accessCollection ? (
+                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                            {uiText("Select a collection to review grants.")}
+                          </p>
+                        ) : collectionPermissionsQuery.isError ? (
+                          <div role="alert" className="flex items-center gap-2 px-3 py-4 text-sm">
+                            <span>{uiText("Collection access could not be loaded.")}</span>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => void collectionPermissionsQuery.refetch()}
+                            >
+                              {uiText("Retry")}
+                            </Button>
+                          </div>
+                        ) : collectionPermissionsQuery.isPending ? (
+                          <p role="status" className="px-3 py-4 text-sm text-muted-foreground">
+                            {uiText("Loading…")}
+                          </p>
+                        ) : !accessUserId ? (
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review collection grants.")}
                           </p>
@@ -2345,7 +2355,6 @@ export function SettingsPanel() {
                           </p>
                         ) : (
                           selectedUserPermissions.map((row) => {
-                            const collection = collectionById.get(row.collection_id);
                             const busyKey = `${row.collection_id}:${row.user_id}`;
                             return (
                               <div
@@ -2354,13 +2363,13 @@ export function SettingsPanel() {
                               >
                                 <div className="min-w-0">
                                   <p className="truncate text-sm text-foreground">
-                                    {collection?.path ??
+                                    {accessCollection?.display_path ??
                                       uiText("Collection #{value1}", {
                                         value1: String(row.collection_id),
                                       })}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    {collection?.model_count ?? 0}
+                                    {accessCollection?.model_count ?? 0}
                                     {uiText(" models")}
                                   </p>
                                 </div>

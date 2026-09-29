@@ -10252,6 +10252,17 @@
             ],
             "title": "Collection Id"
           },
+          "collection_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Label"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -10359,6 +10370,7 @@
           "name",
           "slug",
           "hash",
+          "collection_label",
           "created_at",
           "updated_at"
         ],
@@ -22900,12 +22912,36 @@
           {
             "in": "query",
             "name": "path",
-            "required": true,
+            "required": false,
             "schema": {
-              "maxLength": 512,
-              "minLength": 1,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Id"
             }
           }
         ],
@@ -22936,7 +22972,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Find a collection by path, with its visible ancestors",
+        "summary": "Find a collection by path or id, with its visible ancestors",
         "tags": [
           "taxonomy"
         ]
