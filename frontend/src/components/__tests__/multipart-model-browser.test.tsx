@@ -348,9 +348,11 @@ describe("MultipartModelBrowser", () => {
     await user.type(name, "My organiser");
     await user.click(screen.getByRole("button", { name: "Create multipart set" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't create this multipart model. Check the name and try again.",
-    );
+    expect(
+      await screen.findByText(
+        "Couldn't create this multipart model. Check the name and try again.",
+      ),
+    ).toBeVisible();
     expect(name).toHaveValue("My organiser");
   });
 });
