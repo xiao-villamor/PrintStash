@@ -15,6 +15,11 @@ trash, scans and remote storage), run the repository-level lane instead:
 ./scripts/test-critical.sh
 ```
 
+`backup-recovery.spec.ts` leaves a completed ZIP inspection unselected before
+purging a Model and restoring it through Settings, then compares the recovered
+Artifact bytes. Historical release archives are checked separately by the
+[local backup recovery jobs](../../../docs/backup-recovery-testing.md).
+
 `playwright.real.config.ts` boots the application plus its printer emulator:
 
 - `scripts/start-backend.sh` — wipes state, runs Alembic, launches uvicorn on

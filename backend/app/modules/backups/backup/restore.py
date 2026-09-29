@@ -27,6 +27,9 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.migrate import run_migrations
 from app.db.models import (
+    Job,
+    JobKind,
+    JobState,
     StagingLease,
     User,
 )
@@ -148,9 +151,26 @@ def restore_backup(backup_id: str, *, source_ref: str | None = None) -> dict:
         # not doing anything). Only staged bytes still owned by an unfinished
         # upload would be lost to a restore.
         with get_session_factory().scoped_session() as lease_session:
+            # A completed ZIP inspection retains its archive for optional file
+            # selection. It is idle review state, not an unfinished upload.
+            # Keep those bytes intact: an inspection in the restored snapshot
+            # can still hand them to a selection Job. The maintenance fence
+            # prevents that handoff from racing this check/database swap.
+            completed_inspection = (
+                select(Job.id)
+                .where(
+                    Job.id == StagingLease.job_id,
+                    Job.kind == JobKind.INGESTION_ARCHIVE_INSPECT,
+                    Job.state == JobState.COMPLETED,
+                )
+                .exists()
+            )
             active_leases = len(
                 lease_session.exec(
-                    select(StagingLease).where(StagingLease.expires_at > utcnow())
+                    select(StagingLease).where(
+                        StagingLease.expires_at > utcnow(),
+                        ~completed_inspection,
+                    )
                 ).all()
             )
         if active_leases:

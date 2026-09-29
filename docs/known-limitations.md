@@ -150,6 +150,12 @@ manufacturing platform.
 - Full backups include the database and PrintStash-managed primary/thumbnail
   objects. Files referenced through a Library source remain at their external
   paths and must be backed up separately by the operator.
+- Temporary upload staging is not included in full backups. A completed ZIP
+  inspection waiting for selection does not block restore, and restore leaves
+  its staged bytes untouched. Selection remains usable when both its snapshot
+  record and its unexpired staged ZIP survive on the same installation;
+  recovering onto a fresh volume requires uploading that ZIP again. Unfinished
+  imports and other pending staging owners still block restore.
 - Backup manifests bind managed objects to the storage provider and namespace they
   came from. Restore does not silently retarget those objects to a different remote
   namespace. Valid pre-ledger local backups require explicit superuser adoption

@@ -10,6 +10,8 @@ the service call succeeded.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,85 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
 
 
 class TestBackupRestore:
+    @pytest.mark.critical
+    @pytest.mark.asyncio
+    async def test_restores_after_unused_archive_inspection(
+        self, api, tmp_path, e2e_db
+    ):
+        headers = await _setup_and_login(api, tmp_path)
+        model = await _upload_and_wait(api, headers, model_name="Recoverable Benchy")
+        detail = (
+            await api.get(f"/api/v1/models/{model['id']}", headers=headers)
+        ).json()
+        file_id = detail["files"][0]["id"]
+        backup = await create_backup(api, headers)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("unused.gcode", FIXTURE.read_bytes())
+        inspected = await api.post(
+            "/api/v1/ingest/archive/inspect",
+            files={"file": ("unused.zip", archive.getvalue(), "application/zip")},
+            headers=headers,
+        )
+        await completed_job(api, inspected, headers)
+        deleted = await api.delete(f"/api/v1/models/{model['id']}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(
+            f"/api/v1/models/{model['id']}/purge", headers=headers
+        )
+        assert purged.status_code == 200, purged.text
+        missing = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert missing.status_code == 404, missing.text
+
+        restored = await api.post(
+            f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
+        )
+
+        assert restored.status_code == 200, restored.text
+        recovered = await api.get(f"/api/v1/models/{model['id']}", headers=headers)
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["name"] == "Recoverable Benchy"
+        downloaded = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == FIXTURE.read_bytes()
+
+    @pytest.mark.critical
+    @pytest.mark.asyncio
+    async def test_retains_backed_up_archive_selection(self, api, tmp_path, e2e_db):
+        headers = await _setup_and_login(api, tmp_path)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("pending.gcode", FIXTURE.read_bytes())
+        inspected = await api.post(
+            "/api/v1/ingest/archive/inspect",
+            files={"file": ("pending.zip", archive.getvalue(), "application/zip")},
+            headers=headers,
+        )
+        inspection = await completed_job(api, inspected, headers)
+        backup = await create_backup(api, headers)
+        restored = await api.post(
+            f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
+        )
+        assert restored.status_code == 200, restored.text
+
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{inspection['result']['archive_id']}/select",
+            json={"names": ["pending.gcode"]},
+            headers=headers,
+        )
+        await completed_job(api, selected, headers)
+
+        models = (await api.get("/api/v1/models", headers=headers)).json()
+        assert len(models) == 1, models
+        detail = (
+            await api.get(f"/api/v1/models/{models[0]['id']}", headers=headers)
+        ).json()
+        downloaded = await api.get(
+            f"/api/v1/files/{detail['files'][0]['id']}/download", headers=headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == FIXTURE.read_bytes()
+
     @pytest.mark.asyncio
     async def test_dxf_original_survives_backup_restore(self, api, tmp_path, e2e_db):
         headers = await _setup_and_login(api, tmp_path)

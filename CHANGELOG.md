@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Restoring a backup no longer fails because a completed ZIP inspection is
+  waiting for file selection. Its staged archive remains available; unfinished
+  uploads and imports still block restore until they are settled.
+
 ## 0.14.0
 
 **Running from a git checkout? The old `docker-compose.yml` is now
