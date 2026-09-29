@@ -144,13 +144,14 @@ export function VaultMigrationPanel() {
 
   useEffect(() => {
     mounted.current = true;
+    let stopped = false;
     const clock = window.setInterval(() => setNow(Date.now()), 60_000);
     void Promise.allSettled([
       listVaultMigrations(),
       getStorageProviders(),
       listBackupSources(),
     ]).then(([migrations, catalogue, sources]) => {
-      if (!mounted.current) return;
+      if (stopped) return;
       if (migrations.status === "fulfilled") {
         setRuns(migrations.value);
         setRun(migrations.value[0] ?? null);
@@ -168,6 +169,7 @@ export function VaultMigrationPanel() {
       setLoading(false);
     });
     return () => {
+      stopped = true;
       window.clearInterval(clock);
       mounted.current = false;
     };

@@ -1,5 +1,5 @@
 /** Vault migration requires a verified plan and explicit cutover; uncertain recovery never resumes writes implicitly. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { VaultMigrationPanel } from "@/components/vault-migration-panel";
@@ -7,8 +7,9 @@ import { aMigrationBackup, aMigrationProvider, aVaultMigration } from "@/test-su
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { VaultMigrationRun } from "@/lib/api/vault-migration";
 
-function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}) {
+function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}, strictMode = false) {
   return renderApp(<VaultMigrationPanel />, {
+    reactStrictMode: strictMode,
     routes: {
       "GET /api/v1/storage/migrations/migration-1/report": () =>
         json({ ...aVaultMigration(), ...runs[0], resource_kind_totals: [], recent_failures: [] }),
@@ -21,6 +22,46 @@ function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}) {
   });
 }
 describe("VaultMigrationPanel", () => {
+  it("waits for the current startup request", async () => {
+    const retired = Promise.withResolvers<Response>();
+    const current = Promise.withResolvers<Response>();
+    let requests = 0;
+    setup(
+      [],
+      {
+        "GET /api/v1/storage/migrations": () =>
+          ++requests === 1 ? retired.promise : current.promise,
+      },
+      true,
+    );
+
+    await act(async () => retired.resolve(json([])));
+    expect(screen.getByRole("status", { name: "Loading migrations…" })).toBeVisible();
+    expect(screen.queryByLabelText("Data directory")).not.toBeInTheDocument();
+    await act(async () => current.resolve(json([])));
+    expect(await screen.findByLabelText("Data directory")).toBeVisible();
+  });
+
+  it("preserves edits after a retired startup response", async () => {
+    const retired = Promise.withResolvers<Response>();
+    let requests = 0;
+    setup(
+      [],
+      {
+        "GET /api/v1/storage/migrations": () => (++requests === 1 ? retired.promise : json([])),
+      },
+      true,
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Data directory"), "/new/files");
+    await user.type(screen.getByLabelText("Thumbnail directory"), "/new/thumbs");
+
+    await act(async () => retired.resolve(json([])));
+
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/new/files");
+    expect(screen.getByLabelText("Thumbnail directory")).toHaveValue("/new/thumbs");
+  });
+
   it("reserves the destination layout while migrations load", async () => {
     let finish: (response: Response) => void = () => {};
     const pending = new Promise<Response>((resolve) => {

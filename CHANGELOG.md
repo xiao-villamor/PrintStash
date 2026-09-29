@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Storage migration no longer clears destination fields when an obsolete
+  startup request finishes after the form becomes editable.
 - Restoring a backup no longer fails because a completed ZIP inspection is
   waiting for file selection. Its staged archive remains available; unfinished
   uploads and imports still block restore until they are settled.
