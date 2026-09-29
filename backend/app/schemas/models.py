@@ -585,6 +585,32 @@ class CollectionRead(BaseModel):
     has_readme: bool = False
 
 
+class CollectionNodeRead(CollectionRead):
+    """One collection in the lazily loaded tree.
+
+    ``model_count`` covers the whole subtree. ``display_path`` joins the names of
+    the ancestors the caller can see, so a row can be labelled without the tree
+    above it having been loaded.
+    """
+
+    child_count: int
+    display_path: str
+
+
+class CollectionPage(BaseModel):
+    """A page of collections; ``next_cursor`` is ``None`` on the last one."""
+
+    items: List[CollectionNodeRead]
+    next_cursor: Optional[str] = None
+
+
+class CollectionLookupRead(BaseModel):
+    """A collection found by path, with the visible ancestors above it, root first."""
+
+    collection: CollectionNodeRead
+    ancestors: List[CollectionNodeRead]
+
+
 class CollectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

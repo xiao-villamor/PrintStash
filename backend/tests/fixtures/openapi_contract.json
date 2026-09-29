@@ -3363,6 +3363,27 @@
         "title": "CollectionImageUpload",
         "type": "object"
       },
+      "CollectionLookupRead": {
+        "description": "A collection found by path, with the visible ancestors above it, root first.",
+        "properties": {
+          "ancestors": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionNodeRead"
+            },
+            "title": "Ancestors",
+            "type": "array"
+          },
+          "collection": {
+            "$ref": "#/components/schemas/CollectionNodeRead"
+          }
+        },
+        "required": [
+          "collection",
+          "ancestors"
+        ],
+        "title": "CollectionLookupRead",
+        "type": "object"
+      },
       "CollectionMove": {
         "additionalProperties": false,
         "properties": {
@@ -3392,6 +3413,112 @@
           }
         },
         "title": "CollectionMove",
+        "type": "object"
+      },
+      "CollectionNodeRead": {
+        "description": "One collection in the lazily loaded tree.\n\n``model_count`` covers the whole subtree. ``display_path`` joins the names of\nthe ancestors the caller can see, so a row can be labelled without the tree\nabove it having been loaded.",
+        "properties": {
+          "child_count": {
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "display_path": {
+            "title": "Display Path",
+            "type": "string"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_readme": {
+            "default": false,
+            "title": "Has Readme",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "path",
+          "child_count",
+          "display_path"
+        ],
+        "title": "CollectionNodeRead",
+        "type": "object"
+      },
+      "CollectionPage": {
+        "description": "A page of collections; ``next_cursor`` is ``None`` on the last one.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionNodeRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CollectionPage",
         "type": "object"
       },
       "CollectionPermissionRead": {
@@ -22561,6 +22688,8 @@
     },
     "/api/v1/collections": {
       "get": {
+        "deprecated": true,
+        "description": "Returns the whole tree. Deprecated: use /collections/children, /collections/lookup and /collections/search; removal is planned for 0.16.",
         "operationId": "list_collections_api_v1_collections_get",
         "responses": {
           "200": {
@@ -22628,6 +22757,223 @@
           }
         ],
         "summary": "Create a new collection",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
+    "/api/v1/collections/children": {
+      "get": {
+        "operationId": "list_collection_children_api_v1_collections_children_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "parent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Page through a collection's children, or the caller's root collections",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
+    "/api/v1/collections/lookup": {
+      "get": {
+        "operationId": "lookup_collection_api_v1_collections_lookup_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionLookupRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Find a collection by path, with its visible ancestors",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
+    "/api/v1/collections/search": {
+      "get": {
+        "operationId": "search_collections_api_v1_collections_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_role",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CollectionRole",
+              "default": "view"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Search collections by name, at a minimum role",
         "tags": [
           "taxonomy"
         ]

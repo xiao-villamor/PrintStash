@@ -39,6 +39,9 @@ THE_REST = {"collections": 21_875, "models": 87_500}
 BUDGET_SECONDS = {
     # The whole tree, 25,000 rows; measured 1.0s. A lazy tree replaces it (#295).
     "/api/v1/collections": 3.0,
+    "/api/v1/collections/children": 0.5,
+    "/api/v1/collections/lookup": 0.5,
+    "/api/v1/collections/search": 0.5,
     "/api/v1/tags": 1.0,
     "/api/v1/models/page": 1.5,
     "/api/v1/models/outliner": 0.5,

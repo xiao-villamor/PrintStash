@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- The API serves the collection tree a page at a time:
+  `GET /api/v1/collections/children` lists one level (or a user's top level),
+  `GET /api/v1/collections/lookup` resolves a path with its ancestors, and
+  `GET /api/v1/collections/search` finds collections by name at a minimum role.
+  Each result carries its subtree Model count, child count and display path.
+  `GET /api/v1/collections`, which returns the whole tree, is deprecated and
+  will be removed in 0.16.
+
 ### Fixed
 
 - Backup history disables replica retries when a run has no completed archive

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import List
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -27,7 +27,6 @@ from printstash_core.files import slugify
 from sqlalchemy import func
 from sqlalchemy import select as sa_select
 from sqlmodel import Session, delete, select
-from sqlmodel.sql.expression import SelectOfScalar
 
 from app.api.artifact_responses import serve_stored_file
 from app.core.config import settings
@@ -51,14 +50,16 @@ from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import rbac
-from app.modules.library import library_search, taxonomy, trash
+from app.modules.library import collection_tree, library_search, taxonomy, trash
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import publish_bytes
 from app.schemas.models import (
     CollectionCreate,
     CollectionImageUpload,
+    CollectionLookupRead,
     CollectionMove,
+    CollectionPage,
     CollectionPermissionRead,
     CollectionPermissionUpdate,
     CollectionRead,
@@ -85,30 +86,6 @@ _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 router = APIRouter(tags=["taxonomy"])
 
 
-def _collection_tags_by_id(
-    session: Session, collection_ids: list[int] | SelectOfScalar[int]
-) -> dict[int, list[str]]:
-    """Live tag names per collection; a collection without tags is absent.
-
-    Takes a subquery for listings, so the visible set is never bound as one
-    parameter per collection.
-    """
-    result: dict[int, list[str]] = {}
-    rows = session.exec(
-        select(CollectionTagLink.collection_id, Tag.name)
-        .join(Tag, Tag.id == CollectionTagLink.tag_id)
-        .where(
-            CollectionTagLink.collection_id.in_(collection_ids),  # type: ignore[union-attr]
-            live(Tag),
-        )
-        .order_by(CollectionTagLink.collection_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
-    ).all()
-    for collection_id, tag_name in rows:
-        if collection_id is not None:
-            result.setdefault(collection_id, []).append(tag_name)
-    return result
-
-
 def _collection_read(
     session: Session,
     current_user: User,
@@ -116,7 +93,7 @@ def _collection_read(
     *,
     model_count: int,
 ) -> CollectionRead:
-    tags = _collection_tags_by_id(
+    tags = collection_tree.collection_tags(
         session, [collection.id] if collection.id is not None else []
     )
     return CollectionRead(
@@ -157,9 +134,67 @@ def _collection_model_count(session: Session, path: str, user: User) -> int:
 
 
 @router.get(
+    "/collections/children",
+    response_model=CollectionPage,
+    summary="Page through a collection's children, or the caller's root collections",
+)
+def list_collection_children(
+    parent_id: Optional[int] = Query(None),
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=collection_tree.CHILDREN_LIMIT_MAX),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionPage:
+    return collection_tree.children(
+        session, current_user, parent_id=parent_id, cursor=cursor, limit=limit
+    )
+
+
+@router.get(
+    "/collections/lookup",
+    response_model=CollectionLookupRead,
+    summary="Find a collection by path, with its visible ancestors",
+)
+def lookup_collection(
+    path: str = Query(..., min_length=1, max_length=512),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionLookupRead:
+    return collection_tree.lookup(session, current_user, path)
+
+
+@router.get(
+    "/collections/search",
+    response_model=CollectionPage,
+    summary="Search collections by name, at a minimum role",
+)
+def search_collections(
+    q: str = Query("", max_length=128),
+    min_role: CollectionRole = Query(CollectionRole.VIEW),
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=collection_tree.SEARCH_LIMIT_MAX),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionPage:
+    return collection_tree.search(
+        session,
+        current_user,
+        query=q,
+        minimum=min_role,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@router.get(
     "/collections",
     response_model=List[CollectionRead],
     summary="List all collections with model counts",
+    description=(
+        "Returns the whole tree. Deprecated: use /collections/children, "
+        "/collections/lookup and /collections/search; removal is planned for 0.16."
+    ),
+    deprecated=True,
 )
 def list_collections(
     current_user: User = Depends(require_user),
@@ -194,7 +229,7 @@ def list_collections(
     roles = rbac.effective_roles_for_paths(
         session, current_user, ((cid, path) for cid, _, _, path, _, _ in rows)
     )
-    tags_by_collection = _collection_tags_by_id(session, visible)
+    tags_by_collection = collection_tree.collection_tags(session, visible)
     return [
         CollectionRead(
             id=cid,

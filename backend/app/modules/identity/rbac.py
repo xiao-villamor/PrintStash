@@ -67,7 +67,7 @@ def require_collection_role(
     raise OperationError("collection_permission_denied", kind=ErrorKind.FORBIDDEN)
 
 
-def _like_prefix(path: str) -> str:
+def like_prefix(path: str) -> str:
     """Build the descendant-matching LIKE pattern for *path*.
 
     ``slugify`` cannot currently emit ``%`` or ``_``, so the escaping is belt
@@ -114,7 +114,7 @@ def accessible_collection_ids_stmt(
         *[
             or_(
                 Collection.path == path,
-                Collection.path.like(_like_prefix(path), escape="\\"),  # type: ignore[union-attr]
+                Collection.path.like(like_prefix(path), escape="\\"),  # type: ignore[union-attr]
             )
             for path in granted_paths
         ],

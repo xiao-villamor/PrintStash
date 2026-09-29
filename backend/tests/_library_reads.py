@@ -14,6 +14,11 @@ import pytest
 # fills one page and only the library behind it grows.
 LIBRARY_READS = [
     pytest.param("/api/v1/collections", {}, id="collections"),
+    pytest.param("/api/v1/collections/children", {"limit": 10}, id="collection-roots"),
+    pytest.param(
+        "/api/v1/collections/lookup", {"path": "shared"}, id="collection-lookup"
+    ),
+    pytest.param("/api/v1/collections/search", {"limit": 10}, id="collection-search"),
     pytest.param("/api/v1/tags", {}, id="tags"),
     pytest.param("/api/v1/models/page", {"limit": 10}, id="models-page"),
     pytest.param("/api/v1/models/outliner", {"limit": 10}, id="outliner"),
