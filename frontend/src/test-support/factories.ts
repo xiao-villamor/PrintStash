@@ -37,6 +37,8 @@ import type { ArtifactCacheRead } from "@/lib/api/artifact-cache";
  */
 
 import type {
+  CollectionNodeRead,
+  CollectionPage,
   CollectionRead,
   DerivativeRead,
   ExternalLibrary,
@@ -188,6 +190,22 @@ export function aCollection(override?: Partial<CollectionRead>): CollectionRead 
   };
 }
 
+/** A node of the lazily loaded tree: a top-level folder with nothing below it. */
+export function aCollectionNode(override?: Partial<CollectionNodeRead>): CollectionNodeRead {
+  return {
+    ...aCollection(),
+    child_count: 0,
+    descendant_count: 0,
+    display_path: "Parts",
+    ...override,
+  };
+}
+
+/** The last page of a tree level, search or lookup listing. */
+export function aCollectionPage(items: CollectionNodeRead[]): CollectionPage {
+  return { items, next_cursor: null };
+}
+
 export function aTag(override?: Partial<TagRead>): TagRead {
   return { id: 1, name: "functional", slug: "functional", model_count: 3, ...override };
 }
@@ -250,6 +268,7 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     slug: "bracket",
     collection: null,
     collection_id: null,
+    collection_label: null,
     source_url: null,
     effective_role: null,
     tags: [],
@@ -413,6 +432,7 @@ export function aMultipartModel(
     description: null,
     collection: null,
     collection_id: null,
+    collection_label: null,
     part_count: 1,
     model_count: 1,
     guide_count: 0,

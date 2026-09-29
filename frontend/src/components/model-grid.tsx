@@ -7,7 +7,6 @@ import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
 import { useUiLocale } from "@/lib/i18n";
 
@@ -16,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
   ArtifactFileType,
+  CollectionNodeRead,
   CollectionRead,
   FileRevisionStatus,
   ModelBatchResult,
@@ -98,7 +98,9 @@ import {
   BulkItem,
 } from "@/lib/bulk-upload";
 import {
-  useCollections,
+  useCollectionChildren,
+  useCollectionLookup,
+  useCollectionSearch,
   useModelFacets,
   useLibraryPrefetch,
   useModelList,
@@ -416,7 +418,9 @@ const STRUCTURED_FILTER_KEYS = [
 ] as const;
 type StructuredFilterKey = (typeof STRUCTURED_FILTER_KEYS)[number];
 
+/** Bare paths, as builds before #295 wrote them; read when nothing newer is stored. */
 const RECENT_FOLDERS_KEY = "ps-recent-folders";
+const RECENT_FOLDERS_LABELLED_KEY = "ps-recent-folders-labelled";
 const RECENT_FOLDERS_LIMIT = 6;
 const LIBRARY_VIEW_KEY = "ps-vault-library-view";
 // A signed-out session has no saved views; a shared constant keeps the derived
@@ -467,25 +471,65 @@ function readVaultPreference(key: string): string | null {
   return localStorage.getItem(key);
 }
 
-/**
- * The recent-folder list is a UI convenience written by this component. Paths are
- * re-checked against the live collection list before they're offered (see
- * `availableRecentFolders`), so decoding only has to survive edited JSON.
- */
-function readRecentFolders(): string[] {
-  const raw = readVaultPreference(RECENT_FOLDERS_KEY);
+/** A folder visited recently: its path to navigate to, its names to show. */
+interface RecentFolder {
+  path: string;
+  label: string;
+}
+
+/** Until a folder's names load, it is shown by the last part of its path. */
+function provisionalLabel(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+/** Decode stored JSON that should be an array, or nothing if it is not one. */
+function readStoredArray(raw: string | null): readonly StoredEntry[] {
   if (raw === null) return [];
   try {
-    const decoded: unknown = JSON.parse(raw);
-    return Array.isArray(decoded) ? decoded.map((entry) => String(entry)) : [];
+    // `JSON.parse` is `any`; the annotation is the boundary, checked just below.
+    const decoded: StoredEntry = JSON.parse(raw);
+    return Array.isArray(decoded) ? decoded : [];
   } catch {
     return [];
   }
 }
 
-function writeRecentFolders(paths: string[]): void {
+/** A value JSON can hold: what edited or older storage may contain. */
+type StoredEntry =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly StoredEntry[]
+  | { readonly [key: string]: StoredEntry };
+
+/**
+ * The recent-folder list is a UI convenience written by this component, kept as
+ * `[path, label]` pairs so the menu needs no collection list to name them.
+ * Builds before labels were kept wrote bare paths under the older key; those
+ * are read once, until the next write, with a provisional label.
+ */
+function readRecentFolders(): RecentFolder[] {
+  const labelled = readVaultPreference(RECENT_FOLDERS_LABELLED_KEY);
+  if (labelled !== null) {
+    return readStoredArray(labelled).flatMap((entry) =>
+      Array.isArray(entry) && entry.length === 2
+        ? [{ path: String(entry[0]), label: String(entry[1]) }]
+        : [],
+    );
+  }
+  return readStoredArray(readVaultPreference(RECENT_FOLDERS_KEY)).map((entry) => ({
+    path: String(entry),
+    label: provisionalLabel(String(entry)),
+  }));
+}
+
+function writeRecentFolders(folders: RecentFolder[]): void {
   if (!("window" in globalThis)) return;
-  localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(paths));
+  localStorage.setItem(
+    RECENT_FOLDERS_LABELLED_KEY,
+    JSON.stringify(folders.map((folder) => [folder.path, folder.label])),
+  );
 }
 
 /** The remembered sort, resolved back to one of the options we render. */
@@ -508,48 +552,12 @@ function readLibraryView(): LibraryViewMode | null {
   return null;
 }
 
-function childCollections(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): CollectionRead[] {
-  const selected = selectedPath ? collections.find((c) => c.path === selectedPath) : null;
-  const parentId = selectedPath ? (selected?.id ?? -1) : null;
-  return collections
-    .filter((c) => c.parent_id === parentId)
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function collectionBreadcrumbs(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): CollectionRead[] {
-  if (!selectedPath) return [];
-  const byPath = new Map(collections.map((c) => [c.path, c]));
-  const parts = selectedPath.split("/");
-  const crumbs: CollectionRead[] = [];
-  for (let i = 1; i <= parts.length; i += 1) {
-    const c = byPath.get(parts.slice(0, i).join("/"));
-    if (c) crumbs.push(c);
-  }
-  return crumbs;
-}
-
-function selectedCollectionName(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): string | null {
-  if (!selectedPath) return null;
-  const byPath = new Map(collections.map((c) => [c.path, c]));
-  return byPath.get(selectedPath)?.name ?? null;
-}
-
 function canWriteCollection(collection: CollectionRead | null | undefined): boolean {
   return collection?.effective_role === "edit" || collection?.effective_role === "admin";
 }
 
 export interface BrowserInitialData {
   models: ModelListItem[];
-  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
 }
@@ -566,12 +574,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
   // with the detail/upload views, revalidated on focus, and refetched after any
   // collection/tag mutation (the api layer invalidates the query cache).
-  const collectionsQuery = useCollections();
+  // Collections are read a level, a lookup or a search at a time (#295); tags
+  // are one small list shared with the detail/upload views.
   const tagsQuery = useTags();
-  // Stable empty-array fallback: `data ?? []` would allocate a new array every
-  // render, which cascaded into the useMemo hooks below re-running on every
-  // render even when the underlying query data hadn't changed.
-  const collections = useMemo(() => collectionsQuery.data ?? [], [collectionsQuery.data]);
   const tags = tagsQuery.data ?? [];
   // Printers (superuser-only filter) share the same cache as the printers page
   // and send-to dialog; gated so non-admins don't fetch a list they can't use.
@@ -625,7 +630,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
-  const [recentFolders, setRecentFolders] = useState<string[]>(readRecentFolders);
+  const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(readRecentFolders);
   const [recentFoldersOpen, setRecentFoldersOpen] = useState(false);
   // Seed from the URL (`?v=docs`), falling back to the remembered tab, so
   // returning from a document (Back or the logo) lands on the Documents tab
@@ -740,7 +745,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setUploadOpen(true);
   }
 
-  const facetsLoading = collectionsQuery.isLoading || tagsQuery.isLoading;
+  const facetsLoading = tagsQuery.isLoading;
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
@@ -783,12 +788,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   if (recordedCollection !== selectedCollection) {
     setRecordedCollection(selectedCollection);
     if (selectedCollection !== null)
-      setRecentFolders((current) =>
-        [selectedCollection, ...current.filter((item) => item !== selectedCollection)].slice(
-          0,
-          RECENT_FOLDERS_LIMIT,
-        ),
-      );
+      setRecentFolders((current) => {
+        const known = current.find((item) => item.path === selectedCollection);
+        return [
+          known ?? { path: selectedCollection, label: provisionalLabel(selectedCollection) },
+          ...current.filter((item) => item.path !== selectedCollection),
+        ].slice(0, RECENT_FOLDERS_LIMIT);
+      });
   }
 
   useEffect(() => {
@@ -1150,7 +1156,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const showLibraryTools = libraryToolsOpen;
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [selectedCollectionIds, setSelectedCollectionIds] = useState<Set<number>>(new Set());
+  // Selected folders are kept as the rows they were picked from: they may leave
+  // the view (another folder opened) and still need their names and paths.
+  const [selectedCollectionRows, setSelectedCollectionRows] = useState<
+    Map<number, CollectionNodeRead>
+  >(new Map());
   const [batchBusy, setBatchBusy] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const lastSelectedModelId = useRef<number | null>(null);
@@ -1197,24 +1207,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
 
   function toggleCollectionSelect(id: number) {
-    setSelectedCollectionIds((prev) => {
-      const next = new Set(prev);
+    const row = visibleCollections.find((collection) => collection.id === id);
+    setSelectedCollectionRows((prev) => {
+      const next = new Map(prev);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else if (row) next.set(id, row);
       return next;
     });
   }
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
-    setSelectedCollectionIds(new Set());
+    setSelectedCollectionRows(new Map());
     setSelectMode(false);
   }, []);
 
   function selectAllVisible() {
     setSelectedIds(new Set(sortedModels.map((m) => m.id)));
     selectedModelSnapshot.current = new Map(sortedModels.map((model) => [model.id, model]));
-    setSelectedCollectionIds(new Set(visibleCollections.map((collection) => collection.id)));
+    setSelectedCollectionRows(
+      new Map(visibleCollections.map((collection) => [collection.id, collection])),
+    );
   }
 
   async function selectAllMatching() {
@@ -1264,10 +1277,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const selectedIdList = Array.from(selectedIds);
   const selectedCollections = useMemo(
-    () => collections.filter((collection) => selectedCollectionIds.has(collection.id)),
-    [collections, selectedCollectionIds],
+    () => [...selectedCollectionRows.values()],
+    [selectedCollectionRows],
   );
-  const selectionCount = selectedIds.size + selectedCollectionIds.size;
+  const selectionCount = selectedIds.size + selectedCollectionRows.size;
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -1288,7 +1301,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function runCollectionBatch(
     success: MessageKey,
-    operation: (collection: CollectionRead) => Promise<CollectionRead>,
+    operation: (collection: CollectionNodeRead) => Promise<CollectionRead>,
   ) {
     setBatchBusy(true);
     let succeeded = 0;
@@ -1300,7 +1313,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         succeeded += 1;
       } catch {
         failed += 1;
-        failedFolders.push(collectionDisplayPath(collections, collection.path) ?? collection.name);
+        failedFolders.push(collection.display_path);
       }
     }
     if (succeeded) toast.success(uiText(success, { count: succeeded }));
@@ -1319,7 +1332,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     let succeeded = 0;
     let failed = 0;
     const movedModelIds: number[] = [];
-    const movedCollections: CollectionRead[] = [];
+    const movedCollections: CollectionNodeRead[] = [];
     const failureDetails: string[] = [];
     const originalModels = new Map(selectedModelSnapshot.current);
     try {
@@ -1346,9 +1359,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           failed += 1;
           failureDetails.push(
             uiText("Folder: {value1}", {
-              value1: String(
-                collectionDisplayPath(collections, collection.path) ?? collection.name,
-              ),
+              value1: collection.display_path,
             }),
           );
         }
@@ -1411,9 +1422,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           failed += 1;
           failureDetails.push(
             uiText("Folder: {value1}", {
-              value1: String(
-                collectionDisplayPath(collections, collection.path) ?? collection.name,
-              ),
+              value1: collection.display_path,
             }),
           );
         }
@@ -1499,30 +1508,52 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
   // folder explorer (immediate children of the selected collection).
-  const visibleCollections = (() => {
-    const needle = query.trim().toLowerCase();
-    if (needle) {
-      return collections
-        .filter((c) => c.name.toLowerCase().includes(needle))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return childCollections(collections, selectedCollection);
-  })();
+  // The folder being viewed and the way to it, from one lookup by path.
+  const selectedLookup = useCollectionLookup(selectedCollection);
+  const selectedCollectionRow =
+    selectedLookup.data?.collection.path === selectedCollection
+      ? selectedLookup.data.collection
+      : null;
+  const breadcrumbs =
+    selectedCollectionRow && selectedLookup.data
+      ? [...selectedLookup.data.ancestors, selectedCollectionRow]
+      : [];
+  const selectedName = selectedCollectionRow?.name ?? null;
+  const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
+    enabled: searchQuery !== undefined,
+  });
+  const folderLevel = useCollectionChildren(selectedCollectionRow?.id ?? null, {
+    enabled:
+      searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
+  });
+  const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
+  // A folder view shows one bounded page of child folders at a time.
+  const {
+    data: folderData,
+    hasNextPage: moreFolders,
+    isFetchingNextPage: fetchingFolders,
+    fetchNextPage: fetchMoreFolders,
+  } = folderPages;
+  const visibleCollections = folderData?.pages.flatMap((page) => page.items) ?? [];
+  // The open folder's names replace its provisional label once they load.
+  if (
+    selectedCollectionRow &&
+    recentFolders.some(
+      (folder) =>
+        folder.path === selectedCollectionRow.path &&
+        folder.label !== selectedCollectionRow.display_path,
+    )
+  ) {
+    setRecentFolders((current) =>
+      current.map((folder) =>
+        folder.path === selectedCollectionRow.path
+          ? { ...folder, label: selectedCollectionRow.display_path }
+          : folder,
+      ),
+    );
+  }
   const availableRecentFolders = recentFolders.filter(
-    (path) =>
-      path !== selectedCollection && collections.some((collection) => collection.path === path),
-  );
-  const breadcrumbs = useMemo(
-    () => collectionBreadcrumbs(collections, selectedCollection),
-    [collections, selectedCollection],
-  );
-  const selectedName = useMemo(
-    () => selectedCollectionName(collections, selectedCollection),
-    [collections, selectedCollection],
-  );
-  const selectedCollectionRow = useMemo(
-    () => collections.find((c) => c.path === selectedCollection) ?? null,
-    [collections, selectedCollection],
+    (folder) => folder.path !== selectedCollection,
   );
   // Warm a folder on hover/focus: the pointer's travel to the click hides most
   // of the round-trip, so entering the folder renders from cache.
@@ -1531,19 +1562,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     void libraryPrefetch.modelList(folderModelFilters(path), PAGE_SIZE, sortKey);
     if (multipartListEnabled) void libraryPrefetch.multipartModels(folderMultipartFilters(path));
     void libraryPrefetch.modelFacets(folderModelFilters(path));
-    const target = collections.find((collection) => collection.path === path);
+    const target = visibleCollections.find((collection) => collection.path === path);
     if (target?.has_readme) void libraryPrefetch.collectionReadme(target.id);
   }
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
-  const hasWritableCollection = collections.some(canWriteCollection);
+  // Whether there is anywhere this reader may upload to, without listing it.
+  const writableProbe = useCollectionSearch("", "edit", {
+    enabled: auth.isAuthenticated && !user?.is_superuser,
+  });
+  const hasWritableCollection =
+    !!user?.is_superuser || (writableProbe.data?.pages[0]?.items.length ?? 0) > 0;
   const canUploadToVault =
     auth.isAuthenticated &&
     (user?.is_superuser || canWriteCollection(selectedCollectionRow) || hasWritableCollection);
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
-  // Collections + tags are fetched by useCollections()/useTags() above; the
-  // model grid + outliner come from useModelList()/useOutlinerModels() above.
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
@@ -1556,11 +1590,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       toast.warning(uiText("Admin access required"));
       return;
     }
+    // Until the open folder has loaded, a new folder would land at the root.
+    if (selectedCollection !== null && selectedCollectionRow === null) return;
     try {
-      const parentId = selectedCollection
-        ? (collections.find((c) => c.path === selectedCollection)?.id ?? null)
-        : null;
-      await createCollection({ name, parent_id: parentId });
+      await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
       setNewCollectionName("");
       setIsCreatingCollection(false);
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
@@ -1613,8 +1646,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
     try {
+      // The write invalidates every loaded collection query (request.ts).
       await replaceCollectionTags(collection.id, nextTags);
-      await collectionsQuery.refetch();
       toast.success(uiText("Tags updated for {value1}", { value1: String(collection.name) }));
     } catch (error) {
       toast.error(error);
@@ -1814,14 +1847,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           key={selectedCollectionRow?.id ?? "vault"}
           open={multipartCreateOpen}
           onClose={() => setMultipartCreateOpen(false)}
-          collectionId={selectedCollectionRow?.id ?? null}
-          collections={collections}
+          collection={
+            selectedCollectionRow
+              ? { id: selectedCollectionRow.id, path: selectedCollectionRow.path }
+              : null
+          }
           returnTo={currentLibraryHref}
         />
         <MobileFilterDrawer
           open={filterDrawerOpen}
           onClose={closeDrawer}
-          collections={collections}
           tags={tags}
           printers={printers}
           selectedCollection={selectedCollection}
@@ -1861,7 +1896,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <FilterSidebar
           filtersOpen={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
-          collections={collections}
           models={outlinerModels}
           multipartModels={outlinerMultipartModels}
           tags={tags}
@@ -1970,19 +2004,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   {uiText("Recent folders")}
                 </p>
-                {availableRecentFolders.map((path) => (
+                {availableRecentFolders.map((folder) => (
                   <button
-                    key={path}
+                    key={folder.path}
                     role="menuitem"
                     type="button"
                     onClick={() => {
-                      handleCollectionChange(path);
+                      handleCollectionChange(folder.path);
                       setRecentFoldersOpen(false);
                     }}
                     className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{collectionDisplayPath(collections, path)}</span>
+                    <span className="truncate">{folder.label}</span>
                   </button>
                 ))}
                 <button
@@ -2547,7 +2581,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   type="button"
                   onClick={() => {
                     setSelectedIds(new Set());
-                    setSelectedCollectionIds(new Set());
+                    setSelectedCollectionRows(new Map());
                   }}
                   className="font-medium text-muted-foreground hover:text-foreground"
                 >
@@ -2648,7 +2682,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         onIntent={prefetchFolder}
                         onDropModel={canUploadToVault ? handleMoveModel : undefined}
                         selectable={selectMode}
-                        selected={selectedCollectionIds.has(collection.id)}
+                        selected={selectedCollectionRows.has(collection.id)}
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
@@ -2657,10 +2691,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         <MultipartModelCard
                           key={`multipart-${item.value.id}`}
                           item={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
                           availableTags={tags}
                           onDataChange={refresh}
@@ -2669,10 +2700,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         <ModelCard
                           key={item.value.id}
                           model={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
                           onToggleSelect={toggleSelect}
@@ -2682,6 +2710,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       ),
                     )}
                   </div>
+                  <LoadMore
+                    hasMore={moreFolders}
+                    loading={fetchingFolders}
+                    onClick={() => void fetchMoreFolders()}
+                    folders
+                  />
                   <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
                 </div>
               ) : (
@@ -2700,34 +2734,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <CollectionListRow
                         key={collection.id}
                         collection={collection}
-                        displayPath={collectionDisplayPath(collections, collection.path)}
+                        displayPath={collection.display_path}
                         onSelect={handleCollectionChange}
                         onIntent={prefetchFolder}
                         onDropModel={canUploadToVault ? handleMoveModel : undefined}
                         selectable={selectMode}
-                        selected={selectedCollectionIds.has(collection.id)}
+                        selected={selectedCollectionRows.has(collection.id)}
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
+                    <LoadMore
+                      hasMore={moreFolders}
+                      loading={fetchingFolders}
+                      onClick={() => void fetchMoreFolders()}
+                      folders
+                    />
                     {libraryItems.map((item) =>
                       item.kind === "multipart" ? (
                         <MultipartModelListRow
                           key={`multipart-${item.value.id}`}
                           item={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
                         />
                       ) : (
                         <ModelListRow
                           key={item.value.id}
                           model={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
                           onToggleSelect={toggleSelect}
@@ -2747,7 +2781,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           <BatchToolbar
             modelCount={selectedIds.size}
             selectedCollections={selectedCollections}
-            collections={collections}
             tags={tags}
             busy={batchBusy}
             canMoveToRoot={!!user?.is_superuser}
@@ -3114,10 +3147,12 @@ function LoadMore({
   hasMore,
   loading,
   onClick,
+  folders = false,
 }: {
   hasMore: boolean;
   loading: boolean;
   onClick: () => void;
+  folders?: boolean;
 }) {
   useUiLocale();
   if (!hasMore) return null;
@@ -3129,7 +3164,11 @@ function LoadMore({
           disabled={loading}
           className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors"
         >
-          {loading ? uiText("Loading...") : uiText("Load more")}
+          {loading
+            ? uiText("Loading...")
+            : folders
+              ? uiText("Show more folders")
+              : uiText("Load more")}
         </button>
       </div>
     </Localized>

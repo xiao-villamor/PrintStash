@@ -1,5 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
+import type { CollectionRole } from "@/types";
+
 /**
  * Single app-wide query cache.
  *
@@ -45,6 +47,12 @@ export const queryKeys = {
   // Under the collections root, so a readme write's `collections` invalidation
   // refreshes it together with the list's `has_readme` flag.
   collectionReadme: (id: number) => ["collections", id, "readme"] as const,
+  // The lazily loaded tree, under the same root: any collection write that
+  // invalidates `collections` refreshes every loaded level, lookup and search.
+  collectionChildren: (parentId: number | null) => ["collections", "children", parentId] as const,
+  collectionLookup: (path: string | null) => ["collections", "lookup", path] as const,
+  collectionSearch: (query: string, minRole: CollectionRole) =>
+    ["collections", "search", query, minRole] as const,
   tags: ["tags"] as const,
   printers: ["printers"] as const,
   printerDashboard: ["printers", "dashboard"] as const,

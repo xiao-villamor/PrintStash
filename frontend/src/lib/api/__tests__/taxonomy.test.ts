@@ -21,12 +21,15 @@ import {
   deleteCollectionPermission,
   deleteTag,
   getCollectionReadme,
+  listCollectionChildren,
   listCollectionPermissions,
   listCollections,
+  lookupCollection,
   listTags,
   moveCollection,
   renameCollection,
   replaceCollectionTags,
+  searchCollections,
   setCollectionReadme,
   updateCollectionPermission,
   uploadCollectionImage,
@@ -114,6 +117,54 @@ describe("collections", () => {
 
     expectRequest("/api/v1/collections/1/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Workshop"] });
+  });
+});
+
+describe("the collection tree, a page at a time", () => {
+  // A large library's whole tree took a minute to load (#295); these read one
+  // level, one path or one page of matches, and never the tree.
+  const page = { items: [], next_cursor: null };
+
+  it("asks for the top level without a parent", async () => {
+    respondWith(page);
+
+    await listCollectionChildren(null);
+
+    expectRequest("/api/v1/collections/children?limit=200");
+  });
+
+  it("asks for a folder's children from where the last page stopped", async () => {
+    respondWith(page);
+
+    await listCollectionChildren(3, "next-page");
+
+    expectRequest("/api/v1/collections/children?limit=200&parent_id=3&cursor=next-page");
+  });
+
+  it("looks a collection up by its path", async () => {
+    respondWith({ collection: {}, ancestors: [] });
+
+    await lookupCollection("parts/brackets");
+
+    expectRequest("/api/v1/collections/lookup?path=parts%2Fbrackets");
+  });
+
+  it("searches at the role the caller needs", async () => {
+    respondWith(page);
+
+    await searchCollections("brack", "edit");
+
+    expectRequest("/api/v1/collections/search?q=brack&min_role=edit&limit=20");
+  });
+
+  it("reads the tree fresh rather than from the request cache", async () => {
+    respondWith(page);
+    await listCollectionChildren(null);
+    respondWith(page);
+
+    await listCollectionChildren(null);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

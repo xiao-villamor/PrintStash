@@ -30,11 +30,17 @@ import {
   listPrinters,
   listSpools,
   listTags,
+  listCollectionChildren,
+  lookupCollection,
+  searchCollections,
   type StatsPeriod,
 } from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
 import type {
+  CollectionLookupRead,
+  CollectionPage,
   CollectionRead,
+  CollectionRole,
   Dashboard,
   FleetSummary,
   FilamentProfileRead,
@@ -99,6 +105,9 @@ export const defaultQueryApi = {
   listPrinters,
   listSpools,
   listTags,
+  listCollectionChildren,
+  lookupCollection,
+  searchCollections,
 };
 
 export type QueryApi = typeof defaultQueryApi;
@@ -124,6 +133,58 @@ function collectionReadmeOptions(api: QueryApi, collectionId: number) {
   return queryOptions<string | null>({
     queryKey: queryKeys.collectionReadme(collectionId),
     queryFn: async () => (await api.getCollectionReadme(collectionId)).readme,
+  });
+}
+
+/**
+ * One level of the collection tree, a page at a time: `parentId` null is the
+ * caller's top level. Loaded only while `enabled` (a row that is open), so the
+ * tree fetches what the user expands and nothing else.
+ */
+export function useCollectionChildren(parentId: number | null, options?: { enabled?: boolean }) {
+  const api = useQueryApi();
+  return useInfiniteQuery({
+    queryKey: queryKeys.collectionChildren(parentId),
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      api.listCollectionChildren(parentId, pageParam),
+    initialPageParam: null,
+    getNextPageParam: (page: CollectionPage) => page.next_cursor,
+    enabled: options?.enabled ?? true,
+  });
+}
+
+/** The collection at `path` and its ancestors; idle while `path` is null. */
+export function useCollectionLookup(path: string | null) {
+  const api = useQueryApi();
+  return useQuery<CollectionLookupRead>({
+    queryKey: queryKeys.collectionLookup(path),
+    queryFn: () => {
+      if (path === null || path === "") throw new Error("Collection lookup requires a path");
+      return api.lookupCollection(path);
+    },
+    enabled: path !== null && path !== "",
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Collections whose name contains `query`, held at `minRole` or above — for
+ * pickers and the tree's name filter. The caller debounces `query`.
+ */
+export function useCollectionSearch(
+  query: string,
+  minRole: CollectionRole = "view",
+  options?: { enabled?: boolean },
+) {
+  const api = useQueryApi();
+  return useInfiniteQuery({
+    queryKey: queryKeys.collectionSearch(query, minRole),
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      api.searchCollections(query, minRole, pageParam),
+    initialPageParam: null,
+    getNextPageParam: (page: CollectionPage) => page.next_cursor,
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
   });
 }
 

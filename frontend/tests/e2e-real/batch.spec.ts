@@ -99,7 +99,7 @@ test.describe("batch actions", () => {
     const moveDialog = page.getByRole("dialog", { name: /^Move \d+ item/ });
     await expect(moveDialog).toBeVisible();
     await moveDialog.getByPlaceholder("Find destination").fill(dest);
-    await moveDialog.getByRole("button", { name: new RegExp(`^${dest} `) }).click();
+    await moveDialog.getByRole("option", { name: new RegExp(`^${dest} `) }).click();
     await moveDialog.getByRole("button", { name: "Move here" }).click();
 
     await expect(modelCard(page, model)).toHaveCount(0);

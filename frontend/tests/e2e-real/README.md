@@ -91,7 +91,7 @@ the storage step from any page, choose storage, then upload a first Model.
 
 auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
-(create / nest / subtree count / delete / recursive-delete non-empty from the sidebar) ·
+(create / nest / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
 uploads (mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery

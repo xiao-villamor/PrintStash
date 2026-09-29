@@ -1,6 +1,9 @@
 import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import {
   CollectionCreate,
+  CollectionLookupRead,
+  CollectionPage,
+  CollectionRole,
   CollectionPermissionRead,
   CollectionPermissionUpdate,
   CollectionRead,
@@ -10,6 +13,36 @@ import {
 
 export function listCollections(options?: GetJsonOptions): Promise<CollectionRead[]> {
   return getJson<CollectionRead[]>("/api/v1/collections", options);
+}
+
+/** One page of a collection's children, or of the caller's top level when `parentId` is null. */
+export function listCollectionChildren(
+  parentId: number | null,
+  cursor: string | null = null,
+  limit = 200,
+): Promise<CollectionPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (parentId !== null) params.set("parent_id", String(parentId));
+  if (cursor !== null) params.set("cursor", cursor);
+  return getJson<CollectionPage>(`/api/v1/collections/children?${params}`, { fresh: true });
+}
+
+/** The collection at `path` with its visible ancestors, root first. */
+export function lookupCollection(path: string): Promise<CollectionLookupRead> {
+  const params = new URLSearchParams({ path });
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, { fresh: true });
+}
+
+/** Collections whose name contains `query`, held at `minRole` or above. */
+export function searchCollections(
+  query: string,
+  minRole: CollectionRole = "view",
+  cursor: string | null = null,
+  limit = 20,
+): Promise<CollectionPage> {
+  const params = new URLSearchParams({ q: query, min_role: minRole, limit: String(limit) });
+  if (cursor !== null) params.set("cursor", cursor);
+  return getJson<CollectionPage>(`/api/v1/collections/search?${params}`, { fresh: true });
 }
 
 export function createCollection(payload: CollectionCreate): Promise<CollectionRead> {

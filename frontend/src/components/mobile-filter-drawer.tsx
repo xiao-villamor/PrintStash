@@ -4,14 +4,13 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { X } from "lucide-react";
-import { CollectionRead, PrinterRead, TagRead } from "@/types";
+import { PrinterRead, TagRead } from "@/types";
 import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-sidebar";
 import { Drawer } from "@/components/ui/drawer";
 
 interface MobileFilterDrawerProps {
   open: boolean;
   onClose: () => void;
-  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;

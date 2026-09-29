@@ -28,6 +28,7 @@ import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -272,17 +273,21 @@ export function MultipartModelCard({
   );
 }
 
+/** The folder a new set starts in: its id is what is saved, its path what is shown chosen. */
+export interface CollectionChoice {
+  id: number;
+  path: string;
+}
+
 export function NewMultipartModelModal({
   open,
   onClose,
-  collectionId,
-  collections = [],
+  collection,
   returnTo,
 }: {
   open: boolean;
   onClose: () => void;
-  collectionId: number | null;
-  collections?: CollectionRead[];
+  collection: CollectionChoice | null;
   returnTo?: string;
 }) {
   useUiLocale();
@@ -290,22 +295,14 @@ export function NewMultipartModelModal({
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [targetCollectionId, setTargetCollectionId] = useState<number | null>(collectionId);
+  const [target, setTarget] = useState<CollectionChoice | null>(collection);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const writableCollections = useMemo(
-    () =>
-      collections.filter(
-        (collection) =>
-          collection.effective_role === "edit" || collection.effective_role === "admin",
-      ),
-    [collections],
-  );
 
   function closeModal() {
     setName("");
     setDescription("");
-    setTargetCollectionId(collectionId);
+    setTarget(collection);
     setError(null);
     onClose();
   }
@@ -319,7 +316,7 @@ export function NewMultipartModelModal({
       const created = await createMultipartModel({
         name: name.trim(),
         description: description.trim() || null,
-        collection_id: targetCollectionId,
+        collection_id: target?.id ?? null,
       });
       closeModal();
       router.push(detailHref(created.id, returnTo));
@@ -350,23 +347,18 @@ export function NewMultipartModelModal({
             required
           />
         </label>
-        <label className="block space-y-1.5">
+        <div className="space-y-1.5">
           <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
-          <select
-            value={targetCollectionId ?? ""}
-            onChange={(event) =>
-              setTargetCollectionId(event.target.value ? Number(event.target.value) : null)
+          <CollectionPicker
+            minRole="edit"
+            selectedPath={target?.path ?? ""}
+            onSelect={(picked) =>
+              setTarget(picked === null ? null : { id: picked.id, path: picked.path })
             }
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="">{t("multipart.vaultOnly")}</option>
-            {writableCollections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collectionDisplayPath(collections, collection.path)}
-              </option>
-            ))}
-          </select>
-        </label>
+            noneLabel={t("multipart.vaultOnly")}
+            emptyLabel={uiText("No editable collections.")}
+          />
+        </div>
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
           <textarea
@@ -427,7 +419,8 @@ export function MultipartModelBrowser({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"updated" | "name" | "parts">("updated");
   const [createOpen, setCreateOpen] = useState(false);
-  const collectionId = collections.find((item) => item.path === collection)?.id ?? null;
+  const current = collections.find((item) => item.path === collection);
+  const collectionChoice = current ? { id: current.id, path: current.path } : null;
   const { data: availableTags = [] } = useTags();
   const requestCreate = onCreate ?? (() => setCreateOpen(true));
   function toggleStructure(value: MultipartStructureFilter) {
@@ -471,11 +464,10 @@ export function MultipartModelBrowser({
     <section className="flex-1 px-4 py-5 sm:px-6">
       {!onCreate && (
         <NewMultipartModelModal
-          key={collectionId ?? "vault"}
+          key={collectionChoice?.id ?? "vault"}
           open={createOpen}
           onClose={() => setCreateOpen(false)}
-          collectionId={collectionId}
-          collections={collections}
+          collection={collectionChoice}
         />
       )}
       <div className="w-full space-y-5">

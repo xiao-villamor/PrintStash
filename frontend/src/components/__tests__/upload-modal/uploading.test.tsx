@@ -30,6 +30,7 @@ import { TaskList } from "@/components/task-list";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
 import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -148,11 +149,11 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
   const result = renderApp(
     <UploadModal open onClose={onClose} onUploaded={onUploaded} defaultCollection={null} />,
     {
-      seed: [[queryKeys.collections, [aCollection()]], [queryKeys.tags, [aTag()]], ...seed],
+      seed: [[queryKeys.tags, [aTag()]], ...seed],
       routes: {
         "GET /api/v1/libraries": json([]),
         "GET /api/v1/config": json({ external_libraries_enabled: false }),
-        "GET /api/v1/collections": json([aCollection()]),
+        ...collectionTreeRoutes([aCollection()]),
         "GET /api/v1/tags": json([aTag()]),
         "GET /api/v1/models/1": json(aModel()),
         "POST /api/v1/ingest/model": capture(json(queued())),

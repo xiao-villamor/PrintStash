@@ -10,6 +10,7 @@ import {
   MultipartModelBrowser,
   MultipartModelDetailPage,
 } from "@/components/multipart-model-browser";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { json, renderApp } from "@/test-support/render";
 import type { CollectionRead, MultipartModelListItem, MultipartModelRead } from "@/types";
 
@@ -21,6 +22,7 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     description: null,
     collection: null,
     collection_id: null,
+    collection_label: null,
     part_count: 0,
     model_count: 0,
     guide_count: 0,
@@ -82,6 +84,7 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     description: null,
     collection: "parts",
     collection_id: 3,
+    collection_label: "Parts",
     part_count: 2,
     model_count: 3,
     guide_count: 0,
@@ -318,13 +321,14 @@ describe("MultipartModelBrowser", () => {
         routes: {
           "GET /api/v1/multipart-models": json([]),
           "POST /api/v1/multipart-models": json(aMultipart()),
+          ...collectionTreeRoutes([collection]),
         },
       },
     );
 
     await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
     await user.type(screen.getByRole("textbox", { name: "Name" }), "Filed organiser");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Collection" }), "3");
+    await user.click(await screen.findByRole("option", { name: new RegExp(collection.name) }));
     await user.click(screen.getByRole("button", { name: "Create multipart set" }));
 
     expect(JSON.parse(requestsWithMethod("POST")[0].body).collection_id).toBe(3);

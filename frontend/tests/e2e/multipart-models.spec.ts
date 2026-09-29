@@ -52,6 +52,7 @@ const populatedMobileDetail: MultipartModelRead = {
   description: "A multipart holder with a fixed base and an alternative body.",
   collection: "tetitas",
   collection_id: 1,
+  collection_label: "Tetitas",
   part_count: 1,
   model_count: 2,
   guide_count: 0,
@@ -146,6 +147,7 @@ test.describe("multipart models", () => {
       description: "A complete desk organiser",
       collection: null,
       collection_id: null,
+      collection_label: null,
       part_count: 0,
       model_count: 0,
       guide_count: 0,
@@ -253,7 +255,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
-    await page.getByLabel("Collection").selectOption({ label: "maraio" });
+    await page.getByRole("option", { name: /maraio/ }).click();
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();

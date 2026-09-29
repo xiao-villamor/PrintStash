@@ -6,17 +6,18 @@ import { CheckSquare, ChevronRight, File, Folder, Search, Square } from "lucide-
 import { getJobStatus } from "@/lib/api/jobs";
 import { selectArchiveEntries } from "@/lib/api/models";
 import { useAuth } from "@/lib/auth-context";
-import { collectionDisplayPath } from "@/lib/collection-display";
 import { userMessage } from "@/lib/errors";
 import { formatBytes } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { uiMessage, uiText } from "@/lib/locale";
-import { useCollections } from "@/lib/queries";
+import { useCollectionLookup, useCollectionSearch } from "@/lib/queries";
 import { listTasks, trackImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
-import type { ArchiveEntry, ArchiveManifest, JobStatus } from "@/types";
+import type { ArchiveEntry, ArchiveManifest, CollectionNodeRead, JobStatus } from "@/types";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
@@ -53,23 +54,36 @@ function parentOf(entry: ArchiveEntry): string | null {
 export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
   useUiLocale();
   const { user } = useAuth();
-  const { data: collections = [] } = useCollections();
+  // The first folder a non-administrator may write to, found without listing
+  // the library (#295).
+  const writableProbe = useCollectionSearch("", "edit", { enabled: !user?.is_superuser });
+  const firstWritable = writableProbe.data?.pages[0]?.items[0] ?? null;
   const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folder, setFolder] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [pickedCollection, setPickedCollection] = useState<string | null | undefined>(undefined);
+  // The collection picked, "none" for the vault root, or undefined for no pick yet.
+  const [pickedCollection, setPickedCollection] = useState<CollectionNodeRead | "none" | undefined>(
+    undefined,
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const task = listTasks().find((item) => item.jobId === jobId);
-  const writableCollections = collections.filter(
-    (item) => item.effective_role === "edit" || item.effective_role === "admin",
-  );
-  const collection =
+  const collection: string | null =
     pickedCollection !== undefined
-      ? pickedCollection
-      : (task?.archiveCollection ??
-        (!user?.is_superuser ? (writableCollections[0]?.path ?? null) : null));
+      ? pickedCollection === "none"
+        ? null
+        : pickedCollection.path
+      : (task?.archiveCollection ?? (!user?.is_superuser ? (firstWritable?.path ?? null) : null));
+  // A destination that was not picked here still needs its names.
+  const destinationLookup = useCollectionLookup(pickedCollection === undefined ? collection : null);
+  const destinationLabel =
+    pickedCollection !== undefined && pickedCollection !== "none"
+      ? pickedCollection.display_path
+      : destinationLookup.data?.collection.path === collection
+        ? destinationLookup.data.collection.display_path
+        : null;
   const tags = task?.archiveTags ?? [];
 
   useEffect(() => {
@@ -369,23 +383,43 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                 })}
               </p>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                   {uiText("Destination collection")}
-                  <select
-                    value={collection ?? ""}
-                    onChange={(event) => setPickedCollection(event.target.value || null)}
-                    className="min-h-9 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  <DropdownMenu
+                    open={pickerOpen}
+                    onOpenChange={setPickerOpen}
+                    align="end"
+                    role="dialog"
+                    contentClassName="w-72 rounded border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                    trigger={
+                      <button
+                        type="button"
+                        aria-haspopup="dialog"
+                        aria-expanded={pickerOpen}
+                        onClick={() => setPickerOpen((value) => !value)}
+                        className="min-h-9 max-w-56 truncate rounded border border-border bg-background px-2 text-left text-sm text-foreground"
+                      >
+                        {destinationLabel ??
+                          (collection === null
+                            ? user?.is_superuser
+                              ? uiText("Vault root")
+                              : uiText("Choose a collection")
+                            : collection)}
+                      </button>
+                    }
                   >
-                    <option value="">
-                      {user?.is_superuser ? uiText("Vault root") : uiText("Choose a collection")}
-                    </option>
-                    {writableCollections.map((item) => (
-                      <option key={item.id} value={item.path}>
-                        {collectionDisplayPath(collections, item.path)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={collection ?? ""}
+                      onSelect={(picked) => {
+                        setPickedCollection(picked ?? "none");
+                        setPickerOpen(false);
+                      }}
+                      noneLabel={user?.is_superuser ? uiText("Vault root") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                    />
+                  </DropdownMenu>
+                </div>
                 <Button variant="outline" onClick={onClose}>
                   {uiText("Cancel")}
                 </Button>

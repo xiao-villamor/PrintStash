@@ -3,7 +3,6 @@
 import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,7 +23,8 @@ import {
   getVaultConfig,
   listExternalLibraries,
 } from "@/lib/api";
-import { useCollections, useTags } from "@/lib/queries";
+import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
+import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
 import { createTask, linkTaskToJob, updateTask, waitForImportJob } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -47,7 +47,7 @@ import {
   MESH_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
-import { CollectionRead, ExternalLibrary, JobStatus } from "@/types";
+import { CollectionNodeRead, ExternalLibrary, JobStatus } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
@@ -98,10 +98,6 @@ function acceptsFile(accept: string, name: string): boolean {
 
 function stemName(filename: string): string {
   return filename.replace(/\.[^/.]+$/, "");
-}
-
-function canWriteCollection(collection: CollectionRead): boolean {
-  return collection.effective_role === "edit" || collection.effective_role === "admin";
 }
 
 export function UploadModal({
@@ -155,10 +151,14 @@ export function UploadModal({
   const [targetLibraryId, setTargetLibraryId] = useState<number | "">("");
   // Shared taxonomy lists from the TanStack Query cache (deduped with the grid
   // and detail views; refetched after any create/delete).
-  const { data: collections = [] } = useCollections();
   const { data: tags = [] } = useTags();
   const [catOpen, setCatOpen] = useState(false);
-  const writableCollections = useMemo(() => collections.filter(canWriteCollection), [collections]);
+  // A non-administrator's upload lands in the first folder they may write to,
+  // found without listing the library (#295).
+  const writableProbe = useCollectionSearch("", "edit", {
+    enabled: open && !user?.is_superuser && !defaultCollection,
+  });
+  const firstWritable = writableProbe.data?.pages[0]?.items[0] ?? null;
 
   function sortIntoSlots(files: File[]) {
     for (const f of files) {
@@ -189,11 +189,28 @@ export function UploadModal({
   // the first frame and still right when the writable-collection list arrives
   // after the modal is already open — without overwriting a pick made since.
   const suggestedCollection =
-    defaultCollection ||
-    (!user?.is_superuser && writableCollections.length > 0 ? writableCollections[0].path : "");
-  const [pickedCollection, setPickedCollection] = useState<string | null>(null);
-  const collectionPath = pickedCollection ?? suggestedCollection;
-  const selectedCollectionLabel = collectionDisplayPath(collections, collectionPath);
+    defaultCollection || (!user?.is_superuser && firstWritable ? firstWritable.path : "");
+  // A pick is the collection itself, "none" for no collection, or null for no pick yet.
+  const [pickedCollection, setPickedCollection] = useState<CollectionNodeRead | "none" | null>(
+    null,
+  );
+  const collectionPath =
+    pickedCollection === null
+      ? suggestedCollection
+      : pickedCollection === "none"
+        ? ""
+        : pickedCollection.path;
+  // A suggested path still needs its names and id; a picked one came with them.
+  const suggestedLookup = useCollectionLookup(
+    open && pickedCollection === null && suggestedCollection !== "" ? suggestedCollection : null,
+  );
+  const chosenCollection: CollectionNodeRead | null =
+    pickedCollection !== null && pickedCollection !== "none"
+      ? pickedCollection
+      : suggestedLookup.data?.collection.path === collectionPath
+        ? suggestedLookup.data.collection
+        : null;
+  const selectedCollectionLabel = chosenCollection?.display_path ?? "";
 
   // Seeding the form from the props above is an adjustment to changed props,
   // not synchronization with an external system, so it happens during render:
@@ -572,9 +589,7 @@ export function UploadModal({
     try {
       const item = await capturePendingImport({
         url: urlValue.trim(),
-        collection_id: collectionPath
-          ? (collections.find((collection) => collection.path === collectionPath)?.id ?? null)
-          : null,
+        collection_id: chosenCollection?.id ?? null,
         tags: selectedTags,
       });
       toast.success(uiText("Captured URL. Review it before importing."));
@@ -889,14 +904,14 @@ export function UploadModal({
                   open={catOpen}
                   onOpenChange={setCatOpen}
                   align="start"
-                  role="listbox"
-                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
+                  role="dialog"
+                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg"
                   trigger={
                     <button
                       type="button"
                       data-menu-trigger
                       onClick={() => setCatOpen((v) => !v)}
-                      aria-haspopup="listbox"
+                      aria-haspopup="dialog"
                       aria-expanded={catOpen}
                       title={selectedCollectionLabel || undefined}
                       className="w-full h-10 flex min-w-0 items-center gap-2 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -911,46 +926,18 @@ export function UploadModal({
                     </button>
                   }
                 >
-                  {user?.is_superuser && (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={collectionPath === ""}
-                      onClick={() => {
-                        setPickedCollection("");
+                  <div className="p-2">
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={collectionPath}
+                      onSelect={(collection) => {
+                        setPickedCollection(collection ?? "none");
                         setCatOpen(false);
                       }}
-                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
-                    >
-                      {uiText("None")}
-                    </button>
-                  )}
-                  {writableCollections.length === 0 ? (
-                    <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
-                      {uiText("No editable collections.")}
-                    </div>
-                  ) : (
-                    writableCollections.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        role="option"
-                        aria-selected={collectionPath === c.path}
-                        onClick={() => {
-                          setPickedCollection(c.path);
-                          setCatOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                          collectionPath === c.path
-                            ? "text-primary bg-secondary-container"
-                            : "text-on-surface-variant hover:bg-surface-container-low"
-                        }`}
-                      >
-                        {collectionDisplayPath(collections, c.path)}{" "}
-                        <span className="opacity-50">({c.model_count})</span>
-                      </button>
-                    ))
-                  )}
+                      noneLabel={user?.is_superuser ? uiText("None") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                    />
+                  </div>
                 </DropdownMenu>
               </div>
 
@@ -1086,6 +1073,8 @@ export function UploadModal({
               disabled={
                 submitting ||
                 (!user?.is_superuser && !collectionPath) ||
+                // A destination that has not resolved yet would land at the root.
+                (collectionPath !== "" && chosenCollection === null) ||
                 (mode === "files"
                   ? !meshFile && !gcodeFile
                   : mode === "bulk"

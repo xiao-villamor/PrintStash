@@ -25,6 +25,7 @@ const model: ModelListItem = {
   slug: "cam-holder-v4",
   collection: null,
   collection_id: null,
+  collection_label: null,
   source_url: null,
   effective_role: "admin",
   tags: [],

@@ -32,9 +32,11 @@
   sidebar, because each collection's model count was checked against every
   other collection. Non-administrators' library, tag, collection, document,
   Multipart Model, build, search and similar-model reads no longer send their
-  whole list of visible collections with every query. A
-  first visit to a library with more than 200 collections opens only the root
-  folders and the way to the current folder.
+  whole list of visible collections with every query. The library sidebar now
+  loads one folder level at a time and starts collapsed on a first visit,
+  except along the path to the current folder. Move, upload, ZIP review and
+  new Multipart Model destinations use search instead of loading every folder.
+  Model cards receive their folder names from the server.
 
 ## 0.14.0
 

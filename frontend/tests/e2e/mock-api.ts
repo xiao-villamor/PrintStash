@@ -8,6 +8,32 @@ import type { SearchStatus } from "../../src/types/search";
 
 const now = "2026-06-04T00:24:22.000000";
 
+function mockCollection(id: number, name: string, path: string, modelCount: number) {
+  return {
+    id,
+    name,
+    slug: path,
+    path,
+    parent_id: null,
+    model_count: modelCount,
+    effective_role: "admin",
+    tags: [],
+    has_readme: false,
+  };
+}
+
+function mockCollections() {
+  const rows = [mockCollection(1, "maraio", "maraio", 1)];
+  if (inboxCollectionId !== null) {
+    rows.push(mockCollection(42, "Capture bracket", "capture-bracket", 0));
+  }
+  return rows;
+}
+
+function mockNode(row: ReturnType<typeof mockCollection>) {
+  return { ...row, child_count: 0, descendant_count: 0, display_path: row.name };
+}
+
 const metadata = {
   slicer_name: "OrcaSlicer",
   slicer_version: "OrcaSlicer 2.3.1",
@@ -42,6 +68,7 @@ const model = {
   hash: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
   collection: "maraio",
   collection_id: 1,
+  collection_label: "maraio",
   description: null,
   source_url: "https://www.printables.com/model/123-skadis-kitchen-roll-screw",
   effective_role: "admin",
@@ -975,33 +1002,30 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       });
       return;
     }
-    const collections = [
-      {
-        id: 1,
-        name: "maraio",
-        slug: "maraio",
-        path: "maraio",
-        parent_id: null,
-        model_count: 1,
-        effective_role: "admin",
-        tags: [],
-        has_readme: false,
-      },
-    ];
-    if (inboxCollectionId !== null) {
-      collections.push({
-        id: 42,
-        name: "Capture bracket",
-        slug: "capture-bracket",
-        path: "capture-bracket",
-        parent_id: null,
-        model_count: 0,
-        effective_role: "admin",
-        tags: [],
-        has_readme: false,
-      });
-    }
-    sendJson(res, collections);
+    sendJson(res, mockCollections());
+    return;
+  }
+  // The tree a level, a lookup or a search at a time. Every mock collection is
+  // a top-level folder with nothing below it.
+  if (url.pathname === "/api/v1/collections/children") {
+    const top = url.searchParams.get("parent_id") === null;
+    sendJson(res, { items: top ? mockCollections().map(mockNode) : [], next_cursor: null });
+    return;
+  }
+  if (url.pathname === "/api/v1/collections/lookup") {
+    const found = mockCollections().find((row) => row.path === url.searchParams.get("path"));
+    if (found === undefined) sendJson(res, { detail: "collection_not_found" }, 404);
+    else sendJson(res, { collection: mockNode(found), ancestors: [] });
+    return;
+  }
+  if (url.pathname === "/api/v1/collections/search") {
+    const query = (url.searchParams.get("q") ?? "").toLowerCase();
+    sendJson(res, {
+      items: mockCollections()
+        .filter((row) => row.name.toLowerCase().includes(query))
+        .map(mockNode),
+      next_cursor: null,
+    });
     return;
   }
   if (url.pathname === "/api/v1/collections/1/permissions") {

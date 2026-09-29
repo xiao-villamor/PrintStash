@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ArchiveReviewDialog } from "@/components/archive-review";
-import { queryKeys } from "@/lib/query-client";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { clearCompletedTasks, createTask, listTasks, updateTask } from "@/lib/task-center";
 import { aCollection, aJob } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
@@ -37,7 +37,6 @@ function openReview(
   });
   const onClose = vi.fn<() => void>();
   const result = renderApp(<ArchiveReviewDialog jobId={jobId} onClose={onClose} />, {
-    seed: [[queryKeys.collections, [aCollection({ path: "My Parts", effective_role: "admin" })]]],
     routes: {
       [`GET /api/v1/jobs/${jobId}`]: json(
         aJob({
@@ -58,7 +57,9 @@ function openReview(
         { job_id: `import-${jobId}`, state: "queued" },
         202,
       ),
-      "GET /api/v1/collections": json([aCollection({ path: "My Parts", effective_role: "admin" })]),
+      ...collectionTreeRoutes([
+        aCollection({ name: "My Parts", path: "My Parts", effective_role: "admin" }),
+      ]),
     },
   });
   return { ...result, onClose, taskId, jobId };
@@ -122,7 +123,8 @@ describe("ArchiveReviewDialog", () => {
 
     await user.click(await screen.findByRole("button", { name: "Open folder Animals" }));
     await user.click(screen.getByRole("button", { name: "Animals/cat.stl" }));
-    await user.selectOptions(screen.getByLabelText("Destination collection"), "");
+    await user.click(screen.getByRole("button", { name: "My Parts" }));
+    await user.click(await screen.findByRole("option", { name: "Vault root" }));
     await user.click(screen.getByRole("button", { name: "Import 1 selected" }));
 
     await waitFor(() => expect(requestsWithMethod("POST")).toHaveLength(1));

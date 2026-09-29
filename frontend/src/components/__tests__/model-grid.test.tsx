@@ -34,7 +34,8 @@ import type {
   SavedViewRead,
   TagRead,
 } from "@/types";
-import { aModelListItem, aPrinter } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { aCollectionNode, aModelListItem, aPrinter } from "@/test-support/factories";
 import {
   adminSession,
   json,
@@ -70,6 +71,7 @@ function aMultipartSet(override: Partial<MultipartModelListItem> = {}): Multipar
     description: "A complete printable figure",
     collection: null,
     collection_id: null,
+    collection_label: null,
     part_count: 2,
     model_count: 2,
     guide_count: 0,
@@ -159,7 +161,6 @@ function renderVault(
     </>,
     {
       seed: [
-        [queryKeys.collections, collections],
         [queryKeys.tags, tags],
         [queryKeys.vaultStats, { model_count: models.length, file_count: 0, total_size_bytes: 0 }],
         ...seed,
@@ -172,7 +173,7 @@ function renderVault(
         "GET /api/v1/saved-views": json([]),
         "GET /api/v1/documents": json([]),
         "GET /api/v1/multipart-models": json(multipartModels),
-        "GET /api/v1/collections": json(collections),
+        ...collectionTreeRoutes(collections),
         "GET /api/v1/tags": json(tags),
         ...routes,
       },
@@ -504,19 +505,61 @@ describe("ModelBrowser", () => {
     });
   });
 
+  describe("loading the library", () => {
+    it("never asks for the whole collection tree", async () => {
+      // Every page load fetched all 9,000 folders of the library in #295.
+      const { requests } = renderVault({
+        at: "/?c=parts",
+        collections: [
+          aCollection({ id: 1, name: "Parts", path: "parts" }),
+          aCollection({ id: 2, name: "Brackets", path: "parts/brackets", parent_id: 1 }),
+        ],
+        models: [aModelListItem({ name: "Benchy" })],
+      });
+      await screen.findByText("Benchy");
+
+      const whole = requests().filter(
+        (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
+      );
+
+      expect(whole).toEqual([]);
+    });
+
+    it("labels a model card with its folder's names", async () => {
+      renderVault({
+        models: [
+          aModelListItem({
+            name: "Benchy",
+            collection: "parts/brackets",
+            collection_id: 2,
+            collection_label: "Parts/Brackets",
+          }),
+        ],
+      });
+
+      // The chip shows the folder's own name and carries its full path.
+      expect(await screen.findByTitle("Parts/Brackets")).toHaveTextContent("Brackets");
+    });
+  });
+
   describe("moving between folders", () => {
     const PARTS_TREE = [
       aCollection({ id: 1, name: "Parts", path: "parts" }),
       aCollection({ id: 2, name: "Brackets", path: "parts/brackets", parent_id: 1 }),
     ];
 
-    /** A folder card in the grid (the sidebar tree lists the same names). */
-    function folderCard(path: string) {
-      const card = screen
-        .getByRole("main")
-        .querySelector<HTMLElement>(`[data-collection-path="${path}"]`);
-      if (!card) throw new Error(`no folder card for ${path}`);
-      return card;
+    /**
+     * A folder card in the grid (the sidebar tree lists the same names). The
+     * cards arrive with the open folder's children, after the page has drawn.
+     */
+    async function folderCard(path: string) {
+      return waitFor(() => {
+        const card = screen
+          .getByRole("main")
+          .querySelector<HTMLElement>(`[data-collection-path="${path}"]`);
+        if (!card) throw new Error(`no folder card for ${path}`);
+        return card;
+      });
     }
 
     function requestsFor(
@@ -547,7 +590,7 @@ describe("ModelBrowser", () => {
       });
       await screen.findByText("Shelf rig");
 
-      await user.click(folderCard("parts/brackets"));
+      await user.click(await folderCard("parts/brackets"));
 
       expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
       expect(screen.getByText("Shelf rig")).toBeVisible();
@@ -559,7 +602,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() => {
         for (const prefix of [
@@ -576,12 +619,12 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
       );
 
-      await user.click(folderCard("parts/brackets"));
+      await user.click(await folderCard("parts/brackets"));
 
       await screen.findByRole("heading", { name: "Brackets" });
       expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1);
@@ -592,7 +635,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      fireEvent.focus(folderCard("parts/brackets"));
+      fireEvent.focus(await folderCard("parts/brackets"));
 
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
@@ -629,7 +672,7 @@ describe("ModelBrowser", () => {
       });
       await screen.findByRole("heading", { name: "Parts" });
 
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
         expect(
@@ -662,7 +705,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
@@ -674,7 +717,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      fireEvent.focus(folderCard("parts/brackets"));
+      fireEvent.focus(await folderCard("parts/brackets"));
 
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
@@ -688,7 +731,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
@@ -715,7 +758,7 @@ describe("ModelBrowser", () => {
       await openLibraryTools();
       await user.click(screen.getByRole("button", { name: /Select/ }));
 
-      await user.hover(folderCard("parts/brackets"));
+      await user.hover(await folderCard("parts/brackets"));
 
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(0);
@@ -726,7 +769,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
 
-      await user.click(folderCard("parts/brackets"));
+      await user.click(await folderCard("parts/brackets"));
 
       await screen.findByRole("button", { name: /Add a description for this collection/ });
       expect(requests().some((call) => call.url.endsWith("/readme"))).toBe(false);
@@ -1056,6 +1099,34 @@ describe("ModelBrowser", () => {
   });
 
   describe("recent folders", () => {
+    it("remembers a visited folder by its names", async () => {
+      renderVault({
+        at: "/?c=parts%2Fbrackets",
+        collections: [
+          aCollection({ id: 1, name: "Parts", path: "parts" }),
+          aCollection({ id: 2, name: "Brackets", path: "parts/brackets", parent_id: 1 }),
+        ],
+      });
+
+      await waitFor(() =>
+        expect(window.localStorage.getItem("ps-recent-folders-labelled")).toBe(
+          JSON.stringify([["parts/brackets", "Parts/Brackets"]]),
+        ),
+      );
+    });
+
+    it("still offers folders an older version remembered", async () => {
+      // Those were stored as bare paths, before labels were kept (#295).
+      const user = userEvent.setup();
+      window.localStorage.setItem("ps-recent-folders", JSON.stringify(["parts"]));
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      await screen.findByText("Benchy");
+
+      await user.click(screen.getAllByRole("button", { name: /Recent/ }).at(-1)!);
+
+      expect(await screen.findByRole("menuitem", { name: "parts" })).toBeInTheDocument();
+    });
+
     it("ignores a stored list that is not an array", async () => {
       // The value is a UI convenience written by this component, but a user can
       // edit it — a crash here would take the whole vault page down.
@@ -1204,7 +1275,7 @@ describe("ModelBrowser", () => {
 
       await user.click(screen.getByRole("button", { name: "Move" }));
       const dialog = await screen.findByRole("dialog");
-      await user.click(within(dialog).getByRole("button", { name: /None \(root\)/ }));
+      await user.click(await within(dialog).findByRole("option", { name: "None (root)" }));
       await user.click(within(dialog).getByRole("button", { name: "Move here" }));
 
       await waitFor(() =>
@@ -1357,7 +1428,7 @@ describe("ModelBrowser", () => {
       await user.click(await screen.findByRole("button", { name: /Move/ }));
       const dialog = await screen.findByRole("dialog");
 
-      await user.click(within(dialog).getByRole("button", { name: /Spares/ }));
+      await user.click(await within(dialog).findByRole("option", { name: /Spares/ }));
       await user.click(within(dialog).getByRole("button", { name: /^Move/ }));
 
       await waitFor(() =>
@@ -1868,6 +1939,39 @@ describe("ModelBrowser", () => {
   });
 
   describe("pagination", () => {
+    it("keeps a wide folder level to one page until more is requested", async () => {
+      const user = userEvent.setup();
+      const first = aCollectionNode();
+      const second = aCollectionNode({
+        id: 2,
+        name: "Tools",
+        slug: "tools",
+        path: "tools",
+        display_path: "Tools",
+      });
+      const { requests } = renderVault({
+        routes: {
+          "GET /api/v1/collections/children": (url) =>
+            new URL(url, "http://test").searchParams.has("cursor")
+              ? json({ items: [second], next_cursor: null })
+              : json({ items: [first], next_cursor: "next" }),
+        },
+      });
+
+      const main = within(screen.getByRole("main"));
+      expect(await main.findByText("Parts")).toBeInTheDocument();
+      expect(main.queryByText("Tools")).not.toBeInTheDocument();
+      expect(
+        requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
+      ).toHaveLength(1);
+
+      await user.click(main.getByRole("button", { name: "Show more folders" }));
+      expect(await main.findByText("Tools")).toBeInTheDocument();
+      expect(
+        requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
+      ).toHaveLength(2);
+    });
+
     it("offers more when the page reports a cursor", async () => {
       renderVault({
         models: [aModelListItem({ name: "Benchy" })],
@@ -2204,7 +2308,7 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByLabelText("Select Benchy"));
       await user.click(await screen.findByRole("button", { name: /Move/ }));
       const dialog = await screen.findByRole("dialog");
-      await user.click(within(dialog).getByRole("button", { name: /Spares/ }));
+      await user.click(await within(dialog).findByRole("option", { name: /Spares/ }));
       await user.click(within(dialog).getByRole("button", { name: /^Move/ }));
     }
 

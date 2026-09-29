@@ -161,6 +161,7 @@ function makeListItem(id: number, name: string): ModelListItem {
     slug: name.toLowerCase().replaceAll(" ", "-"),
     collection: null,
     collection_id: null,
+    collection_label: null,
     source_url: null,
     effective_role: null,
     tags: [],
@@ -175,7 +176,7 @@ function makeListItem(id: number, name: string): ModelListItem {
 }
 
 function makeOutlinerModel(id: number, name: string): OutlinerModelRead {
-  return { id, name, collection: null, collection_id: null };
+  return { id, name, collection: null, collection_id: null, collection_label: null };
 }
 
 function emptyFacets(): ModelFacetsRead {
@@ -385,6 +386,7 @@ describe("folder navigation", () => {
       description: null,
       collection: "parts",
       collection_id: 1,
+      collection_label: "Parts",
       part_count: 1,
       model_count: 1,
       guide_count: 0,
