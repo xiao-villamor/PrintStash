@@ -34,6 +34,14 @@ const TREE = [
   aCollection({ id: 3, name: "Toys", path: "toys", parent_id: null }),
 ];
 
+/** A library of 500 folders: a root holding all the others. */
+const LARGE_TREE = [
+  aCollection({ id: 1000, name: "Archive", path: "archive", parent_id: null }),
+  ...Array.from({ length: 499 }, (_, n) =>
+    aCollection({ id: 1001 + n, name: `Shelf ${n}`, path: `archive/shelf-${n}`, parent_id: 1000 }),
+  ),
+];
+
 function outlinerModel(over: Partial<OutlinerModelRead> = {}): OutlinerModelRead {
   // The tree groups by `collection` *path*, not by id — a model with only an id
   // is invisible to it, which is exactly the drift this fixture pins down.
@@ -460,6 +468,20 @@ describe("FilterSidebar", () => {
       expect(await screen.findByText(/models → recycle bin/)).toBeInTheDocument();
     });
 
+    it("counts every folder nested at any depth beneath it", async () => {
+      const user = userEvent.setup();
+      renderSidebar({
+        collections: [
+          ...TREE,
+          aCollection({ id: 4, name: "Small", path: "parts/brackets/small", parent_id: 2 }),
+        ],
+      });
+
+      await user.click(screen.getAllByTitle("Delete collection")[0]);
+
+      expect(await screen.findByText("2 subcollections")).toBeInTheDocument();
+    });
+
     it("deletes the folder once confirmed", async () => {
       const user = userEvent.setup();
       const { onDeleteCollection } = renderSidebar();
@@ -532,6 +554,19 @@ describe("FilterSidebar", () => {
       renderSidebar({ selectedCollection: "parts/brackets" });
 
       expect(screen.getByText("Brackets")).toBeInTheDocument();
+    });
+
+    it("starts a library too large to show whole at its roots", () => {
+      // Opening every branch of a 9k-folder library mounted every row at once.
+      renderSidebar({ collections: LARGE_TREE });
+
+      expect(screen.queryByText("Shelf 0")).toBeNull();
+    });
+
+    it("opens the way to the current folder in a large library", () => {
+      renderSidebar({ collections: LARGE_TREE, selectedCollection: "archive/shelf-7" });
+
+      expect(screen.getByText("Shelf 7")).toBeInTheDocument();
     });
 
     it("remembers that the model group was collapsed", async () => {

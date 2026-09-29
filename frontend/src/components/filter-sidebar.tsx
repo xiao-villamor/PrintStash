@@ -32,6 +32,8 @@ import {
 interface CollectionNode {
   cat: CollectionRead;
   children: CollectionNode[];
+  /** Every collection below this one, counted once when the tree is built. */
+  descendants: number;
 }
 
 interface BranchCounts {
@@ -107,8 +109,15 @@ function readAllModelsExpanded(): boolean {
 }
 
 /**
+ * Beyond this many collections a first visit starts at the roots: opening every
+ * branch of a 9k-folder library mounts every row at once (#295).
+ */
+const AUTO_EXPAND_LIMIT = 200;
+
+/**
  * First-visit expansion: open every collection that has children or models, so
- * a fresh session doesn't start fully collapsed.
+ * a fresh session doesn't start fully collapsed — unless the library is too
+ * large to show whole, where only the roots are listed.
  */
 function autoExpandedPaths(
   collections: CollectionRead[],
@@ -116,6 +125,7 @@ function autoExpandedPaths(
   multipartByCollection: ReadonlyMap<string, MultipartModelListItem[]>,
 ): Set<string> {
   const expanded = new Set<string>();
+  if (collections.length > AUTO_EXPAND_LIMIT) return expanded;
   const parentIds = new Set(collections.map((c) => c.parent_id).filter((id) => id != null));
   for (const collection of collections) {
     if (
@@ -137,7 +147,7 @@ function ancestorPaths(path: string): string[] {
 
 function buildTree(cats: CollectionRead[]): CollectionNode[] {
   const byId = new Map<number, CollectionNode>();
-  for (const c of cats) byId.set(c.id, { cat: c, children: [] });
+  for (const c of cats) byId.set(c.id, { cat: c, children: [], descendants: 0 });
   const roots: CollectionNode[] = [];
   for (const node of byId.values()) {
     if (node.cat.parent_id == null) roots.push(node);
@@ -147,11 +157,18 @@ function buildTree(cats: CollectionRead[]): CollectionNode[] {
       else roots.push(node);
     }
   }
-  const sortRec = (nodes: CollectionNode[]) => {
+  // One pass sorts each level and counts each subtree; rows read the count
+  // instead of walking their own subtree on every render.
+  const finish = (nodes: CollectionNode[]): number => {
     nodes.sort((a, b) => a.cat.name.localeCompare(b.cat.name));
-    nodes.forEach((n) => sortRec(n.children));
+    let total = 0;
+    for (const node of nodes) {
+      node.descendants = finish(node.children);
+      total += 1 + node.descendants;
+    }
+    return total;
   };
-  sortRec(roots);
+  finish(roots);
   return roots;
 }
 
@@ -279,10 +296,6 @@ function OutlinerLeaves({
   );
 }
 
-function countDescendants(node: CollectionNode): number {
-  return node.children.reduce((acc, c) => acc + 1 + countDescendants(c), 0);
-}
-
 function CollectionTreeRow({
   node,
   badgeCounts,
@@ -381,7 +394,7 @@ function CollectionTreeRow({
   const displayChildren = visibleIds ? visibleChildren : node.children;
   const leaves = mergeLeaves(modelLeaves, multipartLeaves);
 
-  const descCount = countDescendants(node);
+  const descCount = node.descendants;
   const hasContent = descCount > 0 || node.cat.model_count > 0;
 
   return (

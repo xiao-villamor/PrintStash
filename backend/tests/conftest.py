@@ -55,6 +55,7 @@ from app.db.session import (  # noqa: E402
 )
 from app.modules.printing.printer_hub import PrinterHub  # noqa: E402
 from tests import containers  # noqa: E402
+from tests._statements import StatementLog  # noqa: E402
 
 _TIER_MARKERS = {"contract": "contract", "e2e": "e2e"}
 _RESOURCE_DIRS = {"postgres": "postgres"}
@@ -608,6 +609,16 @@ def auth_headers(db_session: Session) -> dict[str, str]:
     db_session.refresh(user)
     token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def sql_statements() -> StatementLog:
+    """What SQL a block executes: ``with sql_statements.recording(): ...``.
+
+    For scaling assertions that hold on any machine: the statement count and
+    the largest bound-parameter count must not grow with the data.
+    """
+    return StatementLog()
 
 
 @pytest.fixture(scope="session")

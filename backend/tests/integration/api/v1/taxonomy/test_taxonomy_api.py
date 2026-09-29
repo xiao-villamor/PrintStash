@@ -19,6 +19,7 @@ from app.core.config import _overlay
 from app.db.models import CollectionRole, ExternalLibraryTombstone, MultipartModel
 from app.modules.library import taxonomy
 from app.modules.storage.storage_backend.runtime import get_backend
+from tests._statements import StatementLog
 from tests.factories import (
     bearer,
     build_external_library,
@@ -26,6 +27,13 @@ from tests.factories import (
     build_model,
     build_user,
     grant_collection_role,
+)
+from tests.factories.protocols import (
+    GrantRole,
+    HeadersFor,
+    MakeCollection,
+    MakeModel,
+    MakeUser,
 )
 
 
@@ -93,6 +101,82 @@ class TestListCollections:
         body = resp.json()
         assert len(body) == 1
         assert body[0]["model_count"] == 1
+
+    def test_leaves_a_trashed_model_out_of_the_counts(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+    ) -> None:
+        shelf = make_collection("Shelf")
+        make_model("Kept", collection=shelf)
+        make_model("Binned", collection=shelf, trashed=True)
+
+        resp = client.get("/api/v1/collections", headers=auth_headers)
+
+        assert [c["model_count"] for c in resp.json()] == [1], resp.text
+
+    def test_reports_a_role_inherited_from_a_granted_ancestor(
+        self,
+        client: TestClient,
+        make_collection: MakeCollection,
+        make_user: MakeUser,
+        grant_role: GrantRole,
+        headers_for: HeadersFor,
+    ) -> None:
+        parent = make_collection("Functional")
+        make_collection("Brackets", parent=parent)
+        user = make_user("inheriting-editor")
+        grant_role(user, parent, CollectionRole.EDIT)
+
+        resp = client.get("/api/v1/collections", headers=headers_for(user))
+
+        roles = {c["path"]: c["effective_role"] for c in resp.json()}
+        assert roles == {"functional": "edit", "functional/brackets": "edit"}, resp.text
+
+    def test_runs_the_same_statements_however_many_collections_it_lists(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+        sql_statements: StatementLog,
+    ) -> None:
+        root = make_collection("Root")
+        make_model("First", collection=make_collection("Leaf", parent=root))
+        with sql_statements.recording():
+            client.get("/api/v1/collections", headers=auth_headers)
+        small = sql_statements.count
+        leaves = [make_collection(f"Leaf {n}", parent=root) for n in range(30)]
+        [make_model(f"Model {n}", collection=leaf) for n, leaf in enumerate(leaves)]
+
+        with sql_statements.recording():
+            resp = client.get("/api/v1/collections", headers=auth_headers)
+
+        assert len(resp.json()) == 32, resp.text
+        assert sql_statements.count == small
+
+    def test_binds_no_parameter_per_visible_collection(
+        self,
+        client: TestClient,
+        make_collection: MakeCollection,
+        make_user: MakeUser,
+        grant_role: GrantRole,
+        headers_for: HeadersFor,
+        sql_statements: StatementLog,
+    ) -> None:
+        root = make_collection("Shared")
+        [make_collection(f"Leaf {n}", parent=root) for n in range(30)]
+        user = make_user("wide-viewer")
+        grant_role(user, root, CollectionRole.VIEW)
+
+        with sql_statements.recording():
+            resp = client.get("/api/v1/collections", headers=headers_for(user))
+
+        # An id list bound into a query would carry all 31 visible collections.
+        assert len(resp.json()) == 31, resp.text
+        assert sql_statements.max_bound_parameters < 31
 
 
 class TestCreateCollection:

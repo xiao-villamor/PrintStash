@@ -15,6 +15,16 @@
   waiting for file selection. Its staged archive remains available; unfinished
   uploads and imports still block restore until they are settled.
 
+### Performance
+
+- **Large libraries load their collection tree in about a second.** A library
+  with 9,000 collections and 40,000 Models took over a minute to show its
+  sidebar, because each collection's model count was checked against every
+  other collection. Non-administrators' library, tag and collection reads no
+  longer send their whole list of visible collections with every query. A
+  first visit to a library with more than 200 collections opens only the root
+  folders and the way to the current folder.
+
 ## 0.14.0
 
 **Running from a git checkout? The old `docker-compose.yml` is now

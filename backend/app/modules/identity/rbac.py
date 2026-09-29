@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from sqlalchemy import or_
+from sqlalchemy import false, or_
 from sqlmodel import Session, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.errors import ErrorKind, OperationError
 from app.db.models import Collection, CollectionPermission, CollectionRole, User
@@ -77,21 +78,24 @@ def _like_prefix(path: str) -> str:
     return escaped + "/%"
 
 
-def accessible_collection_ids(
+def accessible_collection_ids_stmt(
     session: Session,
     user: User,
     minimum: CollectionRole = CollectionRole.VIEW,
-) -> set[int]:
-    """Ids of every live collection *user* can reach at *minimum* or above.
+) -> SelectOfScalar[int]:
+    """SQL scope selecting every live collection id *user* reaches at *minimum*.
+
+    Filter reads with it as a subquery (``column.in_(stmt)``). Binding the
+    materialised id set into a query instead sends one parameter per visible
+    collection with every statement, which is what made a 9k-collection
+    library's reads grow with the size of the tree (#295).
 
     A grant cascades to descendants, which the materialised ``path`` turns into
-    a prefix test. Grant filtering and cascade both run in SQL; the previous
-    version compared every live collection against every grant in Python, on
-    every permission check.
+    a prefix test. Only the user's own grants are read eagerly: they are few,
+    and each one becomes a ``path`` predicate.
     """
     if user.is_superuser:
-        rows = session.exec(select(Collection.id).where(live(Collection))).all()
-        return {int(cid) for cid in rows if cid is not None}
+        return select(Collection.id).where(live(Collection))
 
     granted_paths = session.exec(
         select(Collection.path)
@@ -104,19 +108,31 @@ def accessible_collection_ids(
             live(Collection),
         )
     ).all()
-    if not granted_paths:
-        return set()
-
+    # No grant reaches nothing; an empty OR renders as false in both dialects.
     reachable = or_(
+        false(),
         *[
             or_(
                 Collection.path == path,
                 Collection.path.like(_like_prefix(path), escape="\\"),  # type: ignore[union-attr]
             )
             for path in granted_paths
-        ]
+        ],
     )
-    rows = session.exec(select(Collection.id).where(live(Collection), reachable)).all()
+    return select(Collection.id).where(live(Collection), reachable)
+
+
+def accessible_collection_ids(
+    session: Session,
+    user: User,
+    minimum: CollectionRole = CollectionRole.VIEW,
+) -> set[int]:
+    """Ids of every live collection *user* can reach at *minimum* or above.
+
+    For Python-side membership checks only. Never bind the result into another
+    query; filter with ``accessible_collection_ids_stmt`` as a subquery.
+    """
+    rows = session.exec(accessible_collection_ids_stmt(session, user, minimum)).all()
     return {int(cid) for cid in rows if cid is not None}
 
 
@@ -150,22 +166,41 @@ def effective_roles_for_collections(
             live(Collection),
         )
     ).all()
+    resolved = effective_roles_for_paths(
+        session, user, ((int(cid), path) for cid, path in paths)
+    )
+    for cid, role in resolved.items():
+        out[cid] = role
+    return out
+
+
+def effective_roles_for_paths(
+    session: Session,
+    user: User,
+    collections: Iterable[tuple[int, str]],
+) -> dict[int, CollectionRole | None]:
+    """Resolve roles for live ``(id, path)`` rows the caller already loaded.
+
+    One query (the user's grants) however many rows are passed, so a listing
+    that has already read its collections does not bind their ids back into a
+    second query to fetch the paths it holds.
+    """
+    if user.is_superuser:
+        return {cid: CollectionRole.ADMIN for cid, _ in collections}
 
     grants = session.exec(
         select(Collection.path, CollectionPermission.role)
         .join(CollectionPermission, Collection.id == CollectionPermission.collection_id)  # type: ignore[arg-type]
         .where(CollectionPermission.user_id == user.id, live(Collection))
     ).all()
-    if not grants:
-        return out
-
-    for cid, path in paths:
+    out: dict[int, CollectionRole | None] = {}
+    for cid, path in collections:
         best: CollectionRole | None = None
         for granted_path, role in grants:
             inherited = path == granted_path or path.startswith(granted_path + "/")
             if inherited and ROLE_ORDER[role] > ROLE_ORDER.get(best, 0):
                 best = role
-        out[int(cid)] = best
+        out[cid] = best
     return out
 
 

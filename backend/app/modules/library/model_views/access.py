@@ -17,10 +17,11 @@ from app.modules.identity import rbac
 def _apply_model_access(stmt, session: Session, user: User):
     if user.is_superuser:
         return stmt
-    collection_ids = rbac.accessible_collection_ids(session, user, CollectionRole.VIEW)
-    if not collection_ids:
-        return stmt.where(Model.id == -1)
-    return stmt.where(Model.collection_id.in_(collection_ids))  # type: ignore[union-attr]
+    return stmt.where(
+        Model.collection_id.in_(  # type: ignore[union-attr]
+            rbac.accessible_collection_ids_stmt(session, user, CollectionRole.VIEW)
+        )
+    )
 
 
 def accessible_live_model_ids_stmt(session: Session, user: User):
