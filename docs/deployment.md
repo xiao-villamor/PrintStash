@@ -390,6 +390,7 @@ on the API for your provider:
 | `VAULT_MEDIA_WORKER_TIMEOUT_SECONDS` | `180` | Media worker timeout. |
 | `VAULT_SQLITE_SYNCHRONOUS` | `NORMAL` | SQLite durability mode. |
 | `VAULT_LOG_LEVEL` | `INFO` | API logging level. |
+| `VAULT_SLOW_REQUEST_MS` | `1000` | Log a warning for requests at or above this duration in milliseconds. Response `Server-Timing` reports total and SQL time plus SQL statement count; pair it with `X-Request-ID` when diagnosing latency. |
 | `VAULT_BACKUP_RETENTION_DAYS` | `30` | Local backup retention in days. |
 | `VAULT_RESTART_ENABLED` | `true` in Compose | Enables supervised restart from Settings; the app default outside Compose is `false`. |
 

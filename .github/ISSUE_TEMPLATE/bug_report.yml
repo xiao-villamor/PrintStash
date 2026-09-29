@@ -59,4 +59,5 @@ body:
     id: logs
     attributes:
       label: Relevant logs
+      description: For a slow page or API request, include the redacted `slow request` log line, its `X-Request-ID`, and the response `Server-Timing` header. Remove tokens and private paths before sharing.
       render: shell

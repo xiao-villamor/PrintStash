@@ -27,6 +27,7 @@ class TestSettings:
             ("max_archive_entries", 0),
             ("backup_retention_days", -1),
             ("trash_retention_days", -1),
+            ("slow_request_ms", 0),
         ],
     )
     def test_numeric_settings_reject_impossible_values(
@@ -47,6 +48,20 @@ class TestSettings:
         # identifies the deployment's app registration.
         assert "client-id" not in rendered
         assert "client-secret" not in rendered
+
+    def test_slow_request_threshold_defaults_to_one_second(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("VAULT_SLOW_REQUEST_MS", raising=False)
+
+        assert FrozenSettings(_env_file=None).slow_request_ms == 1000
+
+    def test_slow_request_threshold_reads_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VAULT_SLOW_REQUEST_MS", "250")
+
+        assert FrozenSettings(_env_file=None).slow_request_ms == 250
 
     @pytest.mark.parametrize(
         ("field", "value"),

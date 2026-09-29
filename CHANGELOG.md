@@ -4,6 +4,10 @@
 
 ### Added
 
+- API responses include `Server-Timing` for total request time, SQL time and
+  statement count. Requests exceeding `VAULT_SLOW_REQUEST_MS` (1,000 ms by
+  default) emit a warning with those timings and the request ID to help diagnose
+  slow library pages without logging query values.
 - The API serves the collection tree a page at a time:
   `GET /api/v1/collections/children` lists one level (or a user's top level),
   `GET /api/v1/collections/lookup` resolves a path with its ancestors, and

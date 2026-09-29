@@ -182,6 +182,7 @@ services:
 
       # --- Runtime ---
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      VAULT_SLOW_REQUEST_MS: ${VAULT_SLOW_REQUEST_MS:-1000}
       # Settings can request a graceful API exit because this service has an
       # unless-stopped restart policy. Disable if you remove that supervisor.
       VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}
