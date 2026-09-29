@@ -34,7 +34,10 @@ import type { ReactNode } from "react";
 import {
   QueryApiProvider,
   defaultQueryApi,
+  useCollectionChildren,
+  useCollectionLookup,
   useCollectionReadme,
+  useCollectionSearch,
   useCollections,
   useFilamentProfiles,
   useLibraryPrefetch,
@@ -60,7 +63,7 @@ import type {
   TagRead,
   VaultStatsRead,
 } from "@/types";
-import { aPrinter } from "@/test-support/factories";
+import { aCollectionNode, aPrinter } from "@/test-support/factories";
 
 // The hooks are thin, but they encode two real contracts worth locking down:
 // (1) every shared read passes `{ fresh: true }` so TanStack Query — not the
@@ -73,6 +76,9 @@ import { aPrinter } from "@/test-support/factories";
 // real implementation and is never reached from here.
 const stubs = {
   getCollectionReadme: vi.fn<QueryApi["getCollectionReadme"]>(),
+  listCollectionChildren: vi.fn<QueryApi["listCollectionChildren"]>(),
+  lookupCollection: vi.fn<QueryApi["lookupCollection"]>(),
+  searchCollections: vi.fn<QueryApi["searchCollections"]>(),
   getModelFacets: vi.fn<QueryApi["getModelFacets"]>(),
   getVaultStats: vi.fn<QueryApi["getVaultStats"]>(),
   listCollections: vi.fn<QueryApi["listCollections"]>(),
@@ -206,6 +212,9 @@ function wrapper(options: { staleTime?: number } = {}) {
 
 beforeEach(() => {
   stubs.listCollections.mockResolvedValue([collection]);
+  stubs.listCollectionChildren.mockResolvedValue({ items: [aCollectionNode()], next_cursor: null });
+  stubs.lookupCollection.mockResolvedValue({ collection: aCollectionNode(), ancestors: [] });
+  stubs.searchCollections.mockResolvedValue({ items: [aCollectionNode()], next_cursor: null });
   stubs.listTags.mockResolvedValue([tag]);
   stubs.listPrinters.mockResolvedValue([printer]);
   stubs.listPrinterProfiles.mockResolvedValue([printerProfile]);
@@ -219,6 +228,56 @@ afterEach(() => {
 });
 
 describe("taxonomy hooks", () => {
+  it("loads the next child page only when requested", async () => {
+    const first = aCollectionNode();
+    const second = aCollectionNode({ id: 2, name: "Tools", path: "tools" });
+    stubs.listCollectionChildren
+      .mockResolvedValueOnce({ items: [first], next_cursor: "next" })
+      .mockResolvedValueOnce({ items: [second], next_cursor: null });
+    const { result } = renderHook(() => useCollectionChildren(null), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(stubs.listCollectionChildren).toHaveBeenCalledTimes(1);
+    expect(stubs.listCollectionChildren).toHaveBeenCalledWith(null, null);
+    expect(result.current.data?.pages[0].items).toEqual([first]);
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    expect(stubs.listCollectionChildren).toHaveBeenNthCalledWith(2, null, "next");
+    await waitFor(() => expect(result.current.data?.pages[1]?.items).toEqual([second]));
+  });
+
+  it("leaves a closed child level idle", async () => {
+    const { result } = renderHook(() => useCollectionChildren(3, { enabled: false }), {
+      wrapper: wrapper(),
+    });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(stubs.listCollectionChildren).not.toHaveBeenCalled();
+  });
+
+  it("leaves collection lookup idle without a path", async () => {
+    const { result } = renderHook(() => useCollectionLookup(null), { wrapper: wrapper() });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(stubs.lookupCollection).not.toHaveBeenCalled();
+  });
+
+  it("resolves a selected collection by path", async () => {
+    const { result } = renderHook(() => useCollectionLookup("parts"), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(stubs.lookupCollection).toHaveBeenCalledTimes(1);
+    expect(stubs.lookupCollection).toHaveBeenCalledWith("parts");
+    expect(result.current.data?.collection.path).toBe("parts");
+  });
+
+  it("searches collections at the caller's required role", async () => {
+    const { result } = renderHook(() => useCollectionSearch("bracket", "edit"), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(stubs.searchCollections).toHaveBeenCalledTimes(1);
+    expect(stubs.searchCollections).toHaveBeenCalledWith("bracket", "edit", null);
+  });
+
   it("useCollections fetches with fresh:true and exposes data", async () => {
     const { result } = renderHook(() => useCollections(), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

@@ -13,8 +13,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CollectionPicker, type CollectionPickerProps } from "@/components/collection-picker";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
-import { aCollection } from "@/test-support/factories";
-import { renderApp } from "@/test-support/render";
+import { aCollection, aCollectionNode } from "@/test-support/factories";
+import { json, renderApp, type RouteTable } from "@/test-support/render";
 
 const LIBRARY = [
   aCollection({ id: 1, name: "Parts", path: "parts", parent_id: null, effective_role: "edit" }),
@@ -34,7 +34,7 @@ const LIBRARY = [
   }),
 ];
 
-function renderPicker(over: Partial<CollectionPickerProps> = {}) {
+function renderPicker(over: Partial<CollectionPickerProps> = {}, routes: RouteTable = {}) {
   const onSelect = vi.fn<CollectionPickerProps["onSelect"]>();
   renderApp(
     <CollectionPicker
@@ -44,7 +44,7 @@ function renderPicker(over: Partial<CollectionPickerProps> = {}) {
       emptyLabel="Nothing here"
       {...over}
     />,
-    { routes: collectionTreeRoutes(LIBRARY) },
+    { routes: { ...collectionTreeRoutes(LIBRARY), ...routes } },
   );
   return { onSelect };
 }
@@ -104,5 +104,25 @@ describe("CollectionPicker", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  it("recovers from a failed folder search", async () => {
+    const user = userEvent.setup();
+    let failing = true;
+    renderPicker(
+      {},
+      {
+        "GET /api/v1/collections/search": () =>
+          failing
+            ? json({ detail: "offline" }, 500)
+            : json({ items: [aCollectionNode()], next_cursor: null }),
+      },
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Folders could not be loaded.");
+    expect(screen.queryByText("Nothing here")).toBeNull();
+    failing = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("option", { name: /Parts/ })).toBeInTheDocument();
   });
 });

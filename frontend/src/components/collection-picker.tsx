@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
@@ -47,7 +48,9 @@ export function CollectionPicker({
     return () => clearTimeout(timer);
   }, [query]);
   const results = useCollectionSearch(searched, minRole);
-  const options = (results.data?.pages.flatMap((page) => page.items) ?? []).filter(
+  const options = (
+    results.isError ? [] : (results.data?.pages.flatMap((page) => page.items) ?? [])
+  ).filter(
     (collection) =>
       !excludePaths.some(
         (path) => collection.path === path || collection.path.startsWith(`${path}/`),
@@ -101,7 +104,7 @@ export function CollectionPicker({
               <span className="opacity-50">({collection.model_count})</span>
             </button>
           ))}
-          {results.hasNextPage && (
+          {results.isSuccess && results.hasNextPage && (
             <button
               type="button"
               disabled={results.isFetchingNextPage}
@@ -111,7 +114,20 @@ export function CollectionPicker({
               {uiText("Show more folders")}
             </button>
           )}
-          {!results.isPending && options.length === 0 && (
+          {results.isError && (
+            <div role="alert" className="space-y-2 px-3 py-4 text-sm text-muted-foreground">
+              <p>{uiText("Folders could not be loaded.")}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => void results.refetch()}
+              >
+                {uiText("Retry")}
+              </Button>
+            </div>
+          )}
+          {results.isSuccess && options.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyLabel}</p>
           )}
         </div>
