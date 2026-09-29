@@ -35,9 +35,8 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.db.session import get_session_factory
-from app.modules.media import gcode_parser, thumbnail
+from app.modules.media import gcode_parser, mesh_isolation, thumbnail
 from app.modules.media.thumbnail_engine import (
-    ThumbnailEngine,
     ThumbnailFailureReason,
     ThumbnailRequest,
 )
@@ -281,7 +280,7 @@ def _derive_mesh(file_id: int) -> Outcome:
             source = stack.enter_context(
                 resolve(file_row).materialize(capacity_claimed=True)
             )
-            result = ThumbnailEngine().generate(
+            result = mesh_isolation.generate(
                 ThumbnailRequest(
                     path=source,
                     file_type=file_row.file_type.value,
@@ -296,6 +295,25 @@ def _derive_mesh(file_id: int) -> Outcome:
     except ArtifactContentError:
         for kind in needed:
             _fail(file_id, kind, kinds[kind], "invalid_source", deterministic=False)
+            outcome[kind] = DerivativeState.FAILED
+        return Outcome(outcome)
+    except mesh_isolation.MeshWorkerError as exc:
+        # The child died or was killed for this Artifact's bytes; the API did not.
+        # A file over the memory budget is terminal (retrying repeats the kill);
+        # other worker failures keep the bounded retry.
+        reason = exc.reason.value
+        logger.warning(
+            "mesh derivation failed in its worker",
+            extra={"file_id": file_id, "reason": reason},
+        )
+        for kind in needed:
+            _fail(
+                file_id,
+                kind,
+                kinds[kind],
+                reason,
+                deterministic=reason in _DETERMINISTIC,
+            )
             outcome[kind] = DerivativeState.FAILED
         return Outcome(outcome)
     duration_ms = int((time.monotonic() - started) * 1000)

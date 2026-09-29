@@ -49,6 +49,7 @@ class ThumbnailFailureReason(str, Enum):
     RESOURCE_LIMIT = "resource_limit"
     TIMEOUT = "timeout"
     RENDERER_NO_OUTPUT = "renderer_no_output"
+    WORKER_FAILED = "worker_failed"
     STORAGE = "storage"
 
 

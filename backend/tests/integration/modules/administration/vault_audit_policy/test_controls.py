@@ -422,11 +422,10 @@ class TestVaultAuditPolicyControls:
             details_json=f'{{"file_id":{file.id}}}',
         )
 
-        class BrokenRenderer:
-            def generate(self, *args):
-                raise ValueError("private-path-token-must-not-leak")
+        def broken_renderer(*args):
+            raise ValueError("private-path-token-must-not-leak")
 
-        monkeypatch.setattr(producers, "ThumbnailEngine", BrokenRenderer)
+        monkeypatch.setattr(producers.mesh_isolation, "generate", broken_renderer)
         repair_safe_findings(db_session, run)
         assert path.read_bytes() == content
         db_session.refresh(finding)

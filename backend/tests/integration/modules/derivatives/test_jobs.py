@@ -139,7 +139,7 @@ class TestDerivation:
         def crash(*_args, **_kwargs):
             raise RuntimeError("renderer segfaulted")
 
-        monkeypatch.setattr(producers.ThumbnailEngine, "generate", crash)
+        monkeypatch.setattr(producers.mesh_isolation, "generate", crash)
 
         work.nudge(JobKind.DERIVATIVES_MESH)
         drain_work()

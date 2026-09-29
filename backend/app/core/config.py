@@ -409,6 +409,11 @@ class Settings(BaseSettings):
 
     mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
+    # Every mesh derivative (geometry, thumbnail, fingerprint) runs in a
+    # disposable child so a file that outgrows its memory budget costs one
+    # process rather than the API. This is that child's wall-clock deadline.
+    mesh_worker_timeout_seconds: int = Field(default=300, ge=10, le=3600)
+
     # Oversized STL previews run in a disposable, streaming worker. The worker
     # deadline is intentionally capped by the service so an operator override
     # cannot leave an ingestion thread waiting indefinitely.

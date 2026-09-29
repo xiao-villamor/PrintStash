@@ -22,6 +22,8 @@ class TestSettings:
             ("mesh_memory_budget_fraction", 1.01),
             ("mesh_render_face_chunk_size", 0),
             ("mesh_step_timeout_seconds", 0),
+            ("mesh_worker_timeout_seconds", 9),
+            ("mesh_worker_timeout_seconds", 3601),
             ("mesh_stream_timeout_seconds", 0),
             ("mesh_stream_timeout_seconds", 46),
             ("max_archive_entries", 0),

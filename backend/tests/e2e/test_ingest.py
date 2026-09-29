@@ -24,6 +24,7 @@ from app.core.config import _overlay, settings
 from app.db.models import ArtifactDerivative
 from app.schemas.orca import OrcaNativeContext
 from tests.e2e._jobs import settle
+from tests.factories.geometry import three_mf
 from tests.fixtures.three_mf_projects import build_3d_builder_component_project
 from tests.paths import FIXTURES_DIR
 
@@ -431,6 +432,48 @@ class TestMetadata:
         assert tuple(pixels[0, 0]) == (0, 0, 0, 0)
         assert tuple(pixels[image.height // 2, image.width // 2, :3]) == color
         assert pixels[:, :, 3].mean() > 100
+
+    @pytest.mark.asyncio
+    async def test_a_3mf_that_repeats_one_part_beyond_the_budget_keeps_its_preview(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        """#259: a small project that expands past the budget cannot take the API down.
+
+        400 placements of a 4-face part are ~25 KiB of XML, which the size
+        estimate prices far under the 1,000-face budget. The derivative runs in
+        a disposable worker, so whatever the loader does with it, the upload
+        completes, the slicer's own preview is published, and the API goes on
+        answering.
+        """
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        color = (220, 40, 120)
+        preview = io.BytesIO()
+        Image.new("RGB", (32, 24), color).save(preview, format="PNG")
+        placements = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 5} 0 0") for i in range(400))
+        archive = three_mf(
+            build=placements, extras={"Metadata/thumbnail.png": preview.getvalue()}
+        )
+        headers = await _setup_and_login(api, tmp_path)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("plate.3mf", archive, "model/3mf")},
+            data={"model_name": "Repeated Part"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+
+        assert job["state"] == "completed", job
+        derivative = await _thumbnail_derivative(api, headers, job["file_id"])
+        assert derivative["state"] == "ready", derivative
+        assert _thumbnail_output(e2e_db, job["file_id"])["strategy"] == "embedded"
+        thumbnail = await api.get(
+            f"/api/v1/files/{job['file_id']}/thumbnail", headers=headers
+        )
+        assert thumbnail.status_code == 200, thumbnail.text
+        assert (await api.get("/api/v1/health")).status_code == 200
 
     @pytest.mark.asyncio
     async def test_a_3mf_whose_parts_are_placed_by_transform_previews_correctly(

@@ -30,11 +30,12 @@ from app.db.models import (
 )
 from app.modules.derivatives import producers
 from app.modules.ingestion import extensions
-from app.modules.media import toolpath
+from app.modules.media import mesh_isolation, toolpath
 from app.modules.media.thumbnail_publication import ThumbnailPublicationError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.work import events
 from tests.factories import content
+from tests.factories.geometry import three_mf
 from tests.paths import FIXTURES_DIR
 
 
@@ -220,6 +221,60 @@ class TestDeriveMesh:
         assert outcome.kinds[DerivativeKind.THUMBNAIL] == "failed"
         row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
         assert row.attempts == settings.derivative_max_attempts
+        assert row.next_attempt_at is None
+
+    def test_a_worker_over_its_memory_budget_is_terminal_and_spares_the_api(
+        self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#259: the file that exhausts memory is recorded, and this process lives.
+
+        A budget no interpreter can meet stands in for a mesh the size caps
+        mis-sized. Retrying the same bytes would repeat the kill, so both kinds
+        are terminal at once instead of backing off into an hourly crash loop.
+        """
+        monkeypatch.setattr(mesh_isolation, "memory_budget_bytes", lambda: 8 * 1024**2)
+        artifact = stored("cube.stl", content.binary_stl())
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds == {
+            DerivativeKind.METADATA: "failed",
+            DerivativeKind.THUMBNAIL: "failed",
+        }
+        for row in _rows(db_session, artifact.id).values():
+            assert row.failure_reason == "resource_limit"
+            assert row.attempts == settings.derivative_max_attempts
+            assert row.next_attempt_at is None
+
+    def test_a_worker_that_times_out_is_retried_later(
+        self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Slowness may be the machine, not the file, so it keeps its backoff.
+        monkeypatch.setitem(_overlay, "mesh_worker_timeout_seconds", 0.2)
+        artifact = stored("cube.stl", content.binary_stl())
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] == "failed"
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.failure_reason == "timeout"
+        assert row.attempts < settings.derivative_max_attempts
+        assert row.next_attempt_at is not None
+
+    def test_a_3mf_that_repeats_one_part_beyond_the_budget_is_derived_safely(
+        self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The #259 shape through the whole pipeline: stored, derived, recorded."""
+        monkeypatch.setenv("VAULT_MESH_MAX_RENDER_TRIANGLES", "1000")
+        monkeypatch.setenv("VAULT_MESH_MEMORY_BUDGET_FRACTION", "0")
+        placements = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 5} 0 0") for i in range(400))
+        artifact = stored("plate.3mf", three_mf(build=placements))
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] == "failed"
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.failure_reason == "resource_limit"
         assert row.next_attempt_at is None
 
     def test_a_storage_failure_while_publishing_is_transient(

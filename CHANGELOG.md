@@ -31,6 +31,15 @@
   Tasks and Background work, including the number of files archived. Scheduled
   backups now appear in administrators' Tasks while they run, and the latest
   completed scheduled backup remains visible if it finished before reconnect.
+- A model file that needs more memory than expected can no longer take the API
+  down or crash-loop the container
+  ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). Mesh
+  geometry, thumbnails and similarity fingerprints now run in a disposable
+  worker process. When a file passes its memory budget or the worker deadline,
+  the worker is killed and that one file is recorded as failed: a file over the
+  memory budget is not retried, while a timeout keeps its bounded retries. Every
+  other request keeps working. The deadline is `VAULT_MESH_WORKER_TIMEOUT_SECONDS`
+  (default 300 s).
 - Backup history disables replica retries when a run has no completed archive
   record. Its guidance now refers to that run instead of implying that existing
   backup archives have been lost.
