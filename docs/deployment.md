@@ -295,7 +295,7 @@ require copying; uploads continue to work without relocating it:
 
 
 - Remove a volume mapped onto a subfolder of `/data`, after copying its contents
-  into the main volume the way [UPGRADE.md](../UPGRADE.md#unreleased-one-data-volume)
+  into the main volume the way [UPGRADE.md](../UPGRADE.md#0140-one-data-volume)
   moves the old volumes.
 - Or, when files must live on another disk, point **both** `VAULT_DATA_DIR` and
   `VAULT_STAGING_DIR` at that disk's mount.

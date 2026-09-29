@@ -8,7 +8,7 @@ instance.
 ## Chrome Web Store package
 
 Run `pnpm install --frozen-lockfile && pnpm package:chrome` to validate the
-extension and generate `.output/printstash-browser-extension-0.13.0-chrome.zip`
+extension and generate `.output/printstash-browser-extension-0.14.0-chrome.zip`
 (the filename follows `package.json`). The ZIP contains the production extension
 with its manifest at the root. Chrome and Edge exclude Firefox-specific metadata.
 

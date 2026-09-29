@@ -1,6 +1,6 @@
 # PrintStash Upgrade Guide
 
-## Unreleased: background work on a durable engine
+## 0.14.0: background work on a durable engine
 
 Background work now runs as Jobs on an embedded engine (DBOS). Nothing new has
 to be installed or configured for the default single-container deployment.
@@ -34,7 +34,7 @@ to be installed or configured for the default single-container deployment.
   at once are `VAULT_JOBS_INGEST_CONCURRENCY` (default 2), or Settings →
   Background work.
 
-## Unreleased: Model Family removal
+## 0.14.0: Model Family removal
 
 This upgrade removes the Model Families feature and its database tables. Back up
 both the database and managed storage before upgrading if you need to retain
@@ -46,7 +46,7 @@ Family entries and views filtered by Family are skipped.
 Uploaded Family cover blobs may remain in managed storage without a live
 reference after the database tables are removed.
 
-## Unreleased: canonical Artifact downloads
+## 0.14.0: canonical Artifact downloads
 
 Clients using `/api/v1/files/{id}/download-url` or `download-direct` must use
 `/api/v1/files/{id}/download` and follow temporary redirects. Authentication is
@@ -58,7 +58,7 @@ This guide covers supported self-hosted upgrades. SQLite plus local filesystem
 storage remains the default. Always upgrade from a fresh backup and retain the
 previous application image until validation is complete.
 
-## Unreleased: one data volume
+## 0.14.0: one data volume
 
 Both Compose files now mount **one** volume, `printstash`, at `/data` instead of
 five (`printstash_data`, `printstash_thumbs`, `printstash_db`,
@@ -111,7 +111,7 @@ If you set `VAULT_DATA_DIR`, `VAULT_THUMB_DIR`, `VAULT_STAGING_DIR` or
 `VAULT_BACKUP_DIR` yourself, they still work as per-directory overrides. Keep
 staging on the same mount as the library, or imports fall back to copying.
 
-## Unreleased: fewer Compose files
+## 0.14.0: fewer Compose files
 
 The repository root now has two Compose files. `docker-compose.yml` runs
 PrintStash as **one container** (web UI + full API, image
@@ -134,7 +134,7 @@ pulling:
 
 Both files mount the same `printstash` volume, so data is found as long as the
 Compose project name (normally the directory name) stays the same; coming from
-the five older volumes, first follow [one data volume](#unreleased-one-data-volume).
+the five older volumes, first follow [one data volume](#0140-one-data-volume).
 Stop the old stack
 with `docker compose -f <old file> down` (never `down -v`) before starting the
 new one. Moving from two containers to the single container, run

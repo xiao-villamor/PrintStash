@@ -1751,12 +1751,12 @@ describe("SettingsPanel", () => {
             status: "update_available",
             update_available: true,
             current_version: "0.12.1",
-            latest_version: "0.13.0",
+            latest_version: "0.14.0",
           }),
         },
       });
 
-      expect(await screen.findByText(/Update available: v0\.13\.0/)).toBeInTheDocument();
+      expect(await screen.findByText(/Update available: v0\.14\.0/)).toBeInTheDocument();
     });
 
     it("says so when the release check itself could not run", async () => {

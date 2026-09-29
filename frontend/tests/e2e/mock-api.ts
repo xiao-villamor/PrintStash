@@ -281,7 +281,7 @@ function workOverview() {
         executor_id: "all-mock-host-1",
         role: "all",
         hostname: "mock-host",
-        app_version: "0.13.0",
+        app_version: "0.14.0",
         lanes: ["derive.native", "ingest", "maintenance"],
         started_at: now,
         heartbeat_at: now,
@@ -1867,7 +1867,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, {
       status: "ok",
       name: "PrintStash",
-      version: "0.13.0",
+      version: "0.14.0",
       components: {
         database: { ok: true },
         storage: {

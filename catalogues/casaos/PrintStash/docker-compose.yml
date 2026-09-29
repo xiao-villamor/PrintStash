@@ -5,7 +5,7 @@
 name: printstash
 services:
   printstash:
-    image: ghcr.io/xiao-villamor/printstash:0.13.0
+    image: ghcr.io/xiao-villamor/printstash:0.14.0
     restart: unless-stopped
     stop_grace_period: 60s
     network_mode: bridge
@@ -81,4 +81,4 @@ x-casaos:
   screenshot_link: []
   index: /
   port_map: "3378"
-  version: "0.13.0"
+  version: "0.14.0"

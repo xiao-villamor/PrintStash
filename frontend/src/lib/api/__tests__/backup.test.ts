@@ -102,7 +102,7 @@ describe("backupFromJob", () => {
     size_bytes: 1024,
     file_count: 3,
     storage_backend: "local",
-    app_version: "0.13.0",
+    app_version: "0.14.0",
     location: "local",
     source_ref: "local-source",
     outcome: "completed" as const,

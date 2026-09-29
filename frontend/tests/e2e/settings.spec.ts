@@ -71,7 +71,7 @@ test.describe("settings route", () => {
             size_bytes: 4096,
             file_count: 12,
             storage_backend: "local",
-            app_version: "0.13.0",
+            app_version: "0.14.0",
             location: "local",
             source_ref: "9".repeat(64),
             namespace: "backup/data/backups",

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.0
+
 **Running from a git checkout? The old `docker-compose.yml` is now
 `docker-compose.advanced.yml`; `docker-compose.yml` now runs the single-container
 image. See UPGRADE.md before pulling.**
@@ -9,103 +11,6 @@ image. See UPGRADE.md before pulling.**
 **Compose installs: both Compose files now mount one `printstash` volume at
 `/data` instead of five. Copy your data into it before starting the new file
 (one command, in UPGRADE.md), or the app starts empty at first-run setup.**
-
-### Changed
-
-- Background work settings now lead with running, waiting, and failed work and
-  show each active Job's state, progress and cancel action. They also show where
-  to check a model's preview status. Queue tools and worker controls sit in
-  separate views, and mobile Settings links bring the selected tab into view.
-
-- Collection tree badges now count Models in child folders, use the complete
-  total when only part of a large library is loaded, and stay visible in the
-  default sidebar width.
-
-- Storage settings now show one clear current safety state and the location,
-  while remote file cache is visible without nested dropdowns. Cache limits
-  and activity have separate views; sizes use MB or GB. Storage cards reserve
-  their layout while loading, and remote connection setup uses the same visible
-  category and provider choices as Move Vault storage.
-- **One data volume.** Every path PrintStash writes (database, files,
-  thumbnails, staging, backups, caches) lives under `VAULT_DATA_ROOT`, `/data`
-  in the container, so a deployment mounts one volume. Each directory can still
-  be moved on its own with its existing variable. The artifact cache and
-  downloaded AI search models, previously left in the container's own layer,
-  now persist across updates. The Unraid template's Appdata field now says to
-  keep that folder on one pool with no second mapping inside it, so imports
-  keep hard-linking.
-
-- Model Families have been removed. Existing Models, files, G-code revisions and
-  print history remain independent; existing Family relationships and covers
-  are retired when the database migration runs. Multipart Models continue to
-  support named parts and alternative Models.
-
-- Nine Compose files became two in the repository root: `docker-compose.yml`
-  starts PrintStash as one container (web UI and full API) with no
-  configuration, and `docker-compose.advanced.yml` wires every setting with its
-  default, plus optional PostgreSQL, S3 and background workers. The light,
-  production and build-from-source variants are folded into the advanced file;
-  maintainer stacks moved under `deploy/`.
-
-- CI no longer runs the eight per-image Docker build and Grype jobs or the
-  legacy MinIO-to-SeaweedFS migration job. Container publishing no longer runs
-  Grype scans; release builds and the legacy migration helper remain available.
-
-- **Background work runs on a durable engine.** Imports, previews, metadata,
-  backups, scans, notifications, fleet dispatch, audits, migrations and AI
-  Search projection, indexing, captions, expansion and model downloads are Jobs
-  on DBOS, found by a reconciler from what the database says is owed, so a
-  crash, restart or upgrade resumes them instead of losing them. Uploads now
-  commit the Artifact and return; its metadata, thumbnail and binary G-code
-  toolpath are derived afterwards and appear on an open page without a reload.
-  A new kind or a renderer change re-derives the library in the background
-  while current previews stay visible. Native work is bounded by its lane, not
-  a database permit: indexing runs as similarity and search Jobs, and a search
-  query embeds inside the request, ahead of background inference, in a worker
-  with its own memory and time limits. An index build and a model download are
-  each a Job, followed and cancelled through the Jobs API.
-- Follow any Job at `GET /api/v1/jobs/{id}` (cancel and retry beside it) and
-  live changes on the `/api/v1/events/ws` socket. **Breaking:**
-  `/api/v1/ingest/jobs`, `POST /api/v1/files/thumbnails/rebuild`, plain
-  `POST /api/v1/ingest/archive` and `POST /api/v1/storage/migrations/{id}/advance`
-  are removed; `POST /api/v1/backups` and
-  `POST /api/v1/backups/runs/destinations/{id}/retry` now answer 202 with a
-  `job_id`, and the backup (or the retried destination) is the Job's result; a
-  binary toolpath still being derived answers 202; Pending Imports expose
-  `job_id` instead of `background_job_id`; similarity runs no longer report
-  `last_activity_at`.
-- Similarity runs, backup runs and destination retries each follow their Job:
-  the engine, not a lease the run held, decides what is running, and the next
-  attempt of an interrupted Job settles what the previous one left open.
-  Upgrading settles backups an interrupted process left running.
-- Restoring a backup rebuilds the engine's state from the restored database:
-  work the snapshot shows as owed is found again even though the engine that
-  was running it is gone, and a backup the snapshot shows in progress no longer
-  blocks the next one.
-- AI Search settings now separate guided setup, search types, AI servers and
-  technical options. Search types and compatible models appear as visible choices;
-  the active search is clearly separate from a new index build. Specialist index
-  tuning has its own view; server editing and custom model choices no longer
-  depend on nested dropdown sections.
-
-### Performance
-
-- Bound each geometric similarity comparison to three minutes so a pathological
-  mesh pair cannot occupy the scan worker for hours; exhausted pairs are counted
-  as failed verifications and the scan continues.
-- Similar Model analysis now reuses triangle measurements during surface
-  comparisons and avoids Trimesh array tracking inside geometry calculations,
-  reducing CPU time without changing comparison evidence.
-
-- **Imports no longer copy files into local storage.** A staged upload, URL
-  import, library-transfer archive entry or Bambu print capture
-  becomes its library file by hard link when staging shares the library's
-  mount, which the single `/data` volume guarantees: instant, whatever the file
-  size, with no second copy on disk. Local backups publish their archive the
-  same way when no remote replica needs it. Where a link is impossible (another
-  mount, or a filesystem without hard links) the file is copied as before, and
-  Settings warns "Imports are copied, not hard-linked" with a link to the
-  storage layout guide, which lists the layouts that keep hard links.
 
 ### Added
 
@@ -203,6 +108,206 @@ image. See UPGRADE.md before pulling.**
 - Full installations can analyze STEP assemblies and use operator-supplied CPU
   ONNX models for local text-to-shape or Model queries. Learned neighbors remain
   separate from verified geometry, and analysis never downloads model weights.
+
+- Verified, resumable Vault migration with create-only destination copies,
+  online ingestion deltas, journal-backed cutover recovery, generation-pinned
+  reads, and explicit receipt-scoped source retention and cleanup (#104).
+
+- Multipart model selection now browses thumbnail cards and nested collections,
+  pages through large libraries, and keeps multiple selections across searches
+  and pages. Add selected Models as separate parts or as variants of one part.
+
+- Optional scheduled Quick and Full Vault audits with maintenance windows, safe regression and recovery alerts, history, and verified opt-in derived-data repair.
+
+- **Storage presets:** Synology, TrueNAS, QNAP and Unraid mounted-folder guidance; explicit Synology/QNAP WebDAV, MinIO, Garage, SeaweedFS, Hetzner Object Storage, Storage Box SFTP/WebDAV, and Koofr connections. Presets reuse existing transports and encrypted credentials, with endpoint validation and separate delivery/safety facts.
+
+- Capacity admission supports percentage headroom and retains durable upload, migration and restore budgets across process failure.
+
+- Storage insights with logical and unique-object inventory, shared-volume capacity reservations, dated growth evidence, and explicit audited cleanup for expired staging and receipt-verified derived STL cache. Heavy operations now preserve configurable disk headroom before allocation.
+
+- Download strategy and proxied-byte diagnostics use bounded labels; signed query credentials are redacted from application and access logs.
+
+- Authorized Artifact downloads can offload managed S3 bodies through short-lived
+  HTTPS redirects when browser CORS is supported. Local files retain range
+  delivery; originals, previews and thumbnails now revalidate privately, and
+  shares/slicer downloads remain noncacheable.
+
+- The unified Docker image runs the full API and web UI in one container,
+  with the default single-service Compose file and tested AMD64/ARM64 publishing
+  to GHCR.
+
+- Optional verified remote Artifact cache with bounded disk usage, active-reader leases, administrator controls, and authoritative audit bypass.
+
+- Successful browser-extension CI jobs provide the validated Chrome Web Store
+  ZIP as a direct download, retained for 30 days.
+
+- The browser importer includes offline help and privacy information, with a
+  validated Chrome Web Store ZIP command and a publishing guide.
+
+- Vault, Library and backup connection forms use one typed provider catalogue.
+  S3 and Nextcloud presets resolve consistently across uses. Connection editing
+  preserves omitted credentials, supports explicit replacement and prevents
+  changing a target while linked sources or owned backups depend on it.
+
+- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
+  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
+  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
+  no longer create empty layers. Originals
+  remain unchanged for downloads and PrusaLink.
+
+- Backup run history records every selected destination, including invalid
+  connections and partial failures. Administrators can retry an exact failed
+  replica from a verified surviving archive; successful copies remain available.
+  Publication, verification and retry history are reported separately in Settings
+  and operational health.
+
+- Multipart builds snapshot part quantities and selected Revisions for a concrete
+  manufacturing run. Linked print jobs reserve units; explicit usable-output
+  confirmations track missing pieces and retain previous physical attempts.
+  Builds can be duplicated with fresh results or archived with their history.
+
+- Remote Library discovery streams large directories into a durable inventory.
+  Completed pages resume without rereading the directory, interrupted discovery
+  cannot remove linked Artifacts, and transport deadlines bound stalled requests.
+  Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
+  benchmarks cover 1,000, 10,000 and 100,000 entries.
+
+- Browser-based first-owner registration on explicitly enabled trusted networks,
+  with a guided account, storage-check and first-model flow. Local Compose no
+  longer requires a setup credential from API logs. Database serialization
+  prevents competing API processes from creating multiple initial administrators;
+  authenticated recovery preserves an account when storage preparation is pending.
+
+- A minimal, standalone Compose file for local deployment, with optional settings
+  and customization examples in a separate deployment guide.
+
+### Changed
+
+- Background work settings now lead with running, waiting, and failed work and
+  show each active Job's state, progress and cancel action. They also show where
+  to check a model's preview status. Queue tools and worker controls sit in
+  separate views, and mobile Settings links bring the selected tab into view.
+
+- Collection tree badges now count Models in child folders, use the complete
+  total when only part of a large library is loaded, and stay visible in the
+  default sidebar width.
+
+- Storage settings now show one clear current safety state and the location,
+  while remote file cache is visible without nested dropdowns. Cache limits
+  and activity have separate views; sizes use MB or GB. Storage cards reserve
+  their layout while loading, and remote connection setup uses the same visible
+  category and provider choices as Move Vault storage.
+- **One data volume.** Every path PrintStash writes (database, files,
+  thumbnails, staging, backups, caches) lives under `VAULT_DATA_ROOT`, `/data`
+  in the container, so a deployment mounts one volume. Each directory can still
+  be moved on its own with its existing variable. The artifact cache and
+  downloaded AI search models, previously left in the container's own layer,
+  now persist across updates. The Unraid template's Appdata field now says to
+  keep that folder on one pool with no second mapping inside it, so imports
+  keep hard-linking.
+
+- Model Families have been removed. Existing Models, files, G-code revisions and
+  print history remain independent; existing Family relationships and covers
+  are retired when the database migration runs. Multipart Models continue to
+  support named parts and alternative Models.
+
+- Nine Compose files became two in the repository root: `docker-compose.yml`
+  starts PrintStash as one container (web UI and full API) with no
+  configuration, and `docker-compose.advanced.yml` wires every setting with its
+  default, plus optional PostgreSQL, S3 and background workers. The light,
+  production and build-from-source variants are folded into the advanced file;
+  maintainer stacks moved under `deploy/`.
+
+- CI no longer runs the eight per-image Docker build and Grype jobs or the
+  legacy MinIO-to-SeaweedFS migration job. Container publishing no longer runs
+  Grype scans; release builds and the legacy migration helper remain available.
+
+- **Background work runs on a durable engine.** Imports, previews, metadata,
+  backups, scans, notifications, fleet dispatch, audits, migrations and AI
+  Search projection, indexing, captions, expansion and model downloads are Jobs
+  on DBOS, found by a reconciler from what the database says is owed, so a
+  crash, restart or upgrade resumes them instead of losing them. Uploads now
+  commit the Artifact and return; its metadata, thumbnail and binary G-code
+  toolpath are derived afterwards and appear on an open page without a reload.
+  A new kind or a renderer change re-derives the library in the background
+  while current previews stay visible. Native work is bounded by its lane, not
+  a database permit: indexing runs as similarity and search Jobs, and a search
+  query embeds inside the request, ahead of background inference, in a worker
+  with its own memory and time limits. An index build and a model download are
+  each a Job, followed and cancelled through the Jobs API.
+- Follow any Job at `GET /api/v1/jobs/{id}` (cancel and retry beside it) and
+  live changes on the `/api/v1/events/ws` socket. **Breaking:**
+  `/api/v1/ingest/jobs`, `POST /api/v1/files/thumbnails/rebuild`, plain
+  `POST /api/v1/ingest/archive` and `POST /api/v1/storage/migrations/{id}/advance`
+  are removed; `POST /api/v1/backups` and
+  `POST /api/v1/backups/runs/destinations/{id}/retry` now answer 202 with a
+  `job_id`, and the backup (or the retried destination) is the Job's result; a
+  binary toolpath still being derived answers 202; Pending Imports expose
+  `job_id` instead of `background_job_id`; similarity runs no longer report
+  `last_activity_at`.
+- Similarity runs, backup runs and destination retries each follow their Job:
+  the engine, not a lease the run held, decides what is running, and the next
+  attempt of an interrupted Job settles what the previous one left open.
+  Upgrading settles backups an interrupted process left running.
+- Restoring a backup rebuilds the engine's state from the restored database:
+  work the snapshot shows as owed is found again even though the engine that
+  was running it is gone, and a backup the snapshot shows in progress no longer
+  blocks the next one.
+- AI Search settings now separate guided setup, search types, AI servers and
+  technical options. Search types and compatible models appear as visible choices;
+  the active search is clearly separate from a new index build. Specialist index
+  tuning has its own view; server editing and custom model choices no longer
+  depend on nested dropdown sections.
+
+- Storage and Maintenance settings now lead with plain-language tasks, usage, and
+  library checks. Technical cache, migration, and audit controls open on demand;
+  Maintenance actions and backup verification align across narrow screens;
+  Similar Models has its own analysis and paired candidate review flow. An empty
+  audit history no longer generates a failed latest-audit request, and schedules
+  remain available if history fails to load. Collection usage now compares sizes
+  in a compact view with readable B, KB, MB, or GB units and direct Model drilldown.
+  Storage insights now highlights stored files and free space, groups usage by
+  purpose, and shows a dated history chart. File types and provider evidence remain
+  available in Measurement details with readable file-type labels. Collection
+  storage now shows recorded sizes with model counts instead of bars scaled to
+  the largest item on each page. Opening a collection now shows its models in
+  the same fixed-size Collection storage area, preserving the two-column
+  collection layout and links to Model details. Model pages fit fully above the
+  pager even for large collections. Pagination
+  shows the visible range, and recent storage activity appears directly when
+  there is something to report. Cleanup actions appear only for measured
+  candidates and lead with the reclaimable size.
+
+- The getting-started reminder can be dismissed with Don't show again. The choice
+  is remembered per user in the current browser across Settings and the empty library.
+
+- First-run setup uses a centered, responsive form with inline password visibility
+  controls. Storage choices and server folders are visible immediately, with a
+  clear access-check step before account creation and guidance in English and Spanish.
+  A compact branded frame, slim progress steps, and a prominent server-storage
+  choice bring the guide closer to the app's forms and reduce mobile scrolling.
+  The first-model guide now offers a focused file upload or a two-field folder
+  connection that starts scanning immediately. Upload progress, recoverable scan
+  errors, and verified Model links stay visible in the guide; backup and printer
+  shortcuts follow the first Model.
+
+- Artifact downloads use the canonical `/files/{id}/download` endpoint. The
+  separate `download-url` and `download-direct` endpoints have been removed.
+
+- Interface text, accessible labels, errors, plural counts and offline screens
+  use shared language catalogs. Dates and numbers follow the selected language;
+  the language menu supports adding further locales without a two-language toggle.
+  Catalogs are static, typo-friendly sources with guarded imperative feedback and
+  a safe scaffold command for adding complete language drafts.
+
+- Backend code is organized by capability, with separate startup, storage,
+  backup recovery and library query modules. G-code Revision deletion uses a
+  shared business operation with product-specific authorization and persistence.
+
+- The simple Docker Compose deployment now uses the light API image.
+
+- The browser extension is now named PrintStash in the browser, help and store
+  listing. Its connection settings and extension identity are unchanged.
 
 ### Fixed
 
@@ -388,138 +493,6 @@ image. See UPGRADE.md before pulling.**
 
 - Pending Imports remain readable when an older or damaged capture manifest is incomplete, without overwriting the stored capture data.
 
-### Changed
-
-- Storage and Maintenance settings now lead with plain-language tasks, usage, and
-  library checks. Technical cache, migration, and audit controls open on demand;
-  Maintenance actions and backup verification align across narrow screens;
-  Similar Models has its own analysis and paired candidate review flow. An empty
-  audit history no longer generates a failed latest-audit request, and schedules
-  remain available if history fails to load. Collection usage now compares sizes
-  in a compact view with readable B, KB, MB, or GB units and direct Model drilldown.
-  Storage insights now highlights stored files and free space, groups usage by
-  purpose, and shows a dated history chart. File types and provider evidence remain
-  available in Measurement details with readable file-type labels. Collection
-  storage now shows recorded sizes with model counts instead of bars scaled to
-  the largest item on each page. Opening a collection now shows its models in
-  the same fixed-size Collection storage area, preserving the two-column
-  collection layout and links to Model details. Model pages fit fully above the
-  pager even for large collections. Pagination
-  shows the visible range, and recent storage activity appears directly when
-  there is something to report. Cleanup actions appear only for measured
-  candidates and lead with the reclaimable size.
-
-- The getting-started reminder can be dismissed with Don't show again. The choice
-  is remembered per user in the current browser across Settings and the empty library.
-
-- First-run setup uses a centered, responsive form with inline password visibility
-  controls. Storage choices and server folders are visible immediately, with a
-  clear access-check step before account creation and guidance in English and Spanish.
-  A compact branded frame, slim progress steps, and a prominent server-storage
-  choice bring the guide closer to the app's forms and reduce mobile scrolling.
-  The first-model guide now offers a focused file upload or a two-field folder
-  connection that starts scanning immediately. Upload progress, recoverable scan
-  errors, and verified Model links stay visible in the guide; backup and printer
-  shortcuts follow the first Model.
-
-- Artifact downloads use the canonical `/files/{id}/download` endpoint. The
-  separate `download-url` and `download-direct` endpoints have been removed.
-
-- Interface text, accessible labels, errors, plural counts and offline screens
-  use shared language catalogs. Dates and numbers follow the selected language;
-  the language menu supports adding further locales without a two-language toggle.
-  Catalogs are static, typo-friendly sources with guarded imperative feedback and
-  a safe scaffold command for adding complete language drafts.
-
-- Backend code is organized by capability, with separate startup, storage,
-  backup recovery and library query modules. G-code Revision deletion uses a
-  shared business operation with product-specific authorization and persistence.
-
-- The simple Docker Compose deployment now uses the light API image.
-
-- The browser extension is now named PrintStash in the browser, help and store
-  listing. Its connection settings and extension identity are unchanged.
-
-### Added
-
-- Verified, resumable Vault migration with create-only destination copies,
-  online ingestion deltas, journal-backed cutover recovery, generation-pinned
-  reads, and explicit receipt-scoped source retention and cleanup (#104).
-
-- Multipart model selection now browses thumbnail cards and nested collections,
-  pages through large libraries, and keeps multiple selections across searches
-  and pages. Add selected Models as separate parts or as variants of one part.
-
-- Optional scheduled Quick and Full Vault audits with maintenance windows, safe regression and recovery alerts, history, and verified opt-in derived-data repair.
-
-- **Storage presets:** Synology, TrueNAS, QNAP and Unraid mounted-folder guidance; explicit Synology/QNAP WebDAV, MinIO, Garage, SeaweedFS, Hetzner Object Storage, Storage Box SFTP/WebDAV, and Koofr connections. Presets reuse existing transports and encrypted credentials, with endpoint validation and separate delivery/safety facts.
-
-- Capacity admission supports percentage headroom and retains durable upload, migration and restore budgets across process failure.
-
-- Storage insights with logical and unique-object inventory, shared-volume capacity reservations, dated growth evidence, and explicit audited cleanup for expired staging and receipt-verified derived STL cache. Heavy operations now preserve configurable disk headroom before allocation.
-
-- Download strategy and proxied-byte diagnostics use bounded labels; signed query credentials are redacted from application and access logs.
-
-- Authorized Artifact downloads can offload managed S3 bodies through short-lived
-  HTTPS redirects when browser CORS is supported. Local files retain range
-  delivery; originals, previews and thumbnails now revalidate privately, and
-  shares/slicer downloads remain noncacheable.
-
-- Grype scans every AMD64 and ARM64 container image in CI and scans immutable
-  publishing digests before promotion. Each run retains readable, JSON and SARIF
-  vulnerability reports for 90 days and sends trusted-run results to GitHub code
-  scanning when it is available.
-
-- An optional unified Docker image runs the full API and web UI in one container,
-  with a single-service Compose file and tested AMD64/ARM64 publishing to GHCR.
-
-- Optional verified remote Artifact cache with bounded disk usage, active-reader leases, administrator controls, and authoritative audit bypass.
-
-- Successful browser-extension CI jobs provide the validated Chrome Web Store
-  ZIP as a direct download, retained for 30 days.
-
-- The browser importer includes offline help and privacy information, with a
-  validated Chrome Web Store ZIP command and a publishing guide.
-
-- Vault, Library and backup connection forms use one typed provider catalogue.
-  S3 and Nextcloud presets resolve consistently across uses. Connection editing
-  preserves omitted credentials, supports explicit replacement and prevents
-  changing a target while linked sources or owned backups depend on it.
-
-- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
-  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
-  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
-  no longer create empty layers. Originals
-  remain unchanged for downloads and PrusaLink.
-
-- Backup run history records every selected destination, including invalid
-  connections and partial failures. Administrators can retry an exact failed
-  replica from a verified surviving archive; successful copies remain available.
-  Publication, verification and retry history are reported separately in Settings
-  and operational health.
-
-- Multipart builds snapshot part quantities and selected Revisions for a concrete
-  manufacturing run. Linked print jobs reserve units; explicit usable-output
-  confirmations track missing pieces and retain previous physical attempts.
-  Builds can be duplicated with fresh results or archived with their history.
-
-- Remote Library discovery streams large directories into a durable inventory.
-  Completed pages resume without rereading the directory, interrupted discovery
-  cannot remove linked Artifacts, and transport deadlines bound stalled requests.
-  Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
-  benchmarks cover 1,000, 10,000 and 100,000 entries.
-
-- Browser-based first-owner registration on explicitly enabled trusted networks,
-  with a guided account, storage-check and first-model flow. Local Compose no
-  longer requires a setup credential from API logs. Database serialization
-  prevents competing API processes from creating multiple initial administrators;
-  authenticated recovery preserves an account when storage preparation is pending.
-
-- A minimal, standalone Compose file for local deployment, with optional settings
-  and customization examples in a separate deployment guide.
-
-### Fixed
-
 - Browser pairing accepts local addresses without a scheme and explains invalid
   setup input. First-run setup keeps pairing controls visible in the popup;
   transfers remind users to keep it open until completion. Chrome and Edge
@@ -562,6 +535,25 @@ image. See UPGRADE.md before pulling.**
   administrator declaration; changes invalidate an approved plan.
 - Remote Library sources reject incomplete or oversized downloads before
   indexing, so a truncated first read cannot create an Artifact from partial bytes.
+
+### Performance
+
+- Bound each geometric similarity comparison to three minutes so a pathological
+  mesh pair cannot occupy the scan worker for hours; exhausted pairs are counted
+  as failed verifications and the scan continues.
+- Similar Model analysis now reuses triangle measurements during surface
+  comparisons and avoids Trimesh array tracking inside geometry calculations,
+  reducing CPU time without changing comparison evidence.
+
+- **Imports no longer copy files into local storage.** A staged upload, URL
+  import, library-transfer archive entry or Bambu print capture
+  becomes its library file by hard link when staging shares the library's
+  mount, which the single `/data` volume guarantees: instant, whatever the file
+  size, with no second copy on disk. Local backups publish their archive the
+  same way when no remote replica needs it. Where a link is impossible (another
+  mount, or a filesystem without hard links) the file is copied as before, and
+  Settings warns "Imports are copied, not hard-linked" with a link to the
+  storage layout guide, which lists the layouts that keep hard links.
 
 ## 0.13.0
 

@@ -26,7 +26,7 @@ El comando comprueba formato, lint, tipos, las pruebas de comportamiento y los
 builds de Chrome, Firefox y Edge. Después genera el ZIP de Chrome y comprueba
 su contenido real: manifiesto en la raíz, permisos, páginas, dependencias e iconos.
 
-Sube **`.output/printstash-browser-extension-0.13.0-chrome.zip`**. El nombre
+Sube **`.output/printstash-browser-extension-0.14.0-chrome.zip`**. El nombre
 incorpora la versión de `package.json`. No subas el repositorio, el directorio
 contenedor, un CRX ni el ZIP de código fuente. No se incluyen credenciales,
 dependencias de desarrollo, mapas de código ni imágenes promocionales.

@@ -626,7 +626,7 @@ test.describe("settings", () => {
             backup_id: "2026-09-24T000000Z",
             created_at: "2026-09-24T00:00:00Z",
             location: "local",
-            app_version: "0.13.0",
+            app_version: "0.14.0",
             file_count: 42,
             size_bytes: 1024,
             storage_backend: "local",
