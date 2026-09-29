@@ -223,7 +223,7 @@ class TestDeriveMesh:
         assert row.attempts == settings.derivative_max_attempts
         assert row.next_attempt_at is None
 
-    def test_a_worker_over_its_memory_budget_is_terminal_and_spares_the_api(
+    def test_a_worker_over_its_memory_budget_fails_both_kinds_terminally(
         self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """#259: the file that exhausts memory is recorded, and this process lives.

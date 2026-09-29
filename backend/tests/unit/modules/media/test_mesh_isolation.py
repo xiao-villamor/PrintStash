@@ -226,7 +226,7 @@ class TestReplyFrame:
 
         assert decode_reply(encode_reply(result)).fingerprint_result == fingerprint
 
-    def test_keeps_bytes_and_tuples_distinct_from_lists(self):
+    def test_preserves_the_type_of_every_fingerprint_value(self):
         """A descriptor blob must stay bytes and a tuple must stay a tuple."""
         record = FingerprintRecord(
             component_index=0,
