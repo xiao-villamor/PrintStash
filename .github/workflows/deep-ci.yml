@@ -159,6 +159,36 @@ jobs:
         # branches, and the second number is the one that says something.
         run: ./scripts/test.sh coverage -q
 
+  backend-scale:
+    name: Backend at supported scale
+    runs-on: ubuntu-latest
+    # A read that turns quadratic takes minutes per request at this size; the
+    # cap turns that into a failure instead of a job that runs for hours.
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Time library reads at 25,000 collections and 100,000 Models
+        # Budgets and growth limits: tests/repo/test_read_scale_budgets.py.
+        run: ./scripts/test.sh scale -q
+
   backend-python313:
     name: Backend compatibility (Python 3.13)
     runs-on: ubuntu-latest

@@ -32,6 +32,7 @@ from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.models import (
+    Collection,
     CollectionTagLink,
     File,
     FileRevisionStatus,
@@ -44,7 +45,9 @@ from app.db.models import (
     PrintJobState,
 )
 from app.db.scopes import live, trashed
+from app.modules.library import taxonomy
 from tests import factories
+from tests.factories.library_scale import build_library_at_scale
 
 
 class TestGeneratedIdentities:
@@ -853,3 +856,62 @@ class TestSimilarityFactories:
         )
 
         assert unit_component(vector.unit_key) == component
+
+
+class TestBuildLibraryAtScale:
+    """The bulk builder must seed rows the read paths treat as ordinary ones."""
+
+    def test_seeds_every_collection_as_live(self, db_session: Session) -> None:
+        scaled = build_library_at_scale(db_session, collections=20, models=0)
+
+        live_ids = db_session.exec(select(Collection.id).where(live(Collection))).all()
+
+        assert sorted(live_ids) == sorted(scaled.collection_ids)
+
+    def test_seeds_every_model_as_live(self, db_session: Session) -> None:
+        scaled = build_library_at_scale(db_session, collections=3, models=40)
+
+        live_ids = db_session.exec(
+            select(Model.id).where(
+                live(Model),
+                Model.collection_id.in_(scaled.collection_ids),  # type: ignore[union-attr]
+            )
+        ).all()
+
+        assert len(live_ids) == 40
+
+    def test_grows_the_tree_beneath_the_collection_it_is_given(
+        self, db_session: Session
+    ) -> None:
+        root = factories.build_collection(db_session, "Shared")
+
+        scaled = build_library_at_scale(
+            db_session, collections=30, models=0, under=root
+        )
+
+        # The prefix test RBAC cascades a grant through must reach every row.
+        paths = taxonomy.collection_descendant_paths(db_session, root.path)
+        assert len(paths) == len(scaled.collection_ids) + 1
+
+    def test_keeps_each_path_an_extension_of_its_parents(
+        self, db_session: Session
+    ) -> None:
+        build_library_at_scale(db_session, collections=30, models=0, fanout=2)
+
+        rows = db_session.exec(select(Collection)).all()
+
+        by_id = {row.id: row for row in rows}
+        assert all(
+            row.path.startswith(by_id[row.parent_id].path + "/")
+            for row in rows
+            if row.parent_id is not None
+        )
+
+    def test_shares_a_test_with_rows_from_the_ordinary_builders(
+        self, db_session: Session
+    ) -> None:
+        build_library_at_scale(db_session, collections=5, models=5)
+
+        model = factories.build_model(db_session, "Bracket")
+
+        assert model.id is not None

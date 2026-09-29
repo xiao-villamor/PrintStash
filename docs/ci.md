@@ -12,9 +12,10 @@ not cancel the entire suite at the 15-minute per-job limit. The repository
 test suite checks that every backend test file belongs to exactly one shard.
 
 `Deep CI` runs nightly or by manual dispatch. It checks branch coverage and
-area/module floors, external provider contracts, Python/native compatibility,
-the full browser configurations and the extension's real backend and
-ChromeDriver flows. Before tagging a release, dispatch it on the exact `main`
+area/module floors, the `scale` lane (library reads timed at 25,000
+collections and 100,000 Models, capped at 30 minutes), external provider
+contracts, Python/native compatibility, the full browser configurations and the
+extension's real backend and ChromeDriver flows. Before tagging a release, dispatch it on the exact `main`
 commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.

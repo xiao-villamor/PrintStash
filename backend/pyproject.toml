@@ -121,6 +121,9 @@ markers = [
     "remote_storage: runs against real Nextcloud and OpenSSH containers (tests/containers.py)",
     "s3: runs against a real SeaweedFS container (tests/containers.py)",
     "slow: large real fixtures or long simulations; excluded from the fast lane",
+    # Seeds a library at the supported size and times reads against budgets.
+    # Deselected by every lane but its own, which Deep CI runs (#295).
+    "scale: wall-clock budgets at the supported library size (lane: scale)",
     # Reads the report a finished coverage run wrote, so it cannot run inside the run
     # it judges. Every lane deselects it; `./scripts/test.sh coverage` runs it alone,
     # after the measured pass. See scripts/test.sh.

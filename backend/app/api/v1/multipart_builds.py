@@ -42,7 +42,7 @@ def list_builds(
     if not user.is_superuser:
         query = query.where(
             MultipartBuild.collection_id.in_(
-                rbac.accessible_collection_ids(session, user)
+                rbac.accessible_collection_ids_stmt(session, user)
             )
         )
     rows = session.exec(

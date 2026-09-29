@@ -84,7 +84,10 @@ class TestQuickGate:
             "add_paths tests/unit tests/integration tests/contract tests/e2e tests/repo"
             in runner
         )
-        assert "not slow and not coverage_gate and $non_resource_expression" in runner
+        assert (
+            "not slow and not coverage_gate and $not_scale and $non_resource_expression"
+            in runner
+        )
         assert "export PRINTSTASH_TEST_NO_EXTERNAL=1" in runner
 
     def test_backend_shards_cover_every_test_file_once(self) -> None:
@@ -180,6 +183,16 @@ class TestDeepSuite:
             if target["runtime"] == "pytest"
         )
         assert "./scripts/test-critical.sh" not in str(workflow)
+
+    def test_times_library_reads_at_the_supported_scale(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
+
+        assert "./scripts/test.sh scale -q" in _commands(job)
+
+    def test_caps_the_scale_run_so_a_quadratic_read_fails(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
+
+        assert job["timeout-minutes"] <= 30
 
     def test_runs_expensive_work_only_on_schedule_or_dispatch(self) -> None:
         events = _workflow("deep-ci.yml")[True]

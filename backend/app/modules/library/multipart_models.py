@@ -386,10 +386,11 @@ def list_visible(
     elif direct:
         stmt = stmt.where(MultipartModel.collection_id.is_(None))  # type: ignore[union-attr]
     if not user.is_superuser:
-        ids = rbac.accessible_collection_ids(session, user)
-        if not ids:
-            return []
-        stmt = stmt.where(MultipartModel.collection_id.in_(ids))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            MultipartModel.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user)
+            )
+        )
     if query and (needle := query.strip()):
         stmt = stmt.where(MultipartModel.name.ilike(f"%{needle}%"))  # type: ignore[union-attr]
     for tag_slug in tag_slugs or []:
@@ -775,10 +776,11 @@ def candidates(
     elif direct:
         stmt = stmt.where(Model.collection_id.is_(None))  # type: ignore[union-attr]
     if not user.is_superuser:
-        ids = rbac.accessible_collection_ids(session, user, CollectionRole.VIEW)
-        if not ids:
-            return []
-        stmt = stmt.where(Model.collection_id.in_(ids))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            Model.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user, CollectionRole.VIEW)
+            )
+        )
     if query and (needle := query.strip()):
         stmt = stmt.where(Model.name.ilike(f"%{needle}%"))  # type: ignore[union-attr]
     rows = session.exec(

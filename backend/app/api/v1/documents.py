@@ -189,10 +189,11 @@ def list_documents(
         stmt = stmt.where(Document.collection_id.is_(None))  # type: ignore[union-attr]
 
     if not current_user.is_superuser:
-        accessible = rbac.accessible_collection_ids(session, current_user)
-        if not accessible:
-            return []
-        stmt = stmt.where(Document.collection_id.in_(accessible))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            Document.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, current_user)
+            )
+        )
     if q:
         stmt = stmt.where(Document.name.ilike(f"%{q}%"))  # type: ignore[union-attr]
 
@@ -246,10 +247,11 @@ def list_document_trash(
 ) -> List[DocumentListItem]:
     stmt = select(Document).where(trashed(Document))
     if not current_user.is_superuser:
-        accessible = rbac.accessible_collection_ids(session, current_user)
-        if not accessible:
-            return []
-        stmt = stmt.where(Document.collection_id.in_(accessible))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            Document.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, current_user)
+            )
+        )
     documents = session.exec(stmt.order_by(Document.deleted_at.desc())).all()  # type: ignore[union-attr]
     return [_item(session, current_user, document) for document in documents]
 

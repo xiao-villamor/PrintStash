@@ -48,8 +48,9 @@ delegate.
 against contract-enforcing fakes over a real loopback socket), `e2e/` (the whole app
 over ASGITransport), plus `fakes/`, `fixtures/` and `repo/` (repo-level invariants).
 So `app/modules/library/trash.py` ↔ `tests/integration/modules/library/test_trash.py`, and "is this
-module tested?" is one `ls`. Lanes: `./scripts/test.sh fast|pr|contract|e2e|full|coverage`
-(`--help` explains each). Then mock-API Playwright (`frontend/tests/e2e/`,
+module tested?" is one `ls`. Lanes: `./scripts/test.sh fast|pr|contract|e2e|full|coverage|scale`
+(`--help` explains each; `scale` times reads at the supported library size and
+runs only in Deep CI). Then mock-API Playwright (`frontend/tests/e2e/`,
 `pnpm test:e2e`) and real-backend Playwright (`frontend/tests/e2e-real/`,
 `pnpm test:e2e:real`).
 Printer emulators run standalone for manual testing, e.g.

@@ -9,7 +9,7 @@ from sqlalchemy.orm import load_only
 from sqlmodel import Session, col, select
 
 from app.db.models import CollectionRole, File, GeometryFingerprint, Model, User
-from app.modules.identity.rbac import accessible_collection_ids
+from app.modules.identity.rbac import accessible_collection_ids_stmt
 from app.modules.similarity.fingerprints import live_source_predicates
 
 PREFILTER_LIMIT = 512
@@ -26,8 +26,9 @@ class Shortlist:
 def editable_models(session: Session, user: User, model=Model):
     if user.is_superuser:
         return true()
-    ids = accessible_collection_ids(session, user, CollectionRole.EDIT)
-    return col(model.collection_id).in_(ids) if ids else false()
+    return col(model.collection_id).in_(
+        accessible_collection_ids_stmt(session, user, CollectionRole.EDIT)
+    )
 
 
 def hash_lookup(source: GeometryFingerprint):

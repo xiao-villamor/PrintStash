@@ -563,13 +563,11 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
         )
     aggregate_stmt = select(MultipartModel)
     if not user.is_superuser:
-        aggregate_collection_ids = rbac.accessible_collection_ids(session, user)
-        if not aggregate_collection_ids:
-            aggregate_stmt = aggregate_stmt.where(MultipartModel.id == -1)
-        else:
-            aggregate_stmt = aggregate_stmt.where(
-                MultipartModel.collection_id.in_(aggregate_collection_ids)  # type: ignore[union-attr]
+        aggregate_stmt = aggregate_stmt.where(
+            MultipartModel.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user)
             )
+        )
     aggregates = session.exec(aggregate_stmt.order_by(MultipartModel.id.asc())).all()  # type: ignore[attr-defined]
     aggregate_collection_paths = {
         row.id: row.path

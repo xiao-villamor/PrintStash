@@ -1,0 +1,105 @@
+"""The library page answers in time at the size PrintStash supports.
+
+PrintStash commits to libraries of 25,000 collections and 100,000 Models
+(docs/known-limitations.md). Issue #295 was a library a third that size whose
+sidebar took over a minute; nothing measured it because no test had a library
+that large. These tests seed one, then time each registered read.
+
+They run in the ``scale`` lane (``./scripts/test.sh scale``) in Deep CI, never
+in a PR run: seeding takes seconds per case and wall-clock depends on the
+machine. The deterministic half of the same guarantee, which does run on every
+PR, is ``test_read_scaling.py``.
+
+Budgets are about three times what a developer machine measured, to absorb a
+slower CI runner; a regression to quadratic work misses them by minutes, not
+milliseconds. The growth test does not depend on the machine at all: the library
+grows eight times, and a read may take at most sixteen times as long.
+"""
+
+from __future__ import annotations
+
+import statistics
+import time
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session
+
+from app.db.models import Collection
+from tests._library_reads import LIBRARY_READS
+from tests.factories.library_scale import build_library_at_scale
+
+pytestmark = pytest.mark.scale
+
+SUPPORTED = {"collections": 25_000, "models": 100_000}
+AN_EIGHTH = {"collections": 3_125, "models": 12_500}
+THE_REST = {"collections": 21_875, "models": 87_500}
+
+BUDGET_SECONDS = {
+    # The whole tree, 25,000 rows; measured 1.0s. A lazy tree replaces it (#295).
+    "/api/v1/collections": 3.0,
+    "/api/v1/tags": 1.0,
+    "/api/v1/models/page": 1.5,
+    "/api/v1/models/outliner": 0.5,
+    "/api/v1/models/facets": 0.5,
+    "/api/v1/models/stats": 0.5,
+    "/api/v1/multipart-models": 0.5,
+    "/api/v1/documents": 0.5,
+    "/api/v1/documents/trash": 0.5,
+    "/api/v1/multipart-builds": 0.5,
+}
+# Linear work grows eight times with an eight-times library; quadratic, 64.
+MAX_GROWTH = 16
+# Below this a read is fast at any size, and timer noise dominates the ratio.
+NOISE_FLOOR_SECONDS = 0.05
+
+
+def _median_seconds(
+    client: TestClient, path: str, params: dict[str, Any], headers: dict[str, str]
+) -> float:
+    """Median of three timed reads, after one that warms per-process caches."""
+    client.get(path, params=params, headers=headers)
+    samples = []
+    for _ in range(3):
+        started = time.perf_counter()
+        response = client.get(path, params=params, headers=headers)
+        samples.append(time.perf_counter() - started)
+        assert response.status_code == 200, response.text
+    return statistics.median(samples)
+
+
+class TestLibraryReadsAtScale:
+    @pytest.mark.parametrize(("path", "params"), LIBRARY_READS)
+    def test_answers_within_budget_at_the_supported_scale(
+        self,
+        client: TestClient,
+        db_session: Session,
+        reader: tuple[dict[str, str], Collection],
+        path: str,
+        params: dict[str, Any],
+    ) -> None:
+        headers, root = reader
+        build_library_at_scale(db_session, under=root, **SUPPORTED)
+
+        seconds = _median_seconds(client, path, params, headers)
+
+        assert seconds <= BUDGET_SECONDS[path], f"{path} took {seconds:.2f}s"
+
+    @pytest.mark.parametrize(("path", "params"), LIBRARY_READS)
+    def test_grows_no_faster_than_the_library(
+        self,
+        client: TestClient,
+        db_session: Session,
+        reader: tuple[dict[str, str], Collection],
+        path: str,
+        params: dict[str, Any],
+    ) -> None:
+        headers, root = reader
+        build_library_at_scale(db_session, under=root, **AN_EIGHTH)
+        small = max(_median_seconds(client, path, params, headers), NOISE_FLOOR_SECONDS)
+        build_library_at_scale(db_session, under=root, **THE_REST)
+
+        large = _median_seconds(client, path, params, headers)
+
+        assert large / small <= MAX_GROWTH, f"{path}: {small:.3f}s -> {large:.3f}s"

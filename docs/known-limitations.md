@@ -136,6 +136,10 @@ manufacturing platform.
 
 ## Data And Metadata
 
+- Libraries of up to 25,000 collections and 100,000 Models are supported and
+  tested nightly at that size. Larger libraries work, but the collection
+  sidebar still loads the whole tree at once; beyond this size it slows
+  roughly in proportion.
 - Metadata extraction is best for common G-code emitted by OrcaSlicer,
   PrusaSlicer, Bambu Studio, Cura, and Klipper/Orca-style profiles.
 - Slicer metadata comments vary by slicer and profile; missing fields are
