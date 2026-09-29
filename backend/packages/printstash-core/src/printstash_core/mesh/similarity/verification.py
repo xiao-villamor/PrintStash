@@ -21,6 +21,7 @@ from .geometry import (
     sample_surface,
 )
 from .proximity import SurfaceProximity
+from .time_budget import check_deadline
 from .voxel import voxelize
 
 if TYPE_CHECKING:
@@ -77,6 +78,7 @@ def verify_meshes(
     *,
     sample_points: int = 5000,
     partial: bool = False,
+    deadline: float | None = None,
 ) -> Verification:
     """Compare right to left; scale_factor is right-size / left-size.
 
@@ -87,10 +89,12 @@ def verify_meshes(
 
     if type(sample_points) is not int or not 256 <= sample_points <= 5000:
         raise GeometryError("invalid_sample_count")
+    check_deadline(deadline)
     left, right = (
         prepare_surface(left_vertices, left_faces),
         prepare_surface(right_vertices, right_faces),
     )
+    check_deadline(deadline)
     factor = right.radius / left.radius
     scale = 1 / factor
     diagonal = float(np.linalg.norm(np.ptp(left.vertices @ left.frame, axis=0)))
@@ -98,6 +102,7 @@ def verify_meshes(
     fit_a = sample_surface(left, 512, 154) / diagonal
     fit_b = sample_surface(right, 512, 154) * scale / diagonal
     proposals = list(_proposals(left, right, scale))
+    check_deadline(deadline)
     ranked = sorted(
         (
             (
@@ -111,18 +116,26 @@ def verify_meshes(
     )
     exact: dict[bool, FloatArray] = {}
     for _, _, rotation in ranked:
+        check_deadline(deadline)
         reflected = bool(np.linalg.det(rotation) < 0)
         if (
             not partial
             and reflected not in exact
             and equivalent_triangles(
-                left, right, rotation, scale, np.zeros(3), tolerance
+                left,
+                right,
+                rotation,
+                scale,
+                np.zeros(3),
+                tolerance,
+                deadline=deadline,
             )
         ):
             exact[reflected] = rotation
         if len(exact) == 2:
             break
-    proximity_a, proximity_b = SurfaceProximity(left), SurfaceProximity(right)
+    proximity_a = SurfaceProximity(left, deadline=deadline)
+    proximity_b = SurfaceProximity(right, deadline=deadline)
     if exact:
         reflected = False if False in exact else True
         rotation = exact[reflected]
@@ -134,30 +147,38 @@ def verify_meshes(
         aligned: dict[bool, tuple[float, FloatArray, FloatArray, float]] = {}
         fit = sample_surface(right, 512, 154) * scale
         for parity in (False, True):
+            check_deadline(deadline)
             hypotheses = [
                 r for _, _, r in ranked if bool(np.linalg.det(r) < 0) == parity
             ][:4]
             initial = min(
                 hypotheses,
-                key=lambda r: float(proximity_a.closest(fit[:256] @ r)[0].mean()),
+                key=lambda r: float(
+                    proximity_a.closest(fit[:256] @ r, deadline=deadline)[0].mean()
+                ),
             )
-            aligned[parity] = _surface_icp(proximity_a, fit, initial, diagonal)
+            aligned[parity] = _surface_icp(
+                proximity_a, fit, initial, diagonal, deadline=deadline
+            )
         reflected = aligned[True][0] < aligned[False][0] * 0.8
         _, rotation, offset, convergence = aligned[reflected]
     a = sample_surface(left, sample_points, 15401)
     b = sample_surface(right, sample_points, 15402) @ rotation * scale + offset
-    distance_ab = nearest_neighbors(a / diagonal, b / diagonal)[0]
-    distance_ba = nearest_neighbors(b / diagonal, a / diagonal)[0]
+    distance_ab = nearest_neighbors(a / diagonal, b / diagonal, deadline=deadline)[0]
+    distance_ba = nearest_neighbors(b / diagonal, a / diagonal, deadline=deadline)[0]
     hausdorff = float(max(distance_ab.max(), distance_ba.max()))
     chamfer = float((distance_ab.mean() + distance_ba.mean()) / 2)
     surface_ab = (
-        proximity_b.closest((a - offset) @ rotation.T / scale)[0] * scale / diagonal
+        proximity_b.closest((a - offset) @ rotation.T / scale, deadline=deadline)[0]
+        * scale
+        / diagonal
     )
-    surface_ba = proximity_a.closest(b)[0] / diagonal
+    surface_ba = proximity_a.closest(b, deadline=deadline)[0] / diagonal
     surface_chamfer = float((surface_ab.mean() + surface_ba.mean()) / 2)
     surface_hausdorff = float(max(surface_ab.max(), surface_ba.max()))
     metrics_a = measure_surface(left)
     metrics_b = measure_surface(right)
+    check_deadline(deadline)
     half_width = (
         float(
             max(
@@ -173,16 +194,25 @@ def verify_meshes(
     unavailable: list[tuple[str, str]] = []
     fill = metrics_a.watertight and metrics_b.watertight
     try:
-        vox_a = voxelize(left.vertices, left.faces, half_width=half_width, fill=fill)
+        vox_a = voxelize(
+            left.vertices,
+            left.faces,
+            half_width=half_width,
+            fill=fill,
+            deadline=deadline,
+        )
         vox_b = voxelize(
             right.vertices @ rotation * scale + offset,
             right.faces,
             half_width=half_width,
             fill=fill,
+            deadline=deadline,
         )
         union = int(np.count_nonzero(vox_a | vox_b))
         iou = float(np.count_nonzero(vox_a & vox_b) / union) if union else None
     except GeometryError as exc:
+        if exc.code == "verification_time_limit":
+            raise
         iou = None
         unavailable.append(("voxel_iou", exc.code))
     mirror_ambiguous = len(exact) == 2
@@ -201,13 +231,17 @@ def verify_meshes(
             r for _, _, r in ranked if bool(np.linalg.det(r) < 0) != reflected
         ][:8]
         for alternative in alternatives:
+            check_deadline(deadline)
             try:
                 other = voxelize(
                     right.vertices @ alternative * scale,
                     right.faces,
                     half_width=half_width,
+                    deadline=deadline,
                 )
             except GeometryError as exc:
+                if exc.code == "verification_time_limit":
+                    raise
                 if ("mirror_ambiguity", exc.code) not in unavailable:
                     unavailable.append(("mirror_ambiguity", exc.code))
                 continue
@@ -248,6 +282,7 @@ def verify_meshes(
     transform = np.eye(4)
     transform[:3, :3] = rotation.T * scale
     transform[:3, 3] = left.centroid + offset - right.centroid @ rotation * scale
+    check_deadline(deadline)
     return Verification(
         evidence,
         confidence,
@@ -314,20 +349,23 @@ def _surface_icp(
     points: FloatArray,
     rotation: FloatArray,
     diagonal: float,
+    *,
+    deadline: float | None = None,
 ) -> tuple[float, FloatArray, FloatArray, float]:
     import numpy as np
 
     r, offset = rotation.copy(), np.zeros(3)
-    distances, target = proximity.closest(points @ r)
+    distances, target = proximity.closest(points @ r, deadline=deadline)
     best = (float(distances.mean()) / diagonal, r.copy(), offset.copy(), 0.0)
     for _ in range(8):
+        check_deadline(deadline)
         moved = points @ r + offset
         center_a, center_b = moved.mean(axis=0), target.mean(axis=0)
         u, _, vt = np.linalg.svd((moved - center_a).T @ (target - center_b))
         correction = u @ np.diag([1, 1, np.linalg.det(u @ vt)]) @ vt
         r = r @ correction
         offset = (offset - center_a) @ correction + center_b
-        distances, target = proximity.closest(points @ r + offset)
+        distances, target = proximity.closest(points @ r + offset, deadline=deadline)
         error = float(distances.mean()) / diagonal
         if error >= best[0] - 1e-9:
             break

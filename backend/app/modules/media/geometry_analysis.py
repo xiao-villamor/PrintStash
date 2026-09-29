@@ -9,12 +9,15 @@ from printstash_core.inference import EmbeddingInput
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import ExpandedScene
+from printstash_core.mesh.similarity.time_budget import deadline_after
 from printstash_core.mesh.similarity.verification import Verification, verify_meshes
 from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
 
 from app.modules.media import mesh_processing, stl_fallback
 from app.modules.media.mesh_resources import PreparedMesh, load_3mf, prepare_loaded_mesh
+
+MAX_VERIFICATION_SECONDS = 180.0
 
 
 def _load(
@@ -88,9 +91,11 @@ def verify_paths(
     second_component: int = 0,
     sample_points: int = 5000,
     triangle_cap: int = MAX_ANALYSIS_FACES,
+    verification_seconds: float = MAX_VERIFICATION_SECONDS,
 ) -> Verification:
-    """Materialized Artifact paths only; never open storage keys in media."""
+    """Verify materialized Artifacts within a bounded geometric work window."""
     left = right = None
+    deadline = deadline_after(verification_seconds)
     try:
         with mesh_processing._render_semaphore():
             left = _load(first, first_type, triangle_cap=triangle_cap)
@@ -100,6 +105,7 @@ def verify_paths(
                 *_component(right, second_component),
                 sample_points=sample_points,
                 partial=not (left.complete and right.complete),
+                deadline=deadline,
             )
     finally:
         left = right = None

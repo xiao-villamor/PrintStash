@@ -17,6 +17,7 @@ from .fingerprint import (
     measure_triangles,
     validate_mesh_arrays,
 )
+from .time_budget import check_deadline
 
 if TYPE_CHECKING:
     import numpy as np
@@ -119,7 +120,7 @@ def sample_surface(surface: Surface, count: int, seed: int) -> FloatArray:
 
 
 def nearest_neighbors(
-    source: FloatArray, target: FloatArray
+    source: FloatArray, target: FloatArray, *, deadline: float | None = None
 ) -> tuple[FloatArray, IntArray]:
     """Nearest points in blocks of at most 128 × target-count distances.
 
@@ -136,6 +137,7 @@ def nearest_neighbors(
     # Bound the distance temporary at 1M float64 cells even for dense meshes.
     chunk = max(1, min(128, 1_000_000 // len(target)))
     for start in range(0, len(source), chunk):
+        check_deadline(deadline)
         block = source[start : start + chunk]
         squared = (
             np.einsum("ij,ij->i", block, block)[:, None]
@@ -157,6 +159,8 @@ def equivalent_triangles(
     scale: float,
     translation: FloatArray,
     tolerance: float,
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """Verify a bijection of vertices and triangle incidence, after alignment.
 
@@ -168,10 +172,12 @@ def equivalent_triangles(
 
     if len(left.vertices) != len(right.vertices) or len(left.faces) != len(right.faces):
         return False
+    check_deadline(deadline)
     target = right.vertices @ rotation * scale + translation
     # Lexicographic order suffices only after demonstrating every positional
     # correspondence. Near ties are handled with a second shifted grid.
     for offset in (0.0, 0.5):
+        check_deadline(deadline)
         a = np.floor(left.vertices / tolerance + offset).astype(np.int64)
         b = np.floor(target / tolerance + offset).astype(np.int64)
         order_a = np.lexsort(a.T[::-1])

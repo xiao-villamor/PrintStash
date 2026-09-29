@@ -9,6 +9,12 @@ from printstash_core.mesh.similarity.proximity import SurfaceProximity
 
 
 class TestSurfaceProximity:
+    def test_stops_query_after_verification_deadline(self, tetra):
+        proximity = SurfaceProximity(prepare_surface(*tetra))
+
+        with pytest.raises(GeometryError, match="verification_time_limit"):
+            proximity.closest(np.zeros((2, 3)), deadline=0.0)
+
     def test_repeated_queries_preserve_exact_projection(self):
         surface = prepare_surface(
             np.array([[0.0, 0, 0], [3, 0, 0], [0, 3, 0]]), np.array([[0, 1, 2]])

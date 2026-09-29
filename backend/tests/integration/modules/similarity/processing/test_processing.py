@@ -256,6 +256,43 @@ class TestProcessingFailures:
 
 
 class TestPairRecovery:
+    def test_records_timed_out_pair_then_advances_checkpoint(
+        self, db_session, local_pair, monkeypatch
+    ):
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media import geometry_analysis
+
+        actor, _ = local_pair
+        run = runs.start(db_session, actor)
+        worker = SimilarityProcessor(get_session_factory(), get_backend())
+        advance_oldest_run(worker)
+        advance_oldest_run(worker)
+        fingerprints = db_session.exec(
+            select(GeometryFingerprint)
+            .where(GeometryFingerprint.component_index == 0)
+            .order_by(GeometryFingerprint.id)
+        ).all()
+        db_session.refresh(run)
+        run.phase = "candidates"
+        run.checkpoint_json = json.dumps(
+            {"pending_pairs": [[row.id for row in fingerprints]]}
+        )
+        db_session.add(run)
+        db_session.commit()
+
+        def exhausted(*args, **kwargs):
+            raise GeometryError("verification_time_limit")
+
+        monkeypatch.setattr(geometry_analysis, "verify_paths", exhausted)
+
+        assert advance_oldest_run(worker)
+        db_session.refresh(run)
+        assert run.state == "running"
+        assert json.loads(run.checkpoint_json)["pending_pairs"] == []
+        assert json.loads(run.counters_json)["verification_failed"] == 1
+        assert db_session.exec(select(SimilarityCandidate)).all() == []
+
     @pytest.mark.parametrize(
         "failure",
         [

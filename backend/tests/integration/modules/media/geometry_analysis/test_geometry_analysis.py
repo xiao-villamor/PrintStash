@@ -17,6 +17,17 @@ def mesh_path(tmp_path):
 
 
 class TestVerifyPaths:
+    def test_stops_verification_when_pair_budget_expires(self, mesh_path):
+        with pytest.raises(GeometryError, match="verification_time_limit"):
+            geometry_analysis.verify_paths(
+                mesh_path,
+                mesh_path,
+                first_type="stl",
+                second_type="stl",
+                sample_points=256,
+                verification_seconds=1e-9,
+            )
+
     def test_verifies_connected_component_geometry(self, mesh_path):
         result = geometry_analysis.verify_paths(
             mesh_path,

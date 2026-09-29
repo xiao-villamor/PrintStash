@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from .fingerprint import GeometryError
 from .geometry import Surface
+from .time_budget import check_deadline
 
 if TYPE_CHECKING:
     import numpy as np
@@ -61,14 +62,16 @@ def _prepare_triangles(triangles: Array) -> _TriangleGeometry:
 
 
 class SurfaceProximity:
-    def __init__(self, surface: Surface):
+    def __init__(self, surface: Surface, *, deadline: float | None = None):
         import numpy as np
 
+        check_deadline(deadline)
         triangles = surface.vertices[surface.faces]
         low, high = triangles.min(axis=1), triangles.max(axis=1)
         centers = (low + high) / 2
 
         def build(indices: Indices) -> _Node:
+            check_deadline(deadline)
             lo, hi = low[indices].min(axis=0), high[indices].max(axis=0)
             if len(indices) <= 32:
                 return _Node(lo, hi, _prepare_triangles(triangles[indices]))
@@ -80,7 +83,11 @@ class SurfaceProximity:
         self.root = build(np.arange(len(triangles)))
 
     def closest(
-        self, points: Array, *, max_work: int = 32_000_000
+        self,
+        points: Array,
+        *,
+        max_work: int = 32_000_000,
+        deadline: float | None = None,
     ) -> tuple[Array, Array]:
         import numpy as np
 
@@ -93,6 +100,7 @@ class SurfaceProximity:
             raise GeometryError("invalid_proximity_points")
         if type(max_work) is not int or not 1 <= max_work <= 32_000_000:
             raise GeometryError("invalid_proximity_budget")
+        check_deadline(deadline)
         best = np.full(len(points), np.inf)
         nearest = np.empty_like(points, dtype=np.float64)
         ids = np.arange(len(points))
@@ -105,6 +113,7 @@ class SurfaceProximity:
             stack.append((self.root, ids, True))
         work = 0
         while stack:
+            check_deadline(deadline)
             node, ids, seed = stack.pop()
             delta = np.maximum(
                 np.maximum(node.low - points[ids], points[ids] - node.high), 0
