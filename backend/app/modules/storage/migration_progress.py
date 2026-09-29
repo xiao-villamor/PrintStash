@@ -209,7 +209,7 @@ def project(session: Session, run: VaultMigrationRun) -> dict[str, object]:
         "failed_bytes": sum(obj.size_bytes for obj in failed),
         "delta_objects": sum(not obj.baseline for obj in final),
         "throughput_bytes_per_second": sum(obj.size_bytes for obj in copied) / elapsed,
-        "last_activity_at": run.last_activity_at,
+        "last_activity_at": ensure_utc(run.last_activity_at),
         "error_code": run.error_code,
         "retryable": run.retryable,
         "policy": json.loads(run.policy_json),
@@ -218,12 +218,12 @@ def project(session: Session, run: VaultMigrationRun) -> dict[str, object]:
         "post_audit": audit_projection(session, run.post_audit_id),
         "full_audit": audit_projection(session, run.full_audit_id),
         "notification_events": run.notification_events,
-        "cleanup_after": run.cleanup_after,
+        "cleanup_after": ensure_utc(run.cleanup_after) if run.cleanup_after else None,
         "cleanup_findings": json.loads(run.cleanup_findings),
         "cleanup_outcome": run.cleanup_outcome,
         "source_retained": run.state != "cleaned",
         "recovery_required": restore_in_progress(),
-        "expires_at": run.expires_at,
+        "expires_at": ensure_utc(run.expires_at),
         "capacity_resources": resources,
         "capacity_warnings": ["capacity_unknown"]
         if any(r["available_bytes"] is None for r in resources)

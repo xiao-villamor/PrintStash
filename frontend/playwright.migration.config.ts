@@ -17,7 +17,12 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
-  use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
+  use: {
+    baseURL: `http://127.0.0.1:${port}`,
+    trace: "retain-on-failure",
+    // Catch timezone-less UTC deadlines that appear expired outside UTC.
+    timezoneId: "Europe/Madrid",
+  },
   webServer: [
     {
       command: "bash tests/e2e-real/scripts/start-backend.sh",

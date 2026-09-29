@@ -6,6 +6,8 @@
 
 - Storage migration no longer clears destination fields when an obsolete
   startup request finishes after the form becomes editable.
+- Storage migration deadlines now include their UTC timezone, so a fresh plan
+  remains usable and source-retention deadlines display correctly outside UTC.
 - Restoring a backup no longer fails because a completed ZIP inspection is
   waiting for file selection. Its staged archive remains available; unfinished
   uploads and imports still block restore until they are settled.
