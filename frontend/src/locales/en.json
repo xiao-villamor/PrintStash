@@ -1897,7 +1897,7 @@
   "settings.backupLastVerified": "Last verified",
   "settings.backupPartialNotice": "Backup created with destination failures. Review the run below.",
   "settings.backupRunsLoadFailed": "Backup runs could not be loaded.",
-  "settings.backupRetryNewRequired": "No verified copy survives. Create a new backup.",
+  "settings.backupRetryNewRequired": "This run has no verified source available for retry. Create a new backup.",
   "settings.backupRetryTargetChanged": "This destination changed. Restore its original configuration or create a new backup.",
   "settings.backupRetryTargetUnverified": "The original target could not be verified. Create a new backup.",
   "settings.backupReplicaUnavailable": "The destination could not publish this copy.",

@@ -1897,7 +1897,7 @@
   "settings.backupLastVerified": "Última verificación",
   "settings.backupPartialNotice": "Copia creada con fallos en algunos destinos. Revisa la ejecución abajo.",
   "settings.backupRunsLoadFailed": "No se pudieron cargar las ejecuciones.",
-  "settings.backupRetryNewRequired": "No queda ninguna copia verificada. Crea una copia de seguridad nueva.",
+  "settings.backupRetryNewRequired": "Esta ejecución no tiene una copia verificada disponible para reintentar. Crea una copia de seguridad nueva.",
   "settings.backupRetryTargetChanged": "Este destino ha cambiado. Restaura su configuración original o crea una copia de seguridad nueva.",
   "settings.backupRetryTargetUnverified": "No se pudo verificar el destino original. Crea una copia de seguridad nueva.",
   "settings.backupReplicaUnavailable": "El destino no pudo publicar esta copia.",

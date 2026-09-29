@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Backup history disables replica retries when a run has no completed archive
+  record. Its guidance now refers to that run instead of implying that existing
+  backup archives have been lost.
 - Storage migration no longer clears destination fields when an obsolete
   startup request finishes after the form becomes editable.
 - Restoring a backup no longer fails because a completed ZIP inspection is

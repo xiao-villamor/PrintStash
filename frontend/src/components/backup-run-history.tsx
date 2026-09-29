@@ -118,17 +118,25 @@ export function BackupRunHistory({
                         ? `${t("settings.backupLastVerified")}: ${new Date(destination.verified_at).toLocaleString(currentLocale())}`
                         : t("settings.backupNeverVerified")}
                     </p>
-                    {destination.error_code && (
+                    {run.outcome === "failed" && run.archive_sha256 === null ? (
+                      <p className="max-w-prose text-sm text-destructive">
+                        {t("settings.backupRetryNewRequired")}
+                      </p>
+                    ) : destination.error_code ? (
                       <p className="max-w-prose text-sm text-destructive">
                         {reason(destination.error_code)}
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   {destination.outcome === "failed" && (
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={retrying !== null || run.outcome === "running"}
+                      disabled={
+                        retrying !== null ||
+                        run.outcome === "running" ||
+                        run.archive_sha256 === null
+                      }
                       onClick={() => void retry(destination.id)}
                     >
                       {retrying === destination.id

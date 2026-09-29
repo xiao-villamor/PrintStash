@@ -59,6 +59,31 @@ function partialRun(): BackupRun {
 }
 
 describe("Backup run history", () => {
+  it.each([
+    { label: "interrupted publication", error: "backup_publication_interrupted" },
+    { label: "refused retry", error: "backup_retry_new_backup_required" },
+    { label: "missing error detail", error: null },
+  ])("prevents retry without an archive record: $label", async ({ error }) => {
+    const run = partialRun();
+    run.outcome = "failed";
+    run.archive_sha256 = null;
+    run.destinations = run.destinations
+      .filter((destination) => destination.outcome === "failed")
+      .map((destination) => ({ ...destination, error_code: error }));
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: { "GET /api/v1/backups/runs": json([run]) },
+    });
+
+    const retry = await screen.findByRole("button", { name: "Retry this destination" });
+
+    expect(retry).toBeDisabled();
+    expect(
+      screen.getByText("This run has no verified source available for retry. Create a new backup."),
+    ).toBeVisible();
+    await userEvent.click(retry);
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+
   it("keeps the surviving copy visible during partial failure", async () => {
     renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
       routes: { "GET /api/v1/backups/runs": json([partialRun()]) },
@@ -128,7 +153,9 @@ describe("Backup run history", () => {
     });
     await userEvent.click(await screen.findByRole("button", { name: "Retry this destination" }));
     expect(
-      await screen.findByText("No verified copy survives. Create a new backup."),
+      await screen.findByText(
+        "This run has no verified source available for retry. Create a new backup.",
+      ),
     ).toBeVisible();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Retry this destination" })).toBeEnabled(),
