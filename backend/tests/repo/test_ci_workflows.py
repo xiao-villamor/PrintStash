@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import runpy
 import subprocess
 import sys
 import tomllib
 from fnmatch import fnmatch
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 import yaml
@@ -188,6 +190,35 @@ class TestDeepSuite:
         job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
 
         assert "./scripts/test.sh scale -q" in _commands(job)
+
+    def test_scale_lane_limits_worker_startup(self, tmp_path: Path) -> None:
+        fake_uv = tmp_path / "uv"
+        fake_uv.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$PRINTSTASH_TEST_NO_EXTERNAL" "$@"\n'
+        )
+        fake_uv.chmod(0o755)
+        result = subprocess.run(
+            ["bash", "scripts/test.sh", "scale", "-q"],
+            cwd=REPO_ROOT / "backend",
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        assert result.stdout.splitlines() == [
+            "1",
+            "run",
+            "pytest",
+            "-n",
+            "4",
+            "--dist",
+            "worksteal",
+            "-m",
+            "scale",
+            "tests",
+            "-q",
+        ]
 
     def test_caps_the_scale_run_so_a_quadratic_read_fails(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]

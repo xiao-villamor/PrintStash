@@ -20,6 +20,11 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
+The `scale` lane starts four pytest workers explicitly. Automatic CPU detection
+can report a CI host's CPUs instead of the runner's quota and stall before any
+library read is timed; the 30-minute cap then measures worker startup rather
+than the supported library size.
+
 Publication builds all four images in one Bake graph per native architecture.
 Each architecture smokes its four digests; promotion to multiarch tags starts
 only after both architecture jobs succeed.

@@ -83,6 +83,10 @@ done
 # default full/coverage lanes run container-backed contracts in a second, serial
 # pass so every service starts once rather than once per xdist worker.
 parallel=(-n auto --dist worksteal)
+# `auto` can see the host's CPU count inside a constrained CI runner and spend
+# the entire scale job starting workers. Four independent SQLite libraries fit
+# the runner while keeping the benchmark's 30-minute cap meaningful.
+scale_parallel=(-n 4 --dist worksteal)
 resource_expression="postgres or s3 or remote_storage or bgcode"
 non_resource_expression="not postgres and not s3 and not remote_storage and not bgcode"
 # Timed at the supported library size; only its own lane selects it.
@@ -178,7 +182,7 @@ case "$lane" in
   scale)
     add_paths tests
     export PRINTSTASH_TEST_NO_EXTERNAL=1
-    exec uv run pytest "${parallel[@]}" -m "scale" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    exec uv run pytest "${scale_parallel[@]}" -m "scale" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   *)
     echo "unknown lane: $lane" >&2
