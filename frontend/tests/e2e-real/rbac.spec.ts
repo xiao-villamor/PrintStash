@@ -42,7 +42,7 @@ async function grant(
     page.waitForResponse(
       (r) => /\/collections\/\d+\/permissions\/\d+/.test(r.url()) && r.request().method() === "PUT",
     ),
-    card.getByRole("button", { name: "Grant" }).click(),
+    card.getByRole("button", { name: "Grant", exact: true }).click(),
   ]);
 }
 
