@@ -200,11 +200,13 @@ export function MaintenancePanel() {
 
   return (
     <div className="space-y-5 animate-panel-in">
-      <div>
-        <h2 className="text-lg font-semibold">{t("maintenance.title")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("maintenance.subtitle")}</p>
-      </div>
-      <Card>
+      <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
+        <div className="border-b border-border px-4 py-4 sm:px-5">
+          <h2 id="maintenance-heading" className="text-sm font-semibold">
+            {t("maintenance.title")}
+          </h2>
+          <p className="text-xs text-muted-foreground">{t("maintenance.subtitle")}</p>
+        </div>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4" aria-hidden />

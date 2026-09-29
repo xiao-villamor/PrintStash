@@ -107,6 +107,14 @@ afterEach(() => {
 });
 
 describe("MaintenancePanel", () => {
+  it("groups the maintenance heading with its check controls", async () => {
+    renderPanel({ audit: null });
+
+    const section = screen.getByRole("region", { name: "Maintenance" });
+    expect(within(section).getByText("Keep your library and backups ready to use.")).toBeVisible();
+    expect(await within(section).findByRole("button", { name: "Run quick check" })).toBeVisible();
+  });
+
   describe("before anything has been audited", () => {
     it("says so", async () => {
       const view = renderPanel({ audit: null });

@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- The Settings Maintenance heading now uses the same framed section treatment as neighboring tabs.
 - Backup history disables replica retries when a run has no completed archive
   record. Its guidance now refers to that run instead of implying that existing
   backup archives have been lost.
