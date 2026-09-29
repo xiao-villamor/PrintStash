@@ -199,6 +199,10 @@ image. See UPGRADE.md before pulling.**
 
 ### Fixed
 
+- Similar model analysis now appears in Tasks with live run status and a link back
+  to the analysis page. Starting a second scan for the same scope shows a clear
+  explanation instead of a connection error.
+
 - ZIP imports now show how many selected Models have been imported while work is running. The task progress bar advances for each file attempted, including files that fail or are skipped.
 
 - Completing first-run setup now clears task history left in the browser by a

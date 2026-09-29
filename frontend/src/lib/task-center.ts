@@ -3,8 +3,10 @@
 import { getErrorMessage } from "./errors";
 
 import { listJobs } from "@/lib/api/jobs";
+import { getSimilarityRun } from "@/lib/api/similarity";
 import { subscribeEvents } from "@/lib/events";
 import type { JobState, JobStatus } from "@/types";
+import type { SimilarityRun } from "@/types/similarity";
 import { uiText, knownUiText, uiMessage, type MessageDescriptor } from "./locale";
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
@@ -13,6 +15,7 @@ export type TaskStatus = "pending" | "running" | "completed" | "failed";
 export type JobSource = (trackedJobIds: string[]) => Promise<JobStatus[]>;
 
 let jobSource: JobSource = listJobs;
+let similarityRunSource: (id: number) => Promise<SimilarityRun> = getSimilarityRun;
 
 /**
  * Point the Task Center at a different job source. Production keeps the default
@@ -21,6 +24,11 @@ let jobSource: JobSource = listJobs;
  */
 export function setJobSource(source: JobSource): void {
   jobSource = source;
+}
+
+/** Replace the run reader in tests; production reads the durable Similarity Run. */
+export function setSimilarityRunSource(source: (id: number) => Promise<SimilarityRun>): void {
+  similarityRunSource = source;
 }
 
 /**
@@ -64,6 +72,7 @@ export interface TaskItem {
   jobId?: string;
   jobKind?: JobStatus["kind"];
   jobIds?: string[];
+  similarityRunId?: number;
   expectedJobCount?: number;
   stage?: JobStatus["stage"];
   processed?: number;
@@ -591,6 +600,69 @@ export function trackImportJob(jobId: string, title: TaskText): string {
   return taskId;
 }
 
+function similarityTaskStatus(run: SimilarityRun): TaskStatus {
+  switch (run.state) {
+    case "queued":
+      return "pending";
+    case "running":
+    case "cancelling":
+      return "running";
+    case "completed":
+      return "completed";
+    case "cancelled":
+    case "failed":
+      return "failed";
+  }
+}
+
+function similarityTaskDetail(run: SimilarityRun): MessageDescriptor {
+  switch (run.state) {
+    case "queued":
+      return uiMessage("similarity.run.queued");
+    case "running":
+      return uiMessage("similarity.progress", {
+        processed: run.counters.artifacts_processed ?? 0,
+        verified: run.counters.verified ?? 0,
+      });
+    case "cancelling":
+      return uiMessage("similarity.run.cancelling");
+    case "completed":
+      return uiMessage("similarity.run.completed");
+    case "cancelled":
+      return uiMessage("similarity.run.cancelled");
+    case "failed":
+      return uiMessage("similarity.runFailed");
+  }
+}
+
+function applySimilarityRun(run: SimilarityRun): void {
+  const task = tasks.find((item) => item.similarityRunId === run.id);
+  if (!task || task.status === "completed" || task.status === "failed") return;
+  updateTask(task.id, {
+    status: similarityTaskStatus(run),
+    detail: similarityTaskDetail(run),
+    progress: run.state === "completed" ? 100 : task.progress,
+  });
+}
+
+/** One Task follows the complete scan, even when the engine uses several Jobs. */
+export function trackSimilarityRun(run: SimilarityRun): string {
+  const existing = tasks.find((task) => task.similarityRunId === run.id);
+  if (existing) {
+    applySimilarityRun(run);
+    return existing.id;
+  }
+  const id = createTask({
+    title: uiMessage("similarity.taskTitle"),
+    detail: similarityTaskDetail(run),
+    status: similarityTaskStatus(run),
+    progress: run.state === "completed" ? 100 : 0,
+    similarityRunId: run.id,
+  });
+  wakeImportJobSync();
+  return id;
+}
+
 export function waitForImportJob(
   jobId: string,
   title = "Import",
@@ -659,8 +731,15 @@ export async function syncImportJobs(): Promise<boolean> {
     ),
   ].slice(0, 20);
   const requestedJobIds = new Set(trackedJobIds);
-  const response = await jobSource(trackedJobIds);
+  const activeRunIds = tasks
+    .filter((task) => task.status === "pending" || task.status === "running")
+    .flatMap((task) => (task.similarityRunId === undefined ? [] : [task.similarityRunId]));
+  const [response, similarityRuns] = await Promise.all([
+    jobSource(trackedJobIds),
+    Promise.all(activeRunIds.map(similarityRunSource)),
+  ]);
   if (epoch !== taskStoreEpoch) return false;
+  similarityRuns.forEach(applySimilarityRun);
   const jobs = response.filter((job) => !dismissedJobIds.has(job.job_id));
   const jobsById = new Map(jobs.map((job) => [job.job_id, job]));
   const claimedJobIds = new Set<string>();
@@ -693,14 +772,19 @@ export async function syncImportJobs(): Promise<boolean> {
     });
     for (const jobId of missingJobIds) rejectLostJob(jobId);
   }
-  return jobs.some(isActive);
+  return (
+    jobs.some(isActive) ||
+    similarityRuns.some(
+      (run) => similarityTaskStatus(run) === "running" || similarityTaskStatus(run) === "pending",
+    )
+  );
 }
 
 function hasTrackedActiveJobs(): boolean {
   return tasks.some(
     (task) =>
       (task.status === "pending" || task.status === "running") &&
-      (!!task.jobId || !!task.jobIds?.length),
+      (!!task.jobId || !!task.jobIds?.length || task.similarityRunId !== undefined),
   );
 }
 

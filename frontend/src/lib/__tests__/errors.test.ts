@@ -36,6 +36,12 @@ describe("getErrorMessage", () => {
   it("explains an unreadable mounted library folder", () => {
     expect(getErrorMessage("root_path_unreadable")).toMatch(/container mount and permissions/i);
   });
+
+  it("explains an analysis conflict without implying the server is down", () => {
+    const message = userMessage(new ApiError(409, "similarity_run_active", ""));
+    expect(message).toMatch(/analysis for this scope is already running/i);
+    expect(message).not.toMatch(/server/i);
+  });
 });
 
 describe("parseApiError", () => {

@@ -46,6 +46,34 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it("links a similarity task to its analysis", () => {
+    renderTaskList([
+      task({
+        similarityRunId: 1,
+        title: "Similar model analysis",
+        detail: "2 Artifacts · 1 comparisons",
+        status: "running",
+      }),
+    ]);
+
+    expect(screen.getByRole("link", { name: "View analysis" })).toHaveAttribute(
+      "href",
+      "/library/similar",
+    );
+  });
+
+  it("omits the unknown-total hint from a similarity task", () => {
+    renderTaskList([task({ similarityRunId: 1, status: "running" })]);
+
+    expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+  });
+
+  it("omits a misleading percentage for an active similarity run", () => {
+    renderTaskList([task({ similarityRunId: 1, status: "running", progress: 0 })]);
+
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
   it("exposes the ZIP import percentage on its progress bar", () => {
     renderTaskList([
       task({

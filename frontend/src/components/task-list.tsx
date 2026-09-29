@@ -150,24 +150,29 @@ function TaskRow({ task }: { task: TaskItem }) {
               <p>{uiText("Keep this browser tab open during upload.")}</p>
             </div>
           )}
-          {active && task.total == null && !task.archiveUploading && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {uiText("Discovering total… Safe to close this view.")}
-            </p>
-          )}
-          <div
-            role="progressbar"
-            aria-label={uiText("Progress")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={task.progress}
-            className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
-          >
+          {active &&
+            task.total == null &&
+            !task.archiveUploading &&
+            task.similarityRunId === undefined && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {uiText("Discovering total… Safe to close this view.")}
+              </p>
+            )}
+          {(task.similarityRunId === undefined || task.status === "completed") && (
             <div
-              className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-destructive" : "bg-primary"}`}
-              style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}
-            />
-          </div>
+              role="progressbar"
+              aria-label={uiText("Progress")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={task.progress}
+              className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+            >
+              <div
+                className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-destructive" : "bg-primary"}`}
+                style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}
+              />
+            </div>
+          )}
           {!!task.failedItems?.length && (
             <details className="mt-2 text-xs text-muted-foreground">
               <summary className="flex cursor-pointer list-none items-center gap-1 font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -213,6 +218,14 @@ function TaskRow({ task }: { task: TaskItem }) {
             >
               {uiText("Choose ZIP files")}
             </button>
+          )}
+          {task.similarityRunId !== undefined && (
+            <Link
+              to="/library/similar"
+              className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uiText("similarity.viewAnalysis")}
+            </Link>
           )}
           {task.jobKind === "ingestion.library_import" &&
             task.status === "completed" &&

@@ -24,9 +24,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aJob } from "@/test-support/factories";
+import { aSimilarityRun } from "@/test-support/similarity";
 import type { EventSocket } from "@/lib/events";
 import type { JobSource } from "@/lib/task-center";
 import type { JobStatus } from "@/types";
+import type { SimilarityRun } from "@/types/similarity";
 
 // task-center holds module-private state, so each test gets a fresh module via
 // resetModules() + dynamic import. Fake timers (which also fake Date.now in
@@ -37,6 +39,7 @@ import type { JobStatus } from "@/types";
 type TaskCenter = typeof import("@/lib/task-center");
 
 const listJobs = vi.fn<JobSource>();
+const getSimilarityRun = vi.fn<(id: number) => Promise<SimilarityRun>>();
 
 /** A socket the test drives: `deliver` is the server sending one frame. */
 class FakeEventSocket implements EventSocket {
@@ -60,6 +63,7 @@ async function loadTaskCenter(): Promise<TaskCenter> {
   socket = new FakeEventSocket();
   events.setEventSocketFactory(async () => socket);
   taskCenter.setJobSource(listJobs);
+  taskCenter.setSimilarityRunSource(getSimilarityRun);
   return taskCenter;
 }
 
@@ -69,6 +73,7 @@ beforeEach(async () => {
   vi.resetModules();
   listJobs.mockReset();
   listJobs.mockResolvedValue([]);
+  getSimilarityRun.mockReset();
   localStorage.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
@@ -289,6 +294,70 @@ describe("trackServerJob", () => {
         .map((task) => task.title)
         .sort(),
     ).toEqual(localTitles.sort());
+  });
+});
+
+describe("trackSimilarityRun", () => {
+  it("shows a queued analysis in Tasks as soon as it starts", () => {
+    const id = tc.trackSimilarityRun(aSimilarityRun());
+
+    expect(tc.listTasks()).toMatchObject([
+      { id, similarityRunId: 1, title: "Similar model analysis", status: "pending" },
+    ]);
+  });
+
+  it("keeps one analysis task across reloads", async () => {
+    const id = tc.trackSimilarityRun(aSimilarityRun());
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.trackSimilarityRun(aSimilarityRun())).toBe(id);
+    expect(tc.listTasks()).toHaveLength(1);
+  });
+
+  it("shows running comparison counts from the durable run", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(
+      aSimilarityRun({ state: "running", counters: { artifacts_processed: 3, verified: 2 } }),
+    );
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      similarityRunId: 1,
+      status: "running",
+      detail: "3 Artifacts · 2 comparisons",
+    });
+  });
+
+  it("completes the task only when the analysis run completes", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "completed" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ status: "completed", progress: 100 });
+  });
+
+  it("reports a failed analysis in Tasks", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "failed" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      detail: "Analysis stopped. Check the run details and try again.",
+    });
+  });
+
+  it("reports a cancelled analysis in Tasks", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "cancelled" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ status: "failed", detail: "Cancelled" });
   });
 });
 

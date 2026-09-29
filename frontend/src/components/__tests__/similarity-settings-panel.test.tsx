@@ -6,6 +6,7 @@ import { SimilaritySettingsPanel } from "@/components/similarity-settings-panel"
 import { aSimilarityRun, similaritySettings, similarityStatus } from "@/test-support/similarity";
 import { aModel, anExternalLibrary } from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { listTasks, resetTasksForNewSetup, trackSimilarityRun } from "@/lib/task-center";
 
 function renderSettings(options: RenderAppOptions = {}) {
   return renderApp(<SimilaritySettingsPanel />, {
@@ -23,6 +24,7 @@ function renderSettings(options: RenderAppOptions = {}) {
 }
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetTasksForNewSetup();
 });
 
 describe("SimilaritySettingsPanel", () => {
@@ -106,6 +108,74 @@ describe("SimilaritySettingsPanel", () => {
 });
 
 describe("Scoped analysis", () => {
+  it("adds a started analysis to Tasks", async () => {
+    const user = userEvent.setup();
+    renderSettings({ routes: { "POST /api/v1/similarity/runs": json(aSimilarityRun()) } });
+
+    await user.click(screen.getByRole("button", { name: "Start analysis" }));
+
+    await waitFor(() => expect(listTasks()).toMatchObject([{ similarityRunId: 1 }]));
+  });
+
+  it("prevents a second analysis for the active scope", async () => {
+    trackSimilarityRun(aSimilarityRun());
+    const app = renderSettings({
+      routes: {
+        "GET /api/v1/similarity/runs": json({ items: [aSimilarityRun()], next_cursor: null }),
+      },
+    });
+
+    expect(await screen.findByText("An analysis for this scope is already running.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start analysis" })).toBeDisabled();
+    expect(
+      app.requestsWithMethod("POST").filter((request) => request.url.endsWith("/runs")),
+    ).toHaveLength(0);
+  });
+
+  it("allows an administrator to start alongside another user's run", async () => {
+    renderSettings({
+      routes: {
+        "GET /api/v1/similarity/runs": json({ items: [aSimilarityRun()], next_cursor: null }),
+      },
+    });
+
+    await screen.findByText("Queued");
+
+    expect(screen.getByRole("button", { name: "Start analysis" })).toBeEnabled();
+  });
+
+  it("explains a conflict when another browser starts the same scope first", async () => {
+    const user = userEvent.setup();
+    renderSettings({
+      routes: {
+        "POST /api/v1/similarity/runs": json({ detail: "similarity_run_active" }, 409),
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Start analysis" }));
+
+    expect(
+      await screen.findByText(
+        "An analysis for this scope is already running. Check Analysis history.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("permits a different scope while a library analysis runs", async () => {
+    const user = userEvent.setup();
+    trackSimilarityRun(aSimilarityRun());
+    renderSettings({
+      routes: {
+        "GET /api/v1/similarity/runs": json({ items: [aSimilarityRun()], next_cursor: null }),
+        "GET /api/v1/libraries": json([anExternalLibrary({ id: 7, name: "Workshop" })]),
+      },
+    });
+
+    await screen.findByText("An analysis for this scope is already running.");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Analysis scope" }), "source:7");
+
+    expect(screen.getByRole("button", { name: "Start analysis" })).toBeEnabled();
+  });
   it("starts a selected external source", async () => {
     const user = userEvent.setup();
     const app = renderSettings({
