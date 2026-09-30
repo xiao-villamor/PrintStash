@@ -509,7 +509,9 @@ def native_memory_budget_bytes() -> int:
     where cgroup or host memory cannot be detected. Embedding and search-view
     workers are killed past it.
     """
-    return min(step_memory_budget_bytes() or 1024**3, 2 * 1024**3)
+    return min(
+        step_memory_budget_bytes() or 1024**3 // _render_jobs_limit(), 2 * 1024**3
+    )
 
 
 def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
