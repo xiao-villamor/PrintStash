@@ -36,6 +36,10 @@ from app.modules.media import mesh_processing
 from app.modules.media.fingerprints import FingerprintRecord, FingerprintResult
 from app.modules.media.stl_streaming import _terminate_process_group
 from app.modules.media.thumbnail_engine import (
+    GeometryNotRequested,
+    GeometryOutcome,
+    GeometryReady,
+    GeometryRefused,
     ThumbnailFailureReason,
     ThumbnailRequest,
     ThumbnailResult,
@@ -107,12 +111,33 @@ def unpack_value(value: Any) -> Any:
     return value
 
 
+def encode_geometry(outcome: GeometryOutcome) -> dict[str, str]:
+    if isinstance(outcome, GeometryReady):
+        return {"state": "ready"}
+    if isinstance(outcome, GeometryRefused):
+        return {"state": "refused", "reason": outcome.reason.value}
+    if isinstance(outcome, GeometryNotRequested):
+        return {"state": "not_requested"}
+    raise TypeError("invalid geometry outcome")
+
+
+def decode_geometry(raw: dict[str, str]) -> GeometryOutcome:
+    if raw == {"state": "ready"}:
+        return GeometryReady()
+    if raw == {"state": "not_requested"}:
+        return GeometryNotRequested()
+    if set(raw) == {"state", "reason"} and raw["state"] == "refused":
+        return GeometryRefused(ThumbnailFailureReason(raw["reason"]))
+    raise ValueError("invalid geometry outcome")
+
+
 def encode_reply(result: ThumbnailResult) -> bytes:
     image = result.image or b""
     fingerprint = result.fingerprint_result
     header = json.dumps(
         {
             "geometry": result.geometry,
+            "geometry_outcome": encode_geometry(result.geometry_outcome),
             "strategy": result.strategy.value,
             "complete": result.complete,
             "failure_reason": (
@@ -184,6 +209,7 @@ def decode_reply(payload: bytes) -> ThumbnailResult:
         return ThumbnailResult(
             image=image if header["has_image"] else None,
             geometry=dict(header["geometry"]),
+            geometry_outcome=decode_geometry(header["geometry_outcome"]),
             strategy=ThumbnailStrategy(header["strategy"]),
             complete=bool(header["complete"]),
             failure_reason=None if reason is None else ThumbnailFailureReason(reason),
