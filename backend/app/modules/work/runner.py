@@ -114,7 +114,7 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
     from app.core.metrics import record_step
     from app.runtime.maintenance import begin_mutating_operation, end_mutating_operation
 
-    if _withdrawn(context.job_id):
+    if _withdrawn(context.job_id, context.attempt):
         return StepOutcome.CANCELLED.value
     if mutating and not begin_mutating_operation():
         return StepOutcome.DEFERRED.value

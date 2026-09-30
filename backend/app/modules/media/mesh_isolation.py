@@ -296,6 +296,9 @@ def supervise(
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
         checkpoint(force=True)
         return bytes(reply)
+    except MeshWorkerError:
+        checkpoint(force=True)
+        raise
     finally:
         # The leader may already have exited; its descendants still belong to
         # the session's original group, whose ID is the leader's PID.

@@ -216,7 +216,10 @@ class TestDescendantReaping:
 
 
 class TestCancelledReply:
-    def test_withdrawal_before_reply_acceptance_reaps_descendants(self, tmp_path):
+    @pytest.mark.parametrize(
+        "case", ["leaves_child", "resource_reply"], ids=["success", "resource-refusal"]
+    )
+    def test_withdrawal_before_reply_acceptance_reaps_descendants(self, tmp_path, case):
         import json
 
         from app.core.cancellation import OperationCancelled, cancellation_scope
@@ -227,7 +230,7 @@ class TestCancelledReply:
             mesh_isolation.supervise(
                 command(
                     "tests.fakes.mesh_bootstrap_probe",
-                    ["leaves_child", str(pids)],
+                    [case, str(pids)],
                     256 * MB,
                 ),
                 memory_budget=256 * MB,

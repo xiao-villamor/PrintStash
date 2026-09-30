@@ -34,7 +34,7 @@ def main():
             Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
         _hold = bytearray(hold_mb * 1024**2)
         time.sleep(60)
-    elif case in ("tree_wait", "leaves_child"):
+    elif case in ("tree_wait", "leaves_child", "resource_reply"):
         import json
         import subprocess
         from pathlib import Path
@@ -47,6 +47,8 @@ def main():
                 (temporary / "partial.stl").write_bytes(b"partial native output")
                 Path(sys.argv[3]).write_text(str(temporary))
             time.sleep(60)
+        elif case == "resource_reply":
+            raise MemoryError("resource refusal after withdrawal")
         else:
             print("reply", flush=True)
     elif case == "wait":

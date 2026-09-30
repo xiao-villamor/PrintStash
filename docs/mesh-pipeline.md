@@ -38,7 +38,7 @@ output after checking the directory identity; a replacement is preserved. Unsupp
 
 Synchronous Job steps carry a scoped cancellation probe into admission and
 native supervisors. They poll durable intent at most every 200 ms and check again
-before accepting a worker result. Cancellation, a removed Job, or a superseded
+before accepting a worker outcome, including abnormal exits. Cancellation, a removed Job, or a superseded
 attempt unwinds the process tree, temporary outputs and capacity before releasing
 admission. Immediate retry cannot revive the cancelled execution: it belongs to
 the prior attempt. Cancellation remains distinct from a malformed/resource
