@@ -652,7 +652,7 @@ def _write_manifest(path: Path, manifest: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, apply_limits: bool = True) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
@@ -701,11 +701,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         return 2
     try:
-        _apply_worker_limits(
-            args.address_space_bytes,
-            args.cpu_seconds,
-            expected_parent_pid=args.expected_parent_pid,
-        )
+        if apply_limits:
+            _apply_worker_limits(
+                args.address_space_bytes,
+                args.cpu_seconds,
+                expected_parent_pid=args.expected_parent_pid,
+            )
     except _InvalidSTL:
         return 3
     limits = _Limits(
@@ -766,6 +767,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (_InvalidSTL, OSError, ValueError, struct.error):
         return 3
+    except MemoryError:
+        raise
     except Exception:
         return 4
 

@@ -75,38 +75,77 @@ def _reclaim_memory() -> None:
         _LIBC = False
 
 
-# Process-wide gate limiting how many mesh load+render jobs run at once. Cached
-# as (limit, semaphore) so a runtime override / test change to max_render_jobs
-# rebuilds it; protected by a lock because ingestion calls in from the
-# background-task threadpool.
-_RENDER_SEMAPHORE: "tuple[int, threading.BoundedSemaphore] | None" = None
+class _RenderAdmission:
+    """One admission controller, including while administrators change its limit.
+
+    A new allocation split becomes effective after old admissions drain. Mixing
+    old large shares with new small ones could otherwise exceed the total budget.
+    Nested work in the same thread consumes the existing admission.
+    """
+
+    def __init__(self) -> None:
+        self.condition = threading.Condition()
+        self.active = 0
+        self.limit = 1
+        self.requested = 1
+        self.local = threading.local()
+
+    def configure(self, limit: int) -> None:
+        with self.condition:
+            self.requested = limit
+            self.condition.notify_all()
+
+    def __enter__(self):
+        depth = getattr(self.local, "depth", 0)
+        if depth:
+            self.local.depth = depth + 1
+            return self
+        with self.condition:
+            while True:
+                if self.active == 0:
+                    self.limit = self.requested
+                if self.limit == self.requested and self.active < self.limit:
+                    self.active += 1
+                    self.local.depth = 1
+                    self.local.limit = self.limit
+                    return self
+                self.condition.wait()
+
+    def __exit__(self, *_args) -> None:
+        self.local.depth -= 1
+        if self.local.depth:
+            return
+        with self.condition:
+            self.active -= 1
+            self.condition.notify_all()
+
+
+_RENDER_SEMAPHORE: _RenderAdmission | None = None
 _RENDER_SEMAPHORE_LOCK = threading.Lock()
 
 
-def _render_jobs_limit() -> int:
-    """Effective max concurrent render jobs (always >= 1)."""
+def _configured_render_jobs() -> int:
     try:
         return max(int(settings.max_render_jobs), 1)
     except (TypeError, ValueError):
         return 1
 
 
-def _render_semaphore() -> "threading.BoundedSemaphore":
-    """Concurrency gate for mesh load+render.
+def _render_jobs_limit() -> int:
+    """The allocation split belonging to this thread's admission."""
+    gate = _RENDER_SEMAPHORE
+    if gate is not None and getattr(gate.local, "depth", 0):
+        return gate.local.limit
+    return _configured_render_jobs()
 
-    Ingestion runs in FastAPI's background-task threadpool, so a bulk/folder
-    upload (#26) can otherwise fire dozens of concurrent renders that each peak
-    hundreds of MB and collectively OOM the box (#29). This caps how many run at
-    once to ``VAULT_MAX_RENDER_JOBS``; the RAM-aware triangle cap separately
-    divides its per-job budget by the same count so each concurrent job stays
-    within its share.
-    """
+
+def _render_semaphore() -> _RenderAdmission:
     global _RENDER_SEMAPHORE
-    limit = _render_jobs_limit()
     with _RENDER_SEMAPHORE_LOCK:
-        if _RENDER_SEMAPHORE is None or _RENDER_SEMAPHORE[0] != limit:
-            _RENDER_SEMAPHORE = (limit, threading.BoundedSemaphore(limit))
-        return _RENDER_SEMAPHORE[1]
+        if _RENDER_SEMAPHORE is None:
+            _RENDER_SEMAPHORE = _RenderAdmission()
+        _RENDER_SEMAPHORE.configure(_configured_render_jobs())
+        return _RENDER_SEMAPHORE
 
 
 def _canonical_suffix(path: Path, file_type: str | None = None) -> str:
@@ -418,14 +457,44 @@ def _process_rss_bytes(pid: int) -> int | None:
 def _step_memory_budget_bytes() -> int | None:
     limit = _detect_memory_limit_bytes()
     fraction = settings.mesh_memory_budget_fraction
-    if limit is None or fraction <= 0:
+    if limit is None:
         return None
-    return max(int(limit * fraction / _render_jobs_limit()), 1)
+    # Zero disables triangle estimation, never containment.
+    safety_fraction = fraction if fraction > 0 else 0.5
+    return max(int(limit * safety_fraction / _render_jobs_limit()), 1)
 
 
 def process_rss_bytes(pid: int) -> int | None:
     """A child process's resident set, for owners that police their own children."""
     return _process_rss_bytes(pid)
+
+
+def process_tree_rss_bytes(pid: int) -> int | None:
+    """Resident memory of an admitted worker including its descendants."""
+    pending = [pid]
+    seen: set[int] = set()
+    total = 0
+    found = False
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        rss = _process_rss_bytes(current)
+        if rss is not None:
+            total += rss
+            found = True
+        try:
+            pending.extend(
+                int(value)
+                for value in Path(f"/proc/{current}/task/{current}/children")
+                .read_text()
+                .split()
+            )
+        except (OSError, ValueError):
+            # A process can exit between the two reads.
+            continue
+    return total if found else None
 
 
 def step_memory_budget_bytes() -> int | None:
@@ -440,7 +509,9 @@ def native_memory_budget_bytes() -> int:
     where cgroup or host memory cannot be detected. Embedding and search-view
     workers are killed past it.
     """
-    return min(step_memory_budget_bytes() or 1024**3, 2 * 1024**3)
+    return min(
+        step_memory_budget_bytes() or 1024**3 // _render_jobs_limit(), 2 * 1024**3
+    )
 
 
 def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
@@ -456,11 +527,14 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
     # Worst case: three float64 vertices and three int64 indices per face.
     # Include NPZ headers and the bounded B-rep sidecar in the capacity lease.
     result_limit = max(triangle_limit, 1) * 96 + 1024 * 1024
+    from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+    isolated = os.environ.get(WORKER_MARKER) == str(os.getpid())
     with ExitStack() as resources:
         tmp = resources.enter_context(
             tempfile.TemporaryDirectory(prefix="printstash-step-")
         )
-        if include_brep:
+        if include_brep and not isolated:
             import secrets
 
             from app.db.session import get_session_factory
@@ -476,39 +550,53 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
             )
             resources.callback(reservation.release)
         output = Path(tmp) / ("mesh.npz" if include_brep else "mesh.glb")
-        env = os.environ.copy()
-        env["PRINTSTASH_STEP_BREP"] = "1" if include_brep else "0"
-        env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(triangle_limit)
-        command = [
-            sys.executable,
-            "-m",
-            "app.modules.media.step_worker",
-            str(path),
-            str(output),
-        ]
-        process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            cwd=Path(application_file).resolve().parent.parent,
-        )
-        deadline = time.monotonic() + settings.mesh_step_timeout_seconds
-        memory_budget = _step_memory_budget_bytes()
-        failure = ""
-        while process.poll() is None:
-            if time.monotonic() >= deadline:
-                failure = "timeout"
-                process.kill()
-                break
-            rss = _process_rss_bytes(process.pid)
-            if memory_budget is not None and rss is not None and rss > memory_budget:
-                failure = "memory budget"
-                process.kill()
-                break
-            time.sleep(0.05)
-        _stdout, stderr = process.communicate()
-        if failure or process.returncode != 0 or not output.is_file():
+        if isolated:
+            from app.modules.media.step_worker import convert
+
+            returncode = convert(
+                path, output, triangle_limit, include_brep=include_brep
+            )
+            failure = ""
+            stderr = b""
+        else:
+            env = os.environ.copy()
+            env["PRINTSTASH_STEP_BREP"] = "1" if include_brep else "0"
+            env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(triangle_limit)
+            command = [
+                sys.executable,
+                "-m",
+                "app.modules.media.step_worker",
+                str(path),
+                str(output),
+            ]
+            process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                cwd=Path(application_file).resolve().parent.parent,
+            )
+            deadline = time.monotonic() + settings.mesh_step_timeout_seconds
+            memory_budget = _step_memory_budget_bytes()
+            failure = ""
+            while process.poll() is None:
+                if time.monotonic() >= deadline:
+                    failure = "timeout"
+                    process.kill()
+                    break
+                rss = _process_rss_bytes(process.pid)
+                if (
+                    memory_budget is not None
+                    and rss is not None
+                    and rss > memory_budget
+                ):
+                    failure = "memory budget"
+                    process.kill()
+                    break
+                time.sleep(0.05)
+            _stdout, stderr = process.communicate()
+            returncode = process.returncode
+        if failure or returncode != 0 or not output.is_file():
             if include_brep:
                 from printstash_core.mesh.similarity import GeometryError
 
@@ -516,17 +604,17 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
                     "tessellation_timeout"
                     if failure == "timeout"
                     else "worker_oom"
-                    if failure == "memory budget" or process.returncode == -9
+                    if failure == "memory budget" or returncode == -9
                     else "step_unavailable"
-                    if process.returncode == 7
+                    if returncode == 7
                     else "geometry_work_limit"
-                    if process.returncode == 3
+                    if returncode == 3
                     else "invalid_step"
                 )
             logger.warning(
                 "mesh_processing: isolated STEP tessellation failed for %s (%s%s)",
                 path.name,
-                failure or f"exit {process.returncode}",
+                failure or f"exit {returncode}",
                 f": {stderr.decode(errors='replace')[-300:]}" if stderr else "",
             )
             return None

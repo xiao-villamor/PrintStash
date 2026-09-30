@@ -1,0 +1,61 @@
+"""Stdlib-only malicious worker used to verify the production bootstrap."""
+
+import os
+import resource
+import sys
+import time
+
+
+def main():
+    case = sys.argv[1]
+    if case == "burst":
+        bytearray(8 * 1024**3)
+    elif case == "native":
+        import numpy as np
+        import trimesh
+
+        assert np.isfinite(trimesh.creation.box().volume)
+        print(resource.getrlimit(resource.RLIMIT_AS)[0], flush=True)
+    elif case == "tree":
+        import subprocess
+
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import time; hold=bytearray(100*1024**2); time.sleep(60)",
+            ]
+        )
+        if len(sys.argv) > 2:
+            import json
+            from pathlib import Path
+
+            Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
+        _hold = bytearray(100 * 1024**2)
+        time.sleep(60)
+    elif case in ("tree_wait", "leaves_child"):
+        import json
+        import subprocess
+        from pathlib import Path
+
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
+        if case == "tree_wait":
+            if len(sys.argv) > 3:
+                temporary = Path(os.environ["TMPDIR"])
+                (temporary / "partial.stl").write_bytes(b"partial native output")
+                Path(sys.argv[3]).write_text(str(temporary))
+            time.sleep(60)
+        else:
+            print("reply", flush=True)
+    elif case == "wait":
+        from pathlib import Path
+
+        Path(sys.argv[2]).write_text(str(os.getpid()))
+        time.sleep(60)
+    else:
+        raise ValueError(case)
+
+
+if __name__ == "__main__":
+    main()

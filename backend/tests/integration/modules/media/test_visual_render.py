@@ -78,7 +78,7 @@ class TestVisualRender:
         source, recipe, processes = render_case
         monkeypatch.setattr(
             mesh_processing,
-            "process_rss_bytes",
+            "process_tree_rss_bytes",
             lambda _pid: mesh_processing.native_memory_budget_bytes() + 1,
         )
         with pytest.raises(EmbeddingError, match="embedding_worker_oom"):
