@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cascadio
 import pytest
 import trimesh
 
@@ -38,6 +39,12 @@ def run_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(
             step_worker.sys, "argv", ["step_worker", str(source), str(destination)]
         )
+
+        def write_intermediate(_source, output, **_kwargs):
+            Path(output).write_bytes(b"test intermediate")
+            return 0
+
+        monkeypatch.setattr(cascadio, "step_to_glb", write_intermediate)
         monkeypatch.setattr(trimesh, "load_mesh", lambda *_a, **_k: loaded)
         return step_worker.main(), destination
 
@@ -112,6 +119,7 @@ class TestBrepFailureProtocol:
             pytest.param("geometry_work_limit", 3, id="triangle-budget"),
             pytest.param("invalid_step", 4, id="invalid-document"),
             pytest.param("native", 4, id="unexpected-native-error"),
+            pytest.param("io", 4, id="filesystem-error"),
         ],
     )
     def test_classifies_native_failure(self, tmp_path, monkeypatch, failure, expected):
@@ -120,6 +128,8 @@ class TestBrepFailureProtocol:
         def failed_tessellation(*args, **kwargs):
             if failure == "dependency":
                 raise ImportError("OCP unavailable")
+            if failure == "io":
+                raise OSError(13, "permission denied")
             if failure == "native":
                 raise RuntimeError("native library failure")
             raise step_geometry.StepGeometryError(failure)
@@ -133,3 +143,41 @@ class TestBrepFailureProtocol:
         )
         assert not destination.exists()
         assert not destination.with_suffix(".json").exists()
+
+
+class TestNativeResourceFailure:
+    @pytest.mark.parametrize("failure", [MemoryError(), OSError(12, "out of memory")])
+    def test_preserves_resource_refusal(self, tmp_path, monkeypatch, failure):
+        from app.modules.media import step_geometry
+
+        def exhausted(*_args, **_kwargs):
+            raise failure
+
+        monkeypatch.setattr(step_geometry, "tessellate", exhausted)
+        destination = tmp_path / "result.npz"
+        with pytest.raises(type(failure)):
+            step_worker._write_brep(tmp_path / "input.step", destination, 12)
+        assert not destination.exists()
+
+    def test_refuses_failed_native_conversion(self, tmp_path, monkeypatch):
+        temporary_directory = step_worker.tempfile.TemporaryDirectory
+        monkeypatch.setattr(
+            step_worker.tempfile,
+            "TemporaryDirectory",
+            lambda **kwargs: temporary_directory(dir=tmp_path, **kwargs),
+        )
+
+        def failed_conversion(_source, intermediate, **_kwargs):
+            Path(intermediate).write_bytes(b"partial native output")
+            return 1
+
+        monkeypatch.setattr(cascadio, "step_to_glb", failed_conversion)
+        destination = tmp_path / "result.glb"
+        assert (
+            step_worker.convert(
+                tmp_path / "input.step", destination, 12, include_brep=False
+            )
+            == 4
+        )
+        assert not destination.exists()
+        assert list(tmp_path.iterdir()) == []

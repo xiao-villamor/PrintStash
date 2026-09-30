@@ -6,8 +6,10 @@ and only accepts an exported mesh below the configured triangle ceiling.
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -32,9 +34,18 @@ def convert(
     if include_brep:
         return _write_brep(source, destination, triangle_limit)
 
+    import cascadio
     import trimesh
 
-    loaded = trimesh.load_mesh(str(source), process=False)
+    # Trimesh's STEP adapter enables OpenCASCADE's parallel pool, ignoring
+    # OMP_NUM_THREADS. Thread stacks can exhaust the admitted address space and
+    # hang native conversion. Use the same GLB intermediate with serial meshing.
+    with tempfile.TemporaryDirectory(prefix="printstash-step-") as temporary:
+        converted = Path(temporary) / "converted.glb"
+        status = cascadio.step_to_glb(str(source), str(converted), use_parallel=False)
+        if status != 0:
+            return 4
+        loaded = trimesh.load_mesh(str(converted), process=False)
     if isinstance(loaded, trimesh.Scene):
         meshes = [
             geometry
@@ -70,6 +81,12 @@ def _write_brep(source: Path, destination: Path, triangle_limit: int) -> int:
         return 7
     except StepGeometryError as exc:
         return 3 if str(exc) == "geometry_work_limit" else 4
+    except MemoryError:
+        raise
+    except OSError as exc:
+        if exc.errno == errno.ENOMEM:
+            raise
+        return 4
     except Exception:
         return 4
 

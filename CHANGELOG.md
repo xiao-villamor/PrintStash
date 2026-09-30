@@ -27,6 +27,8 @@
   will be removed in 0.16.
 
 ### Fixed
+- Keep native STEP/STP conversion within small worker memory budgets by using serial tessellation, and classify B-rep allocation failures as resource refusals.
+
 
 - Rendering model views for learned similarity embeddings no longer happens in
   the API process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).

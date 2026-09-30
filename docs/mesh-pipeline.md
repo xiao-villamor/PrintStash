@@ -38,3 +38,8 @@ output after checking the directory identity; a replacement is preserved. Unsupp
 
 Keep framework, storage and job infrastructure out of the core geometry library.
 The admission and bootstrap are application responsibilities.
+
+Native STEP GLB conversion uses serial OpenCASCADE tessellation. Its own parallel
+thread pool ignores OMP_NUM_THREADS and can exhaust address space through thread
+stacks under small budgets; serial execution keeps it inside the admitted worker.
+B-rep conversion propagates allocation failures to the resource-limit outcome.
