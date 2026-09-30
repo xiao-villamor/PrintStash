@@ -53,6 +53,25 @@ def pg_session() -> Iterator[Session]:
 
 
 class TestCollectionTreeOnPostgres:
+    def test_counts_nested_search_matches(self, pg_session: Session) -> None:
+        admin = build_user(pg_session, superuser=True)
+        parts = build_collection(pg_session, "Parts")
+        spare = build_collection(pg_session, "Spare Parts", parent=parts)
+        build_model(pg_session, "Direct", collection=parts)
+        build_model(pg_session, "Nested", collection=spare)
+
+        page = collection_tree.search(
+            pg_session,
+            admin,
+            query="parts",
+            minimum=CollectionRole.VIEW,
+            cursor=None,
+            limit=10,
+        )
+
+        counts = {item.name: item.model_count for item in page.items}
+        assert counts == {"Parts": 2, "Spare Parts": 1}
+
     def test_counts_every_model_in_a_subtree(self, pg_session: Session) -> None:
         admin = build_user(pg_session, superuser=True)
         parts = build_collection(pg_session, "Parts")

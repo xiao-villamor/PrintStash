@@ -420,6 +420,43 @@ class TestLookupCollection:
 
 
 class TestSearchCollections:
+    def test_counts_each_matching_subtree_independently(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+    ) -> None:
+        parts = make_collection("Parts")
+        spare = make_collection("Spare Parts", parent=parts)
+        small = make_collection("Small", parent=spare)
+        make_model("Direct", collection=parts)
+        make_model("Nested", collection=spare)
+        make_model("Deep", collection=small)
+
+        response = client.get(SEARCH, params={"q": "parts"}, headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        counts = {
+            item["name"]: (item["model_count"], item["descendant_count"])
+            for item in response.json()["items"]
+        }
+        assert counts == {"Parts": (3, 2), "Spare Parts": (2, 1)}
+
+    def test_labels_a_nested_search_result_from_its_ancestors(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+    ) -> None:
+        parts = make_collection("Parts")
+        make_collection("Wall Brackets", parent=parts)
+
+        response = client.get(SEARCH, params={"q": "brackets"}, headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["items"][0]["display_path"] == "Parts/Wall Brackets"
+
     def test_finds_names_containing_the_query_in_any_case(
         self,
         client: TestClient,

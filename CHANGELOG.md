@@ -24,6 +24,9 @@
   in the library inside the API; it now uses the same disposable worker as the
   other mesh work. A model that exhausts memory or never finishes fails that one
   embedding and the run continues with the rest.
+- Collection search, breadcrumbs and subtree counts now follow indexed parent
+  links, keeping these reads responsive in libraries with tens of thousands of
+  collections ([#295](https://github.com/xiao-villamor/PrintStash/issues/295)).
 - Opening the 3D viewer on a 3MF or OBJ no longer converts it inside the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   The conversion runs in the same disposable worker as mesh derivatives, so a

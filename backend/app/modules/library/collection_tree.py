@@ -123,22 +123,31 @@ def _subtree_counts(
 ) -> dict[str, _Subtree]:
     """Live Models and collections below each row, keyed by path, counted in SQL.
 
-    One grouped join returns a row per page item, however large its subtree:
-    materialising a root's 25,000 descendants in Python to roll them up cost
-    more than every query behind the page together. The prefix test compares a
-    substring rather than building a LIKE pattern from a column, so no character
-    in a path can act as a wildcard.
+    Walk indexed parent ids from the page rows, then group below each root.
+    The recursive query returns one count row per page item without loading
+    the descendants into Python or comparing every collection path to a page
+    path. A deleted or inaccessible descendant contributes to neither count.
     """
     if not rows:
         return {}
+    descendants = (
+        sa_select(
+            Collection.id.label("root_id"),
+            Collection.id.label("below_id"),
+        )
+        .where(Collection.id.in_([row.id for row in rows]))  # type: ignore[union-attr]
+        .cte("descendants", recursive=True)
+    )
+    child = aliased(Collection)
+    descendants = descendants.union_all(
+        sa_select(descendants.c.root_id, child.id).join(
+            child, child.parent_id == descendants.c.below_id
+        )
+    )
     page = aliased(Collection)
     below = aliased(Collection)
-    in_subtree = or_(
-        below.path == page.path,
-        func.substr(below.path, 1, func.length(page.path) + 1) == page.path + "/",
-    )
-    # Models per collection first, so the prefix join walks collections, not
-    # every Model in the library.
+    # Aggregate Models once per collection before joining the descendants, so
+    # the recursive result has one row per collection rather than per Model.
     direct = (
         sa_select(Model.collection_id, func.count(Model.id).label("models"))
         .where(live(Model))
@@ -146,19 +155,19 @@ def _subtree_counts(
         .subquery()
     )
     counts = {
-        path: _Subtree(models=int(models), collections=int(collections) - 1)
+        path: _Subtree(models=int(models), collections=int(collections))
         for path, models, collections in session.execute(
             sa_select(
                 page.path,
                 func.coalesce(func.sum(direct.c.models), 0),
                 # The row itself is in its own subtree; the rest are below it.
-                func.count(below.id),
+                func.count(below.id) - 1,
             )
-            .select_from(page)
-            .join(below, in_subtree)
+            .select_from(descendants)
+            .join(page, page.id == descendants.c.root_id)
+            .join(below, below.id == descendants.c.below_id)
             .outerjoin(direct, direct.c.collection_id == below.id)
             .where(
-                page.id.in_([row.id for row in rows]),
                 live(below),
                 below.id.in_(visible),
             )
@@ -203,28 +212,35 @@ def _labels(
 ) -> dict[str, str]:
     """Each path's visible ancestry as names, root first: ``Parts/Brackets``.
 
-    Ancestors above what the caller can see are left out, as the tree leaves
-    them out. One query binding only the paths asked for: each path's ancestors
-    are found by the same prefix test the subtree counts use, so a deeper tree
-    does not mean more parameters.
+    Follow indexed parent ids from each requested path. Ancestors above what
+    the caller can see are left out, as the tree leaves them out. The query
+    binds only the requested paths, however deep the tree is.
     """
     wanted = sorted(set(paths))
     if not wanted:
         return {}
-    target = aliased(Collection)
-    ancestor = aliased(Collection)
-    is_ancestor = or_(
-        ancestor.path == target.path,
-        func.substr(target.path, 1, func.length(ancestor.path) + 1)
-        == ancestor.path + "/",
+    lineage = (
+        sa_select(
+            Collection.path.label("target_path"),
+            Collection.id.label("ancestor_id"),
+            Collection.parent_id.label("parent_id"),
+        )
+        .where(Collection.path.in_(wanted))  # type: ignore[union-attr]
+        .cte("lineage", recursive=True)
     )
+    parent = aliased(Collection)
+    lineage = lineage.union_all(
+        sa_select(lineage.c.target_path, parent.id, parent.parent_id).join(
+            parent, parent.id == lineage.c.parent_id
+        )
+    )
+    ancestor = aliased(Collection)
     chains: dict[str, list[tuple[str, str]]] = {}
     for path, ancestor_path, name in session.execute(
-        sa_select(target.path, ancestor.path, ancestor.name)
-        .select_from(target)
-        .join(ancestor, is_ancestor)
+        sa_select(lineage.c.target_path, ancestor.path, ancestor.name)
+        .select_from(lineage)
+        .join(ancestor, ancestor.id == lineage.c.ancestor_id)
         .where(
-            target.path.in_(wanted),
             live(ancestor),
             ancestor.id.in_(visible),
         )
@@ -345,7 +361,9 @@ def lookup(session: Session, user: User, path: str) -> CollectionLookupRead:
     return CollectionLookupRead(collection=nodes[-1], ancestors=nodes[:-1])
 
 
-def lookup_by_id(session: Session, user: User, collection_id: int) -> CollectionLookupRead:
+def lookup_by_id(
+    session: Session, user: User, collection_id: int
+) -> CollectionLookupRead:
     """Resolve one visible collection by id without loading a collection list."""
     visible = rbac.accessible_collection_ids_stmt(session, user)
     path = session.exec(
