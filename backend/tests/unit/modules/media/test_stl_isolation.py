@@ -40,3 +40,33 @@ class TestReplyFrame:
             decode_reply(payload)
 
         assert raised.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+
+class TestViewerResourceBounds:
+    def test_refuses_oversized_stl_before_reading(self, tmp_path):
+        from app.modules.media import stl_isolation
+
+        source = tmp_path / "large.stl"
+        with source.open("wb") as stream:
+            stream.truncate(stl_isolation.MAX_STL_BYTES + 1)
+        with pytest.raises(MeshWorkerError) as error:
+            stl_isolation.to_stl_bytes(source)
+        assert error.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert source.stat().st_size == stl_isolation.MAX_STL_BYTES + 1
+
+    def test_reports_unavailable_original(self, tmp_path):
+        from app.modules.media import stl_isolation
+
+        assert stl_isolation.to_stl_bytes(tmp_path / "missing.stl") is None
+
+    def test_refuses_missing_worker_output(self, tmp_path, monkeypatch):
+        from app.modules.media import stl_isolation
+
+        monkeypatch.setattr(
+            stl_isolation.mesh_isolation,
+            "run_worker",
+            lambda *_args: encode_reply(84),
+        )
+        with pytest.raises(MeshWorkerError) as error:
+            stl_isolation.to_stl_bytes(tmp_path / "mesh.obj")
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED

@@ -177,6 +177,8 @@ source = ["app"]
 # exactly the code that is hardest to test.
 concurrency = ["thread", "multiprocessing"]
 parallel = true
+# Measure disposable native workers and their sentinel exits too.
+patch = ["subprocess", "fork", "_exit"]
 sigterm = true
 omit = ["app/__main__.py"]
 

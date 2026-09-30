@@ -16,6 +16,17 @@ The parent still owns admission, memory, timeout and temporary cleanup.
 | 6 | preserves native failure codes (TestBrepFailureProtocol) | Error | Missing dependency, invalid document, work limit, filesystem error, unexpected error | Existing distinct codes | Unit | ✅ implemented |
 | 7 | preserves resource refusal (TestNativeResourceFailure) | Error | MemoryError or ENOMEM in B-rep conversion | Allocation failure reaches worker resource classification | Unit | ✅ implemented |
 | 8 | refuses failed conversion (TestNativeResourceFailure) | Error | Nonzero native conversion status | Exit 4; partial intermediate cleaned; no output | Unit | ✅ implemented |
-| 9 | recovers on small machines (Gate.run) | Edge | Shipped full image in 1 GiB container | Native conversion settles; API survives; next healthy file ready | Production container | ❌ pending final image run |
+| 9 | recovers on small machines (Gate.run) | Edge | Shipped full image in 1 GiB container | Native conversion settles; API survives; next healthy file ready | Production container | ✅ passed local production gate |
+| 10 | fails closed on bootstrap startup (TestBootstrapStartup) | Error | Invalid budget, excessive initial AS, unavailable death/subreaper control, parent identity change | No native import; explicit failure | Unit/integration | ✅ passed |
+| 11 | retains worker error meaning (TestBootstrapStartup) | Error | Allocation/import/OS failures | Resource exit differs from missing dependency or I/O failure | Unit/integration | ✅ passed |
+| 12 | validates guardian handshake (TestSentinel) | Error | Failed handshake or death notification | Worker cannot continue without sentinel | Unit/integration | ✅ passed |
+| 13 | contains abandoned descendants (TestSentinel/TestWorkerBootstrap) | Error | Parent loss during startup or processing | Only owned group killed; nested descendants terminated | Unit/integration | ✅ passed |
+| 14 | cleans proven temporary output (TestOwnedTemporaryCleanup/TestSentinel) | Edge | Owned, unowned, inaccessible or replaced directory | Owned output removed; uncertain ownership preserved | Unit/integration | ✅ passed |
+| 15 | bounds viewer reads (TestViewerResourceBounds) | Error | Sparse STL above cap or unavailable file | Refusal before read; original survives | Unit | ✅ passed |
+| 16 | rejects missing viewer output (TestViewerResourceBounds) | Error | Worker claims bytes without file | Worker failure, no fabricated STL | Unit | ✅ passed |
+| 17 | measures isolated worker coverage (TestWorkerBootstrap/TestBootstrapStartup) | Edge | Coverage subprocess/fork/exit collection | Real worker lifecycle contributes to unchanged branch coverage floor | Integration/unit | ✅ passed |
 
-The container row becomes complete only when its resource report passes.
+The 1 GiB full production gate passed with both reported files: 409 MB peak
+cgroup memory, no OOM kills, surviving workers, staging leases or reservations.
+
+Focused bootstrap branch coverage is 97.90% and viewer STL coverage is 100%; the mandatory 90% floor is unchanged.

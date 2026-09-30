@@ -42,7 +42,7 @@ supply the companion tests referenced here.
 From backend/, build the same image used in production, then run:
 
 ```sh
-docker build --build-arg INSTALL_PROFILE=full -t printstash:mesh-resources .
+docker build --build-arg PRINTSTASH_VARIANT=full -t printstash:mesh-resources .
 uv run --frozen python scripts/mesh_resource_gate.py \
   --image printstash:mesh-resources --memory-gib 1 --report /tmp/mesh-1g.json
 uv run --frozen python scripts/mesh_resource_gate.py \
