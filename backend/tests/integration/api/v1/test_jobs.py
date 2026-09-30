@@ -300,16 +300,15 @@ class TestCancelJob:
         request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
         staged = tmp_path / "upload.stl"
         staged.write_bytes(b"solid x\nendsolid x\n")
-        db_session.add(
-            StagingLease(
-                id="cancel-lease",
-                path=str(staged),
-                owner_user_id=owner.id,
-                job_id=request.job_id,
-                size_bytes=staged.stat().st_size,
-                sha256="e" * 64,
-                expires_at=utcnow() + timedelta(hours=1),
-            )
+        from app.modules.ingestion.staging_leases import create_job_lease
+
+        create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=owner.id,
+            path=staged,
+            size_bytes=staged.stat().st_size,
+            sha256="e" * 64,
         )
         db_session.commit()
 
@@ -812,3 +811,108 @@ class TestChannelAuthorization:
         self, db_session: Session, admin: User, channel: str
     ) -> None:
         assert _may_subscribe(db_session, admin, channel) is False
+
+
+class TestDiscardStaging:
+    @pytest.fixture
+    def staged(self, db_session, make_ingest_request, owner, tmp_path):
+        import hashlib
+
+        from app.modules.ingestion.staging_leases import create_job_lease
+
+        request = make_ingest_request(
+            owner, kind=IngestRequestKind.UPLOAD, state=JobState.FAILED
+        )
+        path = tmp_path / "retained.stl"
+        path.write_bytes(b"retry input")
+        lease = create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=owner.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        return request, path, lease
+
+    def test_owner_reclaims_retained_capacity(self, client, owner, staged, db_session):
+        request, path, lease = staged
+        lease_id = lease.id
+        response = client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(owner)
+        )
+        assert response.status_code == 204, response.text
+        assert not path.exists()
+        db_session.expire_all()
+        assert db_session.get(StagingLease, lease_id) is None
+
+    def test_discard_is_idempotent(self, client, owner, staged):
+        request, _, _ = staged
+        url = f"/api/v1/jobs/{request.job_id}/discard-staging"
+        client.post(url, headers=_headers(owner))
+        assert client.post(url, headers=_headers(owner)).status_code == 204
+
+    def test_other_user_cannot_discard(self, client, stranger, staged):
+        request, path, _ = staged
+        response = client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(stranger)
+        )
+        assert response.status_code == 404
+        assert path.read_bytes() == b"retry input"
+
+    def test_admin_can_discard(self, client, admin, staged):
+        request, path, _ = staged
+        response = client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(admin)
+        )
+        assert response.status_code == 204
+        assert not path.exists()
+
+    def test_active_job_cannot_be_discarded(self, client, owner, staged, db_session):
+        request, path, _ = staged
+        row = db_session.get(Job, request.job_id)
+        row.state = JobState.RUNNING
+        db_session.add(row)
+        db_session.commit()
+        response = client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(owner)
+        )
+        assert response.status_code == 409
+        assert path.read_bytes() == b"retry input"
+
+    def test_uncertain_ownership_cannot_be_discarded(
+        self, client, owner, staged, db_session
+    ):
+        request, path, lease = staged
+        path.unlink()
+        path.write_bytes(b"replacement")
+        response = client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(owner)
+        )
+        assert response.status_code == 409
+        assert path.read_bytes() == b"replacement"
+        db_session.expire_all()
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_status_exposes_retained_capacity(self, client, owner, staged):
+        request, _, lease = staged
+        response = client.get(f"/api/v1/jobs/{request.job_id}", headers=_headers(owner))
+        staging = response.json()["staging"]
+        assert staging["retained_bytes"] == lease.size_bytes
+        assert staging["lease_count"] == 1
+        assert staging["earliest_expiry"] is not None
+        assert staging["discard_available"] is True
+        assert "path" not in staging
+
+    def test_discard_prevents_retrying_missing_input(self, client, owner, staged):
+        request, _, _ = staged
+        client.post(
+            f"/api/v1/jobs/{request.job_id}/discard-staging", headers=_headers(owner)
+        )
+        assert (
+            client.post(
+                f"/api/v1/jobs/{request.job_id}/retry", headers=_headers(owner)
+            ).status_code
+            == 410
+        )

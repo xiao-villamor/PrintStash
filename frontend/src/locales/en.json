@@ -4137,5 +4137,12 @@
   "Vault root": "Vault root",
   "Choose a collection": "Choose a collection",
   "Selected ZIP files are importing in the background.": "Selected ZIP files are importing in the background.",
-  "Files selected for import": "Files selected for import"
+  "Files selected for import": "Files selected for import",
+  "Retained input: {size} · {count} staged files": "Retained input: {size} · {count} staged files",
+  "Earliest expiry: {date}": "Earliest expiry: {date}",
+  "Discard staged input": "Discard staged input",
+  "Discard staged input?": "Discard staged input?",
+  "This frees retained upload capacity. Retrying this import will require uploading its input again.": "This frees retained upload capacity. Retrying this import will require uploading its input again.",
+  "Staged input ownership could not be verified. Its capacity remains reserved.": "Staged input ownership could not be verified. Its capacity remains reserved.",
+  "Wait for this import to finish before discarding its staged input.": "Wait for this import to finish before discarding its staged input."
 }

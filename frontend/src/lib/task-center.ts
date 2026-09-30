@@ -90,6 +90,7 @@ export interface TaskItem {
   retryable?: boolean;
   uploadSessionId?: string;
   uploadPaused?: boolean;
+  staging?: JobStatus["staging"];
   failedItems?: Array<{ name: string; reason: string; retryable: boolean }>;
   archiveCollection?: string | null;
   archiveTags?: string[];
@@ -567,6 +568,7 @@ function applyJob(job: JobStatus, recentScheduledTerminalId: string | null): voi
     completion: job.completion,
     retryable: job.retryable,
     failedItems: job.failed_items,
+    staging: job.staging,
     currentItem: job.current_item,
     error: job.error,
     serverUpdatedAt: job.updated_at,

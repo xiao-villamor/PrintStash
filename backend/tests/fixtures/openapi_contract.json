@@ -6794,6 +6794,37 @@
         "title": "JobPriority",
         "type": "string"
       },
+      "JobStagingSummary": {
+        "properties": {
+          "discard_available": {
+            "title": "Discard Available",
+            "type": "boolean"
+          },
+          "earliest_expiry": {
+            "format": "date-time",
+            "title": "Earliest Expiry",
+            "type": "string"
+          },
+          "lease_count": {
+            "minimum": 1.0,
+            "title": "Lease Count",
+            "type": "integer"
+          },
+          "retained_bytes": {
+            "minimum": 0.0,
+            "title": "Retained Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "retained_bytes",
+          "lease_count",
+          "earliest_expiry",
+          "discard_available"
+        ],
+        "title": "JobStagingSummary",
+        "type": "object"
+      },
       "JobState": {
         "description": "Lifecycle of one background Job, shared by every job definition.\n\n``interrupted`` is not terminal: the execution was lost (crash, upgrade,\nrestore) and the reconciler resubmits the same Job as its next attempt.",
         "enum": [
@@ -7007,6 +7038,16 @@
             ],
             "title": "Stage"
           },
+          "staging": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStagingSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "started_at": {
             "anyOf": [
               {
@@ -7068,6 +7109,7 @@
         },
         "required": [
           "job_id",
+          "staging",
           "kind",
           "state",
           "priority",
@@ -28354,6 +28396,46 @@
           }
         ],
         "summary": "Cancel a queued or running Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/jobs/{job_id}/discard-staging": {
+      "post": {
+        "operationId": "discard_staging_api_v1_jobs__job_id__discard_staging_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discard retained input of a terminal ingest Job",
         "tags": [
           "jobs"
         ]

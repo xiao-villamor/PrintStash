@@ -56,6 +56,7 @@ _STATUS_FIELDS = frozenset(JobStatus.model_fields) - {
     "started_at",
     "finished_at",
     "updated_at",
+    "staging",
 }
 _COUNT_FIELDS = ("processed", "total", "succeeded", "deduplicated", "skipped", "failed")
 
@@ -120,6 +121,7 @@ def status_of(row: Job) -> JobStatus:
     payload = json.loads(row.status_json)
     return JobStatus(
         job_id=row.id,
+        staging=None,
         kind=row.kind,
         owner_user_id=row.owner_user_id,
         state=row.state,
@@ -347,7 +349,13 @@ class JobStore:
     def get(self, job_id: str) -> Optional[JobStatus]:
         with get_session_factory().scoped_session() as session:
             row = session.get(Job, job_id)
-            return status_of(row) if row is not None else None
+            if row is None:
+                return None
+            from app.modules.ingestion.staging_cleanup import attach_summaries
+
+            status = status_of(row)
+            attach_summaries(session, [status], select(Job.id).where(Job.id == job_id))
+            return status
 
     def row(self, session: Session, job_id: str) -> Job | None:
         return session.get(Job, job_id)
@@ -407,7 +415,24 @@ class JobStore:
             )
             rows = {row.id: row for row in [*active, *terminal, *tracked]}
             ordered = sorted(rows.values(), key=lambda r: r.updated_at, reverse=True)
-            return [status_of(row) for row in ordered]
+            from app.modules.ingestion.staging_cleanup import attach_summaries
+
+            statuses = [status_of(row) for row in ordered]
+            selected = select(Job.id).where(
+                *scope,
+                or_(
+                    col(Job.state).in_(ACTIVE_JOB_STATES),
+                    col(Job.id).in_(
+                        select(Job.id)
+                        .where(*scope, col(Job.state).in_(TERMINAL_STATES))
+                        .order_by(col(Job.updated_at).desc())
+                        .limit(terminal_limit)
+                    ),
+                    col(Job.id).in_(tracked_job_ids),
+                ),
+            )
+            attach_summaries(session, statuses, selected)
+            return statuses
 
     def failed(self, *, limit: int = 50) -> list[JobStatus]:
         with get_session_factory().scoped_session() as session:
@@ -417,7 +442,17 @@ class JobStore:
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
             ).all()
-            return [status_of(row) for row in rows]
+            from app.modules.ingestion.staging_cleanup import attach_summaries
+
+            statuses = [status_of(row) for row in rows]
+            selected = (
+                select(Job.id)
+                .where(Job.state == JobState.FAILED)
+                .order_by(col(Job.updated_at).desc())
+                .limit(limit)
+            )
+            attach_summaries(session, statuses, selected)
+            return statuses
 
     def counts_by_definition(self) -> dict[JobKind, dict[JobState, int]]:
         with get_session_factory().scoped_session() as session:

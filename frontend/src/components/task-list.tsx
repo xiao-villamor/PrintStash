@@ -1,5 +1,7 @@
 "use client";
 
+import { StagedInputRecovery } from "@/components/staged-input-recovery";
+
 import { ApiError, getErrorMessage } from "@/lib/errors";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { cancelArchiveTransfer, isArchiveTransferActive } from "@/lib/archive-upload";
@@ -192,6 +194,13 @@ function TaskRow({ task }: { task: TaskItem }) {
                 ))}
               </ul>
             </details>
+          )}
+          {task.jobId && task.staging && (
+            <StagedInputRecovery
+              jobId={task.jobId}
+              staging={task.staging}
+              onDiscard={() => updateTask(task.id, { staging: null, retryable: false })}
+            />
           )}
           {task.retryable && !active && !task.uploadSessionId && (
             <button
