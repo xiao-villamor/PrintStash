@@ -191,7 +191,7 @@ class TestDeepSuite:
 
         assert "./scripts/test.sh scale -q" in _commands(job)
 
-    def test_scale_shards_cover_both_readers_and_measurements_once(self) -> None:
+    def test_scale_shards_cover_case_matrix_once(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
         rows = job["strategy"]["matrix"]["include"]
 
