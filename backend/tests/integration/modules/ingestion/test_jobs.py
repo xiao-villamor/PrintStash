@@ -13,6 +13,7 @@ ingest routes' suites; here, a Job whose staging expired fails saying so.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -46,18 +47,20 @@ def owner(make_user):
 def _stage(session: Session, request: IngestRequest, tmp_path: Path, **fields) -> Path:
     path = tmp_path / f"{request.job_id}.stl"
     path.write_bytes(b"staged")
-    session.add(
-        StagingLease(
-            id=f"lease-{request.job_id}",
-            path=str(path),
-            owner_user_id=request.owner_user_id,
-            job_id=request.job_id,
-            size_bytes=6,
-            sha256="d" * 64,
-            expires_at=utcnow() + timedelta(minutes=5),
-            **fields,
-        )
+    from app.modules.ingestion.staging_leases import create_job_lease
+
+    lease = create_job_lease(
+        session,
+        job_id=request.job_id,
+        owner_user_id=request.owner_user_id,
+        path=path,
+        size_bytes=path.stat().st_size,
+        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
     )
+    lease.expires_at = utcnow() + timedelta(minutes=5)
+    for name, value in fields.items():
+        setattr(lease, name, value)
+    session.add(lease)
     session.commit()
     return path
 
@@ -104,6 +107,18 @@ class TestCancel:
         assert not staged.exists()
         assert _leases(db_session, request.job_id) == []
 
+    def test_cancellation_keeps_uncertain_ownership(
+        self, db_session, owner, make_ingest_request, tmp_path
+    ):
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        staged = _stage(db_session, request, tmp_path)
+        staged.unlink()
+        staged.write_bytes(b"replacement")
+        UPLOAD.cancel(db_session, subject_key(request.job_id))
+        db_session.commit()
+        assert staged.read_bytes() == b"replacement"
+        assert len(_leases(db_session, request.job_id)) == 1
+
     def test_forgets_a_stored_credential(
         self, db_session: Session, owner, make_ingest_request
     ) -> None:
@@ -131,6 +146,16 @@ class TestRetry:
         _stage(db_session, request, tmp_path)
 
         assert UPLOAD.retry(db_session, subject_key(request.job_id)) is True
+
+    def test_replaced_input_cannot_be_retried(
+        self, db_session, owner, make_ingest_request, tmp_path
+    ):
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        staged = _stage(db_session, request, tmp_path)
+        staged.unlink()
+        staged.write_bytes(b"replacement")
+        assert UPLOAD.retry(db_session, subject_key(request.job_id)) is False
+        assert staged.read_bytes() == b"replacement"
 
     def test_a_retry_renews_the_staging_lease(
         self, db_session: Session, owner, make_ingest_request, tmp_path

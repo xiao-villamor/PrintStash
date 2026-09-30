@@ -37,7 +37,6 @@ from app.db.models import (
     Model,
     ModelTagLink,
     OwnedStorageObject,
-    StagingLease,
     StorageObjectState,
     User,
 )
@@ -966,15 +965,9 @@ def release_job_staging(
     """
     session_factory = session_factory or get_session_factory()
     with session_factory.scoped_session() as session:
-        leases = session.exec(
-            select(StagingLease).where(
-                StagingLease.job_id == job_id,
-                StagingLease.capture_upload_slot_origin_id.is_(None),  # type: ignore[union-attr]
-            )
-        ).all()
-        for lease in leases:
-            Path(lease.path).unlink(missing_ok=True)
-            session.delete(lease)
+        from .staging_cleanup import release_job
+
+        release_job(session, job_id)
         session.commit()
 
 

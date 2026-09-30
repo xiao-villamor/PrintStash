@@ -557,3 +557,123 @@ class TestHardlinklessStaging:
         )
         assert downloaded.status_code == 200, downloaded.text
         assert downloaded.content == payload
+
+
+class TestMeshFailureRecovery:
+    @pytest.mark.asyncio
+    async def test_unchanged_terminal_failure_survives_reconciler_nudges(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        from app.db.models import DerivativeKind
+
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        data = three_mf(build=tuple((1, None) for _ in range(40)))
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("refused.3mf", data, "model/3mf")},
+            data={"model_name": "Refused geometry"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        file_id = job["file_id"]
+        before = e2e_db.exec(
+            select(ArtifactDerivative).where(
+                ArtifactDerivative.file_id == file_id,
+                ArtifactDerivative.kind == DerivativeKind.METADATA,
+            )
+        ).one()
+        updated, attempts = before.updated_at, before.attempts
+        assert before.state == "failed"
+        for _ in range(3):
+            response = await api.post(
+                "/api/v1/admin/work/derivatives/metadata/regenerate",
+                headers=headers,
+                json={"mode": "missing"},
+            )
+            assert response.status_code == 202
+            settle()
+        e2e_db.expire_all()
+        after = e2e_db.get(ArtifactDerivative, before.id)
+        assert after.updated_at == updated
+        assert after.attempts == attempts
+
+    @pytest.mark.asyncio
+    async def test_original_download_survives_geometry_failure(self, api, tmp_path):
+        import hashlib
+
+        data = b"invalid 3mf package"
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("broken.3mf", data, "model/3mf")},
+            data={"model_name": "Broken package"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        derivatives = (
+            await api.get(
+                f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+            )
+        ).json()
+        assert (
+            next(row for row in derivatives if row["kind"] == "metadata")["state"]
+            == "failed"
+        )
+        download = await api.get(
+            f"/api/v1/files/{job['file_id']}/download", headers=headers
+        )
+        assert (
+            hashlib.sha256(download.content).digest() == hashlib.sha256(data).digest()
+        )
+
+    @pytest.mark.asyncio
+    async def test_signed_slicer_download_survives_geometry_failure(
+        self, api, tmp_path
+    ):
+        data = b"invalid 3mf for slicer"
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("broken.3mf", data, "model/3mf")},
+            data={"model_name": "Slicer handoff"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        url = (
+            await api.get(f"/api/v1/files/{job['file_id']}/slicer-url", headers=headers)
+        ).json()["url"]
+        download = await api.get(url)
+        assert download.status_code == 200
+        assert download.content == data
+
+    @pytest.mark.asyncio
+    async def test_healthy_artifact_finishes_after_a_bad_file(self, api, tmp_path):
+        from tests.factories.content import binary_stl
+
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("broken.3mf", b"invalid package", "model/3mf")},
+            data={"model_name": "Broken first"},
+            headers=headers,
+        )
+        await _await_job(api, headers, uploaded.json()["job_id"])
+        healthy = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("healthy.stl", binary_stl(), "model/stl")},
+            data={"model_name": "Healthy next"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, healthy.json()["job_id"])
+        assert job["state"] == "completed"
+        derivatives = (
+            await api.get(
+                f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+            )
+        ).json()
+        assert (
+            next(row for row in derivatives if row["kind"] == "metadata")["state"]
+            == "ready"
+        )

@@ -162,7 +162,9 @@ def lookup_collection(
     session: Session = Depends(get_session),
 ) -> CollectionLookupRead:
     if path is not None and collection_id is not None:
-        raise HTTPException(status_code=422, detail="collection_lookup_requires_path_or_id")
+        raise HTTPException(
+            status_code=422, detail="collection_lookup_requires_path_or_id"
+        )
     if path is not None:
         return collection_tree.lookup(session, current_user, path)
     if collection_id is not None:
@@ -678,22 +680,16 @@ def list_tags(
         select(Tag).where(live(Tag)).order_by(Tag.name)  # type: ignore[union-attr]
     ).all()
     if current_user.is_superuser:
-        accessible_model_ids = select(Model.id).where(live(Model))
+        visible = None
         accessible_multipart_ids = select(MultipartModel.id)
     else:
         # A subquery, never the id set bound one parameter per collection.
         visible = rbac.accessible_collection_ids_stmt(session, current_user)
-        accessible_model_ids = select(Model.id).where(
-            live(Model),
-            Model.collection_id.in_(visible),  # type: ignore[union-attr]
-        )
         accessible_multipart_ids = select(MultipartModel.id).where(
             MultipartModel.collection_id.in_(visible)  # type: ignore[union-attr]
         )
     counts = dict(
-        session.exec(
-            library_search.accessible_tag_counts_stmt(accessible_model_ids)
-        ).all()
+        session.exec(library_search.accessible_tag_counts_stmt(visible)).all()
     )
     multipart_counts = dict(
         session.exec(

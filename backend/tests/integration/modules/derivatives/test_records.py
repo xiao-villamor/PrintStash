@@ -250,6 +250,30 @@ class TestOutcomes:
 
         assert row.next_attempt_at == now + timedelta(days=1)
 
+    def test_timeouts_stop_at_the_configured_attempt_limit(self, db_session, mesh):
+        now = utcnow()
+        row = None
+        for _ in range(settings.derivative_max_attempts):
+            row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=now)
+            records.mark_failed(
+                db_session,
+                row,
+                "timeout",
+                now=now,
+                deterministic=False,
+                duration_ms=300_000,
+                peak_rss_bytes=123_456,
+            )
+            db_session.commit()
+            if row.next_attempt_at is not None:
+                now = row.next_attempt_at
+        assert row is not None
+        assert row.attempts == settings.derivative_max_attempts
+        assert row.next_attempt_at is None
+        assert records.satisfied(row, now=now)
+        assert row.duration_ms == 300_000
+        assert row.peak_rss_bytes == 123_456
+
     def test_a_deterministic_failure_is_terminal_at_once(
         self, db_session: Session, mesh
     ) -> None:

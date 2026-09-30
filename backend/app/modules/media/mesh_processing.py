@@ -704,6 +704,8 @@ def _load_mesh(path: Path, *, file_type: str | None = None):
             loaded = trimesh.load_scene(
                 str(path), file_type=suffix.lstrip(".") or None, process=False
             )
+    except MemoryError:
+        raise
     except Exception:
         logger.warning(
             "mesh_processing: trimesh.load_scene failed for %s",
@@ -773,9 +775,17 @@ def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
         out["triangle_count"] = len(mesh.faces)
 
     try:
-        vol = mesh.volume
+        measured = mesh
+        if not mesh.is_watertight:
+            # STL represents each facet with independent vertices. Measure its
+            # welded topology without changing the renderer/fingerprint input.
+            measured = mesh.copy()
+            measured.merge_vertices()
+        vol = measured.volume if measured.is_watertight else None
         if vol is not None and vol > 0:
             out["volume_mm3"] = round(float(vol), 2)
+    except MemoryError:
+        raise
     except Exception:
         # Non-watertight meshes raise here; volume is best-effort only.
         pass

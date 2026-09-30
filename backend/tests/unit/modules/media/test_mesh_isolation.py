@@ -27,6 +27,7 @@ from app.modules.media.mesh_isolation import (
     supervise,
 )
 from app.modules.media.thumbnail_engine import (
+    GeometryReady,
     ThumbnailFailureReason,
     ThumbnailResult,
     ThumbnailStrategy,
@@ -164,6 +165,7 @@ class TestSupervise:
 def _result(**overrides) -> ThumbnailResult:
     values = dict(
         image=b"\x89PNG-bytes",
+        geometry_outcome=GeometryReady(),
         geometry={
             "bbox_x_mm": 1.5,
             "bbox_y_mm": None,
@@ -321,3 +323,34 @@ class TestReplyFrame:
 
         with pytest.raises(MeshWorkerError):
             decode_reply(frame)
+
+
+class TestGeometryOutcome:
+    def test_refusal_survives_a_successful_preview_reply(self):
+        from app.modules.media.thumbnail_engine import GeometryRefused
+
+        result = _result(
+            geometry_outcome=GeometryRefused(ThumbnailFailureReason.RESOURCE_LIMIT)
+        )
+        assert (
+            decode_reply(encode_reply(result)).geometry_outcome
+            == result.geometry_outcome
+        )
+
+    def test_missing_geometry_outcome_is_not_a_successful_reply(self):
+        payload = encode_reply(_result())
+        import struct
+
+        length = struct.unpack("!I", payload[4:8])[0]
+        header = json.loads(payload[8 : 8 + length])
+        del header["geometry_outcome"]
+        encoded = json.dumps(header).encode()
+        invalid = (
+            payload[:4]
+            + struct.pack("!I", len(encoded))
+            + encoded
+            + payload[8 + length :]
+        )
+        with pytest.raises(MeshWorkerError) as error:
+            decode_reply(invalid)
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED

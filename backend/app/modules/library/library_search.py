@@ -30,10 +30,33 @@ def _escaped_like(value: str) -> str:
     return f"%{escaped}%"
 
 
-def effective_tag_pairs():
+def effective_tag_pairs(visible_collection_ids=None):
     """Return ``(tag_id, model_id)`` for every live effective tag association."""
     model_collection = aliased(Collection)
     tagged_collection = aliased(Collection)
+    descendant = aliased(Collection)
+
+    # Start with tagged collections, then follow indexed parent links. Joining
+    # every Model's materialised path against every possible ancestor makes an
+    # empty tag list quadratic in the library size on SQLite.
+    tagged_descendants = (
+        select(
+            CollectionTagLink.tag_id.label("tag_id"),
+            tagged_collection.id.label("collection_id"),
+        )
+        .join(
+            tagged_collection,
+            tagged_collection.id == CollectionTagLink.collection_id,
+        )
+        .join(Tag, Tag.id == CollectionTagLink.tag_id)
+        .where(live(tagged_collection), live(Tag))
+        .cte("tagged_collection_descendants", recursive=True)
+    )
+    tagged_descendants = tagged_descendants.union(
+        select(tagged_descendants.c.tag_id, descendant.id).join(
+            descendant, descendant.parent_id == tagged_descendants.c.collection_id
+        )
+    )
 
     direct = (
         select(
@@ -56,30 +79,20 @@ def effective_tag_pairs():
     )
     collection = (
         select(
-            CollectionTagLink.tag_id.label("tag_id"),
+            tagged_descendants.c.tag_id.label("tag_id"),
             Model.id.label("model_id"),
         )
-        .select_from(Model)
-        .join(model_collection, model_collection.id == Model.collection_id)
         .join(
-            tagged_collection,
-            or_(
-                model_collection.path == tagged_collection.path,
-                model_collection.path.startswith(tagged_collection.path + "/"),
-            ),
+            model_collection, model_collection.id == tagged_descendants.c.collection_id
         )
-        .join(
-            CollectionTagLink,
-            CollectionTagLink.collection_id == tagged_collection.id,
-        )
-        .join(Tag, Tag.id == CollectionTagLink.tag_id)
-        .where(
-            live(Model),
-            live(model_collection),
-            live(tagged_collection),
-            live(Tag),
-        )
+        .join(Model, Model.collection_id == model_collection.id)
+        .where(live(Model), live(model_collection))
     )
+    if visible_collection_ids is not None:
+        scope = Model.collection_id.in_(visible_collection_ids)  # type: ignore[union-attr]
+        direct = direct.where(scope)
+        artifact = artifact.where(scope)
+        collection = collection.where(scope)
     return union_all(direct, artifact, collection)
 
 
@@ -186,14 +199,12 @@ def apply_library_search(
     return stmt
 
 
-def accessible_tag_counts_stmt(accessible_model_ids):
-    """Grouped distinct Model counts for callers that already applied RBAC."""
-    pairs = effective_tag_pairs().subquery("counted_effective_tags")
-    return (
-        select(
-            pairs.c.tag_id,
-            func.count(func.distinct(pairs.c.model_id)).label("model_count"),
-        )
-        .where(pairs.c.model_id.in_(accessible_model_ids))
-        .group_by(pairs.c.tag_id)
+def accessible_tag_counts_stmt(visible_collection_ids=None):
+    """Grouped distinct Model counts with optional collection RBAC scope."""
+    pairs = effective_tag_pairs(visible_collection_ids).subquery(
+        "counted_effective_tags"
     )
+    return select(
+        pairs.c.tag_id,
+        func.count(func.distinct(pairs.c.model_id)).label("model_count"),
+    ).group_by(pairs.c.tag_id)

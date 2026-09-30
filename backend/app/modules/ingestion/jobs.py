@@ -176,10 +176,9 @@ def _job_id(subject_key: str) -> str:
 def _cancel(session: Session, subject_key: str) -> None:
     """Withdraw an ingest request: its staged bytes are released now."""
     job_id = _job_id(subject_key)
-    for lease in staging_leases.job_leases(session, job_id):
-        if lease.capture_upload_slot_origin_id is None:
-            Path(lease.path).unlink(missing_ok=True)
-            session.delete(lease)
+    from .staging_cleanup import release_job
+
+    release_job(session, job_id)
     request = session.get(IngestRequest, job_id)
     if request is not None:
         request.source_credential = None
@@ -199,13 +198,23 @@ def _retry(session: Session, subject_key: str) -> bool:
     }
     if IngestRequestKind(request.kind) in staged_kinds:
         leases = staging_leases.job_leases(session, job_id)
-        if not leases or not all(Path(lease.path).exists() for lease in leases):
+        if not leases or not all(
+            staging_leases._matching_path(lease) is not None
+            for lease in leases
+            if lease.capture_upload_slot_origin_id is None
+        ):
             return False
         staging_leases.renew_job_lease(session, job_id=job_id)
     manifest = json.loads(request.manifest_json or "{}")
     if manifest.get("claimed"):
         return False
     return True
+
+
+def _settled(session: Session, subject_key: str) -> None:
+    from .staging_cleanup import reconcile_jobs
+
+    reconcile_jobs(session, job_id=_job_id(subject_key))
 
 
 def _definition(
@@ -218,6 +227,7 @@ def _definition(
         steps=(Step(f"{name.value}.run", step),),
         cancel=_cancel,
         retry=_retry,
+        on_settled=_settled,
         label=label,
     )
 

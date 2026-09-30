@@ -145,6 +145,9 @@ const ERROR_MESSAGES = {
   artifact_ingestion_failed: "The upload was verified but could not be processed.",
   native_upload_capability_unavailable:
     "Direct upload is unavailable. Refresh to request a fallback plan.",
+  staging_ownership_uncertain:
+    "Staged input ownership could not be verified. Its capacity remains reserved.",
+  staging_job_not_terminal: "Wait for this import to finish before discarding its staged input.",
   staging_capacity_exceeded: "Upload staging is full. Free space or wait for active uploads.",
   // The backstop, not the upload limit: `BodyLimitMiddleware` bounds the whole
   // request — which sits above the per-file cap — so a merely-large file gets the

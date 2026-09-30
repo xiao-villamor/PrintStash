@@ -33,6 +33,7 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 from app.schemas.jobs import (
     DefinitionRead,
     ExecutorRead,
@@ -179,9 +180,14 @@ def retry(job_id: str, *, actor: User) -> JobStatus:
         raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
     definition = catalog_module.get_catalog().definition(status.kind)
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
+        begin_write(session, immediate=True)
+        row = session.exec(
+            select(Job).where(Job.id == job_id).with_for_update()
+        ).first()
         if row is None:
             raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
+        if row.state not in {JobState.FAILED, JobState.CANCELLED}:
+            raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
         other = session.exec(
             select(Job.id).where(
                 Job.kind == row.kind,

@@ -151,6 +151,16 @@ def _settle(
                     "job failure hook failed",
                     extra={"job_id": job_id, "kind": definition.name.value},
                 )
+    if status is not None and status.terminal:
+        with get_session_factory().scoped_session() as session:
+            try:
+                definition.on_settled(session, subject_key)
+                session.commit()
+            except Exception:  # noqa: BLE001 - settlement is durable; startup repairs cleanup
+                session.rollback()
+                logger.exception(
+                    "job settlement cleanup failed", extra={"job_id": job_id}
+                )
     from .submission import nudge
 
     for source in dict.fromkeys((definition.name, *definition.completion_nudges)):

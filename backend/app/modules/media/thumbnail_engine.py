@@ -54,6 +54,24 @@ class ThumbnailFailureReason(str, Enum):
 
 
 @dataclass(frozen=True)
+class GeometryReady:
+    """Measurements were obtained; individual unknown measurements are legitimate."""
+
+
+@dataclass(frozen=True)
+class GeometryRefused:
+    reason: ThumbnailFailureReason
+
+
+@dataclass(frozen=True)
+class GeometryNotRequested:
+    pass
+
+
+GeometryOutcome = GeometryReady | GeometryRefused | GeometryNotRequested
+
+
+@dataclass(frozen=True)
 class ThumbnailRequest:
     path: Path
     file_type: str | None = None
@@ -72,6 +90,7 @@ class ThumbnailRequest:
 class ThumbnailResult:
     image: bytes | None
     geometry: Geometry
+    geometry_outcome: GeometryOutcome
     strategy: ThumbnailStrategy
     complete: bool
     failure_reason: ThumbnailFailureReason | None
@@ -128,6 +147,11 @@ class ThumbnailEngine:
         height = int(request.height or round(width * 3 / 4))
         suffix = mesh_processing._canonical_suffix(request.path, request.file_type)
         geometry = _empty_geometry()
+        geometry_outcome: GeometryOutcome = (
+            GeometryRefused(ThumbnailFailureReason.INVALID_SOURCE)
+            if request.include_geometry
+            else GeometryNotRequested()
+        )
         strategy = ThumbnailStrategy.NONE
         complete = False
         failure: ThumbnailFailureReason | None = None
@@ -156,9 +180,12 @@ class ThumbnailEngine:
             )
             over_cap = estimate is not None and estimate > request.triangle_cap
 
+        if over_cap and request.include_geometry:
+            geometry_outcome = GeometryRefused(ThumbnailFailureReason.RESOURCE_LIMIT)
+
+        embedded = None
         try:
             with mesh_processing._render_semaphore():
-                embedded = None
                 if (
                     request.include_thumbnail
                     and suffix == ".3mf"
@@ -206,6 +233,12 @@ class ThumbnailEngine:
                                     "scene_resource_limit",
                                 }:
                                     over_cap = True
+                                if request.include_geometry:
+                                    geometry_outcome = GeometryRefused(
+                                        ThumbnailFailureReason.RESOURCE_LIMIT
+                                        if over_cap
+                                        else ThumbnailFailureReason.INVALID_SOURCE
+                                    )
                                 if request.include_fingerprint:
                                     fingerprint_result = FingerprintResult(
                                         "failed", failure_code=exc.code
@@ -219,6 +252,17 @@ class ThumbnailEngine:
                                     request.path, include_brep=True
                                 )
                             except GeometryError as exc:
+                                if request.include_geometry:
+                                    geometry_outcome = GeometryRefused(
+                                        ThumbnailFailureReason.UNSUPPORTED_FORMAT
+                                        if exc.code == "step_unavailable"
+                                        else ThumbnailFailureReason.TIMEOUT
+                                        if exc.code == "tessellation_timeout"
+                                        else ThumbnailFailureReason.RESOURCE_LIMIT
+                                        if exc.code
+                                        in {"worker_oom", "geometry_work_limit"}
+                                        else ThumbnailFailureReason.INVALID_SOURCE
+                                    )
                                 fingerprint_result = FingerprintResult(
                                     "unsupported"
                                     if exc.code == "step_unavailable"
@@ -235,6 +279,12 @@ class ThumbnailEngine:
                     report("extracting_geometry")
                     if request.include_geometry:
                         geometry = mesh_processing._geometry_from_mesh(mesh)
+                        if geometry["triangle_count"] is not None:
+                            geometry_outcome = GeometryReady()
+                        elif over_cap:
+                            geometry_outcome = GeometryRefused(
+                                ThumbnailFailureReason.RESOURCE_LIMIT
+                            )
 
                     if request.include_fingerprint and fingerprint_result is None:
                         report("extracting_fingerprint")
@@ -299,6 +349,7 @@ class ThumbnailEngine:
                         return ThumbnailResult(
                             image=None,
                             geometry=geometry,
+                            geometry_outcome=geometry_outcome,
                             strategy=ThumbnailStrategy.NONE,
                             complete=prepared.complete
                             if prepared
@@ -424,12 +475,34 @@ class ThumbnailEngine:
                             if mesh is None
                             else ThumbnailFailureReason.RENDERER_NO_OUTPUT
                         )
+        except MemoryError:
+            prepared = None
+            mesh = None
+            mesh_processing._reclaim_memory()
+            if request.include_geometry and not isinstance(
+                geometry_outcome, GeometryReady
+            ):
+                geometry_outcome = GeometryRefused(
+                    ThumbnailFailureReason.RESOURCE_LIMIT
+                )
+            if request.include_fingerprint:
+                fingerprint_result = FingerprintResult(
+                    "failed", failure_code="resource_limit"
+                )
+            if embedded is not None:
+                image = embedded
+                strategy = ThumbnailStrategy.EMBEDDED
+                complete = True
+            else:
+                failure = ThumbnailFailureReason.RESOURCE_LIMIT
         finally:
             prepared = None
             if mesh is not None:
                 del mesh
                 mesh_processing._reclaim_memory()
 
+        if request.include_geometry and geometry["triangle_count"] is not None:
+            geometry_outcome = GeometryReady()
         if image is not None:
             failure = None
         duration_ms = max(round((time.monotonic() - started) * 1000), 0)
@@ -466,6 +539,7 @@ class ThumbnailEngine:
         return ThumbnailResult(
             image=image,
             geometry=geometry,
+            geometry_outcome=geometry_outcome,
             strategy=strategy,
             complete=complete,
             failure_reason=failure,

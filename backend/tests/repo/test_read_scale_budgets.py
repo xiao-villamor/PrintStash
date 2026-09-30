@@ -28,6 +28,7 @@ from sqlmodel import Session
 
 from app.db.models import Collection
 from tests._library_reads import LIBRARY_READS
+from tests.factories import build_tag, tag_collection
 from tests.factories.library_scale import build_library_at_scale
 
 pytestmark = pytest.mark.scale
@@ -59,10 +60,18 @@ NOISE_FLOOR_SECONDS = 0.05
 
 
 def _median_seconds(
-    client: TestClient, path: str, params: dict[str, Any], headers: dict[str, str]
+    client: TestClient,
+    path: str,
+    params: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    expected_tag_count: int | None = None,
 ) -> float:
     """Median of three timed reads, after one that warms per-process caches."""
-    client.get(path, params=params, headers=headers)
+    warm = client.get(path, params=params, headers=headers)
+    assert warm.status_code == 200, warm.text
+    if expected_tag_count is not None:
+        assert warm.json()[0]["model_count"] == expected_tag_count
     samples = []
     for _ in range(3):
         started = time.perf_counter()
@@ -73,6 +82,21 @@ def _median_seconds(
 
 
 class TestLibraryReadsAtScale:
+    def test_answers_within_budget_at_the_supported_scale_without_tags(
+        self,
+        client: TestClient,
+        db_session: Session,
+        reader: tuple[dict[str, str], Collection],
+    ) -> None:
+        headers, root = reader
+        build_library_at_scale(db_session, under=root, **SUPPORTED)
+        response = client.get("/api/v1/tags", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json() == []
+        seconds = _median_seconds(client, "/api/v1/tags", {}, headers)
+        assert seconds <= BUDGET_SECONDS["/api/v1/tags"]
+
     @pytest.mark.parametrize(("path", "params"), LIBRARY_READS)
     def test_answers_within_budget_at_the_supported_scale(
         self,
@@ -83,9 +107,17 @@ class TestLibraryReadsAtScale:
         params: dict[str, Any],
     ) -> None:
         headers, root = reader
+        if path == "/api/v1/tags":
+            tag_collection(db_session, root, build_tag(db_session, "Scale tag"))
         build_library_at_scale(db_session, under=root, **SUPPORTED)
 
-        seconds = _median_seconds(client, path, params, headers)
+        seconds = _median_seconds(
+            client,
+            path,
+            params,
+            headers,
+            expected_tag_count=SUPPORTED["models"] if path == "/api/v1/tags" else None,
+        )
 
         assert seconds <= BUDGET_SECONDS[path], f"{path} took {seconds:.2f}s"
 
@@ -99,10 +131,29 @@ class TestLibraryReadsAtScale:
         params: dict[str, Any],
     ) -> None:
         headers, root = reader
+        if path == "/api/v1/tags":
+            tag_collection(db_session, root, build_tag(db_session, "Scale tag"))
         build_library_at_scale(db_session, under=root, **AN_EIGHTH)
-        small = max(_median_seconds(client, path, params, headers), NOISE_FLOOR_SECONDS)
+        small = max(
+            _median_seconds(
+                client,
+                path,
+                params,
+                headers,
+                expected_tag_count=AN_EIGHTH["models"]
+                if path == "/api/v1/tags"
+                else None,
+            ),
+            NOISE_FLOOR_SECONDS,
+        )
         build_library_at_scale(db_session, under=root, **THE_REST)
 
-        large = _median_seconds(client, path, params, headers)
+        large = _median_seconds(
+            client,
+            path,
+            params,
+            headers,
+            expected_tag_count=SUPPORTED["models"] if path == "/api/v1/tags" else None,
+        )
 
         assert large / small <= MAX_GROWTH, f"{path}: {small:.3f}s -> {large:.3f}s"

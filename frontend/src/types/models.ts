@@ -460,7 +460,15 @@ export type DerivativeKind = "metadata" | "thumbnail" | "toolpath";
 export type WorkPriority = "interactive" | "backfill";
 
 /** One background Job, from `/api/v1/jobs`. */
+export interface JobStagingSummary {
+  retained_bytes: number;
+  lease_count: number;
+  earliest_expiry: string;
+  discard_available: boolean;
+}
+
 export interface JobStatus {
+  staging: JobStagingSummary | null;
   job_id: string;
   kind: JobKind;
   state: JobState;
