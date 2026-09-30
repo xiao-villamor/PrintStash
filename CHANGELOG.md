@@ -10,6 +10,8 @@
 
 ### Added
 
+- Deep CI exercises the production mesh pipeline under 1 GiB and 4 GiB
+  limits on amd64 and arm64, publishing memory, failure and cleanup evidence.
 - Job details show retained ingest capacity and provide a confirmed, identity-checked
   discard action serialized against retry. Completed staging is reconciled at
   startup; failed input retains its existing expiry (#259).

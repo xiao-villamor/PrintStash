@@ -18,6 +18,62 @@ env:
   OPENBLAS_NUM_THREADS: "1"
 
 jobs:
+  mesh-resources:
+    name: Mesh resources (${{ matrix.arch }}, ${{ matrix.memory }} GiB)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            memory: 1
+          - arch: amd64
+            runner: ubuntu-latest
+            memory: 4
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            memory: 1
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            memory: 4
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install corpus factories
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the production backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          load: true
+          tags: printstash:mesh-resources
+          build-args: PRINTSTASH_VARIANT=full
+          cache-from: type=gha,scope=mesh-resources-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=mesh-resources-${{ matrix.arch }}
+      - name: Exercise production API and DBOS under the memory ceiling
+        working-directory: backend
+        run: >-
+          uv run python scripts/mesh_resource_gate.py
+          --image printstash:mesh-resources
+          --memory-gib ${{ matrix.memory }}
+          --report ${{ runner.temp }}/mesh-resources.json
+      - name: Publish resource and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mesh-resources-${{ matrix.arch }}-${{ matrix.memory }}g
+          path: ${{ runner.temp }}/mesh-resources.json
+          if-no-files-found: error
+
   similarity-native:
     name: Similarity native (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
