@@ -183,9 +183,9 @@ class ThumbnailEngine:
         if over_cap and request.include_geometry:
             geometry_outcome = GeometryRefused(ThumbnailFailureReason.RESOURCE_LIMIT)
 
+        embedded = None
         try:
             with mesh_processing._render_semaphore():
-                embedded = None
                 if (
                     request.include_thumbnail
                     and suffix == ".3mf"
