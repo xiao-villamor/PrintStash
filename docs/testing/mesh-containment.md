@@ -10,7 +10,7 @@
 | 6 | retains bounded budgets with estimates disabled | Edge | 1 GiB detected, two workers, estimates off | 256 MiB per worker | Unit | ✅ `unit/modules/media/test_admission.py::test_disabling_estimates_keeps_divided_safety_budget` |
 | 7 | preserves mesh output through isolation | Happy | Cube with thumbnail/fingerprint | Identical measured output | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestGenerate::test_matches_the_in_process_engine` |
 | 8 | preserves STEP visual rendering | Happy | Native STEP box | Six visual views, worker reaped | Integration | ✅ `integration/modules/media/test_visual_render.py::TestVisualRender::test_renders_step_without_database_access_in_the_child` |
-| 9 | reaps timed-out worker groups | Error | Worker spawns child then stalls | Both processes dead | Unit | ✅ `unit/modules/media/test_mesh_isolation.py::TestSupervise::test_kills_descendants_along_with_the_worker` |
+| 9 | reaps timed-out worker groups | Error | Worker spawns child then stalls | Both processes dead | Unit | ✅ `unit/modules/media/test_mesh_isolation.py::TestSupervise::test_kills_descendants_the_child_started` |
 | 10 | rejects isolation bypasses | Error | Production AST | No unapproved raw consumer | Repo | ✅ `repo/test_mesh_boundaries.py::test_new_consumers_cannot_bypass_mesh_isolation` |
 
 The API/container OOM, architecture and retention gates are delivered separately

@@ -22,7 +22,7 @@ def main():
                 "import time; hold=bytearray(100*1024**2); time.sleep(60)",
             ]
         )
-        hold = bytearray(100 * 1024**2)
+        _hold = bytearray(100 * 1024**2)
         time.sleep(60)
     elif case == "wait":
         from pathlib import Path
