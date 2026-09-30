@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import or_
 from sqlmodel import Session, col, select
-from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.time import utcnow
 from app.db.models import (
@@ -24,11 +22,9 @@ from app.db.models import (
 from app.modules.storage.storage_backend.contracts import (
     StorageBackend,
 )
-from app.schemas.jobs import JobStagingSummary, JobStatus
 
 from .staging_leases import (
     _entry_present,
-    _matching_path,
     _quarantine_entry_path,
     _quarantine_owned_file,
 )
@@ -112,48 +108,6 @@ def reconcile_jobs(session: Session, *, job_id: str | None = None) -> int:
     return released
 
 
-def _releasable(lease: StagingLease) -> bool:
-    if lease.capture_upload_slot_origin_id is not None:
-        return False
-    return _matching_path(lease) is not None or (
-        not _entry_present(Path(lease.path))
-        and not _entry_present(_quarantine_entry_path(Path(lease.path), lease.id))
-    )
-
-
-def summary(status: JobStatus, leases: list[StagingLease]) -> JobStagingSummary | None:
-
-    from .requests import DEFINITIONS
-
-    if not leases:
-        return None
-    return JobStagingSummary(
-        retained_bytes=sum(lease.size_bytes for lease in leases),
-        lease_count=len(leases),
-        earliest_expiry=min(lease.expires_at for lease in leases),
-        discard_available=(
-            status.terminal
-            and status.kind in DEFINITIONS.values()
-            and all(_releasable(lease) for lease in leases)
-        ),
-    )
-
-
-def attach_summaries(
-    session: Session, statuses: Sequence[JobStatus], selection: SelectOfScalar[str]
-) -> None:
-    """One lease query for the selected page; never one query per Job."""
-    from collections import defaultdict
-
-    grouped = defaultdict(list)
-    for lease in session.exec(
-        select(StagingLease).where(col(StagingLease.job_id).in_(selection))
-    ).all():
-        grouped[lease.job_id].append(lease)
-    for status in statuses:
-        status.staging = summary(status, grouped[status.job_id])
-
-
 def discard(job_id: str, *, actor: User) -> None:
     """Serialize discard and retry on the Job row, without exposing a pathname."""
     import json
@@ -163,6 +117,8 @@ def discard(job_id: str, *, actor: User) -> None:
     from app.db.transactions import begin_write
     from app.modules.work.jobs import status_of
     from app.modules.work.service import visible_to
+
+    from .staging_views import _releasable
 
     with get_session_factory().scoped_session() as session:
         begin_write(session, immediate=True)
