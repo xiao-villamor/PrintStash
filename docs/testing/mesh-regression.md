@@ -35,6 +35,7 @@ supply the companion tests referenced here.
 | 21 | exposes safe recovery (zip-upload.spec.ts) | Happy | Failed ZIP inspection | Confirmation, discard, capacity released | Playwright real | ✅ implemented |
 | 22 | avoids accumulation (Gate.run) | Edge | Twelve mixed files after native warm-up | Current RSS delta and trend bounded | Production container | ✅ implemented |
 | 23 | continues after bad input (Gate.run/TestMeshFailureRecovery) | Error | Bad file followed by healthy one | Following metadata ready | E2E/container | ✅ implemented |
+| 24 | rejects mesh bypasses (TestMeshBoundaries) | Error | Native submodules, aliases, relative imports, wildcard imports, raw callable references | Repository gate rejects bypass; isolation and shared types remain allowed | Repository | ✅ implemented |
 
 ## Running the production gate
 
