@@ -19,12 +19,14 @@ import binascii
 import json
 import os
 import re
+import secrets
 import selectors
 import signal
 import struct
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -370,4 +372,25 @@ def generate(request: ThumbnailRequest) -> ThumbnailResult:
         "output_format": request.output_format,
         "reason": request.reason,
     }
-    return decode_reply(run_worker("app.modules.media.mesh_worker", spec))
+    with mesh_processing._render_semaphore(), ExitStack() as resources:
+        if request.include_fingerprint and mesh_processing._canonical_suffix(
+            request.path, request.file_type
+        ) in (".step", ".stp"):
+            from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
+            from app.db.session import get_session_factory
+            from app.modules.storage.capacity import CapacityManager, CapacityResource
+
+            faces = min(settings.mesh_max_render_triangles, MAX_ANALYSIS_FACES)
+            reservation = CapacityManager(get_session_factory()).reserve(
+                "step-tessellation:" + secrets.token_hex(12),
+                [
+                    CapacityResource.for_path(
+                        Path(tempfile.gettempdir()),
+                        max(faces, 1) * 96 + 1024 * 1024 + 64 * 1024,
+                        role="STEP tessellation",
+                    )
+                ],
+            )
+            resources.callback(reservation.release)
+        return decode_reply(run_worker("app.modules.media.mesh_worker", spec))

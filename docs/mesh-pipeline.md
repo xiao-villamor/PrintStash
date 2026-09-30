@@ -28,7 +28,9 @@ while retaining a half-memory safety allocation divided by concurrency. If
 memory detection is unavailable, workers share a bounded 2 GiB fallback.
 
 CAD tessellation and STL streaming inside a mesh worker use its existing process,
-budget and deadline. The parent owns the temporary directory and removes it
+budget and deadline. CAD output capacity belongs to the supervising parent,
+which releases it on every exit; disposable workers never open the application
+database for output admission. The parent owns the temporary directory and removes it
 after killing and reaping the worker group. Linux parent-death protection kills
 an abandoned worker. Unsupported hard-limit platforms fail closed.
 

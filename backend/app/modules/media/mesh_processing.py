@@ -525,11 +525,14 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
     # Worst case: three float64 vertices and three int64 indices per face.
     # Include NPZ headers and the bounded B-rep sidecar in the capacity lease.
     result_limit = max(triangle_limit, 1) * 96 + 1024 * 1024
+    from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+    isolated = os.environ.get(WORKER_MARKER) == str(os.getpid())
     with ExitStack() as resources:
         tmp = resources.enter_context(
             tempfile.TemporaryDirectory(prefix="printstash-step-")
         )
-        if include_brep:
+        if include_brep and not isolated:
             import secrets
 
             from app.db.session import get_session_factory
@@ -545,9 +548,7 @@ def _load_step_mesh_isolated(path: Path, *, include_brep: bool = False):
             )
             resources.callback(reservation.release)
         output = Path(tmp) / ("mesh.npz" if include_brep else "mesh.glb")
-        from app.modules.media.worker_bootstrap import WORKER_MARKER
-
-        if os.environ.get(WORKER_MARKER) == str(os.getpid()):
+        if isolated:
             from app.modules.media.step_worker import convert
 
             returncode = convert(

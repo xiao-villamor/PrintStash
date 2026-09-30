@@ -13,5 +13,8 @@
 | 9 | reaps timed-out worker groups | Error | Worker spawns child then stalls | Both processes dead | Unit | ✅ `unit/modules/media/test_mesh_isolation.py::TestSupervise::test_kills_descendants_the_child_started` |
 | 10 | rejects isolation bypasses | Error | Production AST | No unapproved raw consumer | Repo | ✅ `repo/test_mesh_boundaries.py::TestMeshBoundaries::test_new_consumers_cannot_bypass_mesh_isolation` |
 
+| 11 | keeps CAD workers free of application DB access | Happy | STEP fingerprint, inaccessible child DB | Geometry and fingerprint succeed | Integration | ✅ TestStepCapacityOwnership.test_fingerprint_worker_does_not_access_application_database |
+| 12 | releases CAD capacity after refusal | Error | STEP worker refused at startup | Parent admission existed before launch, reservation released | Integration | ✅ TestStepCapacityOwnership.test_parent_releases_capacity_after_worker_refusal |
+
 The API/container OOM, architecture and retention gates are delivered separately
 with the permanent regression gate. This matrix covers the containment change.
