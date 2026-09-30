@@ -83,3 +83,16 @@ def three_mf(
         )
         entries["_rels/.rels"] = ET.tostring(relationships)
     return zip_bytes(entries)
+
+
+def expanding_three_mf(depth: int = 20) -> bytes:
+    """Four base faces repeated exponentially without a large source archive."""
+    if depth < 1:
+        raise ValueError("depth must be positive")
+    return three_mf(
+        assemblies={
+            index: [(index - 1, None), (index - 1, None)]
+            for index in range(2, depth + 2)
+        },
+        build=((depth + 1, None),),
+    )

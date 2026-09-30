@@ -6,10 +6,25 @@ from printstash_core.mesh.similarity import GeometryError
 
 from app.modules.media.mesh_resources import load_3mf
 from tests.factories import content
-from tests.factories.geometry import three_mf
+from tests.factories.geometry import expanding_three_mf, three_mf
 
 
 class TestThreeMFResources:
+    def test_refuses_exponential_component_expansion(self, tmp_path):
+        path = tmp_path / "expansion.3mf"
+        path.write_bytes(expanding_three_mf())
+        assert path.stat().st_size < 10_000
+        with pytest.raises(GeometryError) as error:
+            load_3mf(path, max_faces=2_000_000)
+        assert error.value.code == "scene_resource_limit"
+
+    def test_preserves_bounded_component_expansion(self, tmp_path):
+        path = tmp_path / "bounded.3mf"
+        path.write_bytes(expanding_three_mf(depth=3))
+        prepared = load_3mf(path, max_faces=32)
+        assert len(prepared.whole_mesh.faces) == 32
+        assert len(prepared.scene.instances) == 8
+
     def test_preserves_plate_multiplicity(self, tmp_path):
         path = tmp_path / "plate.3mf"
         build = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 50} 0 0") for i in range(6))
