@@ -137,10 +137,10 @@ class TestMeshBoundaries:
             "import app.modules.media.fingerprints as fp; callback = fp.extract",
         ],
     )
-    def test_rejects_native_and_relative_bypasses(self, source):
+    def test_rejects_mesh_bypasses(self, source):
         assert _violations(source, "app.modules.media")
 
-    def test_allows_isolation_and_shared_types(self):
+    def test_allows_safe_consumers(self):
         assert (
             _violations(
                 "from .mesh_isolation import generate\n"
