@@ -159,10 +159,14 @@ def mark_failed(
     *,
     now: datetime,
     deterministic: bool,
+    duration_ms: int | None = None,
+    peak_rss_bytes: int | None = None,
 ) -> None:
     """Record a failure; a deterministic one exhausts the attempts at once."""
     row.state = DerivativeState.FAILED
     row.failure_reason = reason
+    row.duration_ms = duration_ms
+    row.peak_rss_bytes = peak_rss_bytes
     if deterministic:
         row.attempts = max(row.attempts, settings.derivative_max_attempts)
     if row.attempts >= settings.derivative_max_attempts:

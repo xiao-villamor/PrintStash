@@ -13,7 +13,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from app.modules.media.thumbnail_engine import ThumbnailResult, ThumbnailStrategy
+from app.modules.media.thumbnail_engine import (
+    GeometryNotRequested,
+    ThumbnailResult,
+    ThumbnailStrategy,
+)
 
 
 def _benchmark_module():
@@ -43,6 +47,7 @@ class TestThumbnailBenchmark:
                 calls += 1
                 return ThumbnailResult(
                     image=image.getvalue(),
+                    geometry_outcome=GeometryNotRequested(),
                     geometry={
                         "bbox_x_mm": None,
                         "bbox_y_mm": None,

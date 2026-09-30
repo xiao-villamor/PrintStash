@@ -225,3 +225,55 @@ class TestDerivativeSource:
         )
 
         assert [item.subject_key for item in pending] == [subject_key(owed.id)]
+
+
+class TestStagingDiscard:
+    def test_discard_serializes_against_retry(self, pg, tmp_path, monkeypatch):
+        import hashlib
+
+        from app.core.errors import OperationError
+        from app.db.models import IngestRequestKind, StagingLease
+        from app.modules.ingestion import staging_cleanup, staging_leases
+        from app.modules.work import service
+
+        owner = f.build_user(pg, "pg-staging-owner")
+        request = f.build_ingest_request(
+            pg, owner, kind=IngestRequestKind.UPLOAD, state=JobState.FAILED
+        )
+        path = tmp_path / "retry.stl"
+        path.write_bytes(b"original retry input")
+        lease = staging_leases.create_job_lease(
+            pg,
+            job_id=request.job_id,
+            owner_user_id=owner.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        pg.commit()
+        job_id, lease_id = request.job_id, lease.id
+        _ = owner.id, owner.is_superuser
+        pg.expunge(owner)
+        monkeypatch.setattr(service, "nudge", lambda *_args: None)
+
+        def attempt(index):
+            action = staging_cleanup.discard if index == 0 else service.retry
+            try:
+                action(job_id, actor=owner)
+                return "accepted"
+            except OperationError as error:
+                return error.code
+
+        results = _race(2, attempt)
+        pg.expire_all()
+        job = pg.get(Job, job_id)
+        assert job is not None
+        retained = pg.get(StagingLease, lease_id)
+        if job.state == JobState.QUEUED:
+            assert results == ["staging_job_not_terminal", "accepted"]
+            assert retained is not None
+            assert path.read_bytes() == b"original retry input"
+        else:
+            assert results == ["accepted", "job_subject_gone"]
+            assert retained is None
+            assert not path.exists()

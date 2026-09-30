@@ -712,6 +712,7 @@ class TestIngestModel:
 
         from app.modules.derivatives import producers
         from app.modules.media.thumbnail_engine import (
+            GeometryNotRequested,
             ThumbnailResult,
             ThumbnailStrategy,
         )
@@ -723,6 +724,7 @@ class TestIngestModel:
             "generate",
             lambda _request: ThumbnailResult(
                 image=replacement,
+                geometry_outcome=GeometryNotRequested(),
                 geometry={
                     "bbox_x_mm": None,
                     "bbox_y_mm": None,

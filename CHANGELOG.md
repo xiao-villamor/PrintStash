@@ -1,11 +1,17 @@
 # Changelog
 
 ## Unreleased
+- Report refused mesh geometry separately from usable thumbnails, retain terminal
+  failures for unchanged input, and backfill accurate metadata with recipe 3 (#259).
+
 
 ### Added
 
 - Deep CI exercises the production mesh pipeline under 1 GiB and 4 GiB
   limits on amd64 and arm64, publishing memory, failure and cleanup evidence.
+- Job details show retained ingest capacity and provide a confirmed, identity-checked
+  discard action serialized against retry. Completed staging is reconciled at
+  startup; failed input retains its existing expiry (#259).
 
 - API responses include `Server-Timing` for total request time, SQL time and
   statement count. Requests exceeding `VAULT_SLOW_REQUEST_MS` (1,000 ms by
@@ -83,6 +89,9 @@
 
 ### Performance
 
+- Tag counts now follow collection links when inheriting tags, so listing tags
+  stays responsive in libraries with tens of thousands of collections and
+  100,000 Models, including for users with collection-specific access.
 - **3MF geometry loads about 1.6 times faster.** The bounded 3MF loader read
   every vertex and triangle attribute with a Python call per value; it now
   hands each column to NumPy in one pass. A 320,000-face project went from

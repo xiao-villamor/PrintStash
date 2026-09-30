@@ -123,3 +123,72 @@ class TestReindexChanged:
 
         assert changed is False
         assert DerivativeKind.METADATA in records.rows_for(db_session, file_row)
+
+
+class TestTerminalMeshFailure:
+    @pytest.mark.parametrize("trigger", ["watcher", "periodic"])
+    def test_unchanged_mesh_failure_survives_source_refresh(
+        self, tmp_path, db_session, work_engine, trigger
+    ):
+        import os
+
+        from app.modules.sources.library_watcher import LibraryWatcher
+
+        use_local_storage(tmp_path)
+        root = tmp_path / "mounted"
+        root.mkdir()
+        path = root / "broken.3mf"
+        path.write_bytes(b"malformed mesh package")
+        library = build_external_library(db_session, root, name="mounted")
+        external_library.scan_library(library.id)
+        work_engine.drain()
+        file_row = db_session.exec(
+            select(File).where(File.original_filename == "broken.3mf")
+        ).one()
+        before = records.rows_for(db_session, file_row)[DerivativeKind.METADATA]
+        assert before.state == DerivativeState.FAILED
+        attempts, updated = before.attempts, before.updated_at
+        for _ in range(3):
+            stat = path.stat()
+            os.utime(path, (stat.st_atime, stat.st_mtime + 60))
+            if trigger == "watcher":
+                LibraryWatcher._request_scan(library.id)
+            else:
+                external_library.scan_library(library.id)
+            work_engine.drain()
+        db_session.expire_all()
+        after = records.rows_for(db_session, db_session.get(File, file_row.id))[
+            DerivativeKind.METADATA
+        ]
+        assert (after.attempts, after.updated_at) == (attempts, updated)
+
+    def test_changed_mesh_bytes_become_eligible_again(
+        self, tmp_path, db_session, work_engine
+    ):
+        from tests.factories.geometry import three_mf
+
+        use_local_storage(tmp_path)
+        root = tmp_path / "mounted"
+        root.mkdir()
+        path = root / "changed.3mf"
+        path.write_bytes(b"malformed mesh package")
+        library = build_external_library(db_session, root, name="mounted")
+        external_library.scan_library(library.id)
+        work_engine.drain()
+        file_row = db_session.exec(
+            select(File).where(File.original_filename == "changed.3mf")
+        ).one()
+        assert (
+            records.rows_for(db_session, file_row)[DerivativeKind.METADATA].state
+            == DerivativeState.FAILED
+        )
+        path.write_bytes(three_mf())
+        external_library.scan_library(library.id)
+        work_engine.drain()
+        db_session.expire_all()
+        assert (
+            records.rows_for(db_session, db_session.get(File, file_row.id))[
+                DerivativeKind.METADATA
+            ].state
+            == DerivativeState.READY
+        )

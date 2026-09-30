@@ -4137,5 +4137,12 @@
   "Vault root": "Raíz de la biblioteca",
   "Choose a collection": "Elige una colección",
   "Selected ZIP files are importing in the background.": "Los archivos elegidos del ZIP se importan en segundo plano.",
-  "Files selected for import": "Archivos elegidos para importar"
+  "Files selected for import": "Archivos elegidos para importar",
+  "Retained input: {size} · {count} staged files": "Entrada conservada: {size} · {count} archivos temporales",
+  "Earliest expiry: {date}": "Primera caducidad: {date}",
+  "Discard staged input": "Descartar entrada temporal",
+  "Discard staged input?": "¿Descartar la entrada temporal?",
+  "This frees retained upload capacity. Retrying this import will require uploading its input again.": "Esto libera espacio temporal de carga. Para reintentar esta importación tendrás que volver a cargar su entrada.",
+  "Staged input ownership could not be verified. Its capacity remains reserved.": "No se pudo verificar la propiedad de la entrada temporal. Su espacio sigue reservado.",
+  "Wait for this import to finish before discarding its staged input.": "Espera a que termine esta importación antes de descartar su entrada temporal."
 }

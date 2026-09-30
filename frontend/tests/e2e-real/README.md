@@ -151,3 +151,5 @@ Only the test certificate's trust check is relaxed; browser CORS remains enabled
 Search clarity: the AI-search flow verifies that Enter preserves the live library filter, explicit AI search opens results, and retrieval explanations stay hidden. Library workflows reveal secondary commands through Library tools.
 
 AI Search settings: the Settings browser flow waits for loaded AI data, visits guided setup, search types, AI servers and technical options, captures desktop and mobile views, and checks visible choices and horizontal fit.
+
+- ZIP uploads: a failed preparation retains input capacity; Tasks confirms and discards it safely.

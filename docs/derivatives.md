@@ -93,3 +93,17 @@ replacement is ready.
   outputs kept until replaced).
 - **Audit repair:** a vault audit that finds a thumbnail missing from storage
   invalidates and re-derives it (`derivatives.repair`).
+
+## Mesh geometry outcomes
+
+Mesh replies carry a geometry outcome independently from thumbnail status.
+A validated embedded preview can remain ready when geometry is refused. Refused
+geometry records a failed metadata derivative, with terminal resource/malformed
+input reasons; it does not publish a successful all-unknown measurement row.
+Ready geometry can still have an unknown volume for an open mesh.
+
+Metadata recipe 3 replaces the earlier output semantics. The ordinary bounded
+Work Source backfills it. Terminal attempts stay exhausted across scans, nudges
+and restarts for the same bytes and recipe. Explicit retry, changed content or a
+new recipe makes work eligible; timeout backoff keeps the configured maximum.
+Original downloads and signed slicer downloads continue to use Artifact bytes.

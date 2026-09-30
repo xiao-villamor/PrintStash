@@ -220,3 +220,23 @@ are only ever recognised by their heartbeat going stale.
   the intent is still in the database.
 - **A notice is dropped.** Clients also refresh on a slow interval and on
   `resync`.
+
+
+## Retained ingest input
+
+JobStatus includes a nullable staging summary (retained_bytes, lease_count,
+earliest_expiry, discard_available). It never includes storage paths. Failed,
+uncommitted ingest input remains charged until the configured lease retention
+expires or the owner explicitly discards it. Active input survives expiry.
+Completed uploads are reconciled against their committed Artifact on settlement
+and startup, releasing exact receipts promptly.
+
+POST /api/v1/jobs/{job_id}/discard-staging returns 204, including when already
+absent. Only the owner or an administrator may use it, and only terminal ingest
+jobs are eligible. Active work and uncertain ownership return 409; another user
+sees 404. Discard and retry lock the same Job row (SQLite reserves its writer),
+so retry cannot race deletion. Replacement or inaccessible paths remain charged.
+Capture-origin inputs retain their Pending Import dismissal lifecycle.
+
+Tasks show retained capacity and expiry with a confirmation before discard.
+After discard, retry requires the input to be uploaded again.

@@ -392,14 +392,11 @@ def inspect_uploaded_archive(
     except ArchivePreparationCancelled:
         return
     except importer.ImportError_ as exc:
-        # The archive is refused on its content; no retry can accept it, so the
-        # staged bytes are released now rather than at lease expiry.
+        # Retain uncommitted input until lease expiry or explicit discard.
+        # Deterministic refusal still suppresses automatic retries.
         registry.finish(
             job_id, JobOutcome.FAILED, error=failure_of(exc), retryable=False
         )
-        from .ingestion import release_job_staging
-
-        release_job_staging(job_id)
 
 
 def run_archive_selection(
