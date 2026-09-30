@@ -27,7 +27,7 @@ MIB = 1024 * 1024
 
 
 def docker(*args: str) -> str:
-    return subprocess.check_output(["docker", *args], text=True).strip()
+    return subprocess.check_output(["docker", *args], text=True, timeout=60).strip()
 
 
 class Gate:
@@ -231,13 +231,19 @@ print(json.dumps({'rss':rss,'workers':workers,'oom_kill':int(events['oom_kill'])
             Path(__file__).resolve().parents[1] / "tests/fakes/mesh_resource_burst.py"
         )
         docker("cp", str(probe), self.name + ":/tmp/mesh_resource_burst.py")
-        script = (
-            "import os,subprocess,sys; "
-            "p=subprocess.run([sys.executable,'-m','app.modules.media.worker_bootstrap',"
-            "str(128*1024*1024),str(os.getpid()),'mesh_resource_burst'],"
-            "env=dict(os.environ,PYTHONPATH='/tmp')); "
-            "assert p.returncode==72,p.returncode"
-        )
+        script = """import os
+os.environ["PYTHONPATH"] = "/tmp"
+from app.modules.media.mesh_isolation import supervise, MeshWorkerError
+from app.modules.media.worker_bootstrap import command
+from app.modules.media.thumbnail_engine import ThumbnailFailureReason
+try:
+ supervise(command("mesh_resource_burst", [], 128*1024*1024),
+           memory_budget=128*1024*1024, timeout_seconds=30)
+except MeshWorkerError as error:
+ assert error.reason is ThumbnailFailureReason.RESOURCE_LIMIT, error.reason
+else:
+ raise AssertionError("unbounded allocation succeeded")
+"""
         docker("exec", self.name, "/app/.venv/bin/python", "-c", script)
         self.request("/api/v1/health")
         assert self.sample()["oom_kill"] == self.baseline["oom_kill"]
@@ -342,8 +348,13 @@ print(json.dumps({'rss':rss,'workers':workers,'oom_kill':int(events['oom_kill'])
         self.case(
             "after-failure.stl", content.binary_stl(offset=(1, 2, 3)), must_succeed=True
         )
+        self.report["before_restart"] = self.sample()
         docker("restart", self.name)
+        # Docker can allocate a new ephemeral host port when restarting.
+        port = docker("port", self.name, "8000/tcp").rsplit(":", 1)[1]
+        self.origin = "http://127.0.0.1:" + port
         self.ready()
+        self.report["after_restart"] = self.sample()
         self.case(
             "after-restart.stl", content.binary_stl(offset=(2, 3, 4)), must_succeed=True
         )
