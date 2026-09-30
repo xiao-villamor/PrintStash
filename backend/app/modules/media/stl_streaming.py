@@ -314,6 +314,23 @@ def render_stl_preview_isolated(
             str(int(height)),
             *worker_limits.as_worker_args(expected_parent_pid=os.getpid()),
         ]
+        from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+        if os.environ.get(WORKER_MARKER) == str(os.getpid()):
+            # The outer worker already owns a hard ceiling and deadline.
+            # Streaming consumes that allowance, rather than spawning a second
+            # process with another full allowance.
+            from app.modules.media.stl_preview_worker import main
+
+            if main(command[3:], apply_limits=False) != 0:
+                return None
+            return _decode_result(
+                output,
+                manifest,
+                width=int(width),
+                height=int(height),
+                limits=worker_limits,
+            )
         env = os.environ.copy()
         env.update(
             {

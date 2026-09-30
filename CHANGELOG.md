@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Harden mesh workers with pre-import address-space limits, one admission controller
+  across concurrency changes, process-tree memory accounting, and shared budgets
+  for nested CAD/streaming work (#259).
+
 
 ### Added
 

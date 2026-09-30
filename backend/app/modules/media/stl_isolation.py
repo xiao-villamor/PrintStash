@@ -51,7 +51,12 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> bytes | None:
     """
     if mesh_processing._canonical_suffix(path, file_type) == ".stl":
         # Already STL: the bytes are returned untouched and nothing is parsed.
-        return mesh_processing.to_stl_bytes(path, file_type=file_type)
+        try:
+            if path.stat().st_size > MAX_STL_BYTES:
+                raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+            return path.read_bytes()
+        except OSError:
+            return None
     with tempfile.TemporaryDirectory(prefix="printstash-stl-") as directory:
         output = Path(directory) / "mesh.stl"
         spec = {
