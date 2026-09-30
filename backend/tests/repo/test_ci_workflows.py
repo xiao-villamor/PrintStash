@@ -157,13 +157,42 @@ class TestQuickGate:
 
     def test_keeps_required_check_present_on_every_pr(self) -> None:
         workflow = _workflow("ci.yml")
-        assert set(workflow[True]) == {"pull_request", "push", "merge_group"}
+        assert set(workflow[True]) == {"pull_request", "push", "merge_group", "workflow_dispatch"}
         assert workflow[True]["pull_request"] is None
         assert workflow["env"]["OPENBLAS_NUM_THREADS"] == "1"
         assert "gate" in workflow["jobs"]
 
 
 class TestDeepSuite:
+    def test_gates_mesh_resources_on_both_native_architectures(self):
+        job = _workflow("deep-ci.yml")["jobs"]["mesh-resources"]
+        rows = job["strategy"]["matrix"]["include"]
+        assert {(row["arch"], row["memory"]) for row in rows} == {
+            ("amd64", 1),
+            ("amd64", 4),
+            ("arm64", 1),
+            ("arm64", 4),
+        }
+        assert job.get("continue-on-error") is not True
+        build = next(
+            step
+            for step in job["steps"]
+            if step.get("name") == "Build the production backend image"
+        )
+        assert build["with"]["context"] == "backend"
+        assert build["with"]["build-args"] == "PRINTSTASH_VARIANT=full"
+        commands = _commands(job)
+        assert "scripts/mesh_resource_gate.py" in commands
+        assert "--memory-gib ${{ matrix.memory }}" in commands
+        assert "github.com/user-attachments" not in commands
+        evidence = next(
+            step
+            for step in job["steps"]
+            if step.get("name") == "Publish resource and cleanup evidence"
+        )
+        assert evidence["if"] == "always()"
+        assert evidence["with"]["if-no-files-found"] == "error"
+
     def test_covers_every_critical_browser_configuration(self) -> None:
         workflow = _workflow("deep-ci.yml")
         browser = workflow["jobs"]["browser-real"]
