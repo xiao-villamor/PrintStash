@@ -19,11 +19,12 @@ def main():
     elif case == "tree":
         import subprocess
 
+        hold_mb = int(sys.argv[3]) if len(sys.argv) > 3 else 100
         child = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
-                "import time; hold=bytearray(100*1024**2); time.sleep(60)",
+                f"import time; hold=bytearray({hold_mb}*1024**2); time.sleep(60)",
             ]
         )
         if len(sys.argv) > 2:
@@ -31,7 +32,7 @@ def main():
             from pathlib import Path
 
             Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
-        _hold = bytearray(100 * 1024**2)
+        _hold = bytearray(hold_mb * 1024**2)
         time.sleep(60)
     elif case in ("tree_wait", "leaves_child"):
         import json

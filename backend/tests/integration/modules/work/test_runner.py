@@ -357,3 +357,23 @@ class TestExecuteJob:
 
         with pytest.raises(KeyboardInterrupt):
             _run(engine, job)
+
+
+class TestActiveAttempt:
+    def test_superseded_execution_is_withdrawn(self, make_job):
+        from app.modules.work.runner import _withdrawn
+
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.RUNNING,
+            attempts=2,
+        )
+        assert _withdrawn(job.id, 1)
+        assert not _withdrawn(job.id, 2)
+
+    def test_requeued_execution_is_withdrawn(self, make_job):
+        from app.modules.work.runner import _withdrawn
+
+        job = make_job(kind=JobKind.DERIVATIVES_MESH, attempts=1)
+        assert _withdrawn(job.id, 1)
+        assert not _withdrawn(job.id)

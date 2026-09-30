@@ -29,6 +29,8 @@
   will be removed in 0.16.
 
 ### Fixed
+- Cancelling active mesh work now stops its native worker tree, releases capacity,
+  and preserves the original. Immediate retry cannot resume the cancelled attempt (#259).
 - Keep native STEP/STP conversion within small worker memory budgets by using serial tessellation, and classify B-rep allocation failures as resource refusals.
 
 

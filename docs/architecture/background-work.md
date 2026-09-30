@@ -240,3 +240,14 @@ Capture-origin inputs retain their Pending Import dismissal lifecycle.
 
 Tasks show retained capacity and expiry with a confirmation before discard.
 After discard, retry requires the input to be uploaded again.
+
+## Synchronous native cancellation
+
+WorkRunner scopes each synchronous step to its Job attempt. Native supervisors
+and their shared admission controller check durable withdrawal through
+app.core.cancellation; a cancelled or superseded attempt releases its process
+tree and owned resources before returning a cancelled step outcome. The scope
+is reset even when the step raises. Concurrent steps have independent probes.
+A forced check before accepting native output prevents a result finishing inside
+the normal 200 ms polling interval from publishing after observed withdrawal.
+The Job engine remains responsible for durable dispatch and settlement.

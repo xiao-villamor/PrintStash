@@ -99,3 +99,44 @@ class TestVisualRender:
             EmbeddingError, match="embedding_(output_invalid|render_failed)"
         ):
             visual_render.decode_reply(payload, recipe)
+
+    def test_cancellation_reaps_the_worker_tree(
+        self, render_case, monkeypatch, tmp_path
+    ):
+        import json
+        import subprocess
+        from pathlib import Path
+
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+        from app.modules.media.worker_bootstrap import command
+        from tests.paths import BACKEND_DIR
+
+        source, recipe, processes = render_case
+        pids = tmp_path / "pids"
+
+        def waiting(*_args, **_kwargs):
+            process = subprocess.Popen(
+                command(
+                    "tests.fakes.mesh_bootstrap_probe",
+                    ["tree_wait", str(pids)],
+                    256 * 1024**2,
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                cwd=BACKEND_DIR,
+            )
+            processes.append(process)
+            return process
+
+        monkeypatch.setattr(visual_render, "_spawn", waiting)
+        with cancellation_scope(pids.exists), pytest.raises(OperationCancelled):
+            visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(10),
+            )
+        assert processes[0].poll() is not None
+        for pid in json.loads(pids.read_text()):
+            assert not Path(f"/proc/{pid}").exists()

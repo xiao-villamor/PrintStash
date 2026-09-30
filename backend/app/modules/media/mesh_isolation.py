@@ -33,6 +33,7 @@ from typing import Any
 from printstash_core.mesh.similarity import GeometryError
 
 from app import __file__ as application_file
+from app.core.cancellation import checkpoint
 from app.core.config import _overlay, settings
 from app.modules.media import mesh_processing
 from app.modules.media.fingerprints import FingerprintRecord, FingerprintResult
@@ -266,6 +267,7 @@ def supervise(
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while True:
+                checkpoint()
                 if time.monotonic() >= deadline:
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
                 rss = mesh_processing.process_tree_rss_bytes(process.pid)
@@ -292,6 +294,7 @@ def supervise(
             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
         if code != 0:
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+        checkpoint(force=True)
         return bytes(reply)
     finally:
         # The leader may already have exited; its descendants still belong to

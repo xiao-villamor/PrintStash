@@ -32,6 +32,7 @@ from typing import Dict, Optional
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
 from app import __file__ as application_file
+from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -102,6 +103,7 @@ class _RenderAdmission:
             return self
         with self.condition:
             while True:
+                checkpoint()
                 if self.active == 0:
                     self.limit = self.requested
                 if self.limit == self.requested and self.active < self.limit:
@@ -109,7 +111,7 @@ class _RenderAdmission:
                     self.local.depth = 1
                     self.local.limit = self.limit
                     return self
-                self.condition.wait()
+                self.condition.wait(0.1)
 
     def __exit__(self, *_args) -> None:
         self.local.depth -= 1

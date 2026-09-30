@@ -48,7 +48,7 @@ class TestWorkerBootstrap:
         script = (
             "import subprocess,time; "
             "from app.modules.media.worker_bootstrap import command; "
-            f"subprocess.Popen(command('tests.fakes.mesh_bootstrap_probe', ['wait', {str(pid_file)!r}], 134217728)); "
+            f"subprocess.Popen(command('tests.fakes.mesh_bootstrap_probe', ['wait', {str(pid_file)!r}], 268435456)); "
             "time.sleep(60)"
         )
         parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
@@ -94,7 +94,7 @@ class TestWorkerBootstrap:
         script = (
             "import subprocess,time; "
             "from app.modules.media.worker_bootstrap import command; "
-            f"subprocess.Popen(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pid_file)!r}], 134217728), start_new_session=True); "
+            f"subprocess.Popen(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pid_file)!r}], 268435456), start_new_session=True); "
             "time.sleep(60)"
         )
         parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
@@ -140,9 +140,9 @@ class TestWorkerBootstrap:
             command(
                 "tests.fakes.mesh_bootstrap_probe",
                 ["leaves_child", str(pid_file)],
-                128 * MB,
+                256 * MB,
             ),
-            memory_budget=128 * MB,
+            memory_budget=256 * MB,
             timeout_seconds=5,
         )
         assert reply.strip() == b"reply"
@@ -158,7 +158,7 @@ class TestAbandonedTemporaryOutputs:
         script = (
             "from app.modules.media.mesh_isolation import supervise; "
             "from app.modules.media.worker_bootstrap import command; "
-            f"supervise(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pids)!r}, {str(ready)!r}], 134217728), memory_budget=134217728, timeout_seconds=60)"
+            f"supervise(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pids)!r}, {str(ready)!r}], 268435456), memory_budget=268435456, timeout_seconds=60)"
         )
         parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
         try:
@@ -204,12 +204,34 @@ class TestDescendantReaping:
             mesh_isolation.supervise(
                 command(
                     "tests.fakes.mesh_bootstrap_probe",
-                    ["tree", str(pid_file)],
-                    256 * MB,
+                    ["tree", str(pid_file), "256"],
+                    512 * MB,
                 ),
-                memory_budget=160 * MB,
+                memory_budget=480 * MB,
                 timeout_seconds=10,
             )
         assert pid_file.exists()
         for pid in json.loads(pid_file.read_text()):
             assert not Path(f"/proc/{pid}").exists(), f"unreaped descendant {pid}"
+
+
+class TestCancelledReply:
+    def test_withdrawal_before_reply_acceptance_reaps_descendants(self, tmp_path):
+        import json
+
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+        from app.modules.media.worker_bootstrap import command
+
+        pids = tmp_path / "pids"
+        with cancellation_scope(pids.exists), pytest.raises(OperationCancelled):
+            mesh_isolation.supervise(
+                command(
+                    "tests.fakes.mesh_bootstrap_probe",
+                    ["leaves_child", str(pids)],
+                    256 * MB,
+                ),
+                memory_budget=256 * MB,
+                timeout_seconds=5,
+            )
+        for pid in json.loads(pids.read_text()):
+            assert not Path(f"/proc/{pid}").exists()

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
@@ -63,11 +64,16 @@ class ExecutionContext:
         nudge(source)
 
 
-def _withdrawn(job_id: str) -> bool:
-    """Whether the Job's intent is gone: cancelled, or its row pruned."""
+def _withdrawn(job_id: str, attempt: int | None = None) -> bool:
+    """Whether this execution is cancelled, missing or superseded."""
     with get_session_factory().scoped_session() as session:
         row = session.get(Job, job_id)
-        return row is None or row.state is JobState.CANCELLED
+        return (
+            row is None
+            or row.state is JobState.CANCELLED
+            or attempt is not None
+            and (row.attempts != attempt or row.state is JobState.QUEUED)
+        )
 
 
 def _begin(job_id: str, attempt: int) -> dict[str, str] | None:
@@ -114,7 +120,13 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
         return StepOutcome.DEFERRED.value
     started = time.monotonic()
     try:
-        step.fn(context)
+        with cancellation_scope(lambda: _withdrawn(context.job_id, context.attempt)):
+            step.fn(context)
+    except OperationCancelled:
+        record_step(
+            context.definition, step.name, "cancelled", time.monotonic() - started
+        )
+        return StepOutcome.CANCELLED.value
     except BaseException:
         record_step(context.definition, step.name, "error", time.monotonic() - started)
         raise

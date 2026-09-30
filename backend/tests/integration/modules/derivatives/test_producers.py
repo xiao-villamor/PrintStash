@@ -11,6 +11,7 @@ without a reload.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from app.db.models import (
     DerivativeState,
     File,
     FileType,
+    JobKind,
+    JobState,
     Metadata,
     Model,
 )
@@ -32,8 +35,12 @@ from app.modules.derivatives import producers
 from app.modules.ingestion import extensions
 from app.modules.media import mesh_isolation, toolpath
 from app.modules.media.thumbnail_publication import ThumbnailPublicationError
+from app.modules.media.worker_bootstrap import command
+from app.modules.storage.capacity import CapacityReservation
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.work import events
+from app.modules.work import events, runner, service
+from app.modules.work.jobs import jobs
+from app.modules.work.submission import submit
 from tests.factories import content
 from tests.factories.geometry import three_mf
 from tests.paths import FIXTURES_DIR
@@ -640,3 +647,87 @@ class TestOutcome:
             DerivativeKind.METADATA,
             DerivativeKind.THUMBNAIL,
         ]
+
+
+class TestMeshCancellation:
+    @pytest.mark.parametrize("retry", [False, True], ids=["cancel", "immediate-retry"])
+    def test_withdrawal_stops_in_flight_native_work(
+        self,
+        db_session,
+        stored,
+        make_job,
+        make_user,
+        work_engine,
+        tmp_path,
+        monkeypatch,
+        retry,
+    ):
+        original = content.binary_stl()
+        artifact = stored("waiting.stl", original)
+        owner = make_user()
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{artifact.id}",
+            owner=owner,
+        )
+        pids = tmp_path / "pids"
+        ready = tmp_path / "temporary"
+        withdrawn = runner._withdrawn
+        acted = False
+        cancelled_at = None
+
+        def cancel_when_started(*args):
+            nonlocal acted, cancelled_at
+            if ready.exists() and not acted:
+                acted = True
+                cancelled_at = time.monotonic()
+                service.cancel(job.id, actor=owner)
+                if retry:
+                    service.retry(job.id, actor=owner)
+            return withdrawn(*args)
+
+        with monkeypatch.context() as patch:
+            _overlay.update({"mesh_worker_timeout_seconds": 15})
+            patch.setattr(runner, "_withdrawn", cancel_when_started)
+            patch.setattr(
+                mesh_isolation,
+                "worker_command",
+                lambda _module, _args, budget: command(
+                    "tests.fakes.mesh_bootstrap_probe",
+                    ["tree_wait", str(pids), str(ready)],
+                    min(budget, 256 * 1024**2),
+                ),
+            )
+            submit(job.id)
+            work_engine.run_one()
+            finished = time.monotonic()
+
+        status = jobs.get(job.id)
+        assert status is not None
+        assert status.state is (JobState.QUEUED if retry else JobState.CANCELLED)
+        assert acted
+        assert cancelled_at is not None
+        assert finished - cancelled_at < 3
+        for pid in json.loads(pids.read_text()):
+            assert not Path(f"/proc/{pid}").exists()
+        assert not Path(ready.read_text()).exists()
+        assert db_session.exec(select(CapacityReservation)).all() == []
+        db_session.expire_all()
+        rows = db_session.exec(
+            select(ArtifactDerivative).where(ArtifactDerivative.file_id == artifact.id)
+        ).all()
+        if retry:
+            assert rows == []
+        else:
+            assert {row.kind: row.state for row in rows} == {
+                DerivativeKind.METADATA: DerivativeState.CANCELLED,
+                DerivativeKind.THUMBNAIL: DerivativeState.CANCELLED,
+            }
+        assert get_backend().read_bytes(artifact.path) == original
+
+        _overlay.update({"mesh_worker_timeout_seconds": 300})
+        healthy = stored("following.stl", content.binary_stl())
+        assert (
+            producers.derive_mesh(healthy.id).kinds[DerivativeKind.METADATA]
+            is DerivativeState.READY
+        )
