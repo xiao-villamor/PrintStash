@@ -18,6 +18,11 @@
 
 ### Fixed
 
+- Comparing two models during a similarity run no longer happens in the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  Verification now runs in the same disposable worker as mesh derivatives, so a
+  pair whose comparison exhausts memory or never finishes is counted as a failed
+  verification and the run moves on to the next pair.
 - Analysing the whole library for similar models no longer runs in the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   The fingerprint pass now uses the same disposable worker as mesh derivatives,

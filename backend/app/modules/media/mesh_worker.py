@@ -7,13 +7,11 @@ so stdout is pointed at the null device once the real pipe has been duplicated.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
-from app.core.config import _overlay
-from app.modules.media.mesh_isolation import encode_reply
+from app.modules.media.mesh_isolation import encode_reply, read_spec
 from app.modules.media.thumbnail_engine import ThumbnailEngine, ThumbnailRequest
 
 
@@ -21,10 +19,7 @@ def main(argv: list[str]) -> int:
     output = os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0)
     with open(os.devnull, "wb") as sink:
         os.dup2(sink.fileno(), sys.stdout.fileno())
-    (raw,) = argv
-    spec = json.loads(raw)
-    # Adopt the parent's runtime configuration before any setting is read.
-    _overlay.update(spec["overrides"])
+    spec = read_spec(argv)
     request = ThumbnailRequest(
         path=Path(spec["path"]),
         file_type=spec["file_type"],

@@ -12,7 +12,7 @@ from sqlmodel import Session, col, select
 from app.core.errors import OperationError
 from app.db.models import File, GeometryFingerprint, SimilarityRun, User
 from app.db.session import SessionFactory
-from app.modules.media import geometry_analysis, mesh_isolation
+from app.modules.media import mesh_isolation, verification_isolation
 from app.modules.media.fingerprints import FingerprintResult
 from app.modules.media.thumbnail_engine import ThumbnailRequest
 from app.modules.similarity import (
@@ -340,7 +340,7 @@ class SimilarityProcessor:
                         counters.get("verification_cached", 0) + 1
                     )
                     return
-                evidence = geometry_analysis.verify_paths(
+                evidence = verification_isolation.verify_paths(
                     path_a,
                     path_b,
                     first_type=fa.file_type.value,
@@ -350,7 +350,12 @@ class SimilarityProcessor:
                     sample_points=config.sample_points,
                     triangle_cap=config.triangle_cap,
                 )
-        except (GeometryError, artifact_content.ArtifactContentError):
+        except (
+            GeometryError,
+            mesh_isolation.MeshWorkerError,
+            artifact_content.ArtifactContentError,
+        ):
+            # A worker killed for this pair's bytes fails the pair, not the run.
             counters["verification_failed"] = counters.get("verification_failed", 0) + 1
             return
         counters["verified"] = counters.get("verified", 0) + 1

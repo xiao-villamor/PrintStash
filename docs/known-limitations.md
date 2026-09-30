@@ -118,10 +118,11 @@ manufacturing platform.
   either architecture. Native Raspberry Pi and representative 1 GB hardware
   validation are still outstanding, so the published architecture list is not
   a physical-device performance claim.
-- Mesh geometry, thumbnails and similarity fingerprints run in a disposable
-  child process rather than the API. The parent kills the child's process group
-  when its resident memory passes the same cgroup-aware budget the triangle caps
-  use (`VAULT_MESH_MEMORY_BUDGET_FRACTION`) or after
+- Mesh geometry, thumbnails, similarity fingerprints and pairwise similarity
+  verification run in a disposable child process rather than the API. The
+  parent kills the child's process group when its resident memory passes the
+  same cgroup-aware budget the triangle caps use
+  (`VAULT_MESH_MEMORY_BUDGET_FRACTION`) or after
   `VAULT_MESH_WORKER_TIMEOUT_SECONDS` (default 300 s). A file that exceeds the
   budget is stored without geometry or a generated preview, is not retried, and
   does not affect other requests; other failures are retried a bounded number of

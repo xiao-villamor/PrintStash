@@ -63,7 +63,7 @@ def memory_budget_bytes() -> int:
     return mesh_processing.step_memory_budget_bytes() or _FALLBACK_MEMORY_BUDGET
 
 
-def _pack(value: Any) -> Any:
+def pack_value(value: Any) -> Any:
     """JSON-safe form of a fingerprint value that keeps bytes and tuples distinct.
 
     Fingerprints carry raw descriptor blobs and tuples, which plain JSON would
@@ -76,27 +76,27 @@ def _pack(value: Any) -> Any:
     if isinstance(value, bytes):
         return {"$bytes": base64.b64encode(value).decode("ascii")}
     if isinstance(value, tuple):
-        return {"$tuple": [_pack(item) for item in value]}
+        return {"$tuple": [pack_value(item) for item in value]}
     if isinstance(value, list):
-        return [_pack(item) for item in value]
+        return [pack_value(item) for item in value]
     if isinstance(value, dict):
         if any(not isinstance(key, str) or key.startswith("$") for key in value):
             raise TypeError("unencodable mapping key")
-        return {key: _pack(item) for key, item in value.items()}
+        return {key: pack_value(item) for key, item in value.items()}
     raise TypeError(f"unencodable {type(value).__name__}")
 
 
-def _unpack(value: Any) -> Any:
+def unpack_value(value: Any) -> Any:
     if isinstance(value, list):
-        return [_unpack(item) for item in value]
+        return [unpack_value(item) for item in value]
     if isinstance(value, dict):
         if len(value) == 1 and "$bytes" in value:
             return base64.b64decode(value["$bytes"], validate=True)
         if len(value) == 1 and "$tuple" in value:
-            return tuple(_unpack(item) for item in value["$tuple"])
+            return tuple(unpack_value(item) for item in value["$tuple"])
         if any(key.startswith("$") for key in value):
             raise ValueError("unknown tag")
-        return {key: _unpack(item) for key, item in value.items()}
+        return {key: unpack_value(item) for key, item in value.items()}
     return value
 
 
@@ -126,8 +126,10 @@ def encode_reply(result: ThumbnailResult) -> bytes:
                         {
                             "component_index": record.component_index,
                             "instance_count": record.instance_count,
-                            "values": _pack(record.values),
-                            "instances": [_pack(item) for item in record.instances],
+                            "values": pack_value(record.values),
+                            "instances": [
+                                pack_value(item) for item in record.instances
+                            ],
                         }
                         for record in fingerprint.records
                     ],
@@ -162,8 +164,10 @@ def decode_reply(payload: bytes) -> ThumbnailResult:
                     FingerprintRecord(
                         component_index=record["component_index"],
                         instance_count=record["instance_count"],
-                        values=_unpack(record["values"]),
-                        instances=tuple(_unpack(item) for item in record["instances"]),
+                        values=unpack_value(record["values"]),
+                        instances=tuple(
+                            unpack_value(item) for item in record["instances"]
+                        ),
                     )
                     for record in raw["records"]
                 ),
@@ -267,13 +271,48 @@ def runtime_overrides() -> dict[str, str | int | float | bool]:
     }
 
 
+def absolute(path: Path) -> str:
+    """*path* as the worker must name it.
+
+    Storage may hand back a path relative to this process's working directory;
+    the worker starts elsewhere, where a relative path would name nothing.
+    """
+    return str(path.absolute())
+
+
+def run_worker(module: str, spec: dict[str, Any]) -> bytes:
+    """Run `python -m module` on *spec* under supervision; return its reply.
+
+    Every isolated worker starts the same way: it is handed the parent's runtime
+    overrides with its request, and it counts against the same local concurrency
+    limit as the mesh derivatives it shares memory with.
+    """
+    command = [
+        sys.executable,
+        "-m",
+        module,
+        json.dumps({"overrides": runtime_overrides(), **spec}),
+    ]
+    with mesh_processing._render_semaphore():
+        return supervise(
+            command,
+            memory_budget=memory_budget_bytes(),
+            timeout_seconds=float(settings.mesh_worker_timeout_seconds),
+        )
+
+
+def read_spec(argv: list[str]) -> dict[str, Any]:
+    """The request a worker was started with, after adopting the parent's overrides."""
+    (raw,) = argv
+    spec = json.loads(raw)
+    _overlay.update(spec["overrides"])
+    return spec
+
+
 def generate(request: ThumbnailRequest) -> ThumbnailResult:
     """`ThumbnailEngine.generate` for *request*, run in a supervised child."""
     spec = {
-        "overrides": runtime_overrides(),
-        # Storage may hand back a path relative to this process's working
-        # directory; the worker starts elsewhere, where it would name nothing.
-        "path": str(request.path.absolute()),
+        "path": absolute(request.path),
         "file_type": request.file_type,
         "width": request.width,
         "height": request.height,
@@ -284,16 +323,4 @@ def generate(request: ThumbnailRequest) -> ThumbnailResult:
         "output_format": request.output_format,
         "reason": request.reason,
     }
-    command = [
-        sys.executable,
-        "-m",
-        "app.modules.media.mesh_worker",
-        json.dumps(spec),
-    ]
-    with mesh_processing._render_semaphore():
-        payload = supervise(
-            command,
-            memory_budget=memory_budget_bytes(),
-            timeout_seconds=float(settings.mesh_worker_timeout_seconds),
-        )
-    return decode_reply(payload)
+    return decode_reply(run_worker("app.modules.media.mesh_worker", spec))

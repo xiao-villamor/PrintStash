@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from printstash_core.mesh.similarity import GeometryError
 from sqlmodel import select
 
 from app.db.models import (
@@ -15,7 +16,7 @@ from app.db.models import (
     SimilarityRun,
 )
 from app.db.session import get_session_factory
-from app.modules.media import mesh_isolation
+from app.modules.media import mesh_isolation, verification_isolation
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.thumbnail_engine import ThumbnailFailureReason
 from app.modules.similarity import configuration, runs
@@ -259,13 +260,19 @@ class TestProcessingFailures:
 
 
 class TestPairRecovery:
-    def test_records_timed_out_pair_then_advances_checkpoint(
-        self, db_session, local_pair, monkeypatch
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            GeometryError("verification_time_limit"),
+            MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT),
+            MeshWorkerError(ThumbnailFailureReason.TIMEOUT),
+            MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED),
+        ],
+        ids=["time-limit", "worker-memory", "worker-timeout", "worker-died"],
+    )
+    def test_records_a_failed_pair_then_advances_checkpoint(
+        self, db_session, local_pair, monkeypatch, failure
     ):
-        from printstash_core.mesh.similarity import GeometryError
-
-        from app.modules.media import geometry_analysis
-
         actor, _ = local_pair
         run = runs.start(db_session, actor)
         worker = SimilarityProcessor(get_session_factory(), get_backend())
@@ -284,10 +291,10 @@ class TestPairRecovery:
         db_session.add(run)
         db_session.commit()
 
-        def exhausted(*args, **kwargs):
-            raise GeometryError("verification_time_limit")
+        def failed(*args, **kwargs):
+            raise failure
 
-        monkeypatch.setattr(geometry_analysis, "verify_paths", exhausted)
+        monkeypatch.setattr(verification_isolation, "verify_paths", failed)
 
         assert advance_oldest_run(worker)
         db_session.refresh(run)
