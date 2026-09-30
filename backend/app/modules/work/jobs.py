@@ -351,7 +351,7 @@ class JobStore:
             row = session.get(Job, job_id)
             if row is None:
                 return None
-            from app.modules.ingestion.staging_cleanup import attach_summaries
+            from app.modules.ingestion.staging_views import attach_summaries
 
             status = status_of(row)
             attach_summaries(session, [status], select(Job.id).where(Job.id == job_id))
@@ -415,7 +415,7 @@ class JobStore:
             )
             rows = {row.id: row for row in [*active, *terminal, *tracked]}
             ordered = sorted(rows.values(), key=lambda r: r.updated_at, reverse=True)
-            from app.modules.ingestion.staging_cleanup import attach_summaries
+            from app.modules.ingestion.staging_views import attach_summaries
 
             statuses = [status_of(row) for row in ordered]
             selected = select(Job.id).where(
@@ -442,7 +442,7 @@ class JobStore:
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
             ).all()
-            from app.modules.ingestion.staging_cleanup import attach_summaries
+            from app.modules.ingestion.staging_views import attach_summaries
 
             statuses = [status_of(row) for row in rows]
             selected = (
