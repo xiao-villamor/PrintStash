@@ -17,6 +17,12 @@ WORKER_MARKER = "PRINTSTASH_ISOLATED_MESH_WORKER"
 def command(module: str, arguments: list[str], budget: int) -> list[str]:
     if budget <= 0:
         raise ValueError("worker budget must be positive")
+    if sys.platform == "linux":
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+            raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER")
     return [
         sys.executable,
         "-m",
@@ -26,6 +32,30 @@ def command(module: str, arguments: list[str], budget: int) -> list[str]:
         module,
         *arguments,
     ]
+
+
+def reap_descendants(group: int) -> None:
+    """Reap only descendants adopted from this admission, never another worker."""
+    if sys.platform != "linux":
+        return
+    while True:
+        adopted = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                if int(fields[1]) == os.getpid() and int(fields[2]) == group:
+                    adopted.append(int(entry.name))
+            except (OSError, ValueError, IndexError):
+                continue
+        if not adopted:
+            return
+        for pid in adopted:
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
 
 
 def _cleanup_owned_temp(path: Path | None, identity: tuple[int, int] | None) -> None:
@@ -174,7 +204,7 @@ def main(argv: list[str]) -> int:
             # Reap direct native children killed by the guardian as well.
             while True:
                 try:
-                    pid, _status = os.waitpid(-1, os.WNOHANG)
+                    pid, _status = os.waitpid(-1, 0)
                     if pid == 0:
                         break
                 except ChildProcessError:

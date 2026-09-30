@@ -19,6 +19,7 @@
 | 15 | divides unknown-memory native fallback | Edge | Four workers, memory detection absent | 256 MiB per native admission | Unit | ✅ TestRenderAdmission.test_native_fallback_is_divided_by_concurrency |
 | 16 | cleans abandoned owned temporary outputs | Error | Parent killed during native work | Output directory removed | Integration | ✅ TestAbandonedTemporaryOutputs.test_parent_death_cleans_owned_outputs |
 | 17 | preserves replaced temporary output | Error | Directory identity changed | Replacement survives cleanup | Integration | ✅ TestAbandonedTemporaryOutputs.test_cleanup_preserves_a_replacement_directory |
+| 18 | reaps refused descendants before releasing admission | Error | Tree exceeds admitted RSS | No remaining /proc entries for owned children | Integration | ✅ TestDescendantReaping.test_resource_refusal_reaps_adopted_children |
 
 The API/container OOM, architecture and retention gates are delivered separately
 with the permanent regression gate. This matrix covers the containment change.
