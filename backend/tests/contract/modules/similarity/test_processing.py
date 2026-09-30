@@ -12,7 +12,7 @@ from app.db.models import (
     GeometryFingerprint,
 )
 from app.db.session import get_session_factory
-from app.modules.media.thumbnail_engine import ThumbnailEngine
+from app.modules.media import mesh_isolation
 from app.modules.similarity import configuration, runs
 from app.modules.similarity.processing import SimilarityProcessor
 from app.modules.storage.storage_backend.s3 import S3StorageBackend
@@ -50,14 +50,14 @@ class TestRemoteProcessing:
         db_session.commit()
         backend._client.put_object(Bucket=backend._bucket, Key=file.path, Body=content)
         materialized = []
-        generate = ThumbnailEngine.generate
+        generate = mesh_isolation.generate
 
-        def observe(engine, request):
+        def observe(request):
             materialized.append(request.path)
             assert request.path.read_bytes() == content
-            return generate(engine, request)
+            return generate(request)
 
-        monkeypatch.setattr(ThumbnailEngine, "generate", observe)
+        monkeypatch.setattr(mesh_isolation, "generate", observe)
         try:
             run = runs.start(db_session, actor)
             assert SimilarityProcessor(get_session_factory(), backend).work_one(

@@ -15,6 +15,9 @@ from app.db.models import (
     SimilarityRun,
 )
 from app.db.session import get_session_factory
+from app.modules.media import mesh_isolation
+from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.thumbnail_engine import ThumbnailFailureReason
 from app.modules.similarity import configuration, runs
 from app.modules.similarity.processing import SimilarityProcessor
 from app.modules.storage.storage_backend.runtime import get_backend
@@ -357,13 +360,52 @@ class TestPairRecovery:
         assert db_session.exec(select(SimilarityCandidate)).all() == []
 
 
+class TestIsolatedAnalysis:
+    """A file whose analysis kills its worker fails alone, never the whole run.
+
+    Fingerprinting walks the entire library, so it is the pass most likely to meet
+    the one file that exhausts memory (#259). The analysis runs in a disposable
+    worker; whatever it does, the run has to record that file and move on.
+    """
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            ThumbnailFailureReason.RESOURCE_LIMIT,
+            ThumbnailFailureReason.TIMEOUT,
+            ThumbnailFailureReason.WORKER_FAILED,
+        ],
+    )
+    def test_a_killed_worker_fails_only_that_file(
+        self, db_session, local_pair, monkeypatch, reason
+    ):
+        actor, files = local_pair
+
+        def killed(_request):
+            raise MeshWorkerError(reason)
+
+        monkeypatch.setattr(mesh_isolation, "generate", killed)
+        run = runs.start(db_session, actor)
+        for _ in files:
+            advance_oldest_run(
+                SimilarityProcessor(get_session_factory(), get_backend())
+            )
+        db_session.refresh(run)
+
+        assert run.state == "running", run.failure_code
+        assert json.loads(run.counters_json)["failed"] == len(files)
+        rows = db_session.exec(select(GeometryFingerprint)).all()
+        assert [(row.state, row.failure_code) for row in rows] == [
+            ("failed", reason.value)
+        ] * len(files)
+
+
 class TestUnexpectedAnalysisFailure:
     @pytest.mark.parametrize("failure", ["busy", "forbidden", "unexpected"])
     def test_preserves_checkpoint_when_engine_fails(
         self, db_session, local_pair, monkeypatch, failure
     ):
         from app.core.errors import ErrorKind, OperationError
-        from app.modules.media.thumbnail_engine import ThumbnailEngine
 
         actor, _ = local_pair
 
@@ -375,7 +417,7 @@ class TestUnexpectedAnalysisFailure:
                 kind=ErrorKind.BUSY if failure == "busy" else ErrorKind.FORBIDDEN,
             )
 
-        monkeypatch.setattr(ThumbnailEngine, "generate", refuse)
+        monkeypatch.setattr(mesh_isolation, "generate", refuse)
         run = runs.start(db_session, actor)
         result = advance_oldest_run(
             SimilarityProcessor(get_session_factory(), get_backend())

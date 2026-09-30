@@ -18,6 +18,12 @@
 
 ### Fixed
 
+- Analysing the whole library for similar models no longer runs in the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  The fingerprint pass now uses the same disposable worker as mesh derivatives,
+  so a file that exhausts memory or never finishes is recorded as a failed
+  fingerprint for that file alone. The run carries on with the rest of the
+  library instead of taking the API down or stopping.
 - The Settings Maintenance heading now uses the same framed section treatment as neighboring tabs.
 - Opening the 3D viewer, converting to STL, and geometry comparison no longer
   expand a 3MF's repeated parts before checking their size. These paths still

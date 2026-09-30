@@ -12,9 +12,9 @@ from sqlmodel import Session, col, select
 from app.core.errors import OperationError
 from app.db.models import File, GeometryFingerprint, SimilarityRun, User
 from app.db.session import SessionFactory
-from app.modules.media import geometry_analysis
+from app.modules.media import geometry_analysis, mesh_isolation
 from app.modules.media.fingerprints import FingerprintResult
-from app.modules.media.thumbnail_engine import ThumbnailEngine, ThumbnailRequest
+from app.modules.media.thumbnail_engine import ThumbnailRequest
 from app.modules.similarity import (
     candidates,
     fingerprints,
@@ -180,7 +180,7 @@ class SimilarityProcessor:
                             )
                             metrics = None
                         else:
-                            metrics = ThumbnailEngine().generate(
+                            metrics = mesh_isolation.generate(
                                 ThumbnailRequest(
                                     path=path,
                                     file_type=file.file_type.value,
@@ -197,6 +197,13 @@ class SimilarityProcessor:
                 except artifact_content.ArtifactContentChangedError:
                     result, metrics = (
                         FingerprintResult("failed", failure_code="source_changed"),
+                        None,
+                    )
+                except mesh_isolation.MeshWorkerError as exc:
+                    # The worker died or was killed for this file's bytes. The run
+                    # walks the whole library, so the file fails alone.
+                    result, metrics = (
+                        FingerprintResult("failed", failure_code=exc.reason.value),
                         None,
                     )
                 except artifact_content.ArtifactContentError:
