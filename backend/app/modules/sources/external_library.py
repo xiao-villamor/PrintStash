@@ -192,7 +192,7 @@ def _content_changed(session: Session, file_row: File) -> None:
     records.invalidate(session, file_row, list(recipes_for(file_row)))
     session.commit()
     session.refresh(file_row)
-    nudge_for(file_row)
+    nudge_for(session, file_row)
 
 
 def _walk(root: Path) -> dict[str, tuple[int, float]]:

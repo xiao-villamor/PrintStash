@@ -121,15 +121,13 @@ def definitions() -> list[JobDefinition]:
     ]
 
 
-def nudge_for(file_row: File) -> None:
+def nudge_for(session: Session, file_row: File) -> None:
     """After an Artifact commit: nudge every group that applies to it."""
-    from app.db.session import get_session_factory
     from app.modules.work import nudge
 
     from .kinds import groups_for
 
-    with get_session_factory().scoped_session() as session:
-        controls = policy.resolve(session)
+    controls = policy.resolve(session)
     for derivative_group in groups_for(file_row):
         if controls[derivative_group.definition].enabled:
             nudge(derivative_group.definition)

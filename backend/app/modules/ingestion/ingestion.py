@@ -651,11 +651,11 @@ def persist_artifact(
 
     # Derivatives are not part of the File+Metadata integrity boundary. The
     # sources find this Artifact by themselves; the nudge only makes that
-    # happen now rather than at the next tick. A resolved commit returns the
-    # detached row without touching the rolled-back caller session.
+    # happen now rather than at the next tick. Read policy from the caller's
+    # database; a resolved commit returns its detached row without refreshing it.
     from app.modules.derivatives.jobs import nudge_for
 
-    nudge_for(file_row)
+    nudge_for(session, file_row)
     if commit_resolved:
         return file_row
     session.refresh(file_row)
