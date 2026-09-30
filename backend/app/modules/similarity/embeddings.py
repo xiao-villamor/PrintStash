@@ -11,7 +11,8 @@ from sqlmodel import Session, col, select
 from app.db.models import File, GeometryFingerprint, SimilarityRun, User
 from app.db.session import SessionFactory
 from app.modules.inference.local import configured_provider
-from app.modules.media import geometry_analysis
+from app.modules.media import embedding_isolation
+from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.similarity import fingerprints, runs
 from app.modules.similarity import vector_sources as store
 from app.modules.similarity.configuration import SimilaritySettings
@@ -90,7 +91,7 @@ def work_one(
                 )
                 if fingerprints.source_digest(path) != fp.source_sha256:
                     raise GeometryError("source_changed")
-                views = geometry_analysis.embedding_views(
+                views = embedding_isolation.embedding_views(
                     path,
                     file_type=file.file_type.value,
                     component_index=fp.component_index,
@@ -114,7 +115,12 @@ def work_one(
                 counters["embedded"] = counters.get("embedded", 0) + 1
         progress["embedding_fingerprint_id"] = fp.id
         runs.checkpoint(session, run, token, progress=progress, counters=counters)
-    except (GeometryError, artifact_content.ArtifactContentError):
+    except (
+        GeometryError,
+        MeshWorkerError,
+        artifact_content.ArtifactContentError,
+    ):
+        # A worker killed for this model's bytes fails this unit, not the run.
         counters["embedding_failed"] = counters.get("embedding_failed", 0) + 1
         if fp is not None:
             progress["embedding_fingerprint_id"] = fp.id

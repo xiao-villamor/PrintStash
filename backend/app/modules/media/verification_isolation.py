@@ -16,21 +16,22 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import re
 from pathlib import Path
 
-from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.verification import Verification
 
 from app.modules.media import mesh_isolation
 from app.modules.media.geometry_analysis import MAX_VERIFICATION_SECONDS
-from app.modules.media.mesh_isolation import MeshWorkerError, pack_value, unpack_value
+from app.modules.media.mesh_isolation import (
+    MeshWorkerError,
+    pack_value,
+    raise_reported_error,
+    unpack_value,
+)
 from app.modules.media.thumbnail_engine import ThumbnailFailureReason
 
 EVIDENCE_MAGIC = b"VRF1"
-ERROR_MAGIC = b"ERR1"
-_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
 def encode_reply(evidence: Verification) -> bytes:
@@ -38,17 +39,9 @@ def encode_reply(evidence: Verification) -> bytes:
     return EVIDENCE_MAGIC + body.encode()
 
 
-def encode_error(error: GeometryError) -> bytes:
-    return ERROR_MAGIC + error.code.encode("ascii")[:64]
-
-
 def decode_reply(payload: bytes) -> Verification:
     """Rebuild the evidence, or raise the failure the worker reported."""
-    if payload.startswith(ERROR_MAGIC):
-        code = payload[len(ERROR_MAGIC) :].decode("ascii", errors="replace")
-        if _CODE.fullmatch(code) is None:
-            raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
-        raise GeometryError(code)
+    raise_reported_error(payload)
     try:
         if not payload.startswith(EVIDENCE_MAGIC):
             raise ValueError("magic")

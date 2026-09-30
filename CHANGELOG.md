@@ -18,6 +18,12 @@
 
 ### Fixed
 
+- Rendering model views for learned similarity embeddings no longer happens in
+  the API process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  With embeddings enabled, the similarity run rendered six views of every model
+  in the library inside the API; it now uses the same disposable worker as the
+  other mesh work. A model that exhausts memory or never finishes fails that one
+  embedding and the run continues with the rest.
 - Opening the 3D viewer on a 3MF or OBJ no longer converts it inside the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   The conversion runs in the same disposable worker as mesh derivatives, so a

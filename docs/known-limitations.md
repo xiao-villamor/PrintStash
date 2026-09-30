@@ -119,8 +119,8 @@ manufacturing platform.
   validation are still outstanding, so the published architecture list is not
   a physical-device performance claim.
 - Mesh geometry, thumbnails, similarity fingerprints, pairwise similarity
-  verification and the 3D viewer's STL conversion run in a disposable child
-  process rather than the API. The parent kills the child's process group when its resident memory passes the
+  verification, similarity embedding views and the 3D viewer's STL conversion
+  run in a disposable child process rather than the API. The parent kills the child's process group when its resident memory passes the
   same cgroup-aware budget the triangle caps use
   (`VAULT_MESH_MEMORY_BUDGET_FRACTION`) or after
   `VAULT_MESH_WORKER_TIMEOUT_SECONDS` (default 300 s). A file that exceeds the

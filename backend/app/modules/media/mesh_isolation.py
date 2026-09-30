@@ -18,6 +18,7 @@ import base64
 import binascii
 import json
 import os
+import re
 import selectors
 import signal
 import struct
@@ -26,6 +27,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+from printstash_core.mesh.similarity import GeometryError
 
 from app import __file__ as application_file
 from app.core.config import _overlay, settings
@@ -269,6 +272,29 @@ def runtime_overrides() -> dict[str, str | int | float | bool]:
         for key, value in dict(_overlay).items()
         if isinstance(value, str | int | float | bool)
     }
+
+
+ERROR_MAGIC = b"ERR1"
+_ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def encode_error(error: GeometryError) -> bytes:
+    """The reply a worker sends for a failure that owns a stable code."""
+    return ERROR_MAGIC + error.code.encode("ascii")[:64]
+
+
+def raise_reported_error(payload: bytes) -> None:
+    """Raise the failure a worker reported; return if *payload* reports none.
+
+    A code that is not a plain identifier is not trusted to name a failure: it
+    came from a process that has just parsed a hostile file.
+    """
+    if not payload.startswith(ERROR_MAGIC):
+        return
+    code = payload[len(ERROR_MAGIC) :].decode("ascii", errors="replace")
+    if _ERROR_CODE.fullmatch(code) is None:
+        raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+    raise GeometryError(code)
 
 
 def absolute(path: Path) -> str:

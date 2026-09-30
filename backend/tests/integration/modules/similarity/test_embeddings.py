@@ -10,6 +10,9 @@ from sqlmodel import select
 from app.core.config import _overlay
 from app.db.models import FileType, PassageVector, SimilarityCandidate
 from app.db.session import get_session_factory
+from app.modules.media import embedding_isolation
+from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.thumbnail_engine import ThumbnailFailureReason
 from app.modules.similarity import configuration, runs
 from app.modules.similarity.processing import SimilarityProcessor
 from app.modules.similarity.semantic_search import SearchRequest, capabilities, search
@@ -156,6 +159,34 @@ class TestEmbeddingRecovery:
                 path.write_bytes(b"new content")
             else:
                 path.unlink()
+        assert advance_oldest_run(
+            SimilarityProcessor(get_session_factory(), get_backend())
+        )
+        db_session.refresh(run)
+        assert run.state == "running"
+        assert json.loads(run.counters_json)["embedding_failed"] == 1
+        assert json.loads(run.checkpoint_json)["embedding_fingerprint_id"] == fp.id
+        assert db_session.exec(select(PassageVector)).all() == []
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            ThumbnailFailureReason.RESOURCE_LIMIT,
+            ThumbnailFailureReason.TIMEOUT,
+            ThumbnailFailureReason.WORKER_FAILED,
+        ],
+    )
+    def test_a_killed_worker_fails_only_that_unit(
+        self, db_session, embedding_unit, monkeypatch, reason
+    ):
+        """The pass renders six views of every model, so one file must fail alone."""
+        _actor, _file, fp, _provider, _generation, run = embedding_unit
+
+        def killed(*_args, **_kwargs):
+            raise MeshWorkerError(reason)
+
+        monkeypatch.setattr(embedding_isolation, "embedding_views", killed)
+
         assert advance_oldest_run(
             SimilarityProcessor(get_session_factory(), get_backend())
         )
