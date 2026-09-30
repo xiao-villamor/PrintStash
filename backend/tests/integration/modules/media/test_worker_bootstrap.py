@@ -86,3 +86,66 @@ class TestWorkerBootstrap:
                 timeout_seconds=10,
             )
         assert error.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+
+    def test_parent_death_terminates_the_entire_worker_tree(self, tmp_path):
+        import json
+
+        pid_file = tmp_path / "tree.json"
+        script = (
+            "import subprocess,time; "
+            "from app.modules.media.worker_bootstrap import command; "
+            f"subprocess.Popen(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pid_file)!r}], 134217728), start_new_session=True); "
+            "time.sleep(60)"
+        )
+        parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
+        pids = []
+        try:
+            deadline = time.monotonic() + 10
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert pid_file.exists()
+            pids = json.loads(pid_file.read_text())
+            parent.kill()
+            parent.wait()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                living = [
+                    pid
+                    for pid in pids
+                    if Path(f"/proc/{pid}/stat").exists()
+                    and Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+                ]
+                if not living:
+                    break
+                time.sleep(0.02)
+            else:
+                pytest.fail(f"worker descendants survived: {living}")
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+            parent.wait()
+            for pid in pids:
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+
+    def test_success_reaps_descendants_before_returning(self, tmp_path):
+        import json
+
+        from app.modules.media.worker_bootstrap import command
+
+        pid_file = tmp_path / "tree.json"
+        reply = mesh_isolation.supervise(
+            command(
+                "tests.fakes.mesh_bootstrap_probe",
+                ["leaves_child", str(pid_file)],
+                128 * MB,
+            ),
+            memory_budget=128 * MB,
+            timeout_seconds=5,
+        )
+        assert reply.strip() == b"reply"
+        for pid in json.loads(pid_file.read_text()):
+            status = Path(f"/proc/{pid}/stat")
+            assert not status.exists() or status.read_text().split()[2] == "Z"

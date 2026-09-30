@@ -45,3 +45,8 @@ class TestRenderAdmission:
             mesh_processing, "_detect_memory_limit_bytes", lambda: 1024**3
         )
         assert mesh_isolation.memory_budget_bytes() == 256 * 1024**2
+
+    def test_native_fallback_is_divided_by_concurrency(self, monkeypatch):
+        monkeypatch.setitem(_overlay, "max_render_jobs", 4)
+        monkeypatch.setattr(mesh_processing, "_detect_memory_limit_bytes", lambda: None)
+        assert mesh_processing.native_memory_budget_bytes() == 256 * 1024**2
