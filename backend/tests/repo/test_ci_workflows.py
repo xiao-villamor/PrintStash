@@ -191,6 +191,21 @@ class TestDeepSuite:
 
         assert "./scripts/test.sh scale -q" in _commands(job)
 
+    def test_scale_shards_cover_both_readers_and_measurements_once(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
+        rows = job["strategy"]["matrix"]["include"]
+
+        assert len(rows) == 4
+        assert {(row["test"], row["reader"]) for row in rows} == {
+            (test, reader)
+            for test in (
+                "test_answers_within_budget_at_the_supported_scale",
+                "test_grows_no_faster_than_the_library",
+            )
+            for reader in ("administrator", "granted-viewer")
+        }
+        assert '-k "${{ matrix.test }} and ${{ matrix.reader }}"' in _commands(job)
+
     def test_scale_lane_limits_worker_startup(self, tmp_path: Path) -> None:
         fake_uv = tmp_path / "uv"
         fake_uv.write_text(

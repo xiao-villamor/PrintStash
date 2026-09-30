@@ -160,11 +160,27 @@ jobs:
         run: ./scripts/test.sh coverage -q
 
   backend-scale:
-    name: Backend at supported scale
+    name: Backend at supported scale (${{ matrix.measurement }} / ${{ matrix.reader }})
     runs-on: ubuntu-latest
     # A read that turns quadratic takes minutes per request at this size; the
     # cap turns that into a failure instead of a job that runs for hours.
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - measurement: budget
+            test: test_answers_within_budget_at_the_supported_scale
+            reader: administrator
+          - measurement: budget
+            test: test_answers_within_budget_at_the_supported_scale
+            reader: granted-viewer
+          - measurement: growth
+            test: test_grows_no_faster_than_the_library
+            reader: administrator
+          - measurement: growth
+            test: test_grows_no_faster_than_the_library
+            reader: granted-viewer
     defaults:
       run:
         working-directory: backend
@@ -187,7 +203,7 @@ jobs:
 
       - name: Time library reads at 25,000 collections and 100,000 Models
         # Budgets and growth limits: tests/repo/test_read_scale_budgets.py.
-        run: ./scripts/test.sh scale -q
+        run: ./scripts/test.sh scale -q -k "${{ matrix.test }} and ${{ matrix.reader }}"
 
   backend-python313:
     name: Backend compatibility (Python 3.13)

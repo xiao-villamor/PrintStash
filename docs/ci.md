@@ -13,17 +13,17 @@ test suite checks that every backend test file belongs to exactly one shard.
 
 `Deep CI` runs nightly or by manual dispatch. It checks branch coverage and
 area/module floors, the `scale` lane (library reads timed at 25,000
-collections and 100,000 Models, capped at 30 minutes), external provider
+collections and 100,000 Models in four 13-case jobs, each capped at 30 minutes), external provider
 contracts, Python/native compatibility, the full browser configurations and the
 extension's real backend and ChromeDriver flows. Before tagging a release, dispatch it on the exact `main`
 commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
-The `scale` lane starts four pytest workers explicitly. Automatic CPU detection
-can report a CI host's CPUs instead of the runner's quota and stall before any
-library read is timed; the 30-minute cap then measures worker startup rather
-than the supported library size.
+The `scale` lane starts four pytest workers explicitly and splits the budget
+and growth checks by administrator and granted viewer. Each job measures 13
+reads. The fixed worker count bounds process startup; the four-way split keeps
+the supported-scale suite within each job's 30-minute cap.
 
 Publication builds all four images in one Bake graph per native architecture.
 Each architecture smokes its four digests; promotion to multiarch tags starts
