@@ -183,6 +183,13 @@ def _prepare_storage_for_startup(
             logger.warning(
                 "reconciled %d interrupted pending import(s)", interrupted_imports
             )
+    if recover_publications:
+        from app.modules.ingestion.staging_cleanup import prune_expired, reconcile_jobs
+
+        with get_session_factory().scoped_session() as session:
+            reconcile_jobs(session)
+            prune_expired(session, backend=backend)
+            session.commit()
     return backend
 
 

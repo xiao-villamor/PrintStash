@@ -4,6 +4,10 @@
 
 ### Added
 
+- Job details show retained ingest capacity and provide a confirmed, identity-checked
+  discard action serialized against retry. Completed staging is reconciled at
+  startup; failed input retains its existing expiry (#259).
+
 - API responses include `Server-Timing` for total request time, SQL time and
   statement count. Requests exceeding `VAULT_SLOW_REQUEST_MS` (1,000 ms by
   default) emit a warning with those timings and the request ID to help diagnose

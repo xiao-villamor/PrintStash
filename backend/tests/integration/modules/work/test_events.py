@@ -40,6 +40,7 @@ def publisher() -> Iterator[Recorder]:
 def _status(**fields) -> JobStatus:
     now = utcnow()
     return JobStatus(
+        staging=None,
         job_id="j1",
         kind=JobKind.INGESTION_UPLOAD,
         state=JobState.RUNNING,

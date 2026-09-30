@@ -563,6 +563,7 @@ export function aJob(override?: Partial<JobStatus>): JobStatus {
     failed: 0,
     completion: null,
     failed_items: [],
+    staging: null,
     ...override,
   };
 }

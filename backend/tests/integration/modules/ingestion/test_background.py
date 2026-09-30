@@ -579,7 +579,7 @@ class TestInspectUploadedArchive:
         status = jobs.get(job_id)
         assert status is not None
         assert (status.state, status.error) == ("failed", "no_importable_files")
-        assert not staged.exists()
+        assert staged.exists()
 
     def test_reports_prepared_file_count_on_the_job(
         self, db_session: Session, owner: User, tmp_path: Path, job_id: str
@@ -652,7 +652,7 @@ class TestInspectUploadedArchive:
         assert status is not None
         assert (status.state, status.error) == ("failed", "archive_zip_bomb")
 
-    def test_releases_the_staged_archive_it_refused(
+    def test_retains_the_staged_archive_it_refused(
         self, db_session: Session, owner: User, tmp_path: Path, job_id: str
     ) -> None:
         use_local_storage(tmp_path)
@@ -665,7 +665,7 @@ class TestInspectUploadedArchive:
                 job_id=job_id, staged=staged, original_filename="staged.zip", cancelled=lambda: False
             )
 
-        assert not staged.exists()
+        assert staged.exists()
 
     def test_leaves_an_unexpected_failure_to_the_job_runner(
         self, db_session: Session, owner: User, tmp_path: Path, job_id: str

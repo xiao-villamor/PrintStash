@@ -76,4 +76,43 @@ test.describe("ZIP upload", () => {
     const imported = models.find((item) => item.name === `${name}-cat`);
     if (imported) await page.request.delete(`/api/v1/models/${imported.id}`);
   });
+  test("reclaims the retained input of a failed ZIP preparation", async ({ page }) => {
+    const name = `e2e-failed-zip-${Date.now()}`;
+    await page.goto("/");
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    const upload = page.getByRole("dialog", { name: "Upload model" });
+    await upload.getByRole("button", { name: "From ZIP" }).click();
+    await upload.locator('input[accept=".zip"]').setInputFiles({
+      name: `${name}.zip`,
+      mimeType: "application/zip",
+      buffer: execFileSync("python3", [
+        "-c",
+        "import io,sys,zipfile; b=io.BytesIO(); z=zipfile.ZipFile(b,'w'); z.writestr('../unsafe.stl','invalid'); z.close(); sys.stdout.buffer.write(b.getvalue())",
+      ]),
+    });
+    const accepted = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/ingest/archive/inspect") && response.status() === 202,
+    );
+    await upload.getByRole("button", { name: "Prepare ZIP" }).click();
+    const { job_id: jobId } = await (await accepted).json();
+    await expect(upload).toHaveCount(0);
+    await expect(async () => {
+      const response = await page.request.get(`/api/v1/jobs/${jobId}`);
+      const job = await response.json();
+      expect(job.state).toBe("failed");
+      expect(job.staging.discard_available).toBe(true);
+    }).toPass({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Notifications" }).click();
+    const discard = page.getByRole("button", { name: "Discard staged input", exact: true });
+    await expect(discard).toBeVisible();
+    await discard.click();
+    const confirmation = page.getByRole("dialog", { name: "Discard staged input?" });
+    await confirmation.getByRole("button", { name: "Discard staged input", exact: true }).click();
+    await expect(confirmation).toHaveCount(0);
+    await expect(async () => {
+      const response = await page.request.get(`/api/v1/jobs/${jobId}`);
+      expect((await response.json()).staging).toBeNull();
+    }).toPass({ timeout: 15_000 });
+  });
 });

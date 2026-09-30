@@ -32,3 +32,8 @@ export function cancelJob(jobId: string): Promise<JobStatus> {
 export function retryJob(jobId: string): Promise<JobStatus> {
   return sendJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, "POST", {});
 }
+
+/** Release retained, uncommitted input after the user confirms. */
+export function discardJobStaging(jobId: string): Promise<void> {
+  return sendJson<void>(`/api/v1/jobs/${encodeURIComponent(jobId)}/discard-staging`, "POST", {});
+}

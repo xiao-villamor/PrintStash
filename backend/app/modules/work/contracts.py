@@ -243,6 +243,7 @@ class JobDefinition:
     source: WorkSource | None = None
     cancel: CancelHook = _no_hook
     on_failure: FailureHook = _no_hook
+    on_settled: CancelHook = _no_hook
     retry: RetryHook = _no_retry_hook
     # Sources this definition's completions should nudge (always its own).
     completion_nudges: tuple[JobKind, ...] = ()
