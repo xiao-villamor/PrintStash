@@ -23,7 +23,7 @@ import selectors
 import signal
 import struct
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
-import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,8 @@ from app.modules.media.thumbnail_engine import (
     ThumbnailResult,
     ThumbnailStrategy,
 )
+from app.modules.media.worker_bootstrap import RESOURCE_EXIT
+from app.modules.media.worker_bootstrap import command as worker_command
 
 REPLY_MAGIC = b"MSH1"
 MAX_REPLY_BYTES = 32 * 1024 * 1024
@@ -63,7 +65,9 @@ def memory_budget_bytes() -> int:
     The same budget the triangle caps are derived from, so a mesh the caps admit
     fits in it; a mesh the caps mis-sized is what the kill is for.
     """
-    return mesh_processing.step_memory_budget_bytes() or _FALLBACK_MEMORY_BUDGET
+    return mesh_processing.step_memory_budget_bytes() or (
+        _FALLBACK_MEMORY_BUDGET // mesh_processing._render_jobs_limit()
+    )
 
 
 def pack_value(value: Any) -> Any:
@@ -207,15 +211,25 @@ def supervise(
     Where a process's resident memory cannot be read (non-Linux) the memory limit
     is not enforced; the deadline still is.
     """
-    process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        env={**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
-        cwd=Path(application_file).resolve().parent.parent,
-    )
+    temporary = tempfile.TemporaryDirectory(prefix="printstash-mesh-")
+    try:
+        process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env={
+                **os.environ,
+                "OMP_NUM_THREADS": "1",
+                "OPENBLAS_NUM_THREADS": "1",
+                "TMPDIR": temporary.name,
+            },
+            cwd=Path(application_file).resolve().parent.parent,
+        )
+    except BaseException:
+        temporary.cleanup()
+        raise
     try:
         assert process.stdout is not None
         os.set_blocking(process.stdout.fileno(), False)
@@ -226,7 +240,7 @@ def supervise(
             while True:
                 if time.monotonic() >= deadline:
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
-                rss = mesh_processing.process_rss_bytes(process.pid)
+                rss = mesh_processing.process_tree_rss_bytes(process.pid)
                 if rss is not None and rss > memory_budget:
                     raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
                 finished = False
@@ -244,7 +258,7 @@ def supervise(
             code = process.wait(timeout=max(deadline - time.monotonic(), 0.1))
         except subprocess.TimeoutExpired as exc:
             raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT) from exc
-        if code == -signal.SIGKILL:
+        if code in (-signal.SIGKILL, RESOURCE_EXIT):
             # Nothing of ours sends SIGKILL after a clean read; the kernel's
             # out-of-memory killer does.
             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
@@ -252,10 +266,17 @@ def supervise(
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
         return bytes(reply)
     finally:
+        # The leader may already have exited; its descendants still belong to
+        # the session's original group, whose ID is the leader's PID.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         _terminate_process_group(process)
         process.wait()
         if process.stdout is not None:
             process.stdout.close()
+        temporary.cleanup()
 
 
 def runtime_overrides() -> dict[str, str | int | float | bool]:
@@ -313,16 +334,16 @@ def run_worker(module: str, spec: dict[str, Any]) -> bytes:
     overrides with its request, and it counts against the same local concurrency
     limit as the mesh derivatives it shares memory with.
     """
-    command = [
-        sys.executable,
-        "-m",
-        module,
-        json.dumps({"overrides": runtime_overrides(), **spec}),
-    ]
     with mesh_processing._render_semaphore():
+        budget = memory_budget_bytes()
+        command = worker_command(
+            module,
+            [json.dumps({"overrides": runtime_overrides(), **spec})],
+            budget,
+        )
         return supervise(
             command,
-            memory_budget=memory_budget_bytes(),
+            memory_budget=budget,
             timeout_seconds=float(settings.mesh_worker_timeout_seconds),
         )
 

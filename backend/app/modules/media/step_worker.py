@@ -18,7 +18,18 @@ def main() -> int:
     destination = Path(sys.argv[2])
     triangle_limit = int(os.environ["PRINTSTASH_STEP_TRIANGLE_LIMIT"])
 
-    if os.environ.get("PRINTSTASH_STEP_BREP") == "1":
+    return convert(
+        source,
+        destination,
+        triangle_limit,
+        include_brep=os.environ.get("PRINTSTASH_STEP_BREP") == "1",
+    )
+
+
+def convert(
+    source: Path, destination: Path, triangle_limit: int, *, include_brep: bool
+) -> int:
+    if include_brep:
         return _write_brep(source, destination, triangle_limit)
 
     import trimesh
