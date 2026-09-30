@@ -36,6 +36,10 @@ def main():
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
         if case == "tree_wait":
+            if len(sys.argv) > 3:
+                temporary = Path(os.environ["TMPDIR"])
+                (temporary / "partial.stl").write_bytes(b"partial native output")
+                Path(sys.argv[3]).write_text(str(temporary))
             time.sleep(60)
         else:
             print("reply", flush=True)

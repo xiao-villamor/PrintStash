@@ -5,8 +5,10 @@ from __future__ import annotations
 import errno
 import os
 import runpy
+import shutil
 import signal
 import sys
+from pathlib import Path
 
 RESOURCE_EXIT = 72
 WORKER_MARKER = "PRINTSTASH_ISOLATED_MESH_WORKER"
@@ -26,23 +28,55 @@ def command(module: str, arguments: list[str], budget: int) -> list[str]:
     ]
 
 
+def _cleanup_owned_temp(path: Path | None, identity: tuple[int, int] | None) -> None:
+    if path is None or identity is None:
+        return
+    quarantine = path.with_name(path.name + ".abandoned-" + os.urandom(8).hex())
+    try:
+        path.rename(quarantine)
+        current = quarantine.lstat()
+        if (current.st_dev, current.st_ino) != identity:
+            if not path.exists():
+                quarantine.rename(path)
+            return
+        shutil.rmtree(quarantine)
+    except OSError:
+        # Uncertain ownership or unavailable storage remains recoverable.
+        return
+
+
 def _arm_guardian(libc) -> int:
     """A stdlib sentinel kills the group even when native parsing cannot handle signals."""
     if os.getpgrp() != os.getpid():
         os.setsid()
     root = os.getpid()
+    temporary = Path(os.environ["TMPDIR"]) if os.environ.get("TMPDIR") else None
+    identity = None
+    if temporary is not None and temporary.name.startswith("printstash-mesh-"):
+        stat = temporary.lstat()
+        identity = (stat.st_dev, stat.st_ino)
     read_fd, write_fd = os.pipe()
     guardian = os.fork()
     if guardian == 0:
         os.close(read_fd)
 
         def abandon(_signal, _frame):
+            # The root may already be gone and its children reparented. The
+            # sentinel still anchors our original group, preventing PID reuse.
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                    continue
+                try:
+                    fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+                    if int(fields[2]) == root:
+                        os.kill(int(entry.name), signal.SIGKILL)
+                except (OSError, ValueError, IndexError):
+                    continue
+            _cleanup_owned_temp(temporary, identity)
             os.killpg(root, signal.SIGKILL)
             os._exit(0)
 
         def finish(_signal, _frame):
-            from pathlib import Path
-
             pending = [root]
             descendants = []
             while pending:
