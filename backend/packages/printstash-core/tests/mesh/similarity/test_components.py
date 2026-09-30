@@ -12,6 +12,7 @@ from printstash_core.mesh.similarity.components import (
     MeshResource,
     compose_scene,
     expand_scene,
+    face_components,
     split_components,
     validate_transform,
 )
@@ -205,3 +206,73 @@ class TestTransform:
 
     def test_accepts_small_unit_conversion(self):
         validate_transform(np.diag([1e-6, 1e-6, 1e-6, 1]))
+
+
+def _reference_partition(triangles: np.ndarray) -> list[tuple[int, ...]]:
+    """Edge-connected faces by the original one-edge-at-a-time union-find."""
+    parents = list(range(len(triangles)))
+
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    owners: dict[tuple[int, int], int] = {}
+    for face, (a, b, c) in enumerate(triangles.tolist()):
+        for edge in ((a, b), (b, c), (c, a)):
+            key = (min(edge), max(edge))
+            if key in owners:
+                first, second = root(owners[key]), root(face)
+                if first != second:
+                    parents[max(first, second)] = min(first, second)
+            else:
+                owners[key] = face
+    groups: dict[int, list[int]] = {}
+    for face in range(len(triangles)):
+        groups.setdefault(root(face), []).append(face)
+    return sorted(tuple(members) for members in groups.values())
+
+
+def _partition(labels: np.ndarray) -> list[tuple[int, ...]]:
+    groups: dict[int, list[int]] = {}
+    for face, label in enumerate(labels.tolist()):
+        groups.setdefault(label, []).append(face)
+    return sorted(tuple(members) for members in groups.values())
+
+
+class TestFaceComponents:
+    @pytest.mark.parametrize("seed", range(25))
+    def test_matches_the_reference_partition_on_random_soups(self, seed):
+        """Sparse random triangles make islands, chains and shared-edge fans.
+
+        A small vertex pool relative to the face count makes edge sharing (and
+        edges shared by more than two faces) common, which is where a vectorised
+        merge is most likely to disagree with the sequential one.
+        """
+        rng = np.random.default_rng(seed)
+        faces = int(rng.integers(1, 400))
+        pool = int(rng.integers(4, 3 * faces + 4))
+        triangles = np.stack(
+            [rng.choice(pool, size=3, replace=False) for _ in range(faces)]
+        )
+
+        assert _partition(face_components(triangles)) == _reference_partition(triangles)
+
+    def test_joins_a_long_chain_that_needs_many_merge_rounds(self):
+        """A strip of N faces is the worst case for naive label propagation."""
+        count = 2000
+        base = np.arange(count)
+        triangles = np.stack([base, base + 1, base + 2], axis=1)
+
+        labels = face_components(triangles)
+
+        assert len(set(labels.tolist())) == 1
+
+    def test_keeps_faces_that_only_touch_at_a_vertex_apart(self):
+        triangles = np.array([[0, 1, 2], [2, 3, 4]])
+
+        assert _partition(face_components(triangles)) == [(0,), (1,)]
+
+    def test_labels_every_face_of_an_empty_mesh_as_nothing(self):
+        assert face_components(np.empty((0, 3), dtype=np.int64)).shape == (0,)

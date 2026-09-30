@@ -58,6 +58,10 @@
   hands each column to NumPy in one pass. A 320,000-face project went from
   3.1 s to 1.9 s. Memory use is unchanged, and malformed attributes are still
   refused as an invalid package.
+- **Splitting a mesh into its separate parts is about three times faster.**
+  Similarity fingerprints of STL, OBJ and other non-3MF meshes joined connected
+  faces one edge at a time in Python; a 500,000-face surface spent 4.3 s there
+  and now spends 1.4 s. The parts found are unchanged.
 - **Large libraries load their collection tree in about a second.** A library
   with 9,000 collections and 40,000 Models took over a minute to show its
   sidebar, because each collection's model count was checked against every

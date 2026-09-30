@@ -47,6 +47,47 @@ class ExpandedScene:
     instances: tuple[Instance, ...]
 
 
+def face_components(triangles: IntArray) -> IntArray:
+    """Label each face with the lowest face index of its edge-connected piece.
+
+    Faces are joined when they share an edge; faces that only touch at a vertex
+    stay apart. Merging is vectorised: every round hooks the higher root of each
+    still-unmerged edge under the lower one, then compresses every chain, so the
+    work is a handful of NumPy passes rather than one Python step per edge and
+    per face. Hooking always points at a smaller index, which keeps the forest
+    acyclic and makes each label the piece's smallest face index.
+    """
+    import numpy as np
+
+    count = len(triangles)
+    if count == 0:
+        return np.empty(0, dtype=np.int64)
+    edges = np.sort(triangles[:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2)), axis=1)
+    order = np.lexsort(edges.T[::-1])
+    shared = np.flatnonzero(np.all(edges[order[1:]] == edges[order[:-1]], axis=1))
+    first = order[shared] // 3
+    second = order[shared + 1] // 3
+    parent = np.arange(count)
+    while len(first):
+        root_first, root_second = parent[first], parent[second]
+        unmerged = root_first != root_second
+        if not unmerged.any():
+            break
+        first, second = first[unmerged], second[unmerged]
+        root_first, root_second = root_first[unmerged], root_second[unmerged]
+        np.minimum.at(
+            parent,
+            np.maximum(root_first, root_second),
+            np.minimum(root_first, root_second),
+        )
+        while True:
+            flattened = parent[parent]
+            if np.array_equal(flattened, parent):
+                break
+            parent = flattened
+    return parent
+
+
 def split_components(
     vertices: FloatArray,
     faces: IntArray,
@@ -70,22 +111,7 @@ def split_components(
     origin = used[np.lexsort(used.T[::-1])[0]]
     verts, tris = clean_mesh(vertices, faces)
     verts += origin
-    parents = np.arange(len(tris))
-
-    def root(index: int) -> int:
-        while parents[index] != index:
-            parents[index] = parents[parents[index]]
-            index = int(parents[index])
-        return index
-
-    edges = np.sort(tris[:, ((0, 1), (1, 2), (2, 0))].reshape((-1, 2)), axis=1)
-    order = np.lexsort(edges.T[::-1])
-    neighbors = np.flatnonzero(np.all(edges[order[1:]] == edges[order[:-1]], axis=1))
-    for offset in neighbors:
-        a, b = root(int(order[offset] // 3)), root(int(order[offset + 1] // 3))
-        if a != b:
-            parents[max(a, b)] = min(a, b)
-    labels = np.array([root(i) for i in range(len(tris))])
+    labels = face_components(tris)
     groups, counts = np.unique(labels, return_counts=True)
     if len(groups) > max_components:
         raise GeometryError("component_resource_limit")
