@@ -24,6 +24,30 @@ upload each part in index order with its byte offset, length, and SHA-256, then
 call `finalize`. Small files receive a one-part `simple` plan. Clients do not
 need browser storage or provider-specific knowledge.
 
+## Publication without re-upload
+
+A `native_parts` upload is already in the bucket when PrintStash verifies it.
+PrintStash downloads a staging copy to verify its SHA-256 identity.
+S3 multipart checksums are per part or composite, never
+a full-object SHA-256, so a metadata request cannot replace that read. The
+Artifact is then published by copying the finished upload inside the bucket
+(`UploadPartCopy`) rather than uploading the verified copy again, so PrintStash
+sends none of the Artifact's bytes back to storage.
+
+After publication, separate Derivative Jobs read the durable Artifact to
+produce metadata and previews. Server-side publication avoids the re-upload;
+it does not eliminate those later reads.
+
+The copy is create-only (`If-None-Match: *` on completion) and pinned to the
+verified object (`x-amz-copy-source-if-match` with its ETag, and its VersionId
+when the bucket is versioned). PrintStash uses it only after the startup probe
+has watched the endpoint refuse both a changed source and an overwrite;
+`/api/v1/health/details` reports the result as `server_side_copy` in the storage
+capabilities and diagnostics. On other
+endpoints, or when the source has changed since verification, PrintStash
+uploads the verified copy as before. Either way the published bytes are the
+bytes that were hashed.
+
 ## Limits and recovery
 
 `VAULT_MAX_UPLOAD_MB` limits one file. Staging admission also enforces

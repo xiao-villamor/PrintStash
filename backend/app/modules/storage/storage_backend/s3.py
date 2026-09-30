@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
+import os
 import re
 import shutil
+import stat as stat_module
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Iterator
+from typing import IO, TYPE_CHECKING, BinaryIO, Iterator
 
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
@@ -30,6 +35,7 @@ from .contracts import (
     NativeMultipartHandle,
     NativeMultipartPart,
     ObjectIdentity,
+    StagedRemoteObject,
     StorageBackend,
     StorageCapabilities,
     StorageCollisionError,
@@ -46,6 +52,57 @@ logger = get_logger(__name__)
 
 
 _S3_MISSING_OBJECT_CODES = {"404", "NoSuchKey", "NotFound"}
+_S3_PRECONDITION_CODES = {"412", "PreconditionFailed", "ConditionalRequestConflict"}
+
+# S3 bounds a multipart object to 10,000 parts of 5 MiB..5 GiB (the last part
+# may be smaller). Uploads keep parts small because each one is held in
+# memory; server-side copies move no bytes through PrintStash, so their parts
+# are larger to keep the request count down.
+_MIN_PART_SIZE = 5 * 1024 * 1024
+_MAX_PART_SIZE = 5 * 1024 * 1024 * 1024
+_MAX_PARTS = 10_000
+_UPLOAD_PART_SIZE = 8 * 1024 * 1024
+_UPLOAD_CONCURRENCY = 4
+# A part copy answers only once the store has copied the whole range, so the
+# range must stay well inside the client's read timeout even on slow stores.
+_COPY_PART_SIZE = 64 * 1024 * 1024
+_COPY_CONCURRENCY = 4
+
+
+class _SourceChanged(Exception):
+    """The store refused a copy because its source is not the verified object."""
+
+
+def _part_ranges(size: int, preferred: int) -> list[tuple[int, int]]:
+    """Inclusive byte ranges covering *size* in as few parts as S3 allows."""
+    part = max(preferred, _MIN_PART_SIZE, -(-size // _MAX_PARTS))
+    if part > _MAX_PART_SIZE:
+        raise ValueError("s3_object_too_large")
+    return [(start, min(start + part, size) - 1) for start in range(0, size, part)]
+
+
+def _is_precondition_failure(exc: Exception) -> bool:
+    response = getattr(exc, "response", {}) or {}
+    code = str(response.get("Error", {}).get("Code", ""))
+    status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return code in _S3_PRECONDITION_CODES or status in {409, 412}
+
+
+def _file_backed_size(src: IO[bytes]) -> int | None:
+    """Bytes left in *src* when it reads a regular file, which needs no spool.
+
+    A file is already seekable and its size is known, which is everything the
+    spool exists to provide. Copying a staged file into a spool first would
+    write it to disk a second time before uploading it.
+    """
+    try:
+        position = src.tell()
+        info = os.fstat(src.fileno())
+    except (AttributeError, OSError, io.UnsupportedOperation):
+        return None
+    if not stat_module.S_ISREG(info.st_mode):
+        return None
+    return max(0, info.st_size - position)
 
 
 class _RangeBody(Iterator[bytes]):
@@ -141,6 +198,8 @@ class S3StorageBackend(StorageBackend):
                 connect_timeout=10,
                 read_timeout=20,
                 retries={"max_attempts": 2},
+                # Parallel part transfers must not starve other requests.
+                max_pool_connections=_COPY_CONCURRENCY + 4,
             ),
         }
         if self._endpoint_url:
@@ -381,6 +440,7 @@ class S3StorageBackend(StorageBackend):
         versioned = status == "enabled"
         conditional = self._probe_conditional_create()
         native_multipart = conditional and self._probe_native_multipart()
+        server_side_copy = conditional and self._probe_server_side_copy()
         self._capabilities = StorageCapabilities(
             conditional_create=conditional,
             object_identity=(
@@ -392,10 +452,12 @@ class S3StorageBackend(StorageBackend):
             direct_path=False,
             browser_multipart_upload=native_multipart,
             multipart_sha256_checksums=native_multipart,
+            server_side_copy=server_side_copy,
         )
         self._read_only = not conditional
         self._probe_diagnostics["conditional_create"] = conditional
         self._probe_diagnostics["browser_multipart_upload"] = native_multipart
+        self._probe_diagnostics["server_side_copy"] = server_side_copy
         if not conditional:
             self._probe_diagnostics["read_only"] = True
 
@@ -439,6 +501,72 @@ class S3StorageBackend(StorageBackend):
                 except Exception:
                     logger.warning(
                         "S3 native multipart probe cleanup failed", exc_info=True
+                    )
+
+    def _probe_server_side_copy(self) -> bool:
+        """Prove a create-only copy that refuses a source which has changed.
+
+        A provider that silently ignored ``CopySourceIfMatch`` could publish
+        bytes nobody hashed, and one that ignored ``If-None-Match`` could
+        overwrite an Artifact. Both refusals must be observed before
+        server-side copy is used; otherwise publication keeps uploading.
+        """
+        base = f"{self._prefix()}.printstash-probe/{uuid.uuid4().hex}"
+        source_key, copy_key, stale_key = (
+            f"{base}-source",
+            f"{base}-copy",
+            f"{base}-stale",
+        )
+        payload = b"printstash-server-side-copy-proof"
+        created_versions: list[tuple[str, str | None]] = []
+        try:
+            created = self._client.put_object(
+                Bucket=self._bucket, Key=source_key, Body=payload, IfNoneMatch="*"
+            )
+            created_versions.append((source_key, created.get("VersionId")))
+            source = StagedRemoteObject(
+                key=source_key,
+                size=len(payload),
+                namespace=f"{self._bucket}/{self._prefix()}",
+                provider_ref=self.storage_target.target_ref,
+                etag=str(created["ETag"]),
+                version_id=created.get("VersionId"),
+            )
+            receipt = self._copy_in(source, copy_key)
+            if receipt is None:
+                return False
+            created_versions.append((copy_key, receipt.version_id))
+            copied = self._client.get_object(Bucket=self._bucket, Key=copy_key)[
+                "Body"
+            ].read()
+            try:
+                stale = self._copy_in(replace(source, etag=f'"{"0" * 32}"'), stale_key)
+            except _SourceChanged:
+                refuses_changed_source = True
+            else:
+                refuses_changed_source = False
+                if stale is not None:
+                    created_versions.append((stale_key, stale.version_id))
+            try:
+                self._copy_in(source, copy_key)
+            except StorageCollisionError:
+                refuses_overwrite = True
+            else:
+                refuses_overwrite = False
+            return copied == payload and refuses_changed_source and refuses_overwrite
+        except Exception:
+            logger.warning("S3 server-side copy probe failed", exc_info=True)
+            return False
+        finally:
+            for key, version_id in created_versions:
+                try:
+                    cleanup = {"Bucket": self._bucket, "Key": key}
+                    if version_id:
+                        cleanup["VersionId"] = str(version_id)
+                    self._client.delete_object(**cleanup)
+                except Exception:
+                    logger.warning(
+                        "S3 server-side copy probe cleanup failed", exc_info=True
                     )
 
     def _probe_conditional_create(self) -> bool:
@@ -718,20 +846,31 @@ class S3StorageBackend(StorageBackend):
 
         token = uuid.uuid4().hex
         threshold = int(settings.s3_multipart_threshold_mb) * 1024 * 1024
-        spool = tempfile.SpooledTemporaryFile(max_size=threshold)
+        size = _file_backed_size(src)
+        spool: tempfile.SpooledTemporaryFile[bytes] | None = None
+        body: IO[bytes] = src
+        if size is None:
+            # An arbitrary stream has no size and may not seek back, so it is
+            # spooled; a staged file is uploaded from where it already is.
+            spool = tempfile.SpooledTemporaryFile(max_size=threshold)
+            body = spool
         try:
-            shutil.copyfileobj(src, spool, length=1024 * 1024)
-            size = spool.tell()
-            spool.seek(0)
+            if size is None:
+                shutil.copyfileobj(src, body, length=1024 * 1024)
+                size = body.tell()
+                body.seek(0)
+            start = body.tell()
             if size > threshold:
                 try:
-                    response = self._multipart_create(spool, key=key, token=token)
+                    response = self._multipart_create(
+                        body, size=size, key=key, token=token
+                    )
                 except botocore.exceptions.ParamValidationError:
-                    spool.seek(0)
+                    body.seek(start)
                     response = self._client.put_object(
                         Bucket=self._bucket,
                         Key=key,
-                        Body=spool,
+                        Body=body,
                         IfNoneMatch="*",
                         Metadata={"printstash-create-token": token},
                     )
@@ -739,22 +878,17 @@ class S3StorageBackend(StorageBackend):
                 response = self._client.put_object(
                     Bucket=self._bucket,
                     Key=key,
-                    Body=spool,
+                    Body=body,
                     IfNoneMatch="*",
                     Metadata={"printstash-create-token": token},
                 )
         except botocore.exceptions.ClientError as exc:
-            code = str(exc.response.get("Error", {}).get("Code", ""))
-            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if code in {
-                "412",
-                "PreconditionFailed",
-                "ConditionalRequestConflict",
-            } or status in {409, 412}:
+            if _is_precondition_failure(exc):
                 raise StorageCollisionError(key) from exc
             raise
         finally:
-            spool.close()
+            if spool is not None:
+                spool.close()
         info = self.object_info(key)
         if info is None:
             raise RuntimeError(f"storage create could not verify destination: {key}")
@@ -773,31 +907,52 @@ class S3StorageBackend(StorageBackend):
 
     def _multipart_create(
         self,
-        src: tempfile.SpooledTemporaryFile[bytes],
+        src: IO[bytes],
         *,
+        size: int,
         key: str,
         token: str,
     ) -> dict:
-        """Publish multipart data create-only, aborting every incomplete upload."""
+        """Publish multipart data create-only, aborting every incomplete upload.
+
+        A file is read at each part's own offset, so its parts upload in
+        parallel; a spooled stream is read in order.
+        """
         created = self._client.create_multipart_upload(
             Bucket=self._bucket,
             Key=key,
             Metadata={"printstash-create-token": token},
         )
         upload_id = created["UploadId"]
-        parts: list[dict[str, object]] = []
+        ranges = _part_ranges(size, _UPLOAD_PART_SIZE)
+        start = src.tell()
+        file_backed = _file_backed_size(src) is not None
+
+        def read(offset: int, length: int) -> bytes:
+            if file_backed:
+                return os.pread(src.fileno(), length, start + offset)
+            return src.read(length)
+
+        def upload(numbered: tuple[int, tuple[int, int]]) -> dict[str, object]:
+            number, (first, last) = numbered
+            uploaded = self._client.upload_part(
+                Bucket=self._bucket,
+                Key=key,
+                UploadId=upload_id,
+                PartNumber=number,
+                Body=read(first, last - first + 1),
+            )
+            return {"ETag": uploaded["ETag"], "PartNumber": number}
+
         try:
-            part_number = 1
-            while chunk := src.read(8 * 1024 * 1024):
-                uploaded = self._client.upload_part(
-                    Bucket=self._bucket,
-                    Key=key,
-                    UploadId=upload_id,
-                    PartNumber=part_number,
-                    Body=chunk,
-                )
-                parts.append({"ETag": uploaded["ETag"], "PartNumber": part_number})
-                part_number += 1
+            numbered = list(enumerate(ranges, start=1))
+            if file_backed and len(ranges) > 1:
+                with ThreadPoolExecutor(
+                    max_workers=min(_UPLOAD_CONCURRENCY, len(ranges))
+                ) as pool:
+                    parts = list(pool.map(upload, numbered))
+            else:
+                parts = [upload(part) for part in numbered]
             return self._client.complete_multipart_upload(
                 Bucket=self._bucket,
                 Key=key,
@@ -806,13 +961,133 @@ class S3StorageBackend(StorageBackend):
                 IfNoneMatch="*",
             )
         except Exception:
-            try:
-                self._client.abort_multipart_upload(
-                    Bucket=self._bucket, Key=key, UploadId=upload_id
-                )
-            except Exception:
-                logger.exception("S3 multipart abort failed", extra={"key": key})
+            self._abort_multipart(key, upload_id)
             raise
+
+    def _abort_multipart(self, key: str, upload_id: str) -> None:
+        try:
+            self._client.abort_multipart_upload(
+                Bucket=self._bucket, Key=key, UploadId=upload_id
+            )
+        except Exception:
+            logger.exception("S3 multipart abort failed", extra={"key": key})
+
+    def copy_in(
+        self, source: StagedRemoteObject, dest_key: str
+    ) -> CreationReceipt | None:
+        if self._read_only or not self.capabilities.server_side_copy:
+            return None
+        if (
+            source.namespace != f"{self._bucket}/{self._prefix()}"
+            or source.provider_ref != self.storage_target.target_ref
+            or not source.etag
+            or source.size <= 0
+        ):
+            return None
+        try:
+            return self._copy_in(source, dest_key)
+        except _SourceChanged:
+            # The staged object is no longer the one that was hashed. The
+            # verified local copy is still correct; the caller uploads it.
+            logger.warning(
+                "S3 server-side copy refused a changed source",
+                extra={"source": source.key, "destination": dest_key},
+            )
+            return None
+
+    def _copy_in(
+        self, source: StagedRemoteObject, dest_key: str
+    ) -> CreationReceipt | None:
+        """Create *dest_key* from *source* inside the store, create-only.
+
+        Every part is copied with ``CopySourceIfMatch`` (and the version id
+        when the bucket keeps one), so only the exact object that was hashed
+        can reach the destination. The completion is ``If-None-Match: *``,
+        the same create-only guarantee an upload has. Raises
+        ``_SourceChanged`` when the store refuses *source* as changed, and
+        returns ``None`` when the copy fails before anything is published.
+        """
+        import botocore.exceptions
+
+        assert source.etag and source.size > 0
+        self._validate_managed_key(source.key)
+        self._validate_managed_key(dest_key)
+        copy_source: dict[str, str] = {"Bucket": self._bucket, "Key": source.key}
+        if source.version_id:
+            copy_source["VersionId"] = source.version_id
+        token = uuid.uuid4().hex
+        created = self._client.create_multipart_upload(
+            Bucket=self._bucket,
+            Key=dest_key,
+            Metadata={"printstash-create-token": token},
+        )
+        upload_id = str(created["UploadId"])
+        ranges = _part_ranges(source.size, _COPY_PART_SIZE)
+
+        def copy_part(numbered: tuple[int, tuple[int, int]]) -> dict[str, object]:
+            number, (first, last) = numbered
+            copied = self._client.upload_part_copy(
+                Bucket=self._bucket,
+                Key=dest_key,
+                UploadId=upload_id,
+                PartNumber=number,
+                CopySource=copy_source,
+                CopySourceIfMatch=source.etag,
+                CopySourceRange=f"bytes={first}-{last}",
+            )
+            return {"ETag": copied["CopyPartResult"]["ETag"], "PartNumber": number}
+
+        try:
+            with ThreadPoolExecutor(
+                max_workers=min(_COPY_CONCURRENCY, len(ranges))
+            ) as pool:
+                parts = list(pool.map(copy_part, enumerate(ranges, start=1)))
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as exc:
+            # Nothing is published before completion, so any store or transport
+            # failure here leaves the verified local copy to be uploaded.
+            self._abort_multipart(dest_key, upload_id)
+            if _is_precondition_failure(exc):
+                raise _SourceChanged(source.key) from exc
+            logger.warning(
+                "S3 server-side copy did not finish; uploading the verified copy",
+                exc_info=True,
+                extra={"source": source.key, "destination": dest_key},
+            )
+            return None
+        except Exception:
+            self._abort_multipart(dest_key, upload_id)
+            raise
+        try:
+            response = self._client.complete_multipart_upload(
+                Bucket=self._bucket,
+                Key=dest_key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+                IfNoneMatch="*",
+            )
+        except botocore.exceptions.ClientError as exc:
+            self._abort_multipart(dest_key, upload_id)
+            if _is_precondition_failure(exc):
+                raise StorageCollisionError(dest_key) from exc
+            raise
+        info = self.object_info(dest_key)
+        if info is None or info.size != source.size:
+            raise RuntimeError(f"storage copy could not verify destination: {dest_key}")
+        etag = response.get("ETag") or info.etag
+        return CreationReceipt(
+            key=dest_key,
+            size=info.size,
+            token=token,
+            backend="s3",
+            namespace=f"{self._bucket}/{self._prefix()}",
+            etag=str(etag) if etag else None,
+            version_id=(
+                str(response["VersionId"]) if response.get("VersionId") else None
+            ),
+        )
 
     @guarded_storage_destruction
     def rollback_create(self, receipt: CreationReceipt) -> bool:
@@ -952,8 +1227,15 @@ class S3StorageBackend(StorageBackend):
         if version_id:
             get_kwargs["VersionId"] = str(version_id)
         response = self._client.get_object(**get_kwargs)
-        digest = hashlib.sha256(response["Body"].read()).hexdigest()
-        if digest != expected_sha256.lower():
+        # Streamed: an adopted Artifact can be larger than the process's memory.
+        hasher = hashlib.sha256()
+        body = response["Body"]
+        try:
+            while chunk := body.read(1024 * 1024):
+                hasher.update(chunk)
+        finally:
+            body.close()
+        if hasher.hexdigest() != expected_sha256.lower():
             raise StorageCollisionError(key)
         etag = head.get("ETag")
         if etag and not str(etag).startswith('"'):

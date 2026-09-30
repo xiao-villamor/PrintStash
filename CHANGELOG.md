@@ -431,6 +431,18 @@ image. See UPGRADE.md before pulling.**
 - The browser extension is now named PrintStash in the browser, help and store
   listing. Its connection settings and extension identity are unchanged.
 
+### Performance
+
+- Direct browser uploads to S3-compatible storage are published by copying the
+  finished upload inside the bucket instead of uploading it again from
+  PrintStash. The copy is create-only and pinned to the verified object, and is
+  used only when the startup probe proves the endpoint refuses a changed source
+  and an overwrite (`server_side_copy` in the storage diagnostics); other
+  endpoints keep uploading the verified copy.
+- S3 uploads of staged files send their parts in parallel straight from the
+  file, without first copying it into a temporary spool. Adopting an existing
+  S3 object hashes it as a stream with bounded memory.
+
 ### Fixed
 
 - Similar model analysis now appears in Tasks with live run status and a link back

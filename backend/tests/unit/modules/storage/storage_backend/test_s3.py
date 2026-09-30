@@ -8,6 +8,7 @@ contract tier.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Iterator
@@ -19,6 +20,7 @@ from app.modules.storage.storage_backend.contracts import (
     NativeMultipartHandle,
     NativeMultipartPart,
     ObjectIdentity,
+    StagedRemoteObject,
     StorageCapabilities,
     StorageCollisionError,
     StorageConfigurationError,
@@ -62,6 +64,47 @@ def _bare_s3_backend(client: _MemoryS3Client) -> S3StorageBackend:
     backend._client = client  # type: ignore[attr-defined]
     backend._bucket = "vault"  # type: ignore[attr-defined]
     return backend
+
+
+MIB = 1024 * 1024
+
+
+class TestPartRanges:
+    def test_covers_a_small_object_in_one_part(self) -> None:
+        assert storage_s3._part_ranges(100, 8 * MIB) == [(0, 99)]
+
+    def test_covers_an_exact_multiple_without_an_empty_tail(self) -> None:
+        assert storage_s3._part_ranges(16 * MIB, 8 * MIB) == [
+            (0, 8 * MIB - 1),
+            (8 * MIB, 16 * MIB - 1),
+        ]
+
+    def test_never_uses_parts_below_the_s3_minimum(self) -> None:
+        ranges = storage_s3._part_ranges(12 * MIB, MIB)
+
+        assert ranges[0] == (0, 5 * MIB - 1)
+
+    def test_grows_parts_to_stay_within_ten_thousand(self) -> None:
+        size = 100 * 1024 * MIB
+
+        assert len(storage_s3._part_ranges(size, 8 * MIB)) <= 10_000
+
+    def test_refuses_an_object_beyond_the_multipart_limit(self) -> None:
+        with pytest.raises(ValueError, match="s3_object_too_large"):
+            storage_s3._part_ranges(10_000 * 5 * 1024 * MIB + 1, 8 * MIB)
+
+
+class TestFileBackedSize:
+    def test_measures_what_is_left_of_a_file(self, tmp_path: Path) -> None:
+        staged = tmp_path / "staged.bin"
+        staged.write_bytes(b"0123456789")
+        with staged.open("rb") as handle:
+            handle.seek(4)
+
+            assert storage_s3._file_backed_size(handle) == 6
+
+    def test_has_no_size_for_an_in_memory_stream(self) -> None:
+        assert storage_s3._file_backed_size(BytesIO(b"payload")) is None
 
 
 class TestS3Reclaim:
@@ -438,6 +481,7 @@ class TestS3CapabilityProbe:
             "versioning_error": "OSError",
             "conditional_create": True,
             "browser_multipart_upload": False,
+            "server_side_copy": False,
         }
 
 
@@ -1047,7 +1091,9 @@ class TestS3CompatibilityCoverage:
             source.write(b"multipart")
             source.seek(0)
             with pytest.raises(OSError, match="part failed"):
-                backend._multipart_create(source, key="vault-data/large", token="token")
+                backend._multipart_create(
+                    source, size=9, key="vault-data/large", token="token"
+                )
 
     def test_maps_s3_replace_precondition_failure_to_collision(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1191,7 +1237,7 @@ class TestS3CompatibilityCoverage:
             source.write(b"multipart")
             source.seek(0)
             result = backend._multipart_create(
-                source, key="vault-data/large", token="token"
+                source, size=9, key="vault-data/large", token="token"
             )
 
         assert result["ETag"] == '"multipart"'
@@ -1224,3 +1270,107 @@ class TestS3CompatibilityCoverage:
         )
         with tempfile.SpooledTemporaryFile(max_size=1) as source:
             source.write(b"multipart")
+            source.seek(0)
+            with pytest.raises(OSError, match="part failed"):
+                backend._multipart_create(
+                    source, size=9, key="vault-data/large", token="token"
+                )
+
+        assert aborted == ["upload-2"]
+
+
+class _StalledCopyClient(_CoverageMemoryS3Client):
+    """A store whose part copies never answer within the read timeout."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.aborted: list[str] = []
+
+    def create_multipart_upload(self, **_kwargs: object) -> dict[str, str]:
+        return {"UploadId": "copy-1"}
+
+    def upload_part_copy(self, **_kwargs: object) -> dict[str, object]:
+        import botocore.exceptions
+
+        raise botocore.exceptions.ReadTimeoutError(endpoint_url="https://s3.test")
+
+    def abort_multipart_upload(self, **kwargs: object) -> None:
+        self.aborted.append(str(kwargs["UploadId"]))
+
+
+def _copyable(backend: S3StorageBackend) -> StagedRemoteObject:
+    """A staged upload in *backend*'s own store, pinned by ETag."""
+    return StagedRemoteObject(
+        key="vault-data/staging/artifact-uploads/session",
+        size=9,
+        namespace=f"{backend._bucket}/{backend._prefix()}",
+        provider_ref=backend.storage_target.target_ref,
+        etag='"etag"',
+    )
+
+
+class TestS3CopyIn:
+    """Server-side copy is declined, never attempted, outside proven ground."""
+
+    def test_declines_until_the_store_proved_server_side_copy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, _client = _memory_s3_backend(monkeypatch)
+
+        assert backend.copy_in(_copyable(backend), "vault-data/files/a.stl") is None
+
+    def test_declines_a_source_in_another_namespace(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, _client = _memory_s3_backend(monkeypatch)
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+        foreign = replace(_copyable(backend), namespace="other-bucket/vault-data/")
+
+        assert backend.copy_in(foreign, "vault-data/files/a.stl") is None
+
+    def test_declines_a_source_behind_another_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend, _client = _memory_s3_backend(monkeypatch)
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+        foreign = replace(_copyable(backend), provider_ref="s3:another-endpoint")
+
+        assert backend.copy_in(foreign, "vault-data/files/a.stl") is None
+
+    def test_declines_a_source_it_cannot_pin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Without an ETag the copy could publish bytes that were never hashed.
+        backend, _client = _memory_s3_backend(monkeypatch)
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+        unpinned = replace(_copyable(backend), etag=None)
+
+        assert backend.copy_in(unpinned, "vault-data/files/a.stl") is None
+
+    def test_falls_back_when_a_part_copy_times_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A slow store must cost an upload, never the publication.
+        backend, _client = _memory_s3_backend(monkeypatch, _StalledCopyClient())
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+
+        assert backend.copy_in(_copyable(backend), "vault-data/files/a.stl") is None
+
+    def test_aborts_the_copy_that_timed_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = _StalledCopyClient()
+        backend, _client = _memory_s3_backend(monkeypatch, client)
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+
+        backend.copy_in(_copyable(backend), "vault-data/files/a.stl")
+
+        assert client.aborted == ["copy-1"]
+
+    def test_declines_an_empty_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A copy range cannot address zero bytes; an upload publishes them.
+        backend, _client = _memory_s3_backend(monkeypatch)
+        backend._capabilities = replace(backend.capabilities, server_side_copy=True)
+        empty = replace(_copyable(backend), size=0)
+
+        assert backend.copy_in(empty, "vault-data/files/a.stl") is None
