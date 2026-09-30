@@ -18,6 +18,13 @@
 
 ### Fixed
 
+- Opening the 3D viewer on a 3MF or OBJ no longer converts it inside the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  The conversion runs in the same disposable worker as mesh derivatives, so a
+  model that exhausts memory or never finishes fails that one request with
+  `stl_conversion_failed` instead of taking the API down. A model that cannot
+  be converted still answers the same error; the viewer's behaviour is
+  otherwise unchanged.
 - Comparing two models during a similarity run no longer happens in the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   Verification now runs in the same disposable worker as mesh derivatives, so a

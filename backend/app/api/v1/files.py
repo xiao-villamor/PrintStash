@@ -339,8 +339,10 @@ def stl_response(
     if backend.exists(cache_key):
         return render_delivery(plan_stored_representation(backend, cache_key, delivery))
 
-    # Lazy import: trimesh is heavy; pull it in only when we must convert.
-    from app.modules.media import mesh_processing
+    # Mesh parsing is unbounded work on an uploaded file, so it runs in a
+    # disposable worker rather than in this process (#259).
+    from app.modules.media import stl_isolation
+    from app.modules.media.mesh_isolation import MeshWorkerError
     from app.modules.storage.capacity import CapacityManager, CapacityResource
     from app.modules.storage.capacity_estimates import vault_allocation
 
@@ -356,9 +358,17 @@ def stl_response(
     ):
         try:
             with resolve(f).materialize(capacity_claimed=True) as path:
-                data = mesh_processing.to_stl_bytes(path, file_type=f.file_type.value)
+                data = stl_isolation.to_stl_bytes(path, file_type=f.file_type.value)
         except ArtifactContentMissingError as exc:
             raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+        except MeshWorkerError as exc:
+            logger.warning(
+                "stl conversion failed in its worker",
+                extra={"file_id": f.id, "reason": exc.reason.value},
+            )
+            raise HTTPException(
+                status_code=500, detail="stl_conversion_failed"
+            ) from exc
         if data is None:
             raise HTTPException(status_code=500, detail="stl_conversion_failed")
 
