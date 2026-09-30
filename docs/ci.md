@@ -24,8 +24,9 @@ The `scale` lane runs serially within each CI job. Four separate jobs split
 budget and growth checks by administrator and granted viewer, measuring 13
 reads apiece. Running four seeded 100,000-Model databases on one CI runner
 exhausted its 30-minute cap, even after the suite was split across jobs.
-Each job targets the scale test module directly, reports the active case and
-per-case durations, and prints a Python stack trace if a case waits two minutes.
+The lane and each job target the scale test module directly, so pytest does not
+collect unrelated backend tests. Jobs report the active case and per-case
+durations, and print a Python stack trace if a case waits two minutes.
 
 Publication builds all four images in one Bake graph per native architecture.
 Each architecture smokes its four digests; promotion to multiarch tags starts

@@ -179,7 +179,7 @@ case "$lane" in
     exec uv run pytest -m "not coverage_gate and $not_scale" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   scale)
-    add_paths tests
+    add_paths tests/repo/test_read_scale_budgets.py
     export PRINTSTASH_TEST_NO_EXTERNAL=1
     exec uv run pytest -m "scale" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;

@@ -251,7 +251,7 @@ class TestDeepSuite:
             "pytest",
             "-m",
             "scale",
-            "tests",
+            "tests/repo/test_read_scale_budgets.py",
             "-q",
         ]
 
