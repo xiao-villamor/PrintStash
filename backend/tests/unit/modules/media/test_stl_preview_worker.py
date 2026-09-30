@@ -457,6 +457,7 @@ class TestMain:
 
     def _run(self, argv: list[str]) -> int:
         """Launch the worker the way production does and return its exit code."""
+        import os
         import subprocess
         import sys
 
@@ -468,6 +469,7 @@ class TestMain:
             [sys.executable, "-m", "app.modules.media.stl_preview_worker", *argv],
             capture_output=True,
             cwd=BACKEND_DIR,
+            env={**os.environ, "OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
             timeout=120,
         )
         assert b"No module named" not in completed.stderr, completed.stderr.decode()
