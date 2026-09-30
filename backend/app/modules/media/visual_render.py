@@ -16,6 +16,7 @@ from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
 
 from app import __file__ as application_file
+from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.modules.inference.worker_pool import pool
 from app.modules.media import mesh_processing
@@ -66,6 +67,7 @@ def render(
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdout, selectors.EVENT_READ)
                 while True:
+                    checkpoint()
                     context.remaining()
                     pool.enforce_memory_budget(
                         process,
@@ -89,6 +91,7 @@ def render(
                         if expected is not None and len(result) >= expected + 4:
                             if len(result) != expected + 4:
                                 raise EmbeddingError("embedding_output_invalid")
+                            checkpoint(force=True)
                             return decode_reply(bytes(result[4:]), recipe)
         finally:
             _terminate_process_group(process)

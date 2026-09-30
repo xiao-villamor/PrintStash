@@ -36,6 +36,14 @@ descendants from their own admission without waiting on another worker. Linux pa
 an abandoned worker tree. Its stdlib guardian also removes abandoned temporary
 output after checking the directory identity; a replacement is preserved. Unsupported hard-limit platforms fail closed.
 
+Synchronous Job steps carry a scoped cancellation probe into admission and
+native supervisors. They poll durable intent at most every 200 ms and check again
+before accepting a worker outcome, including abnormal exits. Cancellation, a removed Job, or a superseded
+attempt unwinds the process tree, temporary outputs and capacity before releasing
+admission. Immediate retry cannot revive the cancelled execution: it belongs to
+the prior attempt. Cancellation remains distinct from a malformed/resource
+failure and preserves the original Artifact.
+
 Keep framework, storage and job infrastructure out of the core geometry library.
 The admission and bootstrap are application responsibilities.
 

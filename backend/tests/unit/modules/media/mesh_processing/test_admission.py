@@ -50,3 +50,30 @@ class TestRenderAdmission:
         monkeypatch.setitem(_overlay, "max_render_jobs", 4)
         monkeypatch.setattr(mesh_processing, "_detect_memory_limit_bytes", lambda: None)
         assert mesh_processing.native_memory_budget_bytes() == 256 * 1024**2
+
+    def test_cancelled_waiter_releases_without_admission(self):
+        import pytest
+
+        from app.core.cancellation import (
+            OperationCancelled,
+            cancellation_scope,
+        )
+
+        gate = mesh_processing._RenderAdmission()
+        entered = threading.Event()
+        stopped = threading.Event()
+
+        def waiting():
+            with cancellation_scope(stopped.is_set):
+                entered.set()
+                with gate:
+                    raise AssertionError("cancelled work admitted")
+
+        with gate, ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(waiting)
+            assert entered.wait(2)
+            stopped.set()
+            with pytest.raises(OperationCancelled):
+                result.result(timeout=2)
+            assert gate.active == 1
+        assert gate.active == 0

@@ -19,7 +19,7 @@ supply the companion tests referenced here.
 | 5 | stops sudden allocation (Gate.burst) | Error | 8 GiB allocation, 128 MiB worker AS | Resource exit; API healthy; OOM count unchanged | Production container | ✅ implemented |
 | 6 | bounds aggregate allocation (test_counts_descendants_against_the_admitted_budget) | Edge | Nested child memory and concurrent uploads | Tree refusal; cgroup OOM count unchanged | Integration/container | ✅ implemented |
 | 7 | preserves changing admission (TestRenderAdmission) | Edge | Active work during concurrency change | New admission waits for existing work | Unit | ✅ implemented |
-| 8 | terminates worker trees (TestWorkerBootstrap/TestAbandonedTemporaryOutputs) | Error | Parent death, timeout, successful orphan | Descendants dead; owned temporary output removed | Integration/unit | ✅ implemented |
+| 8 | terminates worker trees (TestWorkerBootstrap/TestAbandonedTemporaryOutputs/TestMeshCancellation/Gate.cancel_native) | Error | Cancellation, immediate retry, parent death, timeout, successful orphan | Descendants dead; owned temporary output removed; following work ready | Integration/unit/container | ✅ implemented |
 | 9 | reports geometry refusal (TestDeriveMesh) | Error | Resource refusal with embedded image | Metadata terminal failure | Integration | ✅ implemented |
 | 10 | retains embedded preview (TestDeriveMesh) | Happy | Same input | Thumbnail ready | Integration | ✅ implemented |
 | 11 | suppresses unchanged failures (TestTerminalMeshFailure/Gate.run) | Edge | Watcher, scans, nudges, restart | Attempts and timestamps unchanged | Integration/E2E/container | ✅ implemented |
@@ -57,7 +57,8 @@ GitHub downloads in CI.
 
 The JSON artifact records original hashes, wall time, actual job attempts,
 derivative attempts/reasons/duration/peak RSS, cgroup peak/current memory,
-OOM-kill count, warmed current parent RSS samples, and cleanup outcome.
+OOM-kill count, cancellation of an observed active native Job, warmed current
+parent RSS samples, and cleanup outcome.
 Derivative attempts can equal the configured maximum after a terminal refusal;
 actual job attempts distinguish that exhaustion marker from executions.
 The artifact is written on failure too, along with container logs. Missing

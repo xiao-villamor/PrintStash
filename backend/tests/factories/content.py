@@ -91,18 +91,21 @@ def binary_stl(
     )
 
 
-def ascii_stl() -> bytes:
-    """A one-facet ASCII STL, correctly terminated."""
+def ascii_stl(*, triangles: int = 1) -> bytes:
+    """A correctly terminated ASCII STL; repeated facets exercise scan limits."""
     return (
         b"solid printstash\n"
-        b"facet normal 0 0 1\n"
-        b" outer loop\n"
-        b"  vertex 0 0 0\n"
-        b"  vertex 1 0 0\n"
-        b"  vertex 0 1 0\n"
-        b" endloop\n"
-        b"endfacet\n"
-        b"endsolid printstash\n"
+        + (
+            b"facet normal 0 0 1\n"
+            b" outer loop\n"
+            b"  vertex 0 0 0\n"
+            b"  vertex 1 0 0\n"
+            b"  vertex 0 1 0\n"
+            b" endloop\n"
+            b"endfacet\n"
+        )
+        * triangles
+        + b"endsolid printstash\n"
     )
 
 

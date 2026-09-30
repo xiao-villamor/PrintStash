@@ -138,6 +138,8 @@ def main():
                                 ArtifactDerivative.file_id == file_id
                             )
                         ).all()
+                        if any(row.state is DerivativeState.RUNNING for row in rows):
+                            continue
                         _emit(
                             states={row.kind: row.state.value for row in rows},
                             attempts={row.kind: row.attempts for row in rows},

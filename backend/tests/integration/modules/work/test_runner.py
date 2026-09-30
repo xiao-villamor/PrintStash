@@ -357,3 +357,50 @@ class TestExecuteJob:
 
         with pytest.raises(KeyboardInterrupt):
             _run(engine, job)
+
+
+class TestActiveAttempt:
+    def test_superseded_execution_is_withdrawn(self, make_job):
+        from app.modules.work.runner import _withdrawn
+
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.RUNNING,
+            attempts=2,
+        )
+        assert _withdrawn(job.id, 1)
+        assert not _withdrawn(job.id, 2)
+
+    def test_requeued_execution_is_withdrawn(self, make_job):
+        from app.modules.work.runner import _withdrawn
+
+        job = make_job(kind=JobKind.DERIVATIVES_MESH, attempts=1)
+        assert _withdrawn(job.id, 1)
+        assert not _withdrawn(job.id)
+
+    @pytest.mark.parametrize(
+        "state,attempts",
+        [(JobState.QUEUED, 1), (JobState.RUNNING, 2)],
+        ids=["requeued", "superseded"],
+    )
+    def test_superseded_step_cannot_write(self, make_job, tmp_path, state, attempts):
+        from app.modules.work.contracts import Step
+        from app.modules.work.runner import ExecutionContext, StepOutcome, _run_step
+
+        job = make_job(kind=JobKind.DERIVATIVES_MESH, state=state, attempts=attempts)
+        output = tmp_path / "stale-output"
+        context = ExecutionContext(
+            job_id=job.id,
+            definition=job.kind,
+            subject_key=job.subject_key,
+            priority=job.priority,
+            execution_id=f"{job.id}:1",
+            attempt=1,
+        )
+        outcome = _run_step(
+            Step("native", lambda _ctx: output.write_bytes(b"stale")),
+            context,
+            mutating=False,
+        )
+        assert outcome == StepOutcome.CANCELLED.value
+        assert not output.exists()

@@ -245,6 +245,17 @@ class TestParseFloat:
 
 
 class TestReadAscii:
+    @pytest.mark.parametrize("triangles", [1, 2], ids=["single", "repeated"])
+    def test_reads_repeated_factory_facets(self, stl, limits, triangles) -> None:
+        from tests.factories import content
+
+        stats = worker._read_ascii(
+            stl(content.ascii_stl(triangles=triangles)), limits(), lambda _chunk: None
+        )
+        assert stats.triangle_count == triangles
+        assert stats.bounds_min == (0.0, 0.0, 0.0)
+        assert stats.bounds_max == (1.0, 1.0, 0.0)
+
     def test_reads_every_facet(self, stl, limits) -> None:
         path = stl(_ascii_stl([TRIANGLE, SECOND]))
 

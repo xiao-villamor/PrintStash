@@ -162,6 +162,70 @@ print(json.dumps({'rss':rss,'workers':workers,'oom_kill':int(events['oom_kill'])
             docker("exec", self.name, "/app/.venv/bin/python", "-c", script)
         )
 
+    def cancel_native(self):
+        data = content.ascii_stl(triangles=500_000)
+        ingested = self.upload("cancel-active.stl", data)
+        assert ingested["state"] == "completed", ingested
+        file_id = ingested["file_id"]
+        key = self.rows(f"SELECT path FROM files WHERE id={file_id}")[0]["path"]
+        script = (
+            "import json,pathlib,os; needle=" + repr(key.encode()) + "; workers=[]; "
+            "\nfor entry in pathlib.Path('/proc').iterdir():"
+            "\n if not entry.name.isdigit() or int(entry.name)==os.getpid(): continue"
+            "\n try:"
+            "\n  command=(entry/'cmdline').read_bytes()"
+            "\n  if b'app.modules.media.mesh_worker' in command and needle in command: workers.append(int(entry.name))"
+            "\n except OSError: pass"
+            "\nprint(json.dumps(workers))"
+        )
+
+        def running():
+            jobs = self.rows(
+                "SELECT id FROM jobs WHERE kind='derivatives.mesh' "
+                f"AND subject_key='file/{file_id}' AND state='running'"
+            )
+            workers = json.loads(
+                docker("exec", self.name, "/app/.venv/bin/python", "-c", script)
+            )
+            return (jobs[0]["id"], workers) if jobs and workers else None
+
+        job_id, workers = self.wait(running, timeout=60)
+        started = time.monotonic()
+        self.request(f"/api/v1/jobs/{job_id}/cancel", method="POST")
+        status = self.request("/api/v1/jobs/" + job_id)
+        assert status["state"] == "cancelled", status
+        self.wait(
+            lambda: (
+                not json.loads(
+                    docker("exec", self.name, "/app/.venv/bin/python", "-c", script)
+                )
+            ),
+            timeout=15,
+        )
+        assert time.monotonic() - started < 15
+        states = self.request(f"/api/v1/files/{file_id}/derivatives")
+        assert all(
+            row["state"] == "cancelled"
+            for row in states
+            if row["kind"] in ("metadata", "thumbnail")
+        ), states
+        downloaded = self.request(f"/api/v1/files/{file_id}/download")
+        assert hashlib.sha256(downloaded).digest() == hashlib.sha256(data).digest()
+        self.report["cancellation"] = {
+            "job_id": job_id,
+            "file_id": file_id,
+            "workers": workers,
+            "duration_s": round(time.monotonic() - started, 3),
+            "original_sha256": hashlib.sha256(data).hexdigest(),
+            "derivatives": states,
+            "cleanup": "workers terminated",
+        }
+        self.case(
+            "after-cancel.stl",
+            content.binary_stl(offset=(500, 0, 0)),
+            must_succeed=True,
+        )
+
     def case(self, name: str, data: bytes, *, must_succeed=False):
         started = time.monotonic()
         job = self.upload(name, data)
@@ -373,6 +437,7 @@ else:
                     range(3),
                 )
             )
+        self.cancel_native()
         initial = self.sample()["rss"]
         for n in range(12):
             if n % 2:
