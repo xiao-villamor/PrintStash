@@ -687,9 +687,17 @@ def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
         out["triangle_count"] = len(mesh.faces)
 
     try:
-        vol = mesh.volume if mesh.is_watertight else None
+        measured = mesh
+        if not mesh.is_watertight:
+            # STL represents each facet with independent vertices. Measure its
+            # welded topology without changing the renderer/fingerprint input.
+            measured = mesh.copy()
+            measured.merge_vertices()
+        vol = measured.volume if measured.is_watertight else None
         if vol is not None and vol > 0:
             out["volume_mm3"] = round(float(vol), 2)
+    except MemoryError:
+        raise
     except Exception:
         # Non-watertight meshes raise here; volume is best-effort only.
         pass
