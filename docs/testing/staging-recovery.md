@@ -19,3 +19,6 @@
 | 15 | prevents stale retry | Error | Discard then retry | Input unavailable, no queued work | Integration API | ✅ TestDiscardStaging.test_discard_prevents_retrying_missing_input |
 | 16 | confirms destructive recovery | Happy | Retained input in Tasks | Confirmation before POST | Frontend | ✅ staged-input-recovery.test.tsx |
 | 17 | exposes recovery end to end | Happy | ZIP with unsafe entry | Failed job, confirmed discard, capacity released | Playwright real | ✅ zip-upload.spec.ts: reclaims the retained input of a failed ZIP preparation |
+| 18 | refuses replaced retry input | Error | Same path, different receipt | Retry refused | Integration | ✅ TestRetry.test_replaced_input_cannot_be_retried |
+| 19 | preserves replacement on cancellation | Error | Cancel with uncertain ownership | Replacement and charged lease remain | Integration | ✅ TestCancel.test_cancellation_keeps_uncertain_ownership |
+| 20 | summarizes multiple inputs privately | Edge | Two leases and non-ingest work | Sum/count correct; no paths or unauthorized discard | Integration | ✅ TestStagingViews |
