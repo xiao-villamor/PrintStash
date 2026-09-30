@@ -17,7 +17,7 @@
 | 13 | allows new recipes | Edge | Previous recipe | Bounded source offers new work | Integration | ✅ TestPending.test_a_recipe_bump_makes_every_artifact_pending_again |
 | 14 | preserves originals | Error | Malformed 3MF derivative | Download SHA-256 identical | E2E | ✅ TestMeshFailureRecovery.test_original_download_survives_geometry_failure |
 | 15 | preserves slicer handoff | Error | Malformed 3MF derivative | Signed download identical | E2E | ✅ TestMeshFailureRecovery.test_signed_slicer_download_survives_geometry_failure |
-| 16 | continues after failure | Error | Broken package followed by healthy STL | Following metadata ready | E2E | ✅ TestMeshFailureRecovery.test_a_bad_file_does_not_block_the_next_healthy_artifact |
+| 16 | continues after failure | Error | Broken package followed by healthy STL | Following metadata ready | E2E | ✅ TestMeshFailureRecovery.test_healthy_artifact_finishes_after_a_bad_file |
 
 Tests live in the mirrored media and derivatives owners and tests/e2e/test_ingest.py.
 The production-container restart and watcher acceptance coverage belongs to the

@@ -11,11 +11,15 @@ from __future__ import annotations
 import io
 import json
 import math
+import ssl
 import struct
 import zipfile
+from contextlib import ExitStack
 
+import httpx
 import numpy as np
 import pytest
+import pytest_asyncio
 import trimesh
 from PIL import Image
 from sqlmodel import select
@@ -559,6 +563,97 @@ class TestHardlinklessStaging:
         assert downloaded.content == payload
 
 
+@pytest_asyncio.fixture(
+    params=[
+        pytest.param("vault", id="local-vault"),
+        pytest.param("mounted", id="mounted-source"),
+        pytest.param("s3", id="s3-vault", marks=pytest.mark.s3),
+    ]
+)
+async def refused_original(api, tmp_path, request, e2e_db):
+    from app.db.models import File
+    from app.modules.storage.storage_backend.runtime import bind_backend
+    from tests.e2e._jobs import completed_job
+    from tests.fakes.s3_delivery import browser_s3
+
+    headers = await _setup_and_login(api, tmp_path)
+    original = b"invalid 3mf package"
+    ca_file = None
+    with ExitStack() as stack:
+        if request.param == "s3":
+            backend, tls = stack.enter_context(
+                browser_s3(tmp_path, origin="http://app")
+            )
+            backend.ensure_setup()
+            bind_backend(backend)
+            ca_file = tls.ca_file
+        if request.param == "mounted":
+            root = tmp_path / "mounted"
+            root.mkdir()
+            (root / "broken.3mf").write_bytes(original)
+            enabled = await api.put(
+                "/api/v1/config",
+                headers=headers,
+                json={"external_libraries_enabled": True},
+            )
+            assert enabled.status_code == 200, enabled.text
+            library = await api.post(
+                "/api/v1/libraries",
+                headers=headers,
+                json={"name": "Refused mounted mesh", "root_path": str(root)},
+            )
+            assert library.status_code == 201, library.text
+            await completed_job(
+                api,
+                await api.post(
+                    f"/api/v1/libraries/{library.json()['id']}/scan", headers=headers
+                ),
+                headers,
+            )
+            e2e_db.expire_all()
+            file_id = (
+                e2e_db.exec(
+                    select(File).where(File.external_library_id == library.json()["id"])
+                )
+                .one()
+                .id
+            )
+        else:
+            uploaded = await api.post(
+                "/api/v1/ingest/model",
+                files={"file": ("broken.3mf", original, "model/3mf")},
+                data={"model_name": "Refused original"},
+                headers=headers,
+            )
+            job = await completed_job(api, uploaded, headers)
+            file_id = job["file_id"]
+        if request.param == "s3":
+            artifact = e2e_db.get(File, file_id)
+            assert not artifact.is_external
+            assert backend.read_bytes(artifact.path) == original
+        listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
+        assert listed.status_code == 200, listed.text
+        metadata = next(row for row in listed.json() if row["kind"] == "metadata")
+        assert (metadata["state"], metadata["failure_reason"]) == (
+            "failed",
+            "invalid_source",
+        )
+        yield file_id, headers, original, ca_file
+
+
+async def _original_response_bytes(response, ca_file):
+    if ca_file is None:
+        assert response.status_code == 200, response.text
+        return response.content
+    assert response.status_code == 307, response.text
+    async with httpx.AsyncClient(
+        verify=ssl.create_default_context(cafile=str(ca_file))
+    ) as remote:
+        downloaded = await remote.get(response.headers["location"])
+    assert downloaded.status_code == 200, downloaded.text
+    return downloaded.content
+
+
 class TestMeshFailureRecovery:
     @pytest.mark.asyncio
     async def test_unchanged_terminal_failure_survives_reconciler_nudges(
@@ -600,53 +695,32 @@ class TestMeshFailureRecovery:
         assert after.attempts == attempts
 
     @pytest.mark.asyncio
-    async def test_original_download_survives_geometry_failure(self, api, tmp_path):
+    async def test_original_download_survives_geometry_failure(
+        self, api, refused_original
+    ):
         import hashlib
 
-        data = b"invalid 3mf package"
-        headers = await _setup_and_login(api, tmp_path)
-        uploaded = await api.post(
-            "/api/v1/ingest/model",
-            files={"file": ("broken.3mf", data, "model/3mf")},
-            data={"model_name": "Broken package"},
-            headers=headers,
+        file_id, headers, original, ca_file = refused_original
+        response = await api.get(
+            f"/api/v1/files/{file_id}/download",
+            headers={**headers, "Sec-Fetch-Mode": "cors", "Origin": "http://app"},
         )
-        job = await _await_job(api, headers, uploaded.json()["job_id"])
-        derivatives = (
-            await api.get(
-                f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
-            )
-        ).json()
-        assert (
-            next(row for row in derivatives if row["kind"] == "metadata")["state"]
-            == "failed"
-        )
-        download = await api.get(
-            f"/api/v1/files/{job['file_id']}/download", headers=headers
-        )
-        assert (
-            hashlib.sha256(download.content).digest() == hashlib.sha256(data).digest()
-        )
+        downloaded = await _original_response_bytes(response, ca_file)
+        assert hashlib.sha256(downloaded).digest() == hashlib.sha256(original).digest()
 
     @pytest.mark.asyncio
     async def test_signed_slicer_download_survives_geometry_failure(
-        self, api, tmp_path
+        self, api, refused_original
     ):
-        data = b"invalid 3mf for slicer"
-        headers = await _setup_and_login(api, tmp_path)
-        uploaded = await api.post(
-            "/api/v1/ingest/model",
-            files={"file": ("broken.3mf", data, "model/3mf")},
-            data={"model_name": "Slicer handoff"},
-            headers=headers,
-        )
-        job = await _await_job(api, headers, uploaded.json()["job_id"])
-        url = (
-            await api.get(f"/api/v1/files/{job['file_id']}/slicer-url", headers=headers)
-        ).json()["url"]
-        download = await api.get(url)
-        assert download.status_code == 200
-        assert download.content == data
+        import hashlib
+
+        file_id, headers, original, _ca_file = refused_original
+        signed = await api.get(f"/api/v1/files/{file_id}/slicer-url", headers=headers)
+        assert signed.status_code == 200, signed.text
+        response = await api.get(signed.json()["url"])
+        assert response.status_code == 200, response.text
+        downloaded = response.content
+        assert hashlib.sha256(downloaded).digest() == hashlib.sha256(original).digest()
 
     @pytest.mark.asyncio
     async def test_healthy_artifact_finishes_after_a_bad_file(self, api, tmp_path):
