@@ -616,6 +616,8 @@ def _load_mesh(path: Path, *, file_type: str | None = None):
             loaded = trimesh.load_scene(
                 str(path), file_type=suffix.lstrip(".") or None, process=False
             )
+    except MemoryError:
+        raise
     except Exception:
         logger.warning(
             "mesh_processing: trimesh.load_scene failed for %s",
@@ -685,7 +687,7 @@ def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
         out["triangle_count"] = len(mesh.faces)
 
     try:
-        vol = mesh.volume
+        vol = mesh.volume if mesh.is_watertight else None
         if vol is not None and vol > 0:
             out["volume_mm3"] = round(float(vol), 2)
     except Exception:

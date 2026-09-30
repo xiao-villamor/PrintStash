@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Report refused mesh geometry separately from usable thumbnails, retain terminal
+  failures for unchanged input, and backfill accurate metadata with recipe 3 (#259).
+
 
 ### Added
 

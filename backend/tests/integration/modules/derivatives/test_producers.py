@@ -107,6 +107,66 @@ class TestDeriveMesh:
         assert get_backend().exists(published.thumbnail_path)
         assert rows[DerivativeKind.THUMBNAIL].storage_key == published.thumbnail_path
 
+    def test_refused_geometry_is_terminal_with_an_embedded_preview(
+        self, db_session, stored, monkeypatch
+    ):
+        import io
+
+        from PIL import Image
+
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        image = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+        data = three_mf(
+            build=tuple((1, None) for _ in range(40)),
+            extras={"Metadata/thumbnail.png": image.getvalue()},
+        )
+        artifact = stored("repeated.3mf", data)
+
+        result = producers.derive_mesh(artifact.id)
+
+        assert result.kinds[DerivativeKind.METADATA] == DerivativeState.FAILED
+        row = _rows(db_session, artifact.id)[DerivativeKind.METADATA]
+        assert row.failure_reason == "resource_limit"
+        assert row.next_attempt_at is None
+        assert row.attempts == settings.derivative_max_attempts
+
+    def test_embedded_preview_survives_refused_geometry(
+        self, db_session, stored, monkeypatch
+    ):
+        import io
+
+        from PIL import Image
+
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        image = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+        artifact = stored(
+            "repeated.3mf",
+            three_mf(
+                build=tuple((1, None) for _ in range(40)),
+                extras={"Metadata/thumbnail.png": image.getvalue()},
+            ),
+        )
+
+        result = producers.derive_mesh(artifact.id)
+
+        assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.storage_key is not None
+        assert get_backend().exists(row.storage_key)
+
+    def test_malformed_mesh_does_not_publish_successful_unknown_metadata(
+        self, db_session, stored
+    ):
+        artifact = stored("invalid.3mf", b"not a zip")
+        producers.derive_mesh(artifact.id)
+        row = _rows(db_session, artifact.id)[DerivativeKind.METADATA]
+        assert row.state == DerivativeState.FAILED
+        assert row.next_attempt_at is None
+
     def test_the_thumbnail_represents_its_model(
         self, db_session: Session, stored
     ) -> None:
