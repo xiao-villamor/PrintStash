@@ -35,7 +35,16 @@ def main(argv: list[str]) -> int:
     ceiling = int(budget)
     if ceiling <= 0:
         raise ValueError("worker budget must be positive")
+    virtual_size = None
+    if sys.platform == "linux":
+        with open("/proc/self/status") as status:
+            for line in status:
+                if line.startswith("VmSize:"):
+                    virtual_size = int(line.split()[1]) * 1024
+                    break
     resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+    if virtual_size is not None and virtual_size >= ceiling:
+        return RESOURCE_EXIT
     if sys.platform == "linux":
         import ctypes
 
@@ -50,6 +59,12 @@ def main(argv: list[str]) -> int:
         runpy.run_module(module, run_name="__main__")
     except MemoryError:
         os._exit(RESOURCE_EXIT)
+    except ImportError as exc:
+        # CPython's dynamic loader reports ENOMEM as ImportError on Linux.
+        # Missing dependencies remain worker failures, rather than refusals.
+        if "failed to map segment" in str(exc) or "Cannot allocate memory" in str(exc):
+            os._exit(RESOURCE_EXIT)
+        raise
     except OSError as exc:
         if exc.errno == errno.ENOMEM:
             os._exit(RESOURCE_EXIT)

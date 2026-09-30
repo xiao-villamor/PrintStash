@@ -29,45 +29,50 @@ RAW = {
     "app.modules.media.mesh_processing.extract_geometry",
     "app.modules.media.mesh_processing.to_stl_bytes",
     "app.modules.media.geometry_analysis.visual_views",
-    "app.modules.media.geometry_analysis.prepare",
+    "app.modules.media.geometry_analysis._load",
+    "app.modules.media.geometry_analysis.verify_paths",
+    "app.modules.media.geometry_analysis.embedding_views",
     "app.modules.media.geometry_analysis.analyze",
     "app.modules.media.mesh_resources.load_3mf",
 }
 
 
-def test_new_consumers_cannot_bypass_mesh_isolation():
-    violations = []
-    app = BACKEND_DIR / "app"
-    for path in sorted(app.rglob("*.py")):
-        relative = path.relative_to(app).as_posix()
-        if relative in OWNERS:
-            continue
-        aliases = {}
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name == "trimesh":
-                        violations.append(f"{relative}:{node.lineno}: trimesh")
-                    aliases[alias.asname or alias.name] = alias.name
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                for alias in node.names:
-                    target = f"{node.module}.{alias.name}"
-                    if node.module.startswith("trimesh") or target in RAW:
-                        violations.append(f"{relative}:{node.lineno}: {target}")
-                    aliases[alias.asname or alias.name] = target
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+class TestMeshBoundaries:
+    def test_new_consumers_cannot_bypass_mesh_isolation(
+        self,
+    ):
+        violations = []
+        app = BACKEND_DIR / "app"
+        for path in sorted(app.rglob("*.py")):
+            relative = path.relative_to(app).as_posix()
+            if relative in OWNERS:
                 continue
-            parts = []
-            expression = node.func
-            while isinstance(expression, ast.Attribute):
-                parts.append(expression.attr)
-                expression = expression.value
-            if isinstance(expression, ast.Name):
-                target = ".".join(
-                    [aliases.get(expression.id, expression.id), *reversed(parts)]
-                )
-                if target in RAW:
-                    violations.append(f"{relative}:{node.lineno}: {target}")
-    assert violations == [], "\n".join(violations)
+            aliases = {}
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "trimesh":
+                            violations.append(f"{relative}:{node.lineno}: trimesh")
+                        aliases[alias.asname or alias.name] = alias.name
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    for alias in node.names:
+                        target = f"{node.module}.{alias.name}"
+                        if node.module.startswith("trimesh") or target in RAW:
+                            violations.append(f"{relative}:{node.lineno}: {target}")
+                        aliases[alias.asname or alias.name] = target
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                parts = []
+                expression = node.func
+                while isinstance(expression, ast.Attribute):
+                    parts.append(expression.attr)
+                    expression = expression.value
+                if isinstance(expression, ast.Name):
+                    target = ".".join(
+                        [aliases.get(expression.id, expression.id), *reversed(parts)]
+                    )
+                    if target in RAW:
+                        violations.append(f"{relative}:{node.lineno}: {target}")
+        assert violations == [], "\n".join(violations)
