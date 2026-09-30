@@ -206,7 +206,7 @@ class TestDeepSuite:
         }
         assert '-k "${{ matrix.test }} and ${{ matrix.reader }}"' in _commands(job)
 
-    def test_scale_lane_limits_worker_startup(self, tmp_path: Path) -> None:
+    def test_scale_lane_runs_serially(self, tmp_path: Path) -> None:
         fake_uv = tmp_path / "uv"
         fake_uv.write_text(
             '#!/bin/sh\nprintf "%s\\n" "$PRINTSTASH_TEST_NO_EXTERNAL" "$@"\n'
@@ -225,10 +225,6 @@ class TestDeepSuite:
             "1",
             "run",
             "pytest",
-            "-n",
-            "4",
-            "--dist",
-            "worksteal",
             "-m",
             "scale",
             "tests",

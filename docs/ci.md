@@ -20,10 +20,10 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
-The `scale` lane starts four pytest workers explicitly and splits the budget
-and growth checks by administrator and granted viewer. Each job measures 13
-reads. The fixed worker count bounds process startup; the four-way split keeps
-the supported-scale suite within each job's 30-minute cap.
+The `scale` lane runs serially within each CI job. Four separate jobs split
+budget and growth checks by administrator and granted viewer, measuring 13
+reads apiece. Running four seeded 100,000-Model databases on one CI runner
+exhausted its 30-minute cap, even after the suite was split across jobs.
 
 Publication builds all four images in one Bake graph per native architecture.
 Each architecture smokes its four digests; promotion to multiarch tags starts
