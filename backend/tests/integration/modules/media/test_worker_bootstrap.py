@@ -149,3 +149,45 @@ class TestWorkerBootstrap:
         for pid in json.loads(pid_file.read_text()):
             status = Path(f"/proc/{pid}/stat")
             assert not status.exists() or status.read_text().split()[2] == "Z"
+
+
+class TestAbandonedTemporaryOutputs:
+    def test_parent_death_cleans_owned_outputs(self, tmp_path):
+        ready = tmp_path / "temporary"
+        pids = tmp_path / "pids"
+        script = (
+            "from app.modules.media.mesh_isolation import supervise; "
+            "from app.modules.media.worker_bootstrap import command; "
+            f"supervise(command('tests.fakes.mesh_bootstrap_probe', ['tree_wait', {str(pids)!r}, {str(ready)!r}], 134217728), memory_budget=134217728, timeout_seconds=60)"
+        )
+        parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
+        try:
+            deadline = time.monotonic() + 15
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert ready.exists()
+            directory = Path(ready.read_text())
+            assert (directory / "partial.stl").exists()
+            parent.kill()
+            parent.wait()
+            deadline = time.monotonic() + 5
+            while directory.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert not directory.exists()
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+            parent.wait()
+
+    def test_cleanup_preserves_a_replacement_directory(self, tmp_path):
+        from app.modules.media.worker_bootstrap import _cleanup_owned_temp
+
+        directory = tmp_path / "printstash-mesh-owned"
+        directory.mkdir()
+        stat = directory.stat()
+        directory.rename(tmp_path / "original")
+        directory.mkdir()
+        replacement = directory / "replacement"
+        replacement.write_bytes(b"other owner")
+        _cleanup_owned_temp(directory, (stat.st_dev, stat.st_ino))
+        assert replacement.read_bytes() == b"other owner"

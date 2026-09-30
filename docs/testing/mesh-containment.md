@@ -17,6 +17,8 @@
 | 13 | terminates abandoned descendants | Error | API parent dies with nested native child | Entire worker tree dead | Integration | ✅ TestWorkerBootstrap.test_parent_death_terminates_the_entire_worker_tree |
 | 14 | settles child trees before success | Edge | Worker leaves a child after producing output | Reply returned and descendants dead | Integration | ✅ TestWorkerBootstrap.test_success_reaps_descendants_before_returning |
 | 15 | divides unknown-memory native fallback | Edge | Four workers, memory detection absent | 256 MiB per native admission | Unit | ✅ TestRenderAdmission.test_native_fallback_is_divided_by_concurrency |
+| 16 | cleans abandoned owned temporary outputs | Error | Parent killed during native work | Output directory removed | Integration | ✅ TestAbandonedTemporaryOutputs.test_parent_death_cleans_owned_outputs |
+| 17 | preserves replaced temporary output | Error | Directory identity changed | Replacement survives cleanup | Integration | ✅ TestAbandonedTemporaryOutputs.test_cleanup_preserves_a_replacement_directory |
 
 The API/container OOM, architecture and retention gates are delivered separately
 with the permanent regression gate. This matrix covers the containment change.

@@ -32,7 +32,8 @@ budget and deadline. CAD output capacity belongs to the supervising parent,
 which releases it on every exit; disposable workers never open the application
 database for output admission. The parent owns the temporary directory and removes it
 after killing and reaping the worker group. Linux parent-death protection kills
-an abandoned worker. Unsupported hard-limit platforms fail closed.
+an abandoned worker tree. Its stdlib guardian also removes abandoned temporary
+output after checking the directory identity; a replacement is preserved. Unsupported hard-limit platforms fail closed.
 
 Keep framework, storage and job infrastructure out of the core geometry library.
 The admission and bootstrap are application responsibilities.

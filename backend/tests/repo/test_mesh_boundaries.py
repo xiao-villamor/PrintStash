@@ -14,6 +14,8 @@ OWNERS = {
     "modules/media/mesh_resources.py",
     "modules/media/thumbnail_engine.py",
     "modules/media/geometry_analysis.py",
+    "modules/media/fingerprints.py",
+    "modules/media/mesh_render.py",
     "modules/media/mesh_worker.py",
     "modules/media/step_worker.py",
     "modules/media/stl_worker.py",
@@ -23,6 +25,12 @@ OWNERS = {
 }
 
 RAW = {
+    "printstash_core.mesh.similarity.fingerprint_mesh",
+    "printstash_core.mesh.similarity.geometry.prepare_surface",
+    "printstash_core.mesh.similarity.verification.verify_meshes",
+    "printstash_core.mesh.rasterizer.render_mesh_thumbnail",
+    "app.modules.media.fingerprints.fingerprint_mesh",
+    "app.modules.media.fingerprints.fingerprint_path",
     "app.modules.media.thumbnail_engine.ThumbnailEngine",
     "app.modules.media.mesh_processing._load_mesh",
     "app.modules.media.mesh_processing._load_step_mesh_isolated",
