@@ -6,10 +6,10 @@ import json
 
 import pytest
 import trimesh
-from app.modules.media.stl_isolation import decode_reply
 
 from app.core.config import _overlay
 from app.modules.media import stl_worker
+from app.modules.media.stl_isolation import decode_reply
 from tests.factories.geometry import three_mf
 
 
