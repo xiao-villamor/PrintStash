@@ -189,7 +189,31 @@ class TestDeepSuite:
     def test_times_library_reads_at_the_supported_scale(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
 
-        assert "./scripts/test.sh scale -q" in _commands(job)
+        assert "./scripts/test.sh scale " in _commands(job)
+
+    def test_scale_job_collects_only_its_cases(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
+        scale_file = "tests/repo/test_read_scale_budgets.py"
+        marked_files = {
+            str(path.relative_to(REPO_ROOT / "backend"))
+            for path in (REPO_ROOT / "backend/tests").rglob("test_*.py")
+            if "\npytestmark = pytest.mark.scale\n" in path.read_text()
+        }
+
+        assert marked_files == {scale_file}
+        assert f"./scripts/test.sh scale {scale_file}" in _commands(job)
+
+    def test_scale_job_reports_the_case_in_progress(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
+        step = next(
+            step
+            for step in job["steps"]
+            if step.get("name")
+            == "Time library reads at 25,000 collections and 100,000 Models"
+        )
+
+        assert "-vv -s --durations=0 -o faulthandler_timeout=120" in step["run"]
+        assert step["env"]["PYTHONUNBUFFERED"] == "1"
 
     def test_scale_shards_cover_case_matrix_once(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-scale"]
