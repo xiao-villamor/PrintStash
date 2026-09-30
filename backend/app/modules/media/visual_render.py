@@ -22,7 +22,7 @@ from app.modules.media import mesh_processing
 from app.modules.media.geometry_analysis import VisualViews
 from app.modules.media.stl_streaming import _terminate_process_group
 from app.modules.media.visual_worker import MAX_REPLY
-from app.modules.media.worker_bootstrap import RESOURCE_EXIT
+from app.modules.media.worker_bootstrap import RESOURCE_EXIT, reap_descendants
 from app.modules.media.worker_bootstrap import command as worker_command
 
 
@@ -93,6 +93,7 @@ def render(
         finally:
             _terminate_process_group(process)
             process.wait()
+            reap_descendants(process.pid)
             if process.stdout is not None:
                 process.stdout.close()
 

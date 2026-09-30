@@ -191,3 +191,25 @@ class TestAbandonedTemporaryOutputs:
         replacement.write_bytes(b"other owner")
         _cleanup_owned_temp(directory, (stat.st_dev, stat.st_ino))
         assert replacement.read_bytes() == b"other owner"
+
+
+class TestDescendantReaping:
+    def test_resource_refusal_reaps_adopted_children(self, tmp_path):
+        import json
+
+        from app.modules.media.worker_bootstrap import command
+
+        pid_file = tmp_path / "pids"
+        with pytest.raises(mesh_isolation.MeshWorkerError):
+            mesh_isolation.supervise(
+                command(
+                    "tests.fakes.mesh_bootstrap_probe",
+                    ["tree", str(pid_file)],
+                    256 * MB,
+                ),
+                memory_budget=160 * MB,
+                timeout_seconds=10,
+            )
+        assert pid_file.exists()
+        for pid in json.loads(pid_file.read_text()):
+            assert not Path(f"/proc/{pid}").exists(), f"unreaped descendant {pid}"

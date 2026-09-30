@@ -47,7 +47,7 @@ from app.modules.media.thumbnail_engine import (
     ThumbnailResult,
     ThumbnailStrategy,
 )
-from app.modules.media.worker_bootstrap import RESOURCE_EXIT
+from app.modules.media.worker_bootstrap import RESOURCE_EXIT, reap_descendants
 from app.modules.media.worker_bootstrap import command as worker_command
 
 REPLY_MAGIC = b"MSH1"
@@ -302,6 +302,7 @@ def supervise(
             pass
         _terminate_process_group(process)
         process.wait()
+        reap_descendants(process.pid)
         if process.stdout is not None:
             process.stdout.close()
         temporary.cleanup()
