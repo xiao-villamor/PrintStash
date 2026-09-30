@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import func, or_, update
+from sqlalchemy import case, func, or_, update
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -180,13 +180,22 @@ def _interrupt(job: Job, reason: Reason, *, now: datetime) -> None:
 def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> None:
     engine = catalog_module.get_engine()
     with get_session_factory().scoped_session() as session:
+        refused = definition.admission(session)
+        ordering = (
+            [
+                case((col(Job.state) != JobState.RUNNING, 0), else_=1),
+                col(Job.updated_at),
+            ]
+            if refused is not None
+            else [col(Job.updated_at)]
+        )
         rows = list(
             session.exec(
                 select(Job)
                 .where(
                     Job.kind == definition.name, col(Job.state).in_(ACTIVE_JOB_STATES)
                 )
-                .order_by(col(Job.updated_at))
+                .order_by(*ordering)
                 .limit(settings.jobs_reconcile_batch)
             ).all()
         )
@@ -211,6 +220,41 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             max_resubmits=settings.jobs_max_resubmits,
             grace=grace,
         )
+        if refused is not None and decision.verdict is not Verdict.COMPLETE:
+            # Only a healthy execution already running may finish. An execution
+            # lost to a crash or upgrade is a new processing attempt.
+            healthy = (
+                row.state is JobState.RUNNING
+                and seen is not None
+                and seen.status is EngineStatus.RUNNING
+                and decision.reason is Reason.IN_PROGRESS
+            )
+            if healthy:
+                # Rotate checked healthy attempts behind older lost attempts.
+                # A full batch of long producers must not hide the lost backlog.
+                with get_session_factory().scoped_session() as session:
+                    session.execute(
+                        update(Job)
+                        .where(
+                            col(Job.id) == row.id, col(Job.state) == JobState.RUNNING
+                        )
+                        .values(updated_at=utcnow())
+                    )
+                    session.commit()
+                continue
+            if row.attempts and seen is not None:
+                try:
+                    engine.cancel(execution_id(row.id, row.attempts))
+                except Exception:  # noqa: BLE001 - admission blocks execution; next pass retries cancellation
+                    logger.warning("engine cancel failed", extra={"job_id": row.id})
+                    result.deferred += 1
+                    continue
+            jobs.finish(row.id, JobOutcome.CANCELLED, error=refused, retryable=False)
+            _call_failure_hook(definition, row.subject_key, refused)
+            result.skipped += 1
+            result.count(refused)
+            result.full = len(rows) == settings.jobs_reconcile_batch
+            continue
         result.count(decision.reason)
         if decision.verdict is Verdict.NONE:
             continue
@@ -288,6 +332,9 @@ def _headroom(definition: JobDefinition) -> int:
 
 def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -> None:
     source = definition.source
+    with get_session_factory().scoped_session() as session:
+        if definition.admission(session) is not None:
+            return
     if source is None:
         return
     limit = min(settings.jobs_reconcile_batch, _headroom(definition))
@@ -342,6 +389,7 @@ def _recently_finished(
             col(Job.subject_key).in_(subject_keys),
             col(Job.state).in_(TERMINAL_STATES),
             col(Job.finished_at) > since,
+            ~col(Job.status_json).contains(SkipReason.DERIVATIVE_GROUP_DISABLED.value),
         )
         .group_by(col(Job.subject_key))
     ).all()
@@ -358,12 +406,18 @@ def _create_and_submit(
 ) -> int:
     """Create (and submit) the item's Job; 1 when a Job was created."""
     try:
-        job_id = jobs.create(
-            definition=definition.name,
-            subject_key=item.subject_key,
-            owner_user_id=item.owner_user_id,
-            priority=item.priority,
-        )
+        with get_session_factory().scoped_session() as session:
+            # Domain-owned hooks decide admission; coordinator knows no settings.
+            if definition.admission(session) is not None:
+                return 0
+            job_id = jobs.create(
+                definition=definition.name,
+                subject_key=item.subject_key,
+                owner_user_id=item.owner_user_id,
+                priority=item.priority,
+                session=session,
+            )
+            session.commit()
     except ActiveJobExists:
         result.count(PassNote.ALREADY_ACTIVE)
         return 0

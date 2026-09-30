@@ -4144,5 +4144,15 @@
   "Discard staged input?": "Discard staged input?",
   "This frees retained upload capacity. Retrying this import will require uploading its input again.": "This frees retained upload capacity. Retrying this import will require uploading its input again.",
   "Staged input ownership could not be verified. Its capacity remains reserved.": "Staged input ownership could not be verified. Its capacity remains reserved.",
-  "Wait for this import to finish before discarding its staged input.": "Wait for this import to finish before discarding its staged input."
+  "Wait for this import to finish before discarding its staged input.": "Wait for this import to finish before discarding its staged input.",
+  "Mesh metadata and preview images": "Mesh metadata and preview images",
+  "G-code metadata and embedded thumbnails": "G-code metadata and embedded thumbnails",
+  "Binary G-code toolpath previews": "Binary G-code toolpath previews",
+  "Derivative processing": "Derivative processing",
+  "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.": "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.",
+  "Processing disabled": "Processing disabled",
+  "Deployment default: {value}": "Deployment default: {value}",
+  "Use deployment default": "Use deployment default",
+  "Derivative processing is disabled by the administrator.": "Derivative processing is disabled by the administrator.",
+  "viewer.processingDisabled": "Toolpath preview processing is disabled."
 }

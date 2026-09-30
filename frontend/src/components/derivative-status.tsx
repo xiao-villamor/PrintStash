@@ -70,7 +70,11 @@ export function DerivativeStatus({
   useEffect(() => {
     refresh();
     return followModel(modelId, (notice) => {
-      if (notice.type === "resync" || (notice.type === "derivative" && notice.file_id === fileId))
+      if (
+        notice.type === "resync" ||
+        notice.type === "derivative_policy" ||
+        (notice.type === "derivative" && notice.file_id === fileId)
+      )
         refresh();
     });
   }, [modelId, fileId, refresh]);
@@ -88,10 +92,16 @@ export function DerivativeStatus({
 
   const preparing = derivatives.filter((item) => IN_PROGRESS.has(item.state));
   const failed = derivatives.filter((item) => item.state === "failed");
-  if (preparing.length === 0 && failed.length === 0) return null;
+  const disabled = derivatives.some((item) => item.state === "disabled");
+  if (preparing.length === 0 && failed.length === 0 && !disabled) return null;
 
   return (
     <ul className="mt-1.5 space-y-1">
+      {disabled && (
+        <li role="status" className="text-2xs text-on-surface-variant">
+          {uiText("Processing disabled")}
+        </li>
+      )}
       {preparing.length > 0 && (
         <li role="status" className="flex items-center gap-1.5 text-2xs text-on-surface-variant">
           <Loader2 className="h-3 w-3 animate-spin" aria-hidden />

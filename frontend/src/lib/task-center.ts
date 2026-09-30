@@ -84,6 +84,7 @@ export interface TaskItem {
   completion?: JobStatus["completion"];
   /** The Job's own state; `interrupted` and `cancelled` refine `status`. */
   jobState?: JobState;
+  jobReason?: string | null;
   currentItem?: string | null;
   error?: string | null;
   serverUpdatedAt?: string | null;
@@ -433,6 +434,8 @@ export function resetTasksForNewSetup(): void {
 }
 
 function detailForJob(job: Pick<JobStatus, "state"> & Partial<JobStatus>): string {
+  if (job.state === "cancelled" && job.error === "derivative_group_disabled")
+    return uiText("Processing disabled");
   if (job.state === "cancelled") return uiText("Cancelled");
   if (job.state === "interrupted") return uiText("Interrupted · resumes automatically");
   if (job.kind === "backups.create" || job.kind === "backups.automatic") {
@@ -517,7 +520,8 @@ function publishTerminal(job: JobStatus): void {
   if (emittedTerminalJobIds.has(job.job_id) || !isBrowser()) return;
   emittedTerminalJobIds.add(job.job_id);
   persistIdSet(EMITTED_TERMINALS_KEY, emittedTerminalJobIds);
-  window.dispatchEvent(new CustomEvent<JobStatus>(TERMINAL_EVENT, { detail: job }));
+  if (job.error !== "derivative_group_disabled")
+    window.dispatchEvent(new CustomEvent<JobStatus>(TERMINAL_EVENT, { detail: job }));
 }
 
 /** A Job that vanished has no status to report: its waiters fail, nobody is told it completed. */
@@ -550,12 +554,16 @@ function applyJob(job: JobStatus, recentScheduledTerminalId: string | null): voi
     Date.parse(job.updated_at) < Date.parse(existing.serverUpdatedAt)
   )
     return;
-  const status = taskStatusOf(job.state);
+  const status =
+    job.state === "cancelled" && job.error === "derivative_group_disabled"
+      ? "completed"
+      : taskStatusOf(job.state);
   const patch = {
     jobId: job.job_id,
     jobKind: job.kind,
     status,
     jobState: job.state,
+    jobReason: job.error,
     progress: job.progress ?? (job.total ? ((job.processed ?? 0) / job.total) * 100 : 0),
     detail: detailForJob(job),
     stage: job.stage,
@@ -582,7 +590,11 @@ function applyGroupedJobs(task: TaskItem, jobs: JobStatus[]): void {
   jobs.forEach(publishTerminal);
   if (task.status === "completed" || task.status === "failed") return;
   const expected = Math.max(task.expectedJobCount ?? task.jobIds?.length ?? 1, 1);
-  const failedJob = jobs.find((job) => job.state === "failed" || job.state === "cancelled");
+  const failedJob = jobs.find(
+    (job) =>
+      job.state === "failed" ||
+      (job.state === "cancelled" && job.error !== "derivative_group_disabled"),
+  );
   if (failedJob) {
     updateTask(task.id, {
       status: "failed",
@@ -592,13 +604,22 @@ function applyGroupedJobs(task: TaskItem, jobs: JobStatus[]): void {
     return;
   }
 
-  const allCompleted = jobs.length >= expected && jobs.every((job) => job.state === "completed");
+  const allCompleted =
+    jobs.length >= expected &&
+    jobs.every(
+      (job) =>
+        job.state === "completed" ||
+        (job.state === "cancelled" && job.error === "derivative_group_disabled"),
+    );
   if (allCompleted) {
+    const disabled = jobs.some((job) => job.error === "derivative_group_disabled");
     updateTask(task.id, {
+      jobReason: disabled ? "derivative_group_disabled" : null,
       status: "completed",
       progress: 100,
-      detail:
-        expected === 1
+      detail: disabled
+        ? uiMessage("Processing disabled")
+        : expected === 1
           ? uiMessage("Upload processed")
           : uiMessage("files.processed", { count: expected }),
     });

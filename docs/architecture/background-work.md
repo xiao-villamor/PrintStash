@@ -240,3 +240,22 @@ Capture-origin inputs retain their Pending Import dismissal lifecycle.
 
 Tasks show retained capacity and expiry with a confirmation before discard.
 After discard, retry requires the input to be uploaded again.
+
+
+## Producer policy admission
+
+Job Definitions may provide an engine-independent `admission(Session)` hook.
+The coordinator consults it before discovery, Job creation, submission and
+actual step execution. Derivative definitions resolve live database policy.
+Their producers serialize final admission with configuration updates and check
+again whenever actual processing executes after a recovery.
+
+Disabled derivative sources yield no subjects or retry deadlines. A bounded
+repair pass drains queued and lost attempts as policy cancellations without
+withdrawing domain intent; active, healthy processing may finish. The ordinary
+tick remains the recovery mechanism when engine cancellation or a realtime hint
+fails. Policy cancellations are excluded from submission-burst cooldown.
+
+Background work exposes effective/default/override state for each derivative
+definition. Historical failures remain inspectable but disabled groups do not
+contribute to actionable failures or retry lists.

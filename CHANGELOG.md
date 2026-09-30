@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Independent mesh, G-code metadata/thumbnail and binary toolpath processing controls, with deployment defaults and live administrator settings. Disabling retains published previews and lets admitted processing finish; re-enabling resumes eligible missing work (#263).
 - Harden mesh workers with pre-import address-space limits, one admission controller
   across concurrency changes, process-tree memory accounting, and shared budgets
   for nested CAD/streaming work (#259).

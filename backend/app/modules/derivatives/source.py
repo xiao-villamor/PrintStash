@@ -40,6 +40,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.work.contracts import WorkItem
 
+from . import policy
 from .kinds import DerivativeGroup
 from .records import STALE_IN_FLIGHT, regenerations
 
@@ -84,7 +85,7 @@ def pending_predicate(
     group: DerivativeGroup, session: Session, *, now: datetime
 ) -> Any:
     """Live Artifacts of the group missing any kind at its current recipe."""
-    regen = regenerations(session)
+    regen = regenerations(session, definitions=[group.definition])
     missing = [
         not_(_satisfied(kind, recipe, now=now, regenerated_at=regen.get(kind)))
         for kind, recipe in group.kinds.items()
@@ -120,7 +121,7 @@ class DerivativeSource:
     def pending(
         self, session: Session, *, now: datetime, limit: int
     ) -> Sequence[WorkItem]:
-        if limit <= 0:
+        if limit <= 0 or not policy.resolve(session)[self.group.definition].enabled:
             return []
         cursor = self._cursor(session)
         predicate = pending_predicate(self.group, session, now=now)
@@ -189,6 +190,8 @@ class DerivativeSource:
 
     def next_due(self, session: Session, *, now: datetime) -> datetime | None:
         """The earliest failure backoff that expires, so a retry needs no tick."""
+        if not policy.resolve(session)[self.group.definition].enabled:
+            return None
         kinds = list(self.group.kinds)
         due = session.exec(
             select(func.min(ArtifactDerivative.next_attempt_at)).where(

@@ -38,6 +38,7 @@ class DerivativeStatus(StrEnum):
     """A derivative as a reader sees it: ``pending`` (no attempt at the current
     recipe yet, or regenerated since) and every stored ``DerivativeState``."""
 
+    DISABLED = "disabled"
     PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"
@@ -144,6 +145,9 @@ class LaneRead(BaseModel):
 
 
 class DefinitionRead(BaseModel):
+    enabled: bool
+    default_enabled: bool
+    overridden: bool
     name: JobKind
     label: str
     lane: LaneName

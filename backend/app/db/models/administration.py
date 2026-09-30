@@ -147,6 +147,11 @@ class SystemConfig(SQLModel, table=True):
         default=None, sa_column=Column(EncryptedText(), nullable=True)
     )
 
+    # Null inherits the deployment default; persisted values are live controls.
+    derivatives_mesh_enabled: Optional[bool] = None
+    derivatives_gcode_enabled: Optional[bool] = None
+    derivatives_toolpath_enabled: Optional[bool] = None
+
     # Behaviour toggles
     # When true, a file's revision is auto-marked known_good after its first
     # successful print (never overriding a human's failed/archived verdict).

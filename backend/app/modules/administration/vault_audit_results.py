@@ -289,6 +289,8 @@ def repair_safe_findings(session: Session, run: VaultAuditRun) -> None:
 
     from app.db.models import DerivativeKind, DerivativeState
     from app.modules.administration import audit
+    from app.modules.derivatives import policy as derivative_policy
+    from app.modules.derivatives.kinds import groups_for
     from app.modules.derivatives.repair import now as rederive_now
 
     assert run.id is not None
@@ -325,6 +327,16 @@ def repair_safe_findings(session: Session, run: VaultAuditRun) -> None:
             continue
         model = session.get(Model, file.model_id)
         if model is None or model.deleted_at is not None:
+            continue
+        repair_kind = {
+            "reparse_metadata": DerivativeKind.METADATA,
+            "regenerate_thumbnail": DerivativeKind.THUMBNAIL,
+        }.get(finding.repair_action)
+        controls = derivative_policy.resolve(session)
+        if repair_kind is not None and any(
+            repair_kind in group.kinds and not controls[group.definition].enabled
+            for group in groups_for(file)
+        ):
             continue
         assert file.id is not None
         ok = False

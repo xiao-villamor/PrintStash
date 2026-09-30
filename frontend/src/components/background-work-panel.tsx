@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,6 +34,7 @@ import {
   cancelQueuedJobs,
   cancelJob,
   getWorkOverview,
+  updateVaultConfig,
   listWorkJobs,
   regenerateDerivatives,
   retryJob,
@@ -43,11 +45,19 @@ import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { currentLocale, knownUiText, uiText } from "@/lib/locale";
 import { toast } from "@/lib/toast";
-import type { DerivativeKind, JobStatus, WorkDefinition, WorkLane, WorkOverview } from "@/types";
+import type {
+  DerivativeKind,
+  JobStatus,
+  WorkDefinition,
+  WorkLane,
+  WorkOverview,
+  VaultConfigUpdate,
+} from "@/types";
 
 /** The panel's server boundary, so a test drives it without a fetch layer. */
 export interface BackgroundWorkApi {
   overview: () => Promise<WorkOverview>;
+  setPolicy: (body: VaultConfigUpdate) => Promise<void>;
   jobs: () => Promise<JobStatus[]>;
   cancelJob: (jobId: string) => Promise<JobStatus>;
   setLane: (lane: string, concurrency: number | null) => Promise<WorkOverview>;
@@ -61,6 +71,9 @@ export interface BackgroundWorkApi {
 
 const WORK_API: BackgroundWorkApi = {
   overview: getWorkOverview,
+  setPolicy: async (body) => {
+    await updateVaultConfig(body);
+  },
   jobs: listWorkJobs,
   cancelJob,
   setLane: setLaneConcurrency,
@@ -87,6 +100,25 @@ function derivativeLabel(kind: DerivativeKind): string {
       return uiText("Model images");
     case "toolpath":
       return uiText("Toolpath previews");
+  }
+}
+
+const POLICY_SETTINGS = {
+  "derivatives.mesh": "derivatives_mesh_enabled",
+  "derivatives.gcode": "derivatives_gcode_enabled",
+  "derivatives.toolpath": "derivatives_toolpath_enabled",
+} as const;
+
+function policyPurpose(name: string): string {
+  switch (name) {
+    case "derivatives.mesh":
+      return uiText("Mesh metadata and preview images");
+    case "derivatives.gcode":
+      return uiText("G-code metadata and embedded thumbnails");
+    case "derivatives.toolpath":
+      return uiText("Binary G-code toolpath previews");
+    default:
+      return name;
   }
 }
 
@@ -181,6 +213,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
   const [activeJobs, setActiveJobs] = useState<JobStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [policyBusy, setPolicyBusy] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending | null>(null);
   const [activeView, setActiveView] = useState<"types" | "workers">("types");
   const advancedRef = useRef<HTMLDetailsElement>(null);
@@ -204,7 +237,8 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
     refresh();
     const timer = window.setInterval(refresh, REFRESH_MS);
     const stop = subscribeEvents((notice) => {
-      if (notice.type === "job" || notice.type === "resync") refresh();
+      if (notice.type === "job" || notice.type === "resync" || notice.type === "derivative_policy")
+        refresh();
     });
     return () => {
       window.clearInterval(timer);
@@ -229,6 +263,29 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
     } finally {
       setBusy(null);
     }
+  }
+
+  function savePolicy(definition: WorkDefinition, value: boolean | null) {
+    if (!(definition.name in POLICY_SETTINGS)) return;
+    // SAFETY: the membership guard restricts the registry key to derivative definitions.
+    const setting = POLICY_SETTINGS[definition.name as keyof typeof POLICY_SETTINGS];
+    setPolicyBusy((current) => new Set(current).add(definition.name));
+    void api
+      .setPolicy({ [setting]: value })
+      .then(async () => {
+        setOverview(await api.overview());
+      })
+      .catch((cause: unknown) => {
+        toast.error(cause);
+        refresh();
+      })
+      .finally(() => {
+        setPolicyBusy((current) => {
+          const next = new Set(current);
+          next.delete(definition.name);
+          return next;
+        });
+      });
   }
 
   function saveLane(lane: WorkLane, concurrency: number | null) {
@@ -302,6 +359,54 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
         </div>
       ) : overview ? (
         <>
+          <SectionHeader
+            icon={Images}
+            title={uiText("Derivative processing")}
+            description={uiText(
+              "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.",
+            )}
+          />
+          <ul className="divide-y divide-border border-b">
+            {overview.definitions
+              .filter((definition) => definition.name in POLICY_SETTINGS)
+              .map((definition) => (
+                <li
+                  key={definition.name}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                >
+                  <label className="flex items-start gap-3 text-sm">
+                    <Checkbox
+                      checked={definition.enabled}
+                      disabled={policyBusy.has(definition.name)}
+                      ariaLabel={policyPurpose(definition.name)}
+                      onChange={(checked) => savePolicy(definition, checked)}
+                    />
+                    <span>
+                      <span className="font-medium">{policyPurpose(definition.name)}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {definition.enabled ? uiText("Enabled") : uiText("Processing disabled")}
+                        {" · "}
+                        {uiText("Deployment default: {value}", {
+                          value: definition.default_enabled
+                            ? uiText("Enabled")
+                            : uiText("Disabled"),
+                        })}
+                      </span>
+                    </span>
+                  </label>
+                  {definition.overridden && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={policyBusy.has(definition.name)}
+                      onClick={() => savePolicy(definition, null)}
+                    >
+                      {uiText("Use deployment default")}
+                    </Button>
+                  )}
+                </li>
+              ))}
+          </ul>
           <SectionHeader
             icon={Activity}
             title={uiText("What's happening now")}

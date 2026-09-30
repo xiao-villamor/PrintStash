@@ -519,6 +519,7 @@ export interface JobStatus {
  * attempted at the current recipe: every value it would supply is unknown.
  */
 export type DerivativeState =
+  | "disabled"
   | "pending"
   | "queued"
   | "running"
@@ -549,6 +550,9 @@ export interface WorkLane {
 }
 
 export interface WorkDefinition {
+  enabled: boolean;
+  default_enabled: boolean;
+  overridden: boolean;
   name: JobKind;
   label: string;
   lane: LaneName;

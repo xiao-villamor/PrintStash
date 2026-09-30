@@ -6,19 +6,49 @@ from collections.abc import Callable
 
 from sqlmodel import Session, select
 
+from app.core.errors import OperationError
 from app.core.time import utcnow
 from app.db.models import File, JobKind, LaneName
 from app.db.scopes import live
-from app.modules.work.contracts import JobContext, JobDefinition, Step
+from app.modules.work.contracts import (
+    JobContext,
+    JobDefinition,
+    JobOutcome,
+    SkipReason,
+    Step,
+)
 
-from . import producers, records
+from . import policy, producers, records
 from .kinds import DerivativeGroup, group
 from .source import DerivativeSource, file_id_of
 
 
-def _step(produce: Callable[[int], producers.Outcome]) -> Callable[[JobContext], None]:
+def _step(
+    produce: Callable[[int], producers.Outcome], derivative_group: DerivativeGroup
+) -> Callable[[JobContext], None]:
     def run(ctx: JobContext) -> None:
-        outcome = produce(file_id_of(ctx.subject_key))
+        try:
+            outcome = produce(file_id_of(ctx.subject_key))
+        except OperationError as exc:
+            if exc.code != SkipReason.DERIVATIVE_GROUP_DISABLED:
+                raise
+            from app.db.session import get_session_factory
+
+            with get_session_factory().scoped_session() as session:
+                records.fail_in_flight(
+                    session,
+                    file_id_of(ctx.subject_key),
+                    str(exc.code),
+                    now=utcnow(),
+                    kinds=derivative_group.kinds,
+                )
+                session.commit()
+            ctx.finish(
+                JobOutcome.CANCELLED,
+                error=SkipReason.DERIVATIVE_GROUP_DISABLED,
+                retryable=False,
+            )
+            return
         ctx.update(result=outcome.as_result(), processed=1, total=1)
 
     return run
@@ -37,9 +67,17 @@ def _hooks(derivative_group: DerivativeGroup):
             records.cancel(session, file_row, derivative_group.kinds, now=utcnow())
 
     def on_failure(session: Session, subject_key: str, reason: str) -> None:
-        records.fail_in_flight(session, file_id_of(subject_key), reason, now=utcnow())
+        records.fail_in_flight(
+            session,
+            file_id_of(subject_key),
+            reason,
+            now=utcnow(),
+            kinds=derivative_group.kinds,
+        )
 
     def retry(session: Session, subject_key: str) -> bool:
+        policy.lock(session)
+        policy.require_enabled(session, derivative_group.definition)
         file_row = _file(session, subject_key)
         if file_row is None:
             return False
@@ -57,12 +95,13 @@ def _definition(
     return JobDefinition(
         name=name,
         lane=lane,
-        steps=(Step(f"{name.value}.produce", _step(produce)),),
+        steps=(Step(f"{name.value}.produce", _step(produce, derivative_group)),),
         source=DerivativeSource(derivative_group),
         cancel=cancel,
         on_failure=on_failure,
         retry=retry,
         label=derivative_group.label,
+        admission=lambda session: policy.admission(session, name),
     )
 
 
@@ -84,9 +123,13 @@ def definitions() -> list[JobDefinition]:
 
 def nudge_for(file_row: File) -> None:
     """After an Artifact commit: nudge every group that applies to it."""
+    from app.db.session import get_session_factory
     from app.modules.work import nudge
 
     from .kinds import groups_for
 
+    with get_session_factory().scoped_session() as session:
+        controls = policy.resolve(session)
     for derivative_group in groups_for(file_row):
-        nudge(derivative_group.definition)
+        if controls[derivative_group.definition].enabled:
+            nudge(derivative_group.definition)

@@ -109,9 +109,13 @@ def _live_file(session: Session, file_id: int) -> File:
 def _begin(
     file_id: int, definition: JobKind
 ) -> tuple[File, set[DerivativeKind]] | None:
+    from . import policy
+
     now = utcnow()
     kinds = group(definition).kinds
     with get_session_factory().scoped_session() as session:
+        policy.lock(session)
+        policy.require_enabled(session, definition)
         try:
             file_row = _live_file(session, file_id)
         except ArtifactGone:

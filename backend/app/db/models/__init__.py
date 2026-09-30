@@ -151,6 +151,9 @@ from .media import (
     ArtifactDerivative as ArtifactDerivative,
 )
 from .media import (
+    DerivativeGroupRegeneration as DerivativeGroupRegeneration,
+)
+from .media import (
     DerivativeRegeneration as DerivativeRegeneration,
 )
 from .notifications import (

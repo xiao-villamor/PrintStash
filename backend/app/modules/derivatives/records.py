@@ -17,6 +17,7 @@ question for the source: is this kind satisfied for now, or does it need work?
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -28,24 +29,40 @@ from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
 from app.db.models import (
     ArtifactDerivative,
+    DerivativeGroupRegeneration,
     DerivativeKind,
     DerivativeRegeneration,
     DerivativeState,
     File,
+    JobKind,
 )
 from app.schemas.jobs import DerivativeRead, DerivativeStatus
 
-from .kinds import recipes_for
+from . import policy
+from .kinds import groups_for, recipes_for
 
 STALE_IN_FLIGHT = timedelta(hours=1)
 _SATISFIED = {DerivativeState.READY, DerivativeState.SKIPPED}
 
 
-def regenerations(session: Session) -> dict[DerivativeKind, datetime]:
-    return {
+def regenerations(
+    session: Session, *, definitions: Sequence[JobKind] = ()
+) -> dict[DerivativeKind, datetime]:
+    result = {
         row.kind: ensure_utc(row.requested_at)
         for row in session.exec(select(DerivativeRegeneration)).all()
     }
+    if definitions:
+        rows = session.exec(
+            select(DerivativeGroupRegeneration).where(
+                col(DerivativeGroupRegeneration.definition).in_(definitions)
+            )
+        ).all()
+        for row in rows:
+            requested = ensure_utc(row.requested_at)
+            if row.kind not in result or requested > result[row.kind]:
+                result[row.kind] = requested
+    return result
 
 
 def satisfied(
@@ -89,7 +106,7 @@ def needed(
 ) -> set[DerivativeKind]:
     """Which of ``kinds`` still need deriving for ``file`` right now."""
     current = rows_for(session, file)
-    regen = regenerations(session)
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
     return {
         kind
         for kind in kinds
@@ -179,7 +196,12 @@ def mark_failed(
 
 
 def fail_in_flight(
-    session: Session, file_id: int, reason: str, *, now: datetime
+    session: Session,
+    file_id: int,
+    reason: str,
+    *,
+    now: datetime,
+    kinds: dict[DerivativeKind, int] | None = None,
 ) -> int:
     """The job's failure hook: in-flight rows of ``file_id`` become failures."""
     rows = session.exec(
@@ -190,9 +212,15 @@ def fail_in_flight(
             ),
         )
     ).all()
+    changed = 0
     for row in rows:
+        if kinds is not None and (
+            row.kind not in kinds or row.recipe_version != kinds[row.kind]
+        ):
+            continue
         mark_failed(session, row, reason, now=now, deterministic=False)
-    return len(rows)
+        changed += 1
+    return changed
 
 
 def cancel(
@@ -267,10 +295,31 @@ def read(
     """Every applicable kind of ``file`` at its current recipe, pending included."""
     now = now or utcnow()
     current = rows_for(session, file)
-    regen = regenerations(session)
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
+    controls = policy.resolve(session)
+    enabled = {
+        kind: controls[g.definition].enabled
+        for g in groups_for(file)
+        for kind in g.kinds
+    }
     reads: list[DerivativeRead] = []
     for kind, recipe in sorted(recipes_for(file).items()):
         row = current.get(kind)
+        if not enabled[kind] and (
+            row is None
+            or row.state
+            not in {
+                DerivativeState.READY,
+                DerivativeState.SKIPPED,
+                DerivativeState.RUNNING,
+            }
+        ):
+            reads.append(
+                DerivativeRead(
+                    kind=kind, recipe_version=recipe, state=DerivativeStatus.DISABLED
+                )
+            )
+            continue
         if row is None:
             reads.append(
                 DerivativeRead(
@@ -280,7 +329,8 @@ def read(
             continue
         state = DerivativeStatus(row.state.value)
         stale = (
-            row.state in _SATISFIED
+            enabled[kind]
+            and row.state in _SATISFIED
             and kind in regen
             and ensure_utc(row.updated_at) < regen[kind]
         )
@@ -292,8 +342,8 @@ def read(
                 attempts=row.attempts,
                 failure_reason=row.failure_reason,
                 updated_at=row.updated_at,
-                retryable=row.state
-                in {DerivativeState.FAILED, DerivativeState.CANCELLED},
+                retryable=enabled[kind]
+                and row.state in {DerivativeState.FAILED, DerivativeState.CANCELLED},
             )
         )
     return reads

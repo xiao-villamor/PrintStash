@@ -290,3 +290,21 @@ describe("TaskList", () => {
     expect(input).toHaveValue("");
   });
 });
+
+describe("policy-cancelled Tasks", () => {
+  it("shows a neutral terminal entry", () => {
+    renderTaskList([
+      task({
+        status: "completed",
+        jobState: "cancelled",
+        jobReason: "derivative_group_disabled",
+        progress: 0,
+        retryable: false,
+      }),
+    ]);
+    expect(screen.getByText("Processing disabled")).toBeVisible();
+    expect(screen.queryByText("Completed")).toBeNull();
+    expect(screen.queryByText("Failed")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+});

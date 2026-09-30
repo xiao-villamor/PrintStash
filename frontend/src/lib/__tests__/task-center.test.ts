@@ -1239,3 +1239,29 @@ describe("task localization", () => {
     setLocale("en");
   });
 });
+
+describe("policy cancellation", () => {
+  it("settles neutrally without failure notifications", async () => {
+    const completion = vi.fn<(job: JobStatus) => void>();
+    const stop = tc.subscribeImportJobCompletions(completion);
+    tc.trackImportJob("disabled-1", "Mesh derivatives");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "disabled-1",
+        kind: "derivatives.mesh",
+        state: "cancelled",
+        error: "derivative_group_disabled",
+        retryable: false,
+      }),
+    ]);
+    await tc.syncImportJobs();
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "completed",
+      jobReason: "derivative_group_disabled",
+      detail: "Processing disabled",
+      retryable: false,
+    });
+    expect(completion).not.toHaveBeenCalled();
+    stop();
+  });
+});

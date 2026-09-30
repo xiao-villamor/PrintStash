@@ -178,6 +178,10 @@ services:
       # uploads committed at once. Settings → Background work overrides every
       # lane's concurrency at runtime for all processes.
       VAULT_MAX_RENDER_JOBS: ${VAULT_MAX_RENDER_JOBS:-1}
+      # Derivative defaults; persisted Background work controls win on every process.
+      VAULT_DERIVATIVES_MESH_ENABLED: ${VAULT_DERIVATIVES_MESH_ENABLED:-true}
+      VAULT_DERIVATIVES_GCODE_ENABLED: ${VAULT_DERIVATIVES_GCODE_ENABLED:-true}
+      VAULT_DERIVATIVES_TOOLPATH_ENABLED: ${VAULT_DERIVATIVES_TOOLPATH_ENABLED:-true}
       VAULT_JOBS_INGEST_CONCURRENCY: ${VAULT_JOBS_INGEST_CONCURRENCY:-2}
 
       # --- Runtime ---

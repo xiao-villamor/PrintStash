@@ -20,6 +20,7 @@ from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.models import (
+    DerivativeGroupRegeneration,
     DerivativeKind,
     DerivativeRegeneration,
     DerivativeState,
@@ -306,6 +307,7 @@ class TestRegenerateDerivatives:
             work_engine
         )
         assert db_session.exec(select(DerivativeRegeneration)).all() == []
+        assert db_session.exec(select(DerivativeGroupRegeneration)).all() == []
 
     def test_all_marks_every_output_of_the_kind_stale(
         self, client: TestClient, admin: User, db_session: Session, work_engine
@@ -319,10 +321,15 @@ class TestRegenerateDerivatives:
         )
 
         assert response.json() == {"kind": DerivativeKind.THUMBNAIL, "mode": "all"}
-        row = db_session.get(DerivativeRegeneration, DerivativeKind.THUMBNAIL)
-        assert row is not None
-        assert row.requested_by == admin.id
-        assert row.requested_at.replace(tzinfo=None) >= before.replace(tzinfo=None)
+        from app.modules.derivatives.kinds import definitions_for_kind
+
+        for definition in definitions_for_kind(DerivativeKind.THUMBNAIL):
+            row = db_session.get(
+                DerivativeGroupRegeneration, (definition, DerivativeKind.THUMBNAIL)
+            )
+            assert row is not None
+            assert row.requested_by == admin.id
+            assert row.requested_at.replace(tzinfo=None) >= before.replace(tzinfo=None)
         assert JobKind.DERIVATIVES_MESH in _nudged(work_engine)
 
     def test_an_unknown_kind_is_refused(self, client: TestClient, admin: User) -> None:

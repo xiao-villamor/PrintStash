@@ -107,3 +107,42 @@ Work Source backfills it. Terminal attempts stay exhausted across scans, nudges
 and restarts for the same bytes and recipe. Explicit retry, changed content or a
 new recipe makes work eligible; timeout backoff keeps the configured maximum.
 Original downloads and signed slicer downloads continue to use Artifact bytes.
+
+
+## Live processing policy
+
+`modules/derivatives/policy.py` owns the three groups' database overrides and
+frozen deployment defaults. Discovery, admission, manual actions and status
+projection all consult it; process-local settings overlays do not decide live
+policy. Definitions remain registered while disabled so historical Jobs remain
+inspectable. `disabled` is a read projection, never a stored derivative state.
+
+Admission locks the configuration singleton using a SQLite write transaction
+or PostgreSQL row lock, then opens the derivative attempt in that transaction.
+An admitted producer may finish after disablement. The producer repeats this
+check on actual execution, including recovery replay; cached engine checkpoints
+never grant permission for a new attempt.
+
+The reconciler cancels queued, delayed, interrupted and retrying Jobs with
+`derivative_group_disabled`. It preserves healthy execution and settles orphaned
+in-flight derivative rows using normal failure/backoff rules. Policy cancellation
+does not invoke the user cancellation hook or satisfy a missing derivative. It
+does not count towards repeated-submission cooldown.
+
+New regenerate-all markers are scoped to enabled producer definitions in
+`derivative_group_regenerations`; earlier kind-wide markers remain readable.
+This prevents a thumbnail regeneration from invalidating a disabled group's
+outputs on later re-enablement. Nothing changes the recipes.
+
+Administrator config updates accept a Boolean to save an override, explicit
+`null` to inherit the environment, and omission to preserve it. Manual retries
+and repairs return 409 `derivative_group_disabled` before changing rows.
+Automatic audit repair leaves disabled findings unrepaired.
+
+Stored thumbnails and metadata remain available. Binary toolpaths serve the
+latest ready published output, including a prior recipe; missing outputs return
+409 while disabled. The viewer stops polling until a policy notice or resync.
+After commit, the event publisher emits a payload-free `derivative_policy`
+notice on the authenticated `derivatives:policy` channel. Views refetch through
+their authorized endpoints. Periodic reconciliation recovers lost notices or
+nudges.

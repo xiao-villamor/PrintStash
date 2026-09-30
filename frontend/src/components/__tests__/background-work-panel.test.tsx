@@ -33,6 +33,7 @@ let socket: FakeSocket;
 function stubApi(overview: WorkOverview = aWorkOverview(), over: Partial<BackgroundWorkApi> = {}) {
   return {
     overview: vi.fn<BackgroundWorkApi["overview"]>().mockResolvedValue(overview),
+    setPolicy: vi.fn<BackgroundWorkApi["setPolicy"]>().mockResolvedValue(undefined),
     jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockResolvedValue([]),
     cancelJob: vi
       .fn<BackgroundWorkApi["cancelJob"]>()
@@ -420,5 +421,72 @@ describe("BackgroundWorkPanel", () => {
 
       expect(socket.close).toHaveBeenCalled();
     });
+  });
+});
+
+describe("derivative controls", () => {
+  it("saves one group's server-confirmed value", async () => {
+    const user = userEvent.setup();
+    const overview = aWorkOverview();
+    const saved = {
+      ...overview,
+      definitions: overview.definitions.map((definition) => ({
+        ...definition,
+        enabled: false,
+        overridden: true,
+      })),
+    };
+    const overviewReader = vi
+      .fn<BackgroundWorkApi["overview"]>()
+      .mockResolvedValueOnce(overview)
+      .mockResolvedValue(saved);
+    const api = stubApi(overview, { overview: overviewReader });
+    renderPanel(api);
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" }),
+    );
+    await waitFor(() =>
+      expect(api.setPolicy).toHaveBeenCalledWith({ derivatives_mesh_enabled: false }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
+      ).not.toBeChecked(),
+    );
+    expect(screen.getByRole("button", { name: "Use deployment default" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Use deployment default" }));
+    await waitFor(() =>
+      expect(api.setPolicy).toHaveBeenCalledWith({ derivatives_mesh_enabled: null }),
+    );
+  });
+
+  it("restores the server value after a failed save", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(aWorkOverview(), {
+      setPolicy: vi
+        .fn<BackgroundWorkApi["setPolicy"]>()
+        .mockRejectedValue(new Error("save rejected")),
+    });
+    renderPanel(api);
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" }),
+    );
+    await waitFor(() => expect(api.setPolicy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
+      ).toBeChecked(),
+    );
+    expect(api.overview).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes on a policy notice", async () => {
+    const api = stubApi();
+    renderPanel(api);
+    await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" });
+    await waitFor(() => expect(socket.onmessage).not.toBeNull());
+    const calls = vi.mocked(api.overview).mock.calls.length;
+    socket.onmessage?.({ data: JSON.stringify({ type: "derivative_policy" }) });
+    await waitFor(() => expect(api.overview).toHaveBeenCalledTimes(calls + 1));
   });
 });

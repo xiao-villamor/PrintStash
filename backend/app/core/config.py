@@ -231,6 +231,10 @@ class Settings(BaseSettings):
     jobs_system_retention_hours: int = Field(default=24, ge=1, le=8760)
     jobs_retention_per_user: int = Field(default=500, ge=10, le=100000)
     engine_history_retention_days: int = Field(default=7, ge=1, le=365)
+    derivatives_mesh_enabled: bool = True
+    derivatives_gcode_enabled: bool = True
+    derivatives_toolpath_enabled: bool = True
+
     derivative_max_attempts: int = Field(default=5, ge=1, le=100)
     derivative_backoff_seconds: int = Field(default=30, ge=1, le=86400)
     fence_heartbeat_seconds: int = Field(default=15, ge=1, le=3600)

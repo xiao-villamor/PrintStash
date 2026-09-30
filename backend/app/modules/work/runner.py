@@ -114,6 +114,15 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
         return StepOutcome.DEFERRED.value
     started = time.monotonic()
     try:
+        definition = catalog_module.get_catalog().definition(context.definition)
+        with get_session_factory().scoped_session() as session:
+            refused = definition.admission(session)
+            if refused is not None:
+                definition.on_failure(session, context.subject_key, refused)
+                session.commit()
+        if refused is not None:
+            context.finish(JobOutcome.CANCELLED, error=refused, retryable=False)
+            return StepOutcome.CANCELLED.value
         step.fn(context)
     except BaseException:
         record_step(context.definition, step.name, "error", time.monotonic() - started)

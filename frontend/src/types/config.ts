@@ -78,6 +78,10 @@ export interface SetupResponse {
 }
 
 export interface VaultConfigRead {
+  derivatives_mesh_enabled: boolean;
+  derivatives_gcode_enabled: boolean;
+  derivatives_toolpath_enabled: boolean;
+
   storage_backend: string;
   storage_provider: string;
   storage_provider_config: StorageProviderConfigValues;
@@ -127,6 +131,10 @@ export interface VaultConfigRead {
 }
 
 export interface VaultConfigUpdate {
+  derivatives_mesh_enabled?: boolean | null;
+  derivatives_gcode_enabled?: boolean | null;
+  derivatives_toolpath_enabled?: boolean | null;
+
   storage_backend?: string;
   storage_provider?: string;
   storage_provider_config?: StorageProviderConfigValues;

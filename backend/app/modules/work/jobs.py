@@ -434,11 +434,15 @@ class JobStore:
             attach_summaries(session, statuses, selected)
             return statuses
 
-    def failed(self, *, limit: int = 50) -> list[JobStatus]:
+    def failed(
+        self, *, limit: int = 50, excluded_kinds: Sequence[JobKind] = ()
+    ) -> list[JobStatus]:
         with get_session_factory().scoped_session() as session:
             rows = session.exec(
                 select(Job)
-                .where(Job.state == JobState.FAILED)
+                .where(
+                    Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
+                )
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
             ).all()
@@ -447,7 +451,9 @@ class JobStore:
             statuses = [status_of(row) for row in rows]
             selected = (
                 select(Job.id)
-                .where(Job.state == JobState.FAILED)
+                .where(
+                    Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
+                )
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
             )

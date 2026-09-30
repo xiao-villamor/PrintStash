@@ -29,6 +29,8 @@ from app.db.models import (
     CollectionPermission,
     CollectionRole,
     CollectionTagLink,
+    DerivativeGroupRegeneration,
+    DerivativeKind,
     DerivativeState,
     Document,
     DocumentKind,
@@ -356,6 +358,12 @@ class MakeIngestRequest(Protocol):
     ) -> IngestRequest: ...
 
 
+class MakeDerivativeGroupRegeneration(Protocol):
+    def __call__(
+        self, definition: JobKind, kind: DerivativeKind, **overrides: Any
+    ) -> DerivativeGroupRegeneration: ...
+
+
 class MakeDerivative(Protocol):
     def __call__(
         self,
@@ -471,6 +479,7 @@ __all__ = [
     "MakeJob",
     "MakeIngestRequest",
     "MakeDerivative",
+    "MakeDerivativeGroupRegeneration",
     "MakeWorkFence",
     "MakeWorkExecutor",
     "TagCollection",

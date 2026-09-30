@@ -549,6 +549,16 @@ def _wait_subscribed(bus, channel: str) -> None:
 
 
 class TestEventsSocket:
+    def test_authenticated_members_receive_policy_notices(self, client, app, owner):
+        bus = app.state.event_bus
+        with client.websocket_connect(
+            f"/api/v1/events/ws?ticket={_ticket(client, owner)}"
+        ) as ws:
+            assert ws.receive_json() == {"type": "resync"}
+            notice = {"type": "derivative_policy"}
+            ws.portal.call(bus.publish, "derivatives:policy", notice)
+            assert ws.receive_json() == notice
+
     def test_a_ticket_opens_the_stream_with_a_resync(
         self, client: TestClient, owner: User
     ) -> None:

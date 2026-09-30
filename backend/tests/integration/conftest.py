@@ -37,6 +37,7 @@ from tests.factories.protocols import (
     MakeCollection,
     MakeCover,
     MakeDerivative,
+    MakeDerivativeGroupRegeneration,
     MakeDocument,
     MakeEmbeddingSpace,
     MakeExternalLibrary,
@@ -336,6 +337,13 @@ def make_job(db_session: Session) -> MakeJob:
 def make_ingest_request(db_session: Session) -> MakeIngestRequest:
     """An accepted ingest request together with the queued Job that owns it."""
     return _bound(factories.build_ingest_request, db_session)
+
+
+@pytest.fixture
+def make_derivative_group_regeneration(
+    db_session: Session,
+) -> MakeDerivativeGroupRegeneration:
+    return _bound(factories.build_derivative_group_regeneration, db_session)
 
 
 @pytest.fixture

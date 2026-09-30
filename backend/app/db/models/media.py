@@ -19,7 +19,7 @@ from app.core.time import utcnow
 from app.db.enum_columns import EnumText, enum_check
 
 from .base import SQLModel
-from .types import DerivativeKind, DerivativeState
+from .types import DerivativeKind, DerivativeState, JobKind
 
 
 class ArtifactDerivative(SQLModel, table=True):
@@ -114,6 +114,34 @@ class DerivativeRegeneration(SQLModel, table=True):
     __tablename__ = "derivative_regenerations"
     __table_args__ = (enum_check("kind", DerivativeKind),)
 
+    kind: DerivativeKind = Field(
+        sa_column=Column(EnumText(DerivativeKind), primary_key=True, nullable=False)
+    )
+    requested_at: datetime = Field(default_factory=utcnow)
+    requested_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+
+
+class DerivativeGroupRegeneration(SQLModel, table=True):
+    """A regenerate-all request limited to an enabled producer group.
+
+    Legacy kind-wide requests remain readable, but new requests must not
+    invalidate the same kind of a group the operator has disabled.
+    """
+
+    __tablename__ = "derivative_group_regenerations"
+    __table_args__ = (
+        enum_check("definition", JobKind),
+        enum_check("kind", DerivativeKind),
+    )
+
+    definition: JobKind = Field(
+        sa_column=Column(EnumText(JobKind), primary_key=True, nullable=False)
+    )
     kind: DerivativeKind = Field(
         sa_column=Column(EnumText(DerivativeKind), primary_key=True, nullable=False)
     )

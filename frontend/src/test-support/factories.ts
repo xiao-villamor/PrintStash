@@ -600,6 +600,9 @@ export function aWorkOverview(override?: Partial<WorkOverview>): WorkOverview {
     definitions: [
       {
         name: "derivatives.mesh",
+        enabled: true,
+        default_enabled: true,
+        overridden: false,
         label: "Mesh derivatives",
         lane: "derive.native",
         queued: 0,
@@ -704,6 +707,9 @@ export function aVaultConfig(
   override?: Partial<import("@/types").VaultConfigRead>,
 ): import("@/types").VaultConfigRead {
   return {
+    derivatives_mesh_enabled: true,
+    derivatives_gcode_enabled: true,
+    derivatives_toolpath_enabled: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {

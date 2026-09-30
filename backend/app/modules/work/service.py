@@ -12,7 +12,7 @@ import json
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import delete, func
+from sqlalchemy import and_, delete, false, func, or_
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -21,9 +21,10 @@ from app.core.time import utcnow
 from app.db.models import (
     ACTIVE_JOB_STATES,
     ArtifactDerivative,
+    DerivativeGroupRegeneration,
     DerivativeKind,
-    DerivativeRegeneration,
     DerivativeState,
+    File,
     Job,
     JobKind,
     JobState,
@@ -32,6 +33,7 @@ from app.db.models import (
     WorkLaneOverride,
     WorkPriority,
 )
+from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.db.transactions import begin_write
 from app.schemas.jobs import (
@@ -181,6 +183,9 @@ def retry(job_id: str, *, actor: User) -> JobStatus:
     definition = catalog_module.get_catalog().definition(status.kind)
     with get_session_factory().scoped_session() as session:
         begin_write(session, immediate=True)
+        refused = definition.admission(session)
+        if refused is not None:
+            raise OperationError(refused, kind=ErrorKind.CONFLICT)
         row = session.exec(
             select(Job).where(Job.id == job_id).with_for_update()
         ).first()
@@ -249,23 +254,33 @@ def regenerate_derivatives(
     kind: DerivativeKind, *, mode: RegenerateMode, actor: User
 ) -> None:
     """``missing`` just nudges; ``all`` marks every output of ``kind`` stale."""
+    from app.modules.derivatives import policy
     from app.modules.derivatives.kinds import definitions_for_kind
+    from app.modules.work.contracts import SkipReason
 
-    if mode is RegenerateMode.ALL:
-        with get_session_factory().scoped_session() as session:
-            row = session.get(DerivativeRegeneration, kind) or DerivativeRegeneration(
-                kind=kind
+    with get_session_factory().scoped_session() as session:
+        policy.lock(session)
+        controls = policy.resolve(session)
+        enabled = [d for d in definitions_for_kind(kind) if controls[d].enabled]
+        if not enabled:
+            raise OperationError(
+                SkipReason.DERIVATIVE_GROUP_DISABLED, kind=ErrorKind.CONFLICT
             )
-            row.requested_at = utcnow()
-            row.requested_by = actor.id
-            session.add(row)
-            session.commit()
-    for definition in definitions_for_kind(kind):
+        if mode is RegenerateMode.ALL:
+            for definition in enabled:
+                row = session.get(DerivativeGroupRegeneration, (definition, kind))
+                if row is None:
+                    row = DerivativeGroupRegeneration(definition=definition, kind=kind)
+                row.requested_at = utcnow()
+                row.requested_by = actor.id
+                session.add(row)
+        session.commit()
+    for definition in enabled:
         nudge(definition)
 
 
 def overview(*, now: datetime | None = None) -> WorkOverview:
-    from app.modules.derivatives import kinds
+    from app.modules.derivatives import kinds, policy
 
     now = now or utcnow()
     catalog = catalog_module.get_catalog()
@@ -289,6 +304,8 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
     counts = jobs.counts_by_definition()
     definitions: list[DefinitionRead] = []
     with get_session_factory().scoped_session() as session:
+        controls = policy.resolve(session)
+        disabled = [d for d, control in controls.items() if not control.enabled]
         for name, definition in sorted(catalog.definitions.items()):
             per_state = counts.get(name, {})
             last = session.exec(
@@ -305,12 +322,17 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
             definitions.append(
                 DefinitionRead(
                     name=name,
+                    enabled=controls[name].enabled if name in controls else True,
+                    default_enabled=controls[name].default_enabled
+                    if name in controls
+                    else True,
+                    overridden=controls[name].overridden if name in controls else False,
                     label=definition.label,
                     lane=definition.lane,
                     queued=per_state.get(JobState.QUEUED, 0),
                     running=per_state.get(JobState.RUNNING, 0),
                     interrupted=per_state.get(JobState.INTERRUPTED, 0),
-                    failed=per_state.get(JobState.FAILED, 0),
+                    failed=0 if name in disabled else per_state.get(JobState.FAILED, 0),
                     completed=per_state.get(JobState.COMPLETED, 0),
                     derivative_kinds=list(kinds.group(name).kinds)
                     if kinds.is_derivative(name)
@@ -321,8 +343,19 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
             )
         failed_derivatives = int(
             session.exec(
-                select(func.count(col(ArtifactDerivative.id))).where(
-                    ArtifactDerivative.state == DerivativeState.FAILED
+                select(func.count(col(ArtifactDerivative.id)))
+                .join(File)
+                .where(
+                    or_(
+                        false(),
+                        *(
+                            and_(g.applies(), col(ArtifactDerivative.kind).in_(g.kinds))
+                            for g in kinds.GROUPS
+                            if controls[g.definition].enabled
+                        ),
+                    ),
+                    live(File),
+                    ArtifactDerivative.state == DerivativeState.FAILED,
                 )
             ).one()
         )
@@ -343,7 +376,7 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
         lanes=lanes,
         definitions=definitions,
         executors=executors_read,
-        failed_jobs=jobs.failed(limit=50),
+        failed_jobs=jobs.failed(limit=50, excluded_kinds=disabled),
         failed_derivatives=failed_derivatives,
     )
 

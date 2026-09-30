@@ -120,3 +120,11 @@ class TestPublication:
             events.job_changed(_status(owner_user_id=7))
         finally:
             events.bind(None)
+
+
+class TestPolicyChanged:
+    def test_sends_a_payload_free_refetch_notice(self, publisher):
+        events.derivative_policy_changed()
+        assert publisher.sent == [
+            (events.POLICY_CHANNEL, {"type": "derivative_policy"})
+        ]

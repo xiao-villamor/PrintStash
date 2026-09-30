@@ -189,7 +189,9 @@ async def events_ws(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     sink = websocket.send_json
-    channels = {f"jobs:{user.id}"} | ({"work:admin"} if user.is_superuser else set())
+    channels = {f"jobs:{user.id}", "derivatives:policy"} | (
+        {"work:admin"} if user.is_superuser else set()
+    )
     for channel in channels:
         await bus.subscribe(channel, sink)
     await sink({"type": "resync"})

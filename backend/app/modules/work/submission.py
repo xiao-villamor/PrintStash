@@ -67,6 +67,8 @@ def submit(job_id: str, *, now: datetime | None = None) -> SubmitOutcome | None:
         if row is None or row.state not in ACTIVE_JOB_STATES:
             return None
         definition = catalog.definition(row.kind)
+        if definition.admission(session) is not None:
+            return None
         attempt = row.attempts + 1
         submission = JobSubmission(
             execution_id=execution_id(row.id, attempt),

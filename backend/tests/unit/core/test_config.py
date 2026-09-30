@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import DATA_ROOT_LAYOUT, ConfigResolver, FrozenSettings, _overlay
+from app.modules.derivatives.policy import SETTINGS
 
 DATA_ROOT = Path("/srv/printstash")
 POSTGRES_URL = "postgresql+psycopg://printstash:secret@postgres:5432/printstash"
@@ -188,3 +189,16 @@ class TestConfigResolver:
         monkeypatch.setitem(_overlay, "data_dir", Path("/mnt/runtime/files"))
 
         assert resolver.frozen.data_dir == DATA_ROOT / "files"
+
+
+class TestDerivativeDefaults:
+    def test_all_producer_groups_default_to_enabled(self, monkeypatch):
+        for name in SETTINGS.values():
+            monkeypatch.delenv(f"VAULT_{name.upper()}", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert all(getattr(configured, name) is True for name in SETTINGS.values())
+
+    @pytest.mark.parametrize("name", list(SETTINGS.values()))
+    def test_reads_a_disabled_environment_default(self, monkeypatch, name):
+        monkeypatch.setenv(f"VAULT_{name.upper()}", "false")
+        assert getattr(FrozenSettings(_env_file=None), name) is False

@@ -915,3 +915,17 @@ class TestBuildLibraryAtScale:
         model = factories.build_model(db_session, "Bracket")
 
         assert model.id is not None
+
+
+class TestGroupRegeneration:
+    def test_group_regeneration_factory_reaches_only_its_producer(self, db_session):
+        from app.db.models import DerivativeKind, JobKind
+        from app.modules.derivatives.records import regenerations
+
+        factories.build_derivative_group_regeneration(
+            db_session, JobKind.DERIVATIVES_GCODE, DerivativeKind.METADATA
+        )
+        assert DerivativeKind.METADATA in regenerations(
+            db_session, definitions=[JobKind.DERIVATIVES_GCODE]
+        )
+        assert regenerations(db_session, definitions=[JobKind.DERIVATIVES_MESH]) == {}

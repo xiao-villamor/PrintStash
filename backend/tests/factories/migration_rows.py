@@ -343,3 +343,21 @@ def seed_released_v0121_rows(connection) -> None:
     connection.execute(
         models.update().where(models.c.id == 1).values(thumbnail_file_id=1)
     )
+
+
+def create_pre_derivative_controls_schema(connection) -> None:
+    """The predecessor's unchanged models, without this feature's columns/table."""
+    from sqlmodel import SQLModel
+
+    metadata = MetaData(naming_convention=SQLModel.metadata.naming_convention)
+    for table in SQLModel.metadata.tables.values():
+        if table.name != "derivative_group_regenerations":
+            table.to_metadata(metadata)
+    config = metadata.tables["system_config"]
+    for column in (
+        "derivatives_mesh_enabled",
+        "derivatives_gcode_enabled",
+        "derivatives_toolpath_enabled",
+    ):
+        config._columns.remove(config.c[column])
+    metadata.create_all(connection)

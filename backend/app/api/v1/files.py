@@ -452,6 +452,13 @@ def retry_file_derivative(
     recipes = recipes_for(file)
     if kind not in recipes:
         raise HTTPException(status_code=404, detail="derivative_kind_not_found")
+    from app.modules.derivatives import policy
+    from app.modules.derivatives.kinds import groups_for
+
+    policy.lock(session)
+    for group in groups_for(file):
+        if kind in group.kinds:
+            policy.require_enabled(session, group.definition)
     if not records.reset(session, file, {kind: recipes[kind]}):
         raise HTTPException(status_code=409, detail="derivative_not_retryable")
     session.commit()

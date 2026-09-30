@@ -4144,5 +4144,15 @@
   "Discard staged input?": "¿Descartar la entrada temporal?",
   "This frees retained upload capacity. Retrying this import will require uploading its input again.": "Esto libera espacio temporal de carga. Para reintentar esta importación tendrás que volver a cargar su entrada.",
   "Staged input ownership could not be verified. Its capacity remains reserved.": "No se pudo verificar la propiedad de la entrada temporal. Su espacio sigue reservado.",
-  "Wait for this import to finish before discarding its staged input.": "Espera a que termine esta importación antes de descartar su entrada temporal."
+  "Wait for this import to finish before discarding its staged input.": "Espera a que termine esta importación antes de descartar su entrada temporal.",
+  "Mesh metadata and preview images": "Metadatos de mallas e imágenes de vista previa",
+  "G-code metadata and embedded thumbnails": "Metadatos G-code y miniaturas integradas",
+  "Binary G-code toolpath previews": "Vistas previas de trayectorias G-code binarias",
+  "Derivative processing": "Procesamiento de derivados",
+  "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.": "Al desactivar se conservan las vistas previas existentes y finaliza el procesamiento en curso. Al reactivar se pueden procesar archivos pendientes.",
+  "Processing disabled": "Procesamiento desactivado",
+  "Deployment default: {value}": "Valor predeterminado del despliegue: {value}",
+  "Use deployment default": "Usar el valor predeterminado del despliegue",
+  "Derivative processing is disabled by the administrator.": "El administrador ha desactivado el procesamiento de derivados.",
+  "viewer.processingDisabled": "El procesamiento de vistas previas de trayectorias está desactivado."
 }

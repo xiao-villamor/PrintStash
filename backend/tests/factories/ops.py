@@ -27,6 +27,7 @@ from app.db.models import (
     BackupDestinationResult,
     BackupRetryAttempt,
     BackupRun,
+    DerivativeGroupRegeneration,
     DerivativeKind,
     DerivativeState,
     Document,
@@ -305,6 +306,16 @@ def build_ingest_request(
     return save(
         session,
         IngestRequest(job_id=job_id, kind=kind, owner_user_id=owner.id, **overrides),
+    )
+
+
+def build_derivative_group_regeneration(
+    session: Session, definition: JobKind, kind: DerivativeKind, **overrides: Any
+) -> DerivativeGroupRegeneration:
+    """A regeneration scoped to the producer that was enabled when requested."""
+    return save(
+        session,
+        DerivativeGroupRegeneration(definition=definition, kind=kind, **overrides),
     )
 
 

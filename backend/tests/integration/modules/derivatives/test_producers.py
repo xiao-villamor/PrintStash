@@ -640,3 +640,73 @@ class TestOutcome:
             DerivativeKind.METADATA,
             DerivativeKind.THUMBNAIL,
         ]
+
+
+class TestLivePolicy:
+    def test_reenable_processes_missing_outputs_through_the_source(
+        self, db_session, stored, work_engine
+    ):
+        from app.db.models import JobKind
+        from app.modules.derivatives import policy
+        from app.modules.work.submission import nudge
+
+        policy.update(db_session, {policy.SettingName.MESH: False})
+        artifact = stored("resume.stl", content.binary_stl())
+        nudge(JobKind.DERIVATIVES_MESH)
+        work_engine.drain()
+        assert _rows(db_session, artifact.id) == {}
+        policy.update(db_session, {policy.SettingName.MESH: True})
+        work_engine.drain()
+        assert {row.state for row in _rows(db_session, artifact.id).values()} == {
+            DerivativeState.READY
+        }
+
+    @pytest.mark.parametrize("disabled", ["gcode", "toolpath"])
+    @pytest.mark.bgcode
+    def test_binary_groups_produce_independently(
+        self, db_session, stored, work_engine, disabled, bgcode_binary
+    ):
+        from app.db.models import JobKind
+        from app.modules.derivatives import policy
+        from app.modules.work.submission import nudge
+
+        _overlay["bgcode_executable"] = str(bgcode_binary)
+        name = (
+            policy.SettingName.GCODE
+            if disabled == "gcode"
+            else policy.SettingName.TOOLPATH
+        )
+        policy.update(db_session, {name: False})
+        artifact = stored(
+            "independent.bgcode",
+            (FIXTURES_DIR / "bgcode/prusaslicer.bgcode").read_bytes(),
+        )
+        for definition in [JobKind.DERIVATIVES_GCODE, JobKind.DERIVATIVES_TOOLPATH]:
+            nudge(definition)
+        work_engine.drain()
+        rows = _rows(db_session, artifact.id)
+        if disabled == "gcode":
+            assert set(rows) == {DerivativeKind.TOOLPATH}
+            assert rows[DerivativeKind.TOOLPATH].state is DerivativeState.READY
+        else:
+            assert set(rows) == {DerivativeKind.METADATA, DerivativeKind.THUMBNAIL}
+            assert rows[DerivativeKind.METADATA].state is DerivativeState.READY
+
+
+class TestPublishedOutputs:
+    def test_disabling_preserves_published_outputs(self, db_session, stored):
+        from app.modules.derivatives import policy
+
+        artifact = stored("retained.stl", content.binary_stl())
+        producers.derive_mesh(artifact.id)
+        db_session.refresh(artifact)
+        key = artifact.thumbnail_path
+        assert key is not None
+        before = get_backend().read_bytes(key)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        policy.update(db_session, {policy.SettingName.MESH: False})
+        assert get_backend().read_bytes(key) == before
+        db_session.refresh(metadata)
+        assert metadata.triangle_count == 12

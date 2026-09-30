@@ -21,6 +21,7 @@ import type { DerivativeState, JobState } from "@/types";
 
 export type EventNotice =
   | { type: "resync" }
+  | { type: "derivative_policy" }
   | { type: "subscribed"; channel: string }
   | { type: "job"; job_id: string; kind: string; state: JobState; progress: number | null }
   | {
@@ -94,6 +95,7 @@ function parse(data: string): EventNotice | null {
     // with an unknown type (a newer server) is ignored rather than guessed at.
     const notice: EventNotice = JSON.parse(data);
     return notice.type === "resync" ||
+      notice.type === "derivative_policy" ||
       notice.type === "subscribed" ||
       notice.type === "job" ||
       notice.type === "derivative"
@@ -186,6 +188,7 @@ export function followModel(modelId: number, listener: EventListener): () => voi
   const filtered: EventListener = (notice) => {
     if (
       notice.type === "resync" ||
+      notice.type === "derivative_policy" ||
       (notice.type === "subscribed" && notice.channel === channel) ||
       (notice.type === "derivative" && notice.model_id === modelId)
     )

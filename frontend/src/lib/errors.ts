@@ -239,6 +239,7 @@ const ERROR_MESSAGES = {
   backup_retry_in_progress: "A retry is already in progress for this destination.",
   backup_retry_backup_running:
     "This backup is still publishing its other destinations. Retry once it finishes.",
+  derivative_group_disabled: "Derivative processing is disabled by the administrator.",
   backup_retry_cancelled: "The retry was cancelled before it published a copy.",
   backup_remote_delete_unverified:
     "This remote backup changed or couldn't be verified, so it was not deleted.",

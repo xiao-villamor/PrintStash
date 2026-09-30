@@ -4010,12 +4010,20 @@
             "title": "Completed",
             "type": "integer"
           },
+          "default_enabled": {
+            "title": "Default Enabled",
+            "type": "boolean"
+          },
           "derivative_kinds": {
             "items": {
               "$ref": "#/components/schemas/DerivativeKind"
             },
             "title": "Derivative Kinds",
             "type": "array"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
           },
           "failed": {
             "title": "Failed",
@@ -4059,6 +4067,10 @@
             ],
             "title": "Next Due At"
           },
+          "overridden": {
+            "title": "Overridden",
+            "type": "boolean"
+          },
           "queued": {
             "title": "Queued",
             "type": "integer"
@@ -4069,6 +4081,9 @@
           }
         },
         "required": [
+          "enabled",
+          "default_enabled",
+          "overridden",
           "name",
           "label",
           "lane",
@@ -4160,6 +4175,7 @@
       "DerivativeStatus": {
         "description": "A derivative as a reader sees it: ``pending`` (no attempt at the current\nrecipe yet, or regenerated since) and every stored ``DerivativeState``.",
         "enum": [
+          "disabled",
           "pending",
           "queued",
           "running",
@@ -19061,6 +19077,18 @@
             "title": "Data Dir",
             "type": "string"
           },
+          "derivatives_gcode_enabled": {
+            "title": "Derivatives Gcode Enabled",
+            "type": "boolean"
+          },
+          "derivatives_mesh_enabled": {
+            "title": "Derivatives Mesh Enabled",
+            "type": "boolean"
+          },
+          "derivatives_toolpath_enabled": {
+            "title": "Derivatives Toolpath Enabled",
+            "type": "boolean"
+          },
           "external_libraries_enabled": {
             "default": false,
             "title": "External Libraries Enabled",
@@ -19244,6 +19272,11 @@
             "type": "integer"
           }
         },
+        "required": [
+          "derivatives_mesh_enabled",
+          "derivatives_gcode_enabled",
+          "derivatives_toolpath_enabled"
+        ],
         "title": "VaultConfigRead",
         "type": "object"
       },
@@ -19385,6 +19418,39 @@
               }
             ],
             "title": "Data Dir"
+          },
+          "derivatives_gcode_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Gcode Enabled"
+          },
+          "derivatives_mesh_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Mesh Enabled"
+          },
+          "derivatives_toolpath_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Toolpath Enabled"
           },
           "external_libraries_enabled": {
             "anyOf": [

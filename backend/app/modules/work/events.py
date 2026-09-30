@@ -44,6 +44,13 @@ def _publish(channel: str, payload: dict[str, Any]) -> None:
         logger.warning("work event publication failed", extra={"channel": channel})
 
 
+POLICY_CHANNEL = "derivatives:policy"
+
+
+def derivative_policy_changed() -> None:
+    _publish(POLICY_CHANNEL, {"type": "derivative_policy"})
+
+
 def job_changed(status: JobStatus) -> None:
     notice = {
         "type": "job",

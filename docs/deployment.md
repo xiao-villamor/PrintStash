@@ -542,3 +542,27 @@ after a restore. Tuning settings are listed in
 | `docker-compose.advanced.yml` | Every setting wired; separate web UI and API containers; opt-in PostgreSQL, S3 and [workers](#background-work-and-workers). |
 | `deploy/manual-testing/compose.yml` | Maintainer release-testing stack. |
 | `deploy/minio-migration/compose.yml` | One-release helper for old bundled MinIO data; see [MinIO migration](./minio-migration.md). |
+
+
+## Derivative processing controls
+
+Settings → Background work provides independent administrator controls for mesh
+metadata/previews, G-code metadata/embedded thumbnails, and binary G-code
+toolpaths. All groups default to enabled. Deployment defaults are:
+
+| Environment variable | Default |
+| --- | --- |
+| `VAULT_DERIVATIVES_MESH_ENABLED` | `true` |
+| `VAULT_DERIVATIVES_GCODE_ENABLED` | `true` |
+| `VAULT_DERIVATIVES_TOOLPATH_ENABLED` | `true` |
+
+A saved Boolean overrides the environment; **Use deployment default** clears it.
+The controls persist in the application database and take effect in running API
+and worker processes without restarting. Configure matching deployment defaults
+on every process. The advanced Compose file shares these variables with workers.
+
+Disabling retains existing outputs and lets an admitted producer finish. It
+blocks subsequent attempts, retries, regeneration and audit repairs for that
+group. Re-enabling discovers eligible missing work through the bounded source;
+it preserves retry budgets and deliberate cancellations. Similar Models has its
+own settings. ASCII toolpaths continue to use the Artifact's text directly.

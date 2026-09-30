@@ -1066,11 +1066,16 @@ def _source_readable(row: File) -> bool:
 def _reparse_metadata(session: Session, file_id: int) -> bool:
     """Queue the metadata derivative again; the Job re-derives it off the request."""
     from app.db.models import DerivativeKind
-    from app.modules.derivatives import repair
+    from app.modules.derivatives import policy, repair
+    from app.modules.derivatives.kinds import groups_for
 
     row = session.get(File, file_id)
     if row is None or row.deleted_at is not None:
         return False
+    policy.lock(session)
+    for group in groups_for(row):
+        if DerivativeKind.METADATA in group.kinds:
+            policy.require_enabled(session, group.definition)
     if session.exec(select(Metadata).where(Metadata.file_id == file_id)).first():
         # Metadata arrived since the audit looked: nothing is missing any more.
         return True

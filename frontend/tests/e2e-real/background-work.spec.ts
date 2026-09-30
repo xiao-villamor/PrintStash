@@ -10,6 +10,7 @@
  * stays visible while the replacement is produced.
  */
 import { test, expect } from "./helpers";
+import type { ModelRead } from "../../src/types/models";
 import { modelCard, uploadModel } from "./util";
 
 test.describe("background work", () => {
@@ -60,5 +61,55 @@ test.describe("background work", () => {
     // The page learned it without reloading, and still shows a preview.
     await expect(page.getByRole("status").filter({ hasText: "Preparing" })).toHaveCount(0);
     await admin.close();
+  });
+});
+
+test.describe("derivative processing policy", () => {
+  test("reenabling mesh processing backfills an uploaded preview", async ({ page }) => {
+    test.setTimeout(180_000);
+    const name = `e2e-policy-${Date.now()}`;
+    await page.goto("/settings?section=work");
+    const mesh = page.getByRole("checkbox", { name: "Mesh metadata and preview images" });
+    await expect(mesh).toBeChecked();
+    await mesh.click();
+    await expect(mesh).not.toBeChecked();
+    try {
+      await uploadModel(page, name, { mesh: true, gcode: false });
+      await modelCard(page, name).click();
+      await expect(page).toHaveURL(/\/models\/\d+/);
+      await page.getByRole("tab", { name: /^Files/ }).click();
+      await expect(page.getByText("Processing disabled", { exact: true })).toBeVisible();
+      const settings = await page.context().newPage();
+      try {
+        await settings.goto("/settings?section=work");
+        await settings.getByRole("checkbox", { name: "Mesh metadata and preview images" }).click();
+        await expect(
+          settings.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
+        ).toBeChecked();
+        await expect(page.getByText("Processing disabled", { exact: true })).toHaveCount(0);
+        await expect(page.getByRole("status").filter({ hasText: "Preparing" })).toHaveCount(0, {
+          timeout: 120_000,
+        });
+        const modelId = Number(new URL(page.url()).pathname.split("/").at(-1));
+        await expect
+          .poll(
+            async () => {
+              const response = await page.request.get(`/api/v1/models/${modelId}`);
+              expect(response.ok()).toBe(true);
+              const model: ModelRead = await response.json();
+              return Boolean(model.thumbnail_url);
+            },
+            { timeout: 120_000 },
+          )
+          .toBe(true);
+      } finally {
+        await settings.close();
+      }
+    } finally {
+      const restored = await page.request.put("/api/v1/config", {
+        data: { derivatives_mesh_enabled: null },
+      });
+      expect(restored.ok()).toBe(true);
+    }
   });
 });

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlmodel import Session
 
 from app.core.config import settings
@@ -23,6 +23,9 @@ router = APIRouter(prefix="/config", tags=["config"])
 
 
 class VaultConfigRead(BaseModel):
+    derivatives_mesh_enabled: bool
+    derivatives_gcode_enabled: bool
+    derivatives_toolpath_enabled: bool
     storage_backend: str = "local"
     data_dir: str = ""
     thumb_dir: str = ""
@@ -77,6 +80,9 @@ class VaultConfigRead(BaseModel):
 class VaultConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    derivatives_mesh_enabled: StrictBool | None = None
+    derivatives_gcode_enabled: StrictBool | None = None
+    derivatives_toolpath_enabled: StrictBool | None = None
     auto_mark_known_good: Optional[bool] = None
     external_libraries_enabled: Optional[bool] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
@@ -170,7 +176,16 @@ def get_config(
     _: object = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
+    from app.modules.derivatives import policy
+
+    controls = policy.resolve(session)
     cfg = runtime_config.get_effective_config(session)
+    cfg.update(
+        {
+            name.value: controls[definition].enabled
+            for definition, name in policy.SETTINGS.items()
+        }
+    )
     provider_config = runtime_config.get_sanitized_storage_provider(session)
     if provider_config is not None:
         cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
@@ -381,6 +396,15 @@ def update_config(
                 detail="storage_migration_required",
             )
 
+    from app.modules.derivatives import policy
+
+    changes = {
+        name: getattr(body, name)
+        for name in policy.SettingName
+        if name in body.model_fields_set
+    }
+    policy.update(session, changes)
+
     if body.auto_mark_known_good is not None:
         runtime_config.set_auto_mark_known_good(session, body.auto_mark_known_good)
 
@@ -445,7 +469,14 @@ def update_config(
         oidc_allow_insecure_http=body.oidc_allow_insecure_http,
     )
 
+    controls = policy.resolve(session)
     cfg = runtime_config.get_effective_config(session)
+    cfg.update(
+        {
+            name.value: controls[definition].enabled
+            for definition, name in policy.SETTINGS.items()
+        }
+    )
     provider_config = runtime_config.get_sanitized_storage_provider(session)
     if provider_config is not None:
         cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
