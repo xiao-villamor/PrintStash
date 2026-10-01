@@ -60,3 +60,4 @@ The first post-merge Deep CI run passed both backend test blocks (15,179 ordinar
 
 
 The process-recovery assertion uses the shared DBOS harness deadline (120 seconds by default). A killed process can leave a reconcile cursor claimed for 60 seconds; settlement may require the following tick. A 60-second assertion deadline raced that valid lease expiry on SQLite in post-merge CI. The test still requires policy cancellation, failed orphan rows and an unchanged attempt count of one.
+Polling also yields and checks the deadline while waiting for orphan bookkeeping to settle after a Job cancellation.

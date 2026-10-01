@@ -148,16 +148,18 @@ def main():
                                 ArtifactDerivative.file_id == file_id
                             )
                         ).all()
-                        if any(row.state is DerivativeState.RUNNING for row in rows):
-                            continue
-                        _emit(
-                            states={row.kind: row.state.value for row in rows},
-                            attempts={row.kind: row.attempts for row in rows},
-                            errors=[
-                                json.loads(row.status_json).get("error") for row in jobs
-                            ],
-                        )
-                        return
+                        if not any(
+                            row.state is DerivativeState.RUNNING for row in rows
+                        ):
+                            _emit(
+                                states={row.kind: row.state.value for row in rows},
+                                attempts={row.kind: row.attempts for row in rows},
+                                errors=[
+                                    json.loads(row.status_json).get("error")
+                                    for row in jobs
+                                ],
+                            )
+                            return
                 assert time.monotonic() < deadline
                 time.sleep(0.1)
 
