@@ -155,13 +155,13 @@ class TestCrashRecovery:
     ) -> None:
         # One API per vault: holding the vault lock proves the previous API
         # process is gone, so its work must not wait out the stale window
-        # (here an hour, far beyond the harness deadline).
+        # (here an hour, far beyond the shared 120s harness deadline). A
+        # killed reconcile pass can retain its separate cursor lease for 60s.
         process, file_id = _stall(vault_env, tmp_path / "running")
         _kill(process)
         restarted = {
             **vault_env,
             "VAULT_JOBS_EXECUTOR_STALE_SECONDS": "3600",
-            "JOB_ENGINE_DEADLINE_S": "60",
         }
 
         states = _converge(restarted, file_id)

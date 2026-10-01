@@ -61,3 +61,9 @@ The first post-merge Deep CI run passed both backend test blocks (15,179 ordinar
 
 The process-recovery assertion uses the shared DBOS harness deadline (120 seconds by default). A killed process can leave a reconcile cursor claimed for 60 seconds; settlement may require the following tick. A 60-second assertion deadline raced that valid lease expiry on SQLite in post-merge CI. The test still requires policy cancellation, failed orphan rows and an unchanged attempt count of one.
 Polling also yields and checks the deadline while waiting for orphan bookkeeping to settle after a Job cancellation.
+
+The enabled predecessor-recovery case uses the same shared deadline. Its one-hour executor stale window still proves recovery does not await executor expiry; the separate 60-second cursor lease must fit within the test budget. CI caught this existing case after the disabled-recovery cases passed.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 46 | recovers enabled predecessor work before executor expiry | Edge | Killed API, enabled mesh policy, one-hour executor stale window, SQLite/PostgreSQL | Metadata and thumbnail ready within the shared 120-second harness budget | E2E | ✅ [test_a_restarted_api_reruns_its_predecessors_work_at_once](../../backend/tests/e2e/test_job_engine.py) |
