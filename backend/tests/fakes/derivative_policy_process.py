@@ -21,7 +21,14 @@ from app.db.models import (
 from app.db.session import get_session_factory
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import bind_backend, get_backend
-from tests.fakes.job_engine_process import _STL, _emit, _follow, _set_up, _settle
+from tests.fakes.job_engine_process import (
+    _DEADLINE_S,
+    _STL,
+    _emit,
+    _follow,
+    _set_up,
+    _settle,
+)
 
 
 def _upload_disabled(client):
@@ -126,7 +133,10 @@ def main():
                 time.sleep(1)
         elif role == "recover_disabled":
             file_id = int(sys.argv[2])
-            deadline = time.monotonic() + 60
+            # A crashed reconcile pass can retain its cursor claim for 60s;
+            # settlement may need the next tick after that lease expires.
+            # Use the same bounded budget as the other real DBOS roles.
+            deadline = time.monotonic() + _DEADLINE_S
             while True:
                 with get_session_factory().scoped_session() as session:
                     jobs = session.exec(
