@@ -292,3 +292,52 @@ class TestRetry:
         assert not DEFINITIONS[JobKind.DERIVATIVES_MESH].retry(
             db_session, subject_key(artifact.id)
         )
+
+
+class TestProducerAdmission:
+    @pytest.mark.parametrize("definition", list(DEFINITIONS))
+    def test_a_disable_after_step_admission_settles_orphaned_attempts(
+        self, db_session, make_model, make_file, make_derivative, make_job, definition
+    ):
+        from app.db.models import WorkPriority
+        from app.modules.derivatives import policy
+        from app.modules.derivatives.kinds import group
+        from app.modules.work.runner import ExecutionContext
+
+        artifact = make_file(
+            make_model(),
+            filename="part.stl"
+            if definition is JobKind.DERIVATIVES_MESH
+            else "part.bgcode",
+        )
+        derivative_group = group(definition)
+        rows = [
+            make_derivative(artifact, kind, state=DerivativeState.RUNNING, attempts=2)
+            for kind in derivative_group.kinds
+        ]
+        job = make_job(
+            kind=definition,
+            state=JobState.RUNNING,
+            subject=subject_key(artifact.id),
+            attempts=1,
+        )
+        context = ExecutionContext(
+            job.id, definition, job.subject_key, WorkPriority.BACKFILL, "admitted", 1
+        )
+        assert DEFINITIONS[definition].admission(db_session) is None
+        policy.update(db_session, {policy.SETTINGS[definition]: False})
+
+        # Execute the real producer after the earlier step admission. Its final
+        # transaction observes the disable; the step must settle the attempt.
+        DEFINITIONS[definition].steps[0].fn(context)
+
+        db_session.expire_all()
+        assert job.state is JobState.CANCELLED
+        status = json.loads(job.status_json)
+        assert status["error"] == "derivative_group_disabled"
+        assert status["retryable"] is False
+        for row in rows:
+            assert row.state is DerivativeState.FAILED
+            assert row.failure_reason == "derivative_group_disabled"
+            assert row.attempts == 2
+            assert row.next_attempt_at is not None

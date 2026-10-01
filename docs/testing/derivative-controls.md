@@ -45,3 +45,15 @@ The registry parameterizes common assertions across all three producer groups. A
 | 39 | upgrades an existing installation | Edge | Predecessor schema with configuration and model | Existing data preserved; all new overrides null | Integration SQLite/PostgreSQL | ✅ [test_upgrades_existing_configuration_without_a_policy_backfill](../../backend/tests/integration/db/migrations/test_derivative_controls.py) |
 | 40 | completes the operator lifecycle | Happy | Settings disable, upload, enable in another tab | Disabled placeholder becomes a published preview | Playwright real | ✅ [reenabling mesh processing backfills an uploaded preview](../../frontend/tests/e2e-real/background-work.spec.ts) |
 | 41 | applies live policy across processes | Edge | PostgreSQL API and already-running worker | Worker observes disable/enable without restart | E2E PostgreSQL split topology | ✅ [test_existing_workers_observe_live_policy_without_restart](../../backend/tests/e2e/test_derivative_policy_processes.py) |
+
+
+## Admission and publication race coverage
+
+The first post-merge Deep CI run passed both backend test blocks (15,179 ordinary tests and 372 external-service tests), but the per-module coverage gate found two uncovered paths. These tests exercise those paths; both affected modules reach 100% with branches enabled in the focused run. The existing 90% floor remains unchanged.
+
+| # | Behaviour | Category | Precondition / input | Observable outcome | Tier | Status |
+|---|---|---|---|---|---|---|
+| 42 | settles a late producer refusal | Edge | Step admitted; group disabled before the real producer begins; orphaned running derivatives | Job policy-cancelled; derivatives fail with original attempt count and backoff | Integration | ✅ [test_a_disable_after_step_admission_settles_orphaned_attempts](../../backend/tests/integration/modules/derivatives/test_jobs.py) |
+| 43 | preserves an unrelated producer failure | Error | Producer raises an OperationError unrelated to policy | Same exception propagates; no policy cancellation | Unit | ✅ [test_an_unrelated_operation_error_remains_a_failure](../../backend/tests/unit/modules/derivatives/test_jobs.py) |
+| 44 | serves concurrent toolpath publication | Edge | A second database connection commits a ready toolpath between delivery reads | Same response delivers the published bytes and private cache headers | Integration | ✅ [test_serves_a_toolpath_published_during_the_lookup](../../backend/tests/integration/api/test_toolpath_response.py) |
+| 45 | limits concurrent toolpath publication | Error | Concurrent ready output exceeds the configured limit | HTTP 413 with toolpath_output_too_large | Integration | ✅ [test_refuses_an_oversized_concurrent_publication](../../backend/tests/integration/api/test_toolpath_response.py) |
