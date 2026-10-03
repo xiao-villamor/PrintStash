@@ -465,6 +465,12 @@ image. See UPGRADE.md before pulling.**
 
 - Completing first-run setup now clears task history left in the browser by a
   previous installation, so old Jobs no longer appear as failed in a new vault.
+- G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
+  filament weight and filament length. Its header block writes
+  `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and
+  `; total filament weight [g] : 6.15`, none of which the parser recognised.
+  The G-code metadata recipe moves to version 2, so files already in the
+  library are re-read in the background.
 
 - **3MF imports no longer exhaust container memory on repeated project parts.** Mesh metadata and previews now use a bounded 3MF resource loader that checks placed instances before composing geometry. Over-budget projects keep their original Artifact and embedded preview without crashing the API; existing mesh derivatives are refreshed at the new recipe version. ([#259](https://github.com/xiao-villamor/PrintStash/issues/259))
 
