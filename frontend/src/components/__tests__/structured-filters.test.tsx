@@ -19,7 +19,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -76,7 +76,7 @@ describe("StructuredFilters", () => {
       await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
       await userEvent.setup().click(screen.getByRole("button", { name: "Material" }));
 
-      expect(screen.getByText("stl")).toBeInTheDocument();
+      expect(screen.getByText("STL")).toBeInTheDocument();
       expect(screen.getByText("PLA")).toBeInTheDocument();
     });
 
@@ -86,7 +86,9 @@ describe("StructuredFilters", () => {
       renderFilters();
 
       await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
-      expect(screen.getByText("12")).toBeInTheDocument();
+      const stl = screen.getByText("STL").closest("label");
+      if (stl === null) throw new Error("STL option not rendered");
+      expect(within(stl).getByText("12")).toBeInTheDocument();
     });
 
     it("leaves out a group the library has nothing for", () => {
@@ -102,7 +104,7 @@ describe("StructuredFilters", () => {
       const { onChange } = renderFilters();
 
       await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
-      await user.click(screen.getByText("stl"));
+      await user.click(screen.getByText("STL"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["stl"]);
     });
@@ -113,7 +115,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onChange } = renderFilters({ active: { file_type: ["stl"] } });
 
-      await user.click(screen.getByText("gcode"));
+      await user.click(screen.getByText("G-code"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["stl", "gcode"]);
     });
@@ -122,7 +124,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onChange } = renderFilters({ active: { file_type: ["stl", "gcode"] } });
 
-      await user.click(screen.getByText("stl"));
+      await user.click(screen.getByText("STL"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["gcode"]);
     });
@@ -135,7 +137,7 @@ describe("StructuredFilters", () => {
 
       await user.click(screen.getByRole("button", { name: /Artifact/ }));
 
-      expect(screen.queryByText("stl")).toBeNull();
+      expect(screen.queryByText("STL")).toBeNull();
     });
 
     it("brings them back when it is expanded again", async () => {
@@ -144,7 +146,7 @@ describe("StructuredFilters", () => {
 
       await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
 
-      expect(screen.getByText("stl")).toBeInTheDocument();
+      expect(screen.getByText("STL")).toBeInTheDocument();
     });
 
     it("starts a rarely-used group collapsed", () => {
@@ -197,6 +199,74 @@ describe("StructuredFilters", () => {
       await user.click(screen.getByRole("button", { name: /Clear/ }));
 
       expect(onChange).toHaveBeenCalledWith("file_type", []);
+    });
+  });
+
+  describe("grouping file types", () => {
+    const MIXED: ModelFacetsRead = {
+      ...FACETS,
+      file_type: [
+        { value: "stl", count: 20 },
+        { value: "3mf", count: 4 },
+        { value: "gcode", count: 2 },
+        { value: "dxf", count: 1 },
+      ],
+    };
+
+    async function openFileTypes(over: Partial<Props> = {}) {
+      const rendered = renderFilters({ facets: MIXED, ...over });
+      const user = userEvent.setup();
+      // A group with picked values opens on its own (and its name gains the count).
+      if (!over.active?.file_type?.length) {
+        await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+      }
+      return { ...rendered, user };
+    }
+
+    function optionRow(label: string): HTMLElement {
+      const row = screen.getByText(label).closest("label");
+      if (row === null) throw new Error(`${label} option not rendered`);
+      return row;
+    }
+
+    it("nests only the source meshes under the source-mesh row", async () => {
+      await openFileTypes();
+
+      expect(within(optionRow("Source meshes")).getByText("24")).toBeInTheDocument();
+      const meshes = optionRow("Source meshes").parentElement;
+      if (meshes === null) throw new Error("Source meshes group not rendered");
+      expect(within(meshes).getByText("STL")).toBeInTheDocument();
+      expect(within(meshes).getByText("3MF")).toBeInTheDocument();
+      expect(within(meshes).queryByText("G-code")).toBeNull();
+      expect(within(meshes).queryByText("DXF")).toBeNull();
+      expect(screen.getByText("G-code")).toBeInTheDocument();
+      expect(screen.getByText("DXF")).toBeInTheDocument();
+    });
+
+    it("selects every source mesh at once without dropping another pick", async () => {
+      const { user, onChange } = await openFileTypes({ active: { file_type: ["gcode", "stl"] } });
+
+      await user.click(screen.getByText("Source meshes"));
+
+      expect(onChange).toHaveBeenCalledWith("file_type", ["gcode", "stl", "3mf"]);
+    });
+
+    it("clears only the source meshes when all of them were picked", async () => {
+      const { user, onChange } = await openFileTypes({
+        active: { file_type: ["stl", "3mf", "dxf"] },
+      });
+
+      await user.click(screen.getByText("Source meshes"));
+
+      expect(onChange).toHaveBeenCalledWith("file_type", ["dxf"]);
+    });
+
+    it("leaves out the source-mesh row when the library has none", async () => {
+      renderFilters({ facets: { ...FACETS, file_type: [{ value: "gcode", count: 2 }] } });
+      await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+
+      expect(screen.queryByText("Source meshes")).toBeNull();
+      expect(screen.getByText("G-code")).toBeInTheDocument();
     });
   });
 
