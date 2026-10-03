@@ -317,6 +317,10 @@ image. See UPGRADE.md before pulling.**
 
 ### Changed
 
+- The library filter panel names its file-format group **File type**, matching the
+  active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo"),
+  instead of "Artifact".
+
 - Background work settings now lead with running, waiting, and failed work and
   show each active Job's state, progress and cancel action. They also show where
   to check a model's preview status. Queue tools and worker controls sit in

@@ -29,14 +29,10 @@ import type { ModelFacetsRead } from "@/types";
 type Props = Parameters<typeof StructuredFilters>[0];
 
 /**
- * The rendered label for the `file_type` group.
- *
- * The panel sits inside `<Localized>`, which rewrites UI text through the
- * product's own vocabulary — "File type" reaches the DOM as "Artifact", the term
- * `CONTEXT.md` makes binding. Matching the source string would pass only until
- * someone corrected the wording, which is the opposite of what this defends.
+ * The rendered label for the `file_type` group. It says "File type" like the
+ * active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo").
  */
-const FILE_TYPE_GROUP = "Artifact";
+const FILE_TYPE_GROUP = "File type";
 
 const FACETS: ModelFacetsRead = {
   file_type: [
@@ -133,7 +129,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       renderFilters({ active: { file_type: ["stl"] } });
 
-      await user.click(screen.getByRole("button", { name: /Artifact/ }));
+      await user.click(screen.getByRole("button", { name: /File type/ }));
 
       expect(screen.queryByText("stl")).toBeNull();
     });

@@ -27,7 +27,7 @@ const GROUPS: Array<{ key: FacetFilterKey; label: string }> = [
   {
     key: "file_type",
     get label() {
-      return uiText("Artifact");
+      return uiText("File type");
     },
   },
   {
