@@ -164,6 +164,104 @@ class TestSupervise:
         assert raised.value.reason is ThumbnailFailureReason.WORKER_FAILED
 
 
+class TestSuperviseAfterEof:
+    def test_enforces_memory_budget_after_stdout_closes(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "pid"
+        script = (
+            "import os, sys, time\n"
+            "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+            "os.close(1)\n"
+            "time.sleep(0.3)\n"
+            "hold = b'x' * (48 * 1024 * 1024)\n"
+            "time.sleep(60)\n"
+        )
+
+        with pytest.raises(MeshWorkerError) as error:
+            supervise(
+                _child(script, str(pid_file)), memory_budget=32 * MB, timeout_seconds=4
+            )
+
+        assert _wait_gone(int(pid_file.read_text()))
+        assert error.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert error.value.supervision.exit_cause.value == "memory_limit"
+        assert error.value.supervision.peak_tree_rss_bytes > 32 * MB
+        assert error.value.supervision.active_phase is None
+
+    def test_observes_cancellation_after_stdout_closes(self, tmp_path: Path) -> None:
+        from app.core.cancellation import cancellation_scope
+
+        marker = tmp_path / "cancel"
+        pid_file = tmp_path / "pid"
+        script = (
+            "import os, sys, time\n"
+            "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+            "os.close(1)\n"
+            "time.sleep(0.3)\n"
+            "open(sys.argv[2], 'w').write('cancel')\n"
+            "time.sleep(60)\n"
+        )
+        started = time.monotonic()
+
+        with (
+            cancellation_scope(marker.exists),
+            pytest.raises(mesh_isolation.MeshWorkerCancelled) as error,
+        ):
+            supervise(
+                _child(script, str(pid_file), str(marker)),
+                memory_budget=256 * MB,
+                timeout_seconds=4,
+            )
+
+        assert _wait_gone(int(pid_file.read_text()))
+        assert time.monotonic() - started < 2
+        assert error.value.supervision.exit_cause.value == "cancelled"
+        assert error.value.supervision.elapsed_ns > 0
+
+    def test_retains_reply_when_child_exits_after_stdout_closes(self) -> None:
+        reply = supervise(
+            _child(
+                "import os, time; os.write(1, b'reply'); os.close(1); time.sleep(0.1)"
+            ),
+            memory_budget=256 * MB,
+            timeout_seconds=4,
+        )
+
+        assert reply == b"reply"
+
+    def test_classifies_nonzero_exit_after_stdout_closes(self) -> None:
+        with pytest.raises(MeshWorkerError) as error:
+            supervise(
+                _child(
+                    "import os, sys, time; os.close(1); time.sleep(0.1); sys.exit(3)"
+                ),
+                memory_budget=256 * MB,
+                timeout_seconds=4,
+            )
+
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+        assert error.value.supervision.exit_cause.value == "exited_nonzero"
+
+    def test_enforces_deadline_after_stdout_closes(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "pid"
+        script = (
+            "import os, sys, time\n"
+            "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+            "os.close(1)\n"
+            "time.sleep(60)\n"
+        )
+
+        with pytest.raises(MeshWorkerError) as error:
+            supervise(
+                _child(script, str(pid_file)),
+                memory_budget=256 * MB,
+                timeout_seconds=0.5,
+            )
+
+        assert _wait_gone(int(pid_file.read_text()))
+        assert error.value.reason is ThumbnailFailureReason.TIMEOUT
+        assert error.value.supervision.exit_cause.value == "deadline"
+
+
 def _result(**overrides) -> ThumbnailResult:
     values = dict(
         image=b"\x89PNG-bytes",

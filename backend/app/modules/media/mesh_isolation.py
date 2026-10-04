@@ -292,6 +292,7 @@ def supervise_result(
         deadline = time.monotonic() + timeout_seconds
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
+            stdout_closed = False
             while True:
                 checkpoint()
                 if time.monotonic() >= deadline:
@@ -303,23 +304,21 @@ def supervise_result(
                     if rss > memory_budget:
                         cause = WorkerExitCause.MEMORY_LIMIT
                         raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
-                finished = False
                 for key, _ in selector.select(_POLL_SECONDS):
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
-                        finished = True
+                        stdout_closed = True
+                        selector.unregister(process.stdout)
                         break
                     reply.extend(chunk)
                     if len(reply) > MAX_REPLY_BYTES:
                         cause = WorkerExitCause.REPLY_LIMIT
                         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
-                if finished:
+                if stdout_closed and process.poll() is not None:
                     break
-        try:
-            code = process.wait(timeout=max(deadline - time.monotonic(), 0.1))
-        except subprocess.TimeoutExpired as exc:
-            cause = WorkerExitCause.DEADLINE
-            raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT) from exc
+        # EOF only ends the reply: native work may continue after closing stdout.
+        # Polling above keeps resource and cancellation checks active until exit.
+        code = process.wait()
         if code in (-signal.SIGKILL, RESOURCE_EXIT):
             # Preserve the existing refusal classification, without claiming
             # that a signal proves an OOM: users and the child can send it too.
