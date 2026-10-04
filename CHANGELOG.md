@@ -37,6 +37,9 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 ### Fixed
 - Ingest acceptance keeps the API event loop responsive while staging files,
   recording work and notifying the background engine.
+- Meshes with inconsistent triangle winding now report unknown volume while
+  retaining dimensions and triangle counts. Existing metadata is recalculated
+  automatically.
 - Browser-local upload queues recover as interrupted after a reload, so stale
   tasks can be cleared. Resumable uploads retain their recovery controls, and
   queued browser work now asks users to keep the tab open (#336).
