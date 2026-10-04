@@ -298,3 +298,55 @@ class TestStepCapacityOwnership:
         assert db_session.exec(select(CapacityReservation)).all() == []
         assert len(admitted) == 1
         assert admitted[0].startswith("step-tessellation:")
+
+
+class TestTelemetry:
+    def test_metadata_only_preserves_phase_stats(self, tmp_path: Path) -> None:
+        path = tmp_path / "cube.stl"
+        path.write_bytes(content.binary_stl())
+
+        result = mesh_isolation.generate(
+            _request(path, include_thumbnail=False, include_fingerprint=False)
+        )
+
+        phases = {stat.phase.value: stat for stat in result.phase_stats}
+        assert phases["load"].input_bytes == path.stat().st_size
+        assert phases["measurements"].triangle_count == 12
+        assert phases["measurements"].elapsed_ns > 0
+        assert "render" not in phases
+
+    def test_exposes_parent_resource_cost(self, tmp_path: Path) -> None:
+        path = tmp_path / "cube.stl"
+        path.write_bytes(content.binary_stl())
+
+        result = mesh_isolation.generate(_request(path, include_fingerprint=False))
+
+        assert result.supervision is not None
+        assert result.supervision.elapsed_ns > 0
+        assert result.supervision.peak_tree_rss_bytes > 0
+        assert result.supervision.reply_bytes > len(result.image)
+        assert result.supervision.exit_cause.value == "exited_zero"
+
+    def test_parent_exports_metadata_only_phases(self, tmp_path: Path) -> None:
+        from app.core.metrics import registry
+
+        path = tmp_path / "cube.stl"
+        path.write_bytes(content.binary_stl())
+        labels = {"phase": "measurements", "outcome": "completed"}
+        before = (
+            registry.get_sample_value(
+                "printstash_mesh_phase_duration_seconds_count", labels
+            )
+            or 0
+        )
+
+        mesh_isolation.generate(
+            _request(path, include_thumbnail=False, include_fingerprint=False)
+        )
+
+        assert (
+            registry.get_sample_value(
+                "printstash_mesh_phase_duration_seconds_count", labels
+            )
+            == before + 1
+        )

@@ -29,6 +29,7 @@ from app.modules.media.mesh_isolation import (
 from app.modules.media.thumbnail_engine import (
     GeometryReady,
     ThumbnailFailureReason,
+    ThumbnailRequest,
     ThumbnailResult,
     ThumbnailStrategy,
 )
@@ -129,7 +130,7 @@ class TestSupervise:
 
         assert _wait_gone(int(grandchild.read_text()))
 
-    def test_reads_a_sigkill_as_the_kernel_running_out_of_memory(self):
+    def test_preserves_legacy_refusal_reason_for_sigkill(self):
         with pytest.raises(MeshWorkerError) as raised:
             supervise(
                 _child("import os, signal; os.kill(os.getpid(), signal.SIGKILL)"),
@@ -138,6 +139,7 @@ class TestSupervise:
             )
 
         assert raised.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert raised.value.supervision.exit_cause.value == "sigkill"
 
     def test_a_child_that_exits_with_an_error_is_a_worker_failure(self):
         with pytest.raises(MeshWorkerError) as raised:
@@ -353,4 +355,198 @@ class TestGeometryOutcome:
         )
         with pytest.raises(MeshWorkerError) as error:
             decode_reply(invalid)
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+
+class TestSupervisionStats:
+    @pytest.mark.parametrize(
+        ("script", "budget", "deadline", "cause"),
+        [
+            pytest.param(
+                "import time; time.sleep(60)", 256 * MB, 0.3, "deadline", id="timeout"
+            ),
+            pytest.param(
+                "import sys, time; time.sleep(0.2); sys.exit(3)",
+                256 * MB,
+                30,
+                "exited_nonzero",
+                id="nonzero",
+            ),
+            pytest.param(
+                "import time; hold = b'x' * (32 * 1024 * 1024); time.sleep(60)",
+                24 * MB,
+                30,
+                "memory_limit",
+                id="memory",
+            ),
+        ],
+    )
+    def test_retains_cost_on_native_failure(
+        self, script: str, budget: int, deadline: float, cause: str
+    ) -> None:
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                _child(script), memory_budget=budget, timeout_seconds=deadline
+            )
+
+        stats = error.value.supervision
+        assert stats is not None
+        assert stats.elapsed_ns > 0
+        assert stats.peak_tree_rss_bytes > 0
+        assert stats.exit_cause.value == cause
+        assert stats.active_phase is None
+
+    def test_success_retains_reply_cost(self) -> None:
+        result = mesh_isolation.supervise_result(
+            _child("import sys; sys.stdout.buffer.write(b'hello')"),
+            memory_budget=256 * MB,
+            timeout_seconds=30,
+        )
+
+        assert result.payload == b"hello"
+        assert result.stats.reply_bytes == 5
+        assert result.stats.elapsed_ns > 0
+        assert result.stats.exit_cause.value == "exited_zero"
+
+    def test_preserves_unobserved_rss(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            mesh_isolation.mesh_processing, "process_tree_rss_bytes", lambda _pid: None
+        )
+
+        result = mesh_isolation.supervise_result(
+            _child("pass"), memory_budget=256 * MB, timeout_seconds=30
+        )
+
+        assert result.stats.peak_tree_rss_bytes is None
+
+    def test_retains_partial_reply_on_error(self) -> None:
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                _child("import sys; sys.stdout.buffer.write(b'partial'); sys.exit(3)"),
+                memory_budget=256 * MB,
+                timeout_seconds=30,
+            )
+
+        assert error.value.supervision.reply_bytes == 7
+
+    def test_records_spawn_failure(self) -> None:
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                ["/nonexistent-printstash-worker"],
+                memory_budget=256 * MB,
+                timeout_seconds=30,
+            )
+
+        assert error.value.supervision.exit_cause.value == "spawn_failed"
+        assert error.value.supervision.elapsed_ns > 0
+        assert error.value.supervision.peak_tree_rss_bytes is None
+
+    def test_read_failure_retains_parent_cost(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real_read = os.read
+
+        def fail_reply_read(fd: int, size: int) -> bytes:
+            if size == 65536:
+                raise OSError("injected reply pipe failure")
+            return real_read(fd, size)
+
+        monkeypatch.setattr(mesh_isolation.os, "read", fail_reply_read)
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                _child("print('reply')"), memory_budget=256 * MB, timeout_seconds=30
+            )
+
+        assert isinstance(error.value.__cause__, OSError)
+        assert error.value.supervision.exit_cause.value == "supervision_failed"
+        assert error.value.supervision.elapsed_ns > 0
+
+    def test_cleanup_failure_retains_parent_cost(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_reap(_pid: int) -> None:
+            raise OSError("injected reaper failure")
+
+        monkeypatch.setattr(mesh_isolation, "reap_descendants", fail_reap)
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                _child("print('reply')"), memory_budget=256 * MB, timeout_seconds=30
+            )
+
+        assert isinstance(error.value.__cause__, OSError)
+        assert error.value.supervision.exit_cause.value == "supervision_failed"
+        assert error.value.supervision.reply_bytes == 6
+
+    def test_invalid_final_reply_retains_parent_cost(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            mesh_isolation,
+            "worker_command",
+            lambda *_args, **_kwargs: _child("print('invalid')"),
+        )
+        with pytest.raises(MeshWorkerError) as error:
+            mesh_isolation.generate(
+                ThumbnailRequest(path=tmp_path / "unused.stl", file_type="stl")
+            )
+
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+        assert error.value.supervision.exit_cause.value == "exited_zero"
+        assert error.value.supervision.reply_bytes == 8
+
+    def test_cancellation_retains_parent_cost(self) -> None:
+        from app.core.cancellation import cancellation_scope
+
+        with (
+            cancellation_scope(lambda: True),
+            pytest.raises(mesh_isolation.MeshWorkerCancelled) as error,
+        ):
+            mesh_isolation.supervise_result(
+                _child("import time; time.sleep(60)"),
+                memory_budget=256 * MB,
+                timeout_seconds=30,
+            )
+
+        assert error.value.supervision.exit_cause.value == "cancelled"
+        assert error.value.supervision.elapsed_ns > 0
+        assert error.value.supervision.active_phase is None
+
+    def test_exports_failure_cost_in_parent(self) -> None:
+        from app.core.metrics import registry
+
+        labels = {"cause": "exited_nonzero"}
+        before = (
+            registry.get_sample_value(
+                "printstash_mesh_worker_duration_seconds_sum", labels
+            )
+            or 0
+        )
+
+        with pytest.raises(MeshWorkerError):
+            mesh_isolation.supervise_result(
+                _child("import sys; sys.exit(2)"),
+                memory_budget=256 * MB,
+                timeout_seconds=30,
+            )
+
+        assert (
+            registry.get_sample_value(
+                "printstash_mesh_worker_duration_seconds_sum", labels
+            )
+            > before
+        )
+
+
+class TestPhaseReply:
+    def test_requires_versioned_phase_stats(self) -> None:
+        frame = encode_reply(_result())
+        length = int.from_bytes(frame[4:8], "big")
+        header = json.loads(frame[8 : 8 + length])
+        del header["phase_stats"]
+        body = json.dumps(header).encode()
+        legacy = frame[:4] + len(body).to_bytes(4, "big") + body + frame[8 + length :]
+
+        with pytest.raises(MeshWorkerError) as error:
+            decode_reply(legacy)
+
         assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED

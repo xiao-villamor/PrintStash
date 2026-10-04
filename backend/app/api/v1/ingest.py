@@ -6,6 +6,11 @@ queued Job and staging lease in one transaction, and nudge the job's
 definition. Hashing into the vault, deduplication, parsing and thumbnails all
 happen in background Jobs; poll ``GET /api/v1/jobs/{job_id}`` or subscribe to
 ``/api/v1/events/ws`` for progress.
+
+These commands use synchronous SQL, storage and JobEngine ports. FastAPI runs
+whole synchronous handlers in its bounded thread pool, keeping the event loop
+free during acceptance as well as staging. Do not offload individual statements
+from an async handler while passing its Session across execution boundaries.
 """
 
 from __future__ import annotations
@@ -29,7 +34,6 @@ from fastapi import (
 )
 from printstash_core.files import slugify
 from sqlmodel import Session, select
-from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.errors import OperationError
@@ -202,7 +206,7 @@ def _orca_suffix(original_filename: str) -> str:
         "derivatives. Returns a job_id to poll via GET /api/v1/jobs/{job_id}."
     ),
 )
-async def ingest_orca(
+def ingest_orca(
     file: UploadFile = UploadFileParam(..., description="The .gcode file"),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
     collection: Optional[str] = Form(
@@ -315,9 +319,7 @@ async def ingest_orca(
     _require_ingest_collection(session, current_user, collection)
     _validate_target_library(session, target_library_id)
 
-    staged, staged_size, staged_hash = await run_in_threadpool(
-        _stage_upload, file, suffix
-    )
+    staged, staged_size, staged_hash = _stage_upload(file, suffix)
     return _accept_staged(
         session,
         kind=IngestRequestKind.UPLOAD,
@@ -349,7 +351,7 @@ async def ingest_orca(
         "GET /api/v1/jobs/{job_id}."
     ),
 )
-async def ingest_model(
+def ingest_model(
     file: UploadFile = UploadFileParam(
         ..., description="A .stl, .3mf, .obj, .step, .stp, or .dxf file"
     ),
@@ -375,9 +377,7 @@ async def ingest_model(
     _require_ingest_collection(session, current_user, collection)
     _validate_target_library(session, target_library_id)
 
-    staged, staged_size, staged_hash = await run_in_threadpool(
-        _stage_upload, file, suffix
-    )
+    staged, staged_size, staged_hash = _stage_upload(file, suffix)
     return _accept_staged(
         session,
         kind=IngestRequestKind.UPLOAD,
@@ -407,7 +407,7 @@ async def ingest_model(
         "whose token (the Job id) selects what to import."
     ),
 )
-async def ingest_url(
+def ingest_url(
     req: UrlIngestRequest,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
@@ -449,7 +449,7 @@ async def ingest_url(
         "archive_id is the manifest's archive_id (the Job id)."
     ),
 )
-async def inspect_archive_background(
+def inspect_archive_background(
     file: UploadFile = UploadFileParam(..., description="The .zip archive"),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
@@ -459,9 +459,7 @@ async def inspect_archive_background(
     original_filename = Path(file.filename).name
     if Path(original_filename).suffix.lower() != ".zip":
         raise HTTPException(status_code=400, detail="unsupported_file_type")
-    staged, staged_size, staged_hash = await run_in_threadpool(
-        _stage_upload, file, ".zip"
-    )
+    staged, staged_size, staged_hash = _stage_upload(file, ".zip")
     if not zipfile.is_zipfile(staged):
         staged.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="archive_invalid")
@@ -490,7 +488,7 @@ async def inspect_archive_background(
         "Collection named after the archive."
     ),
 )
-async def select_archive_entries(
+def select_archive_entries(
     archive_id: str,
     req: ArchiveSelectRequest,
     current_user: User = Depends(require_user),
@@ -551,7 +549,7 @@ async def select_archive_entries(
         "(see the model_files_manifest job result) and ingests each as its own Model."
     ),
 )
-async def select_model_files(
+def select_model_files(
     files_token: str,
     req: FileSelectRequest,
     current_user: User = Depends(require_user),
@@ -598,7 +596,7 @@ async def select_model_files(
         "collection_manifest job result) into the target collection."
     ),
 )
-async def select_collection_members(
+def select_collection_members(
     collection_token: str,
     req: CollectionSelectRequest,
     current_user: User = Depends(require_user),

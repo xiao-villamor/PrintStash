@@ -27,6 +27,13 @@ from app.modules.media.mesh_resources import (
     load_3mf,
     prepare_loaded_mesh,
 )
+from app.modules.media.mesh_telemetry import (
+    MeshPhase,
+    PhaseOutcome,
+    PhaseRecorder,
+    PhaseStats,
+    SupervisionStats,
+)
 
 logger = get_logger(__name__)
 
@@ -97,6 +104,8 @@ class ThumbnailResult:
     duration_ms: int
     peak_rss_bytes: int | None
     fingerprint_result: FingerprintResult | None = None
+    phase_stats: tuple[PhaseStats, ...] = ()
+    supervision: SupervisionStats | None = None
 
 
 class ThumbnailMetricsSink(Protocol):
@@ -143,6 +152,11 @@ class ThumbnailEngine:
         from app.modules.media import mesh_processing
 
         started = time.monotonic()
+        phases = PhaseRecorder()
+        try:
+            source_bytes = request.path.stat().st_size
+        except OSError:
+            source_bytes = None
         width = int(request.width or settings.model_thumbnail_width)
         height = int(request.height or round(width * 3 / 4))
         suffix = mesh_processing._canonical_suffix(request.path, request.file_type)
@@ -169,6 +183,7 @@ class ThumbnailEngine:
             or not 100 <= request.triangle_cap <= MAX_ANALYSIS_FACES
         ):
             raise ValueError("invalid_triangle_cap")
+        phases.start(MeshPhase.ADMISSION, input_bytes=source_bytes)
         report("loading_mesh")
         if request.file_type is None:
             over_cap = mesh_processing._exceeds_cap(request.path)
@@ -179,6 +194,8 @@ class ThumbnailEngine:
                 request.path, file_type=suffix
             )
             over_cap = estimate is not None and estimate > request.triangle_cap
+
+        phases.finish()
 
         if over_cap and request.include_geometry:
             geometry_outcome = GeometryRefused(ThumbnailFailureReason.RESOURCE_LIMIT)
@@ -194,10 +211,15 @@ class ThumbnailEngine:
                         or settings.use_embedded_3mf_preview_for_large_files
                     )
                 ):
+                    phases.start(MeshPhase.EMBEDDED, input_bytes=source_bytes)
                     embedded = mesh_processing.extract_embedded_3mf_thumbnail(
                         request.path,
                         validate_image=True,
                         file_type=suffix if request.file_type is not None else None,
+                    )
+
+                    phases.finish(
+                        output_bytes=len(embedded) if embedded is not None else None
                     )
 
                 # A thumbnail-only repair can return a validated embedded image
@@ -213,6 +235,7 @@ class ThumbnailEngine:
                     complete = True
                 else:
                     if not over_cap:
+                        phases.start(MeshPhase.LOAD, input_bytes=source_bytes)
                         if suffix == ".3mf":
                             # The ZIP-size estimate cannot account for repeated
                             # build/component instances. Trimesh expands those
@@ -276,9 +299,27 @@ class ThumbnailEngine:
                                 request.path, file_type=suffix
                             )
 
+                        phases.finish(
+                            outcome=PhaseOutcome.COMPLETED
+                            if mesh is not None
+                            else PhaseOutcome.FAILED,
+                            triangle_count=len(mesh.faces)
+                            if mesh is not None
+                            else None,
+                        )
+
                     report("extracting_geometry")
                     if request.include_geometry:
+                        phases.start(MeshPhase.MEASUREMENTS)
                         geometry = mesh_processing._geometry_from_mesh(mesh)
+                        phases.finish(
+                            triangle_count=int(geometry["triangle_count"])
+                            if geometry["triangle_count"] is not None
+                            else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if geometry["triangle_count"] is not None
+                            else PhaseOutcome.FAILED,
+                        )
                         if geometry["triangle_count"] is not None:
                             geometry_outcome = GeometryReady()
                         elif over_cap:
@@ -287,6 +328,7 @@ class ThumbnailEngine:
                             )
 
                     if request.include_fingerprint and fingerprint_result is None:
+                        phases.start(MeshPhase.FINGERPRINT)
                         report("extracting_fingerprint")
                         try:
                             if prepared is None and mesh is not None:
@@ -345,6 +387,12 @@ class ThumbnailEngine:
                                 else "analysis_failed",
                             )
 
+                        phases.finish(
+                            outcome=PhaseOutcome.COMPLETED
+                            if fingerprint_result.state == "ready"
+                            else PhaseOutcome.FAILED
+                        )
+
                     if not request.include_thumbnail:
                         return ThumbnailResult(
                             image=None,
@@ -360,8 +408,10 @@ class ThumbnailEngine:
                             ),
                             peak_rss_bytes=_peak_rss_bytes(),
                             fingerprint_result=fingerprint_result,
+                            phase_stats=phases.snapshot(),
                         )
 
+                    phases.start(MeshPhase.RENDER)
                     report("rendering_thumbnail")
                     if embedded is not None:
                         image = embedded
@@ -399,6 +449,13 @@ class ThumbnailEngine:
                                 strategy = ThumbnailStrategy.FULL
                                 complete = True
 
+                    phases.finish(
+                        output_bytes=len(image) if image is not None else None,
+                        outcome=PhaseOutcome.COMPLETED
+                        if image is not None
+                        else PhaseOutcome.FAILED,
+                    )
+
                     if (
                         image is None
                         and suffix == ".stl"
@@ -408,8 +465,20 @@ class ThumbnailEngine:
                             del mesh
                             mesh = None
                             mesh_processing._reclaim_memory()
+                        phases.start(MeshPhase.STREAMING, input_bytes=source_bytes)
                         streamed = stl_streaming.render_stl_preview_isolated(
                             request.path, width=width, height=height
+                        )
+                        phases.finish(
+                            output_bytes=len(streamed.png)
+                            if streamed is not None
+                            else None,
+                            triangle_count=streamed.triangle_count
+                            if streamed is not None
+                            else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if streamed is not None
+                            else PhaseOutcome.FAILED,
                         )
                         if streamed is not None:
                             image = streamed.png
@@ -438,8 +507,20 @@ class ThumbnailEngine:
                                 )
 
                     if image is None and suffix == ".stl":
+                        phases.start(MeshPhase.FALLBACK, input_bytes=source_bytes)
                         fallback = stl_fallback.render_stl_thumbnail(
                             request.path, width=width, height=height
+                        )
+                        phases.finish(
+                            output_bytes=len(fallback.png)
+                            if fallback is not None
+                            else None,
+                            triangle_count=fallback.triangle_count
+                            if fallback is not None
+                            else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if fallback is not None
+                            else PhaseOutcome.FAILED,
                         )
                         if fallback is not None:
                             image = fallback.png
@@ -476,6 +557,7 @@ class ThumbnailEngine:
                             else ThumbnailFailureReason.RENDERER_NO_OUTPUT
                         )
         except MemoryError:
+            phases.fail_active()
             prepared = None
             mesh = None
             mesh_processing._reclaim_memory()
@@ -496,6 +578,7 @@ class ThumbnailEngine:
             else:
                 failure = ThumbnailFailureReason.RESOURCE_LIMIT
         finally:
+            phases.fail_active()
             prepared = None
             if mesh is not None:
                 del mesh
@@ -546,6 +629,7 @@ class ThumbnailEngine:
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss,
             fingerprint_result=fingerprint_result,
+            phase_stats=phases.snapshot(),
         )
 
 
