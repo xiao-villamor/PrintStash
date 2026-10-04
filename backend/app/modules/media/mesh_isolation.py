@@ -27,16 +27,25 @@ import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import tempfile
 import time
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from printstash_core.mesh.similarity import GeometryError
 
 from app import __file__ as application_file
-from app.core.cancellation import checkpoint
+from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.config import _overlay, settings
 from app.modules.media import mesh_processing
 from app.modules.media.fingerprints import FingerprintRecord, FingerprintResult
+from app.modules.media.mesh_observability import record_phases, record_supervision
+from app.modules.media.mesh_telemetry import (
+    SupervisedReply,
+    SupervisionStats,
+    WorkerExitCause,
+    decode_phase_stats,
+    encode_phase_stats,
+)
 from app.modules.media.stl_streaming import _terminate_process_group
 from app.modules.media.thumbnail_engine import (
     GeometryNotRequested,
@@ -64,6 +73,15 @@ class MeshWorkerError(Exception):
     def __init__(self, reason: ThumbnailFailureReason) -> None:
         super().__init__(reason.value)
         self.reason = reason
+        self.supervision: SupervisionStats | None = None
+
+
+class MeshWorkerCancelled(OperationCancelled):
+    """Withdrawal preserves observed parent costs without becoming job failure."""
+
+    def __init__(self, supervision: SupervisionStats) -> None:
+        super().__init__()
+        self.supervision = supervision
 
 
 def memory_budget_bytes() -> int:
@@ -139,6 +157,7 @@ def encode_reply(result: ThumbnailResult) -> bytes:
     fingerprint = result.fingerprint_result
     header = json.dumps(
         {
+            "phase_stats": encode_phase_stats(result.phase_stats),
             "geometry": result.geometry,
             "geometry_outcome": encode_geometry(result.geometry_outcome),
             "strategy": result.strategy.value,
@@ -219,6 +238,7 @@ def decode_reply(payload: bytes) -> ThumbnailResult:
             duration_ms=int(header["duration_ms"]),
             peak_rss_bytes=header["peak_rss_bytes"],
             fingerprint_result=fingerprint,
+            phase_stats=decode_phase_stats(header["phase_stats"]),
         )
     except (
         ValueError,
@@ -231,48 +251,58 @@ def decode_reply(payload: bytes) -> ThumbnailResult:
         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
 
 
-def supervise(
+def supervise_result(
     command: list[str], *, memory_budget: int, timeout_seconds: float
-) -> bytes:
-    """Run *command*, returning everything it wrote to stdout on a clean exit.
+) -> SupervisedReply:
+    """Own the process lifecycle and retain observed costs on every exit.
 
-    The child leads its own process group, so a kill reaches anything it spawned.
-    Where a process's resident memory cannot be read (non-Linux) the memory limit
-    is not enforced; the deadline still is.
+    Tree RSS is sampled, not a kernel high-water mark. None means no sample was
+    available. The one terminal frame provides no phase attribution on a kill.
     """
+    started = time.monotonic_ns()
+    execution_id = secrets.token_hex(16)
+    peak_rss: int | None = None
+    reply = bytearray()
+    cause = WorkerExitCause.SPAWN_FAILED
+    error: MeshWorkerError | None = None
+    cancelled: OperationCancelled | None = None
+    process: subprocess.Popen[bytes] | None = None
     temporary = tempfile.TemporaryDirectory(prefix="printstash-mesh-")
     try:
-        process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env={
-                **os.environ,
-                "OMP_NUM_THREADS": "1",
-                "OPENBLAS_NUM_THREADS": "1",
-                "TMPDIR": temporary.name,
-            },
-            cwd=Path(application_file).resolve().parent.parent,
-        )
-    except BaseException:
-        temporary.cleanup()
-        raise
-    try:
+        try:
+            process = subprocess.Popen(  # nosec B603 - fixed argv; no shell
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env={
+                    **os.environ,
+                    "OMP_NUM_THREADS": "1",
+                    "OPENBLAS_NUM_THREADS": "1",
+                    "TMPDIR": temporary.name,
+                },
+                cwd=Path(application_file).resolve().parent.parent,
+            )
+        except OSError as exc:
+            raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
+        cause = WorkerExitCause.SUPERVISION_FAILED
         assert process.stdout is not None
         os.set_blocking(process.stdout.fileno(), False)
         deadline = time.monotonic() + timeout_seconds
-        reply = bytearray()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while True:
                 checkpoint()
                 if time.monotonic() >= deadline:
+                    cause = WorkerExitCause.DEADLINE
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
                 rss = mesh_processing.process_tree_rss_bytes(process.pid)
-                if rss is not None and rss > memory_budget:
-                    raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+                if rss is not None:
+                    peak_rss = rss if peak_rss is None else max(peak_rss, rss)
+                    if rss > memory_budget:
+                        cause = WorkerExitCause.MEMORY_LIMIT
+                        raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
                 finished = False
                 for key, _ in selector.select(_POLL_SECONDS):
                     chunk = os.read(key.fd, 65536)
@@ -281,37 +311,85 @@ def supervise(
                         break
                     reply.extend(chunk)
                     if len(reply) > MAX_REPLY_BYTES:
+                        cause = WorkerExitCause.REPLY_LIMIT
                         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
                 if finished:
                     break
         try:
             code = process.wait(timeout=max(deadline - time.monotonic(), 0.1))
         except subprocess.TimeoutExpired as exc:
+            cause = WorkerExitCause.DEADLINE
             raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT) from exc
         if code in (-signal.SIGKILL, RESOURCE_EXIT):
-            # Nothing of ours sends SIGKILL after a clean read; the kernel's
-            # out-of-memory killer does.
+            # Preserve the existing refusal classification, without claiming
+            # that a signal proves an OOM: users and the child can send it too.
+            cause = (
+                WorkerExitCause.SIGKILL
+                if code == -signal.SIGKILL
+                else WorkerExitCause.MEMORY_LIMIT
+            )
             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
         if code != 0:
+            cause = WorkerExitCause.EXITED_NONZERO
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
         checkpoint(force=True)
-        return bytes(reply)
-    except MeshWorkerError:
-        checkpoint(force=True)
-        raise
-    finally:
-        # The leader may already have exited; its descendants still belong to
-        # the session's original group, whose ID is the leader's PID.
+        cause = WorkerExitCause.EXITED_ZERO
+    except MeshWorkerError as exc:
+        error = exc
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        _terminate_process_group(process)
-        process.wait()
-        reap_descendants(process.pid)
-        if process.stdout is not None:
-            process.stdout.close()
-        temporary.cleanup()
+            checkpoint(force=True)
+        except OperationCancelled as exc:
+            cancelled = exc
+            cause = WorkerExitCause.CANCELLED
+    except OperationCancelled as exc:
+        cancelled = exc
+        cause = WorkerExitCause.CANCELLED
+    except OSError as exc:
+        error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+        error.__cause__ = exc
+    finally:
+        try:
+            if process is not None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                _terminate_process_group(process)
+                process.wait()
+                reap_descendants(process.pid)
+                if process.stdout is not None:
+                    process.stdout.close()
+        except OSError as exc:
+            cause = WorkerExitCause.SUPERVISION_FAILED
+            error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+            error.__cause__ = exc
+        finally:
+            try:
+                temporary.cleanup()
+            except OSError as exc:
+                cause = WorkerExitCause.SUPERVISION_FAILED
+                error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+                error.__cause__ = exc
+            stats = SupervisionStats(
+                execution_id, time.monotonic_ns() - started, peak_rss, len(reply), cause
+            )
+            if error is not None:
+                error.supervision = stats
+            record_supervision(stats)
+    if cancelled is not None:
+        raise MeshWorkerCancelled(stats) from cancelled
+    if error is not None:
+        raise error
+    return SupervisedReply(bytes(reply), stats)
+
+
+def supervise(
+    command: list[str], *, memory_budget: int, timeout_seconds: float
+) -> bytes:
+    """Byte-only convenience retained for non-mesh workers and containment probes."""
+    return supervise_result(
+        command, memory_budget=memory_budget, timeout_seconds=timeout_seconds
+    ).payload
 
 
 def runtime_overrides() -> dict[str, str | int | float | bool]:
@@ -362,7 +440,7 @@ def absolute(path: Path) -> str:
     return str(path.absolute())
 
 
-def run_worker(module: str, spec: dict[str, Any]) -> bytes:
+def _run_worker(module: str, spec: dict[str, Any]) -> SupervisedReply:
     """Run `python -m module` on *spec* under supervision; return its reply.
 
     Every isolated worker starts the same way: it is handed the parent's runtime
@@ -376,11 +454,16 @@ def run_worker(module: str, spec: dict[str, Any]) -> bytes:
             [json.dumps({"overrides": runtime_overrides(), **spec})],
             budget,
         )
-        return supervise(
+        return supervise_result(
             command,
             memory_budget=budget,
             timeout_seconds=float(settings.mesh_worker_timeout_seconds),
         )
+
+
+def run_worker(module: str, spec: dict[str, Any]) -> bytes:
+    """Byte reply convenience for STL conversion, embedding and verification."""
+    return _run_worker(module, spec).payload
 
 
 def read_spec(argv: list[str]) -> dict[str, Any]:
@@ -426,4 +509,11 @@ def generate(request: ThumbnailRequest) -> ThumbnailResult:
                 ],
             )
             resources.callback(reservation.release)
-        return decode_reply(run_worker("app.modules.media.mesh_worker", spec))
+        reply = _run_worker("app.modules.media.mesh_worker", spec)
+        try:
+            result = decode_reply(reply.payload)
+        except MeshWorkerError as exc:
+            exc.supervision = reply.stats
+            raise
+        record_phases(result.phase_stats, reply.stats)
+        return replace(result, supervision=reply.stats)

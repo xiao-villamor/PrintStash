@@ -3,9 +3,10 @@
 A single process-local ``CollectorRegistry`` holds every PrintStash metric so
 the ``/metrics`` endpoint can render them in one pass. The app runs
 API process per vault, so the default per-process registry semantics are
-correct for request and printer metrics. A split deployment's worker processes
-expose their own lane and step metrics; job counts are read from the database
-and are therefore the same from every process.
+correct for request and printer metrics. A split deployment's standalone workers have no HTTP scrape endpoint. Their
+process-local counters are not visible at the API scrape; mesh costs also leave
+those workers through structured stdout records. Job counts are read from the
+database and are therefore the same from every process.
 
 Instruments:
 - ``http_request_duration`` — request latency histogram, labelled by method,
