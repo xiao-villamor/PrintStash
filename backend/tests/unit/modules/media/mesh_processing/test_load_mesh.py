@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import trimesh
 
 from app.modules.media import mesh_processing
@@ -228,6 +229,17 @@ class TestLoadStepMeshIsolated:
 
 
 class TestGeometryFromMesh:
+    @pytest.mark.parametrize(
+        "volume", [float("inf"), float("nan")], ids=["infinite", "nan"]
+    )
+    def test_refuses_nonfinite_volume(self, monkeypatch, volume):
+        mesh = trimesh.creation.box(extents=[10, 10, 10])
+        monkeypatch.setattr(trimesh.Trimesh, "volume", property(lambda self: volume))
+
+        geometry = mesh_processing._geometry_from_mesh(mesh)
+
+        assert geometry["volume_mm3"] is None
+
     def test_geometry_from_mesh_handles_non_watertight_volume_error(
         self, monkeypatch
     ) -> None:
