@@ -53,18 +53,18 @@ step = [
     "cadquery-ocp-novtk==7.9.3.1.1",
 ]
 full = [
-    "sqlite-vec==0.1.6",
+    "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
     "cadquery-ocp-novtk==7.9.3.1.1",
-    "opendal==0.47.9",
+    "opendal==0.47.10",
 ]
 storage-opendal = [
     "asyncssh>=2.21,<3",
-    "opendal==0.47.9",
+    "opendal==0.47.10",
 ]
 dev = [
     # Builds tiny licensed ONNX contract fixtures; never downloads model weights.
@@ -100,7 +100,7 @@ dev = [
     "ty>=0.0.1",
 ]
 ai = [
-    "sqlite-vec==0.1.6",
+    "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
