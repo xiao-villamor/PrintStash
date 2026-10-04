@@ -48,7 +48,7 @@ jobs:
           - suite: integration-migrations-c
             paths: tests/integration/db/migrations/test_[n-z]*.py
           - suite: integration-platform
-            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime
+            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime tests/integration/scripts
           - suite: integration-domains-a
             paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
           - suite: integration-domains-b
