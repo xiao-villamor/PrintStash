@@ -52,7 +52,12 @@ literals cover tetrahedron and cube with canonical and ambiguous frames. Their
 complete historical `Surface` inputs are pinned too, so the renderer comparison
 does not recompute an arbitrary eigenframe for the isotropic cube on a different
 runtime. Separate existing tests continue to exercise real surface preparation
-and equivalent exports. The
+and equivalent exports. The 24 archived grayscale planes also pin the exact DCT
+inputs. Near-zero median comparisons in the symmetric cube can vary across
+floating-point runtimes; full 48-byte parity uses the unchanged DCT on those
+independent archived inputs in the same runtime, with three stable literal
+checks and all four historical literals retained as provenance. This refactor
+does not claim cross-host bit identity for the existing descriptor algorithm. The
 application fixture pins source bytes, recipe identity, preview RGB and six RGB
 view hashes from the complete legacy visual pass.
 
@@ -106,7 +111,7 @@ work is lower for these inputs; it does not establish an ingestion-wide speedup.
 | 18 | test_refuses_invalid_camera | Error | Nonorthogonal camera | No pixels result | Unit | ✅ `packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedPixels::test_refuses_invalid_camera` |
 | 19 | test_preserves_renderer_failure_result | Error | Actual rasterboundary raises | No pixels result insteadofpropagation | Unit | ✅ `packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedPixels::test_preserves_renderer_failure_result` |
 | 20 | test_preserves_existing_encoded_bytes | Happy | PNG/WEBP withsamecamera/dimensions/chunk | Exact legacy encoded bytes | Unit | ✅ `packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedThumbnail::test_preserves_existing_encoded_bytes` |
-| 21 | preserves exact legacy descriptor bytes | Happy | Tetra/cube canonical and ambiguous frames; raw source digests and frozen legacy JSON at59e91d | Exactly48bytes equal four independent literals; frozenJSON/provenance/source digests match | Unit | ✅ `packages/printstash-core/tests/mesh/similarity/test_descriptors.py::TestViews::test_preserves_legacy_view_hash_golden` |
+| 21 | preserves exact legacy descriptor bytes | Happy | Four frozen tetra/cube Surface inputs, canonical/ambiguous frames and independently archived gray planes from59e91d | Exact24archived grayscale planes and complete48bytes match unchanged DCT on the same runtime; three stable literals plus four historical source/literal references preserved | Unit | ✅ `packages/printstash-core/tests/mesh/similarity/test_descriptors.py::TestViews::test_preserves_legacy_view_hash_golden` |
 | 22 | reuses one preparation for six views | Happy | Real tetra surface; actual preparation/render functions wrapped for observation | One preparation shared by six renders; exact view ordering64x64/matte;48bytes preserved | Unit | ✅ `packages/printstash-core/tests/mesh/similarity/test_descriptors.py::TestViews::test_reuses_preparation_for_six_views` |
 | 23 | keeps source arrays immutable | Edge | Canonical/ambiguous tetra; vertices/faces/frame read-only | Source values unchanged; complete48byte result | Unit | ✅ `packages/printstash-core/tests/mesh/similarity/test_descriptors.py::TestViews::test_keeps_view_source_arrays_unchanged` |
 | 24 | avoids an image codec roundtrip | Edge | Real raster outputs; Image.open/save refuse calls | Complete48byte legacy-equivalent descriptor without encoding or decoding PNG | Unit | ✅ `packages/printstash-core/tests/mesh/similarity/test_descriptors.py::TestViews::test_hashes_actual_pixels_without_codec_roundtrip` |

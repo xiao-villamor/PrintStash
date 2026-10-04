@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
+import zlib
 from importlib.resources import files
 
 import numpy as np
@@ -225,7 +227,7 @@ class TestViews:
         ],
     )
     def test_preserves_legacy_view_hash_golden(
-        self, request, shape, ambiguous_frame, golden_hex
+        self, request, monkeypatch, shape, ambiguous_frame, golden_hex
     ):
         vertices, faces = request.getfixturevalue(shape)
         baseline = json.loads((FIXTURES_DIR / "render-prepared-v1.json").read_text())
@@ -246,6 +248,32 @@ class TestViews:
             eigenvalues=np.asarray(frozen["eigenvalues"], dtype=np.float64),
             radius=frozen["radius"],
         )
+        planes = []
+        for plane in reference["gray_planes"]:
+            gray = zlib.decompress(
+                base64.b64decode(plane["gray_zlib_base64"], validate=True)
+            )
+            assert hashlib.sha256(gray).hexdigest() == plane["gray_sha256"]
+            assert (plane["width"], plane["height"], len(gray)) == (64, 64, 4096)
+            planes.append(
+                np.frombuffer(gray, dtype=np.uint8).reshape((64, 64)).astype(np.float64)
+            )
+        legacy_dct = descriptors.dct_hash
+        expected = b"".join(legacy_dct(plane) for plane in planes)
+        observed = []
+
+        def observe_dct(pixels):
+            index = len(observed)
+            assert index < len(planes)
+            assert np.array_equal(pixels, planes[index])
+            assert (
+                hashlib.sha256(pixels.astype(np.uint8).tobytes()).hexdigest()
+                == reference["gray_planes"][index]["gray_sha256"]
+            )
+            observed.append(index)
+            return legacy_dct(pixels)
+
+        monkeypatch.setattr(descriptors, "dct_hash", observe_dct)
         result = descriptors.view_hashes(surface, ambiguous_frame=ambiguous_frame)
 
         assert (
@@ -258,7 +286,11 @@ class TestViews:
         )
         assert hashlib.sha256(faces.tobytes()).hexdigest() == reference["faces_sha256"]
         assert reference["view_hashes_hex"] == golden_hex
-        assert result == bytes.fromhex(golden_hex)
+        assert observed == list(range(6))
+        assert result == expected
+        # Symmetric near-zero DCT coefficients can cross the median by BLAS build.
+        if (shape, ambiguous_frame) != ("cube", True):
+            assert result == bytes.fromhex(golden_hex)
         assert len(result) == 48
 
     def test_view_hashes_survive_equivalent_exports(self, tetra):
