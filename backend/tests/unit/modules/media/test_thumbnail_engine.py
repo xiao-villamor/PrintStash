@@ -24,6 +24,7 @@ from app.modules.media import (
 )
 from app.modules.media.mesh_contracts import (
     GeometryNotLoaded,
+    GeometryReady,
     MeshMeasurements,
     PreviewCoverage,
     SourceScanState,
@@ -34,6 +35,7 @@ from app.modules.media.mesh_contracts import (
 from app.modules.media.mesh_facts import FingerprintFailureCode, FingerprintResultState
 from app.modules.media.stl_reader import InvalidSTL, STLBudgetExceeded, STLSourceChanged
 from app.modules.media.thumbnail_engine import ThumbnailEngine
+from tests.factories.content import binary_stl_facets
 
 
 def _geometry() -> dict[str, float | int | None]:
@@ -93,26 +95,47 @@ class TestThumbnailEngine:
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         source = tmp_path / "dense.stl"
-        source.write_bytes(b"dense")
+        facet = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 2.0, 3.0))
+        source.write_bytes(binary_stl_facets([facet] * 999))
         monkeypatch.setattr(mesh_policy, "exceeds_cap", lambda *_a, **_k: True)
-        monkeypatch.setattr(mesh_loading, "load_mesh", lambda *_a, **_k: None)
-        streamed = type(
-            "Streamed",
-            (),
-            {
-                "png": b"streamed",
-                "bounds_min": (0.0, 0.0, 0.0),
-                "bounds_max": (1.0, 2.0, 3.0),
-                "triangle_count": 999,
-            },
-        )()
+
+        def no_load(*_args, **_kwargs):
+            raise AssertionError("over-cap STL must not materialize through Trimesh")
+
+        monkeypatch.setattr(mesh_loading, "load_mesh", no_load)
+        streamed = stl_streaming.STLStreamingResult(
+            png=b"streamed",
+            bounds_min=(0.0, 0.0, 0.0),
+            bounds_max=(1.0, 2.0, 3.0),
+            triangle_count=999,
+            parsed_triangles=999,
+            scanned_bytes=source.stat().st_size,
+            raster_candidates=1,
+        )
+        calls = []
+
+        def isolated_preview(path, *, width, height, **_kwargs):
+            calls.append(path)
+            return streamed
+
         monkeypatch.setattr(
-            "app.modules.media.stl_streaming.render_stl_preview_isolated",
-            lambda *_a, **_k: streamed,
+            stl_streaming, "render_stl_preview_isolated", isolated_preview
         )
 
         result = ThumbnailEngine().generate(ThumbnailRequest(path=source))
 
+        assert calls == [source]
+        assert result.geometry_outcome == GeometryReady()
+        assert result.geometry == {
+            "bbox_x_mm": 1.0,
+            "bbox_y_mm": 2.0,
+            "bbox_z_mm": 3.0,
+            "volume_mm3": None,
+            "triangle_count": 999,
+        }
+        assert result.volume == VolumeNotCalculated(
+            VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
+        )
         assert result.image == b"streamed"
         assert result.strategy is ThumbnailStrategy.STREAMING
         assert result.coverage.preview is PreviewCoverage.COMPLETE

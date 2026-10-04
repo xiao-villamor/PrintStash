@@ -930,18 +930,17 @@ class TestLocalRootSafetyBranches:
         file = root / "disappearing.bin"
         file.write_bytes(b"payload")
         real_stat = Path.stat
-        stat_calls = 0
 
         def missing_stat(path: Path, *args: object, **kwargs: object):
-            nonlocal stat_calls
             if path == file:
-                stat_calls += 1
-                if stat_calls == 2:
-                    raise OSError("file disappeared")
+                path.unlink(missing_ok=True)
             return real_stat(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", missing_stat)
-        assert backend.usage(str(root))["object_count"] == 0
+        usage = backend.usage(str(root))
+        assert not file.exists()
+        assert usage["object_count"] == 0
+        assert usage["total_size_bytes"] == 0
 
     def test_rejects_an_unusable_hardlink_publication_on_a_managed_root(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

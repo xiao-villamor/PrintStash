@@ -6,6 +6,10 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
+from printstash_core.mesh.measurements import (
+    VolumeNotCalculated,
+    VolumeNotCalculatedCause,
+)
 
 from app.core.config import _overlay
 from app.modules.media import (
@@ -14,7 +18,12 @@ from app.modules.media import (
     mesh_previews,
     mesh_render,
 )
-from app.modules.media.mesh_contracts import PreviewCoverage, SourceScanState
+from app.modules.media.mesh_contracts import (
+    GeometryNotLoaded,
+    GeometryReady,
+    PreviewCoverage,
+    SourceScanState,
+)
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
 
 from .._meshes import (
@@ -152,11 +161,26 @@ class TestAnalyzeMesh:
 
         monkeypatch.setattr(mesh_loading, "load_mesh", _boom)
 
+        assert mesh_policy.exceeds_cap(p)
         result = analyze(p)
         geometry, thumb = result.geometry, result.image
 
-        # Indexed, but with no geometry/thumbnail — and crucially, no load attempt.
-        assert geometry["triangle_count"] is None
+        # Exact source scanning preserves facts without admitting a full mesh.
+        assert geometry["triangle_count"] == 50000
+        assert (
+            geometry["bbox_x_mm"]
+            == geometry["bbox_y_mm"]
+            == geometry["bbox_z_mm"]
+            == 0.0
+        )
+        assert geometry["volume_mm3"] is None
+        assert result.geometry_outcome == GeometryReady()
+        assert result.volume == VolumeNotCalculated(
+            VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
+        )
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert isinstance(result.coverage.geometry, GeometryNotLoaded)
+        assert result.coverage.preview is PreviewCoverage.NOT_PRODUCED
         assert thumb is None
 
     def test_over_cap_valid_stl_uses_streaming_thumbnail_fallback(
@@ -192,9 +216,7 @@ class TestAnalyzeMesh:
         png = _valid_preview_png()
         p = tmp_path / "dense.3mf"
         with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr(
-                "3D/3dmodel.model", b"<triangle/>" * 100_000
-            )
+            zf.writestr("3D/3dmodel.model", b"<triangle/>" * 100_000)
             zf.writestr("Metadata/thumbnail.png", png)
         assert p.stat().st_size > 1024 * 1024
 
@@ -265,9 +287,24 @@ class TestAnalyzeMesh:
             ),
         )
 
+        assert mesh_policy.exceeds_cap(p)
         result = analyze(p)
         geometry, thumb = result.geometry, result.image
-        assert geometry["triangle_count"] is None
+        assert geometry["triangle_count"] == 42000
+        assert (
+            geometry["bbox_x_mm"]
+            == geometry["bbox_y_mm"]
+            == geometry["bbox_z_mm"]
+            == 0.0
+        )
+        assert geometry["volume_mm3"] is None
+        assert result.geometry_outcome == GeometryReady()
+        assert result.volume == VolumeNotCalculated(
+            VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
+        )
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert isinstance(result.coverage.geometry, GeometryNotLoaded)
+        assert result.coverage.preview is PreviewCoverage.NOT_PRODUCED
         assert thumb is None
 
     def test_oversize_3mf_still_gets_embedded_preview(
