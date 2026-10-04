@@ -76,6 +76,18 @@ ORCHESTRATORS = {
 }
 
 RAW = {
+    "printstash_core.mesh.render_geometry.prepare_mesh_render",
+    "printstash_core.mesh.render_geometry.prepare_scene_render",
+    "printstash_core.mesh.rasterizer.render_prepared_pixels",
+    "printstash_core.mesh.rasterizer.render_prepared_thumbnail",
+    "printstash_core.mesh.prepare_mesh_render",
+    "printstash_core.mesh.prepare_scene_render",
+    "printstash_core.mesh.render_prepared_pixels",
+    "printstash_core.mesh.render_prepared_thumbnail",
+    "app.modules.media.mesh_render.prepare_mesh_render",
+    "app.modules.media.mesh_render.prepare_scene_render",
+    "app.modules.media.mesh_render.render_prepared_pixels",
+    "app.modules.media.mesh_render.render_prepared_thumbnail",
     "printstash_core.mesh.similarity.fingerprint_mesh",
     "printstash_core.mesh.similarity.geometry.prepare_surface",
     "printstash_core.mesh.similarity.verification.verify_meshes",
@@ -246,6 +258,35 @@ class TestMeshBoundaries:
         ],
     )
     def test_rejects_retained_scene_bypasses(self, source, target):
+        assert target in _violations(source, "app.modules.media")
+
+    @pytest.mark.parametrize(
+        ("source", "target"),
+        [
+            (source, target)
+            for target in (
+                "printstash_core.mesh.render_geometry.prepare_mesh_render",
+                "printstash_core.mesh.render_geometry.prepare_scene_render",
+                "printstash_core.mesh.rasterizer.render_prepared_pixels",
+                "printstash_core.mesh.rasterizer.render_prepared_thumbnail",
+                "printstash_core.mesh.prepare_mesh_render",
+                "printstash_core.mesh.prepare_scene_render",
+                "printstash_core.mesh.render_prepared_pixels",
+                "printstash_core.mesh.render_prepared_thumbnail",
+                "app.modules.media.mesh_render.prepare_mesh_render",
+                "app.modules.media.mesh_render.prepare_scene_render",
+                "app.modules.media.mesh_render.render_prepared_pixels",
+                "app.modules.media.mesh_render.render_prepared_thumbnail",
+            )
+            for module, name in (target.rsplit(".", 1),)
+            for source in (
+                f"from {module} import {name} as direct",
+                f"import {module} as owner\nowner.{name}(source)",
+                f"import {module} as owner\ncallback = owner.{name}",
+            )
+        ],
+    )
+    def test_rejects_prepared_render_bypasses(self, source, target):
         assert target in _violations(source, "app.modules.media")
 
     def test_allows_safe_consumers(self):

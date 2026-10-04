@@ -70,7 +70,8 @@ def prepare_mesh(mesh: RenderableMesh | None) -> PreparedRenderGeometry | None:
         raise ValueError("invalid triangle indices")
     if faces.min() < 0 or faces.max() >= len(vertices):
         raise ValueError("triangle index outside vertex array")
-    faces = faces.astype(np.int64, copy=False)
+    faces = faces.astype(np.int64, copy=True)
+    faces.flags.writeable = False
     referenced = np.zeros(len(vertices), dtype=bool)
     referenced[faces] = True
     remap = None
@@ -84,8 +85,11 @@ def prepare_mesh(mesh: RenderableMesh | None) -> PreparedRenderGeometry | None:
         _validate_chunk(size)
         for start in range(0, len(faces), size):
             selected = faces[start : start + size]
-            yield remap[selected] if remap is not None else selected
+            output = remap[selected] if remap is not None else selected
+            output.flags.writeable = False
+            yield output
 
+    relative.flags.writeable = False
     return PreparedRenderGeometry(relative, len(faces), chunks)
 
 
@@ -97,10 +101,14 @@ def prepare_scene(scene: ExpandedScene) -> PreparedRenderGeometry:
     by_id = {resource.resource_id: resource for resource in scene.resources}
     points: dict[str, FloatArray] = {}
     remaps: dict[str, IntArray] = {}
+    owned_faces: dict[str, IntArray] = {}
     for resource in scene.resources:
         referenced = np.zeros(len(resource.vertices), dtype=bool)
         referenced[resource.faces] = True
         points[resource.resource_id] = resource.vertices[referenced]
+        faces = resource.faces.copy()
+        faces.flags.writeable = False
+        owned_faces[resource.resource_id] = faces
         # Only referenced indices can appear in admitted faces. Unused entries
         # in this source-to-render index map are never read.
         remaps[resource.resource_id] = np.cumsum(referenced, dtype=np.int64) - 1
@@ -139,9 +147,9 @@ def prepare_scene(scene: ExpandedScene) -> PreparedRenderGeometry:
                     ).astype(np.float32)
                 resource = by_id[instance.resource_id]
                 winding = (
-                    resource.faces[:, ::-1]
+                    owned_faces[resource.resource_id][:, ::-1]
                     if np.linalg.slogdet(transform[:3, :3])[0] < 0
-                    else resource.faces
+                    else owned_faces[resource.resource_id]
                 )
                 layout.append((winding, remaps[instance.resource_id], offset))
                 offset += len(source)
@@ -171,11 +179,104 @@ def prepare_scene(scene: ExpandedScene) -> PreparedRenderGeometry:
                     placement += 1
                     source_offset = 0
             emitted += count
+            output.flags.writeable = False
             yield output
 
+    vertices.flags.writeable = False
     return PreparedRenderGeometry(vertices, face_count, chunks)
 
 
 def _validate_chunk(size: int) -> None:
     if type(size) is not int or size < 1:
         raise ValueError("invalid_render_chunk")
+
+
+@dataclass(frozen=True)
+class PreparedRender:
+    """Owned camera-independent positions, identities and angle-weighted normals.
+
+    Scene face storage is proportional to unique source resources; expanded
+    positions and welded normals remain whole. Iterators expose read-only,
+    bounded indices in the original placement order.
+    """
+
+    vertices: RenderPositions
+    face_count: int
+    face_chunks: Callable[[int], Iterator[IntArray]]
+    position_ids: IntArray
+    smooth_normals: FloatArray
+
+
+def prepare_mesh_render(
+    mesh: RenderableMesh | None, *, face_chunk_size: int = 64_000
+) -> PreparedRender | None:
+    """Snapshot source arrays and prepare shared normals once for any camera."""
+    _validate_chunk(face_chunk_size)
+    geometry = prepare_mesh(mesh)
+    return None if geometry is None else _prepare_normals(geometry, face_chunk_size)
+
+
+def prepare_scene_render(
+    scene: ExpandedScene, *, face_chunk_size: int = 64_000
+) -> PreparedRender:
+    """Admit retained resources before allocating owned render preparation."""
+    _validate_chunk(face_chunk_size)
+    return _prepare_normals(prepare_scene(scene), face_chunk_size)
+
+
+def _prepare_normals(
+    geometry: PreparedRenderGeometry, face_chunk_size: int
+) -> PreparedRender:
+    import numpy as np
+
+    verts = geometry.vertices
+    extent = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0))) or 1.0
+    q = np.round(verts / (extent * 1e-5)).astype(np.int64)
+    q -= q.min(axis=0)
+    span = q.max(axis=0) + 1
+    key = (q[:, 0] * span[1] + q[:, 1]) * span[2] + q[:, 2]
+    _, pos_id = np.unique(key, return_inverse=True)
+    n_pos = int(pos_id.max()) + 1
+    del q, key
+
+    # Angle-weighted object-space normals are shared across every camera.
+    # Accumulate bounded facet chunks into the whole welded-position table.
+    vacc = np.zeros((n_pos, 3), dtype=np.float64)
+    for fc in geometry.face_chunks(face_chunk_size):
+        f_obj = verts[fc]  # (c, 3, 3)
+        fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
+        fn = fn / np.where(
+            np.linalg.norm(fn, axis=1, keepdims=True) == 0,
+            1.0,
+            np.linalg.norm(fn, axis=1, keepdims=True),
+        )
+        # Angle-weighted normals (Thürmer–Wüthrich): weight each face's
+        # contribution to a vertex by the triangle's interior angle there.
+        # Plain incident-face averaging over-counts directions that simply
+        # have more (or thinner) triangles — which skews the normal at mesh
+        # "poles" (many triangles fanning into one vertex) and irregular
+        # tessellation, the source of the radial "fan" streaks. Angle weights
+        # make the smoothed normal independent of how the surface is cut up.
+        e_ab = f_obj[:, [1, 2, 0]] - f_obj  # edge to "next" corner, per corner
+        e_ac = f_obj[:, [2, 0, 1]] - f_obj  # edge to "prev" corner, per corner
+        e_ab /= np.maximum(np.linalg.norm(e_ab, axis=2, keepdims=True), 1e-20)
+        e_ac /= np.maximum(np.linalg.norm(e_ac, axis=2, keepdims=True), 1e-20)
+        ang = np.arccos(np.clip(np.sum(e_ab * e_ac, axis=2), -1.0, 1.0))  # (c,3)
+        flat_pos = pos_id[fc].ravel()  # (3c,) welded id per face corner
+        # Each corner contributes its face normal scaled by that corner angle.
+        fn_per_corner = np.repeat(fn, 3, axis=0) * ang.ravel()[:, None]  # (3c,3)
+        for a in range(3):
+            vacc[:, a] += np.bincount(
+                flat_pos, weights=fn_per_corner[:, a], minlength=n_pos
+            )
+        del f_obj, fn, flat_pos, fn_per_corner, e_ab, e_ac, ang
+    vsm = vacc / np.where(
+        np.linalg.norm(vacc, axis=1, keepdims=True) == 0,
+        1.0,
+        np.linalg.norm(vacc, axis=1, keepdims=True),
+    )
+    del vacc
+
+    pos_id.flags.writeable = False
+    vsm.flags.writeable = False
+    return PreparedRender(verts, geometry.face_count, geometry.face_chunks, pos_id, vsm)

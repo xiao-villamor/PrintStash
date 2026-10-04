@@ -10,8 +10,15 @@ from importlib.resources import files
 import numpy as np
 import pytest
 
+from printstash_core.mesh import rasterizer, render_geometry
 from printstash_core.mesh.similarity import GeometryError, descriptors
 from printstash_core.mesh.similarity.geometry import prepare_surface
+
+from ...paths import FIXTURES_DIR
+
+TETRA_CANONICAL_VIEW_HASH = bytes.fromhex(
+    "13496cb66b25b269196d30c3669267b614c26b3d95c23a3d40c73f3cc0c72f38194c66936966936d196933c6649e669a"
+)
 
 
 class TestPhysicalDescriptors:
@@ -188,6 +195,63 @@ class TestSphericalHarmonics:
 
 
 class TestViews:
+    @pytest.mark.parametrize(
+        ("shape", "ambiguous_frame", "golden_hex"),
+        [
+            pytest.param(
+                "tetra",
+                False,
+                "13496cb66b25b269196d30c3669267b614c26b3d95c23a3d40c73f3cc0c72f38194c66936966936d196933c6649e669a",
+                id="tetra-canonical",
+            ),
+            pytest.param(
+                "tetra",
+                True,
+                "4c38659663c732c7196936c664966f9215696a94956b7a9441913e6ec5946a6b4c30669b63ce31ce196933c6649e669a",
+                id="tetra-ambiguous",
+            ),
+            pytest.param(
+                "cube",
+                False,
+                "49793e97606cb44649863f686093b5b9446e3a934bcc946e5091276e5973d691433d2d673a993498433c38e266c96d99",
+                id="cube-canonical",
+            ),
+            pytest.param(
+                "cube",
+                True,
+                "569a3b8530e4b36556c52fda6491e232149c6bd86bc2946b149c6bd86bc2946b462d39d42dc4297d462939d629d2297d",
+                id="cube-ambiguous",
+            ),
+        ],
+    )
+    def test_preserves_legacy_view_hash_golden(
+        self, request, shape, ambiguous_frame, golden_hex
+    ):
+        vertices, faces = request.getfixturevalue(shape)
+        baseline = json.loads((FIXTURES_DIR / "render-prepared-v1.json").read_text())
+        reference = next(
+            row
+            for row in baseline["descriptors"]
+            if row["name"] == shape and row["ambiguous_frame"] is ambiguous_frame
+        )
+
+        result = descriptors.view_hashes(
+            prepare_surface(vertices, faces), ambiguous_frame=ambiguous_frame
+        )
+
+        assert (
+            baseline["provenance"]["source_commit"]
+            == "59e91d25172ca53c47f26b1ec773992defddc57a"
+        )
+        assert (
+            hashlib.sha256(vertices.tobytes()).hexdigest()
+            == reference["vertices_sha256"]
+        )
+        assert hashlib.sha256(faces.tobytes()).hexdigest() == reference["faces_sha256"]
+        assert reference["view_hashes_hex"] == golden_hex
+        assert result == bytes.fromhex(golden_hex)
+        assert len(result) == 48
+
     def test_view_hashes_survive_equivalent_exports(self, tetra):
         vertices, faces = tetra
 
@@ -201,8 +265,121 @@ class TestViews:
         assert a == b
         assert len(set(a[i : i + 8] for i in range(0, 48, 8))) > 1
 
+    def test_reuses_preparation_for_six_views(self, tetra, monkeypatch):
+        surface = prepare_surface(*tetra)
+        preparations = []
+        renders = []
+        prepare = render_geometry.prepare_mesh_render
+        render = rasterizer.render_prepared_pixels
+
+        def observe_preparation(mesh, *args, **kwargs):
+            prepared = prepare(mesh, *args, **kwargs)
+            preparations.append(prepared)
+            return prepared
+
+        def observe_render(prepared, name, *args, **kwargs):
+            renders.append((prepared, name, kwargs))
+            return render(prepared, name, *args, **kwargs)
+
+        monkeypatch.setattr(
+            descriptors, "prepare_mesh_render", observe_preparation, raising=False
+        )
+        monkeypatch.setattr(
+            descriptors, "render_prepared_pixels", observe_render, raising=False
+        )
+
+        result = descriptors.view_hashes(surface, ambiguous_frame=False)
+
+        assert result == TETRA_CANONICAL_VIEW_HASH
+        assert len(preparations) == 1
+        assert len(renders) == 6
+        assert all(prepared is preparations[0] for prepared, _, _ in renders)
+        assert {name for _, name, _ in renders} == {"geometry-descriptor"}
+        assert {
+            (options["width"], options["height"], options["matte"])
+            for _, _, options in renders
+        } == {(64, 64, True)}
+        np.testing.assert_array_equal(
+            np.stack([options["view_rotation"] for _, _, options in renders]),
+            np.array(
+                [
+                    [[0, -1, 0], [0, 0, 1], [-1, 0, 0]],
+                    [[0, 1, 0], [0, 0, 1], [1, 0, 0]],
+                    [[0, 0, -1], [1, 0, 0], [0, -1, 0]],
+                    [[0, 0, 1], [1, 0, 0], [0, 1, 0]],
+                    [[-1, 0, 0], [0, 1, 0], [0, 0, -1]],
+                    [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                ]
+            ),
+        )
+
+    @pytest.mark.parametrize(
+        "ambiguous_frame", [False, True], ids=["canonical", "ambiguous"]
+    )
+    def test_keeps_view_source_arrays_unchanged(self, tetra, ambiguous_frame):
+        surface = prepare_surface(*tetra)
+        vertices, faces, frame = (
+            surface.vertices.copy(),
+            surface.faces.copy(),
+            surface.frame.copy(),
+        )
+        surface.vertices.flags.writeable = False
+        surface.faces.flags.writeable = False
+        surface.frame.flags.writeable = False
+
+        result = descriptors.view_hashes(surface, ambiguous_frame=ambiguous_frame)
+
+        assert len(result) == 48
+        np.testing.assert_array_equal(surface.vertices, vertices)
+        np.testing.assert_array_equal(surface.faces, faces)
+        np.testing.assert_array_equal(surface.frame, frame)
+
+    def test_hashes_actual_pixels_without_codec_roundtrip(self, tetra, monkeypatch):
+        from PIL import Image
+
+        surface = prepare_surface(*tetra)
+
+        def reject_codec(*_args, **_kwargs):
+            raise AssertionError(
+                "view descriptors must consume actual pixels without an image codec"
+            )
+
+        monkeypatch.setattr(Image, "open", reject_codec)
+        monkeypatch.setattr(Image.Image, "save", reject_codec)
+
+        result = descriptors.view_hashes(surface, ambiguous_frame=False)
+
+        assert result == TETRA_CANONICAL_VIEW_HASH
+        assert len(set(result[index : index + 8] for index in range(0, 48, 8))) > 1
+
+    def test_preserves_legacy_grayscale_alpha_policy(self, tetra, monkeypatch):
+        surface = prepare_surface(*tetra)
+        backgrounds = []
+        convert_rgb = rasterizer.RenderedPixels.rgb
+
+        def observe_background(pixels, background):
+            backgrounds.append(background)
+            return convert_rgb(pixels, background)
+
+        monkeypatch.setattr(rasterizer.RenderedPixels, "rgb", observe_background)
+
+        result = descriptors.view_hashes(surface, ambiguous_frame=False)
+
+        assert result == TETRA_CANONICAL_VIEW_HASH
+        assert backgrounds == [rasterizer.RGBBackground.IGNORE_ALPHA] * 6
+
+    def test_missing_preparation_has_explicit_reason(self, tetra, monkeypatch):
+        monkeypatch.setattr(descriptors, "prepare_mesh_render", lambda *a, **k: None)
+
+        with pytest.raises(GeometryError) as raised:
+            descriptors.view_hashes(prepare_surface(*tetra), ambiguous_frame=False)
+
+        assert raised.value.code == "view_render_unavailable"
+
     def test_renderer_failure_has_explicit_reason(self, tetra, monkeypatch):
-        monkeypatch.setattr(descriptors, "render_mesh_thumbnail", lambda *a, **k: None)
+        monkeypatch.setattr(
+            descriptors, "render_prepared_pixels", lambda *a, **k: None, raising=False
+        )
 
         with pytest.raises(GeometryError, match="view_render_unavailable"):
             descriptors.view_hashes(prepare_surface(*tetra), ambiguous_frame=False)

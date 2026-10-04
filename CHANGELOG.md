@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Reuse immutable mesh positions and smooth normals across each visual pass.
+  Embedding views and similarity view hashes consume pixels directly without
+  repeated PNG encoding and decoding, while preserving existing preview bytes
+  and descriptor identities.
 - Retain unique 3MF resources and explicit placements through measurement and
   preview rendering. Measure repeated instances without first allocating a whole
   placed mesh, materialize only for admitted fingerprints or global topology,

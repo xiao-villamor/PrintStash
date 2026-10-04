@@ -1,13 +1,17 @@
 """Path-based comparison contains malformed, partial and unavailable media inputs."""
 
+import hashlib
+import json
+
 import numpy as np
 import pytest
 import trimesh
 from printstash_core.mesh.similarity import GeometryError
 
-from app.modules.media import geometry_analysis, mesh_resources
+from app.modules.media import geometry_analysis, mesh_render, mesh_resources
 from tests.factories.geometry import tetrahedron, three_mf
 from tests.fixtures.three_mf_projects import build_instanced_project
+from tests.paths import FIXTURES_DIR
 
 
 @pytest.fixture
@@ -169,13 +173,28 @@ class TestEmbeddingViews:
         from printstash_core.search.visual_inputs import VisualRecipe
 
         loads = []
+        preparations = []
         original = geometry_analysis._load
+        prepare = mesh_render.prepare_mesh_render
+        source = mesh_path.read_bytes()
 
         def observed(*args, **kwargs):
             loads.append(args[0])
-            return original(*args, **kwargs)
+            prepared = original(*args, **kwargs)
+            loads[-1] = (
+                args[0],
+                prepared,
+                prepared.whole_mesh.vertices.tobytes(),
+                prepared.whole_mesh.faces.tobytes(),
+            )
+            return prepared
+
+        def observed_preparation(mesh):
+            preparations.append(mesh)
+            return prepare(mesh)
 
         monkeypatch.setattr(geometry_analysis, "_load", observed)
+        monkeypatch.setattr(mesh_render, "prepare_mesh_render", observed_preparation)
         recipe = VisualRecipe.for_space(
             VisualRecipe.space(
                 EmbeddingSpace("clip", "v1", 3, "text_image", "test"),
@@ -187,11 +206,106 @@ class TestEmbeddingViews:
             mesh_path, file_type="stl", recipe=recipe, triangle_cap=100
         )
 
-        assert loads == [mesh_path]
+        assert len(loads) == 1
+        path, prepared, vertices, faces = loads[0]
+        assert path == mesh_path
+        assert preparations == [prepared.whole_mesh]
+        assert prepared.whole_mesh.vertices.tobytes() == vertices
+        assert prepared.whole_mesh.faces.tobytes() == faces
+        assert mesh_path.read_bytes() == source
         assert len(result.views) == 6
         assert result.thumbnail.modality == "image"
         assert len(result.thumbnail.rgb) == 32 * 32 * 3
         assert all(view.width == 32 for view in result.views)
+
+    def test_preserves_frozen_visual_input_hashes(self, mesh_path):
+        from printstash_core.inference import EmbeddingSpace
+        from printstash_core.search.visual_inputs import VisualRecipe
+
+        baseline = json.loads(
+            (FIXTURES_DIR / "media/visual-prepared-v1.json").read_text()
+        )
+        recipe = VisualRecipe.for_space(
+            VisualRecipe.space(
+                EmbeddingSpace("clip", "v1", 3, "text_image", "test"),
+                image_size=baseline["image_size"],
+                profile=baseline["profile"],
+            )
+        )
+        source = mesh_path.read_bytes()
+        assert hashlib.sha256(source).hexdigest() == baseline["source_sha256"]
+        assert recipe.view_identity == baseline["view_identity"]
+
+        result = geometry_analysis.visual_views(
+            mesh_path,
+            file_type="stl",
+            recipe=recipe,
+            triangle_cap=baseline["triangle_cap"],
+        )
+
+        assert result.thumbnail is not None
+        assert result.thumbnail.rgb is not None
+        assert (
+            hashlib.sha256(result.thumbnail.rgb).hexdigest()
+            == baseline["thumbnail_rgb_sha256"]
+        )
+        assert len(result.views) == 6
+        assert all(view.rgb is not None for view in result.views)
+        assert [
+            hashlib.sha256(view.rgb).hexdigest() for view in result.views
+        ] == baseline["views_rgb_sha256"]
+        assert mesh_path.read_bytes() == source
+
+    def test_reuses_component_preparation_for_embedding_views(
+        self, mesh_path, monkeypatch
+    ):
+        original = geometry_analysis._load
+        prepare = mesh_render.prepare_mesh_render
+        loaded = []
+        preparations = []
+        source = mesh_path.read_bytes()
+
+        def observed(*args, **kwargs):
+            prepared = original(*args, **kwargs)
+            resource = prepared.scene.resources[0]
+            loaded.append(
+                (resource, resource.vertices.tobytes(), resource.faces.tobytes())
+            )
+            return prepared
+
+        def observed_preparation(mesh):
+            preparations.append(mesh)
+            return prepare(mesh)
+
+        monkeypatch.setattr(geometry_analysis, "_load", observed)
+        monkeypatch.setattr(mesh_render, "prepare_mesh_render", observed_preparation)
+        views = geometry_analysis.embedding_views(
+            mesh_path,
+            file_type="stl",
+            component_index=1,
+            image_size=32,
+            triangle_cap=100,
+        )
+
+        assert len(preparations) == len(loaded) == 1
+        resource, vertices, faces = loaded[0]
+        assert resource.vertices.tobytes() == vertices
+        assert resource.faces.tobytes() == faces
+        assert mesh_path.read_bytes() == source
+        assert len(views) == 6
+        assert all(len(view.rgb) == 32 * 32 * 3 for view in views)
+
+    def test_refuses_decoded_thumbnail_without_rgb(self, monkeypatch):
+        from printstash_core.inference import EmbeddingInput, images
+
+        monkeypatch.setattr(
+            images,
+            "decode_image",
+            lambda *_args: EmbeddingInput("text", text="wrong modality"),
+        )
+
+        with pytest.raises(GeometryError, match="embedding_view_failed"):
+            geometry_analysis.thumbnail_input(b"encoded", 32)
 
     def test_produces_distinct_opaque_rgb_views(self, mesh_path):
         views = geometry_analysis.embedding_views(

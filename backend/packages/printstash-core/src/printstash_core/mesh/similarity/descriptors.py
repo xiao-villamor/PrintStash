@@ -15,7 +15,8 @@ from importlib.resources import files
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
-from ..rasterizer import render_mesh_thumbnail
+from ..rasterizer import RGBBackground, render_prepared_pixels
+from ..render_geometry import prepare_mesh_render
 from .fingerprint import GeometryError, canonical_sample_triangles
 from .geometry import Surface
 from .hull import hull_volume
@@ -209,23 +210,30 @@ def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
         vertices=triangles.reshape((-1, 3)),
         faces=np.arange(triangles.size // 3).reshape((-1, 3)),
     )
+    prepared = prepare_mesh_render(mesh)
+    if prepared is None:
+        raise GeometryError("view_render_unavailable")
     output = bytearray()
     for axis in range(3):
         for sign in (-1, 1):
             view = np.eye(3)[[(axis + 1) % 3, (axis + 2) % 3, axis]]
             view[0] *= sign
             view[2] *= sign
-            png = render_mesh_thumbnail(
-                mesh,
+            rendered = render_prepared_pixels(
+                prepared,
                 "geometry-descriptor",
                 width=64,
                 height=64,
                 view_rotation=view,
                 matte=True,
             )
-            if png is None:
+            if rendered is None:
                 raise GeometryError("view_render_unavailable")
-            with Image.open(io.BytesIO(png)) as image:
+            with Image.frombytes(
+                "RGB",
+                (rendered.width, rendered.height),
+                rendered.rgb(RGBBackground.IGNORE_ALPHA),
+            ) as image:
                 pixels = np.asarray(image.convert("L"), dtype=np.float64)
             output.extend(dct_hash(pixels))
     return bytes(output)

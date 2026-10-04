@@ -64,6 +64,13 @@ refreshes when a thumbnail lands.
 
 ## Mesh rendering
 
+A visual pass owns one immutable render preparation: referenced relative
+positions, welded identities and smooth normals. The preview and orthographic
+views reuse it; embeddings and view fingerprints consume final pixels without
+PNG serialization. Stored previews retain the existing PNG/WebP encoding and
+recipe identities. See [the preparation contract](shared-visual-preparation.md)
+for memory bounds, RGB policies and compatibility evidence.
+
 The software renderer subtracts the mesh's bounding-box center in float64 before
 converting relative coordinates to float32 for camera projection and shading.
 Small geometry far from the origin therefore retains the precision provided by
