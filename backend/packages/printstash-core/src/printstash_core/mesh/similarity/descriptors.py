@@ -12,7 +12,6 @@ import json
 import math
 from dataclasses import dataclass
 from importlib.resources import files
-from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from ..rasterizer import RGBBackground, render_prepared_pixels
@@ -27,9 +26,16 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     FloatArray = NDArray[np.float64]
+    IntArray = NDArray[np.int64]
 
 SH_RECIPE = "occupancy64-shells32-degree16-pca64-v1"
 VIEW_RECIPE = "pca-six-orthographic64-matte-dct8-v2"
+
+
+@dataclass(frozen=True)
+class _ViewMesh:
+    vertices: FloatArray
+    faces: IntArray
 
 
 @dataclass(frozen=True)
@@ -206,7 +212,7 @@ def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
         triangles = normalized[surface.faces]
     else:
         triangles = canonical_sample_triangles(normalized, surface.faces)
-    mesh = SimpleNamespace(
+    mesh = _ViewMesh(
         vertices=triangles.reshape((-1, 3)),
         faces=np.arange(triangles.size // 3).reshape((-1, 3)),
     )
