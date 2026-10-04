@@ -61,6 +61,23 @@ A producer derives only the kinds still owed, records every outcome on the
 kind's row, and tells viewers of the Model on `model:<id>` so an open page
 refreshes when a thumbnail lands.
 
+## Rendering distant geometry
+
+The software renderer subtracts the mesh's bounding-box center in float64 before
+converting relative coordinates to float32 for camera projection and shading.
+Small geometry far from the origin therefore retains the precision provided by
+3MF coordinates and transforms or other float64 sources. This does not restore
+detail already lost when binary STL coordinates were written as float32. Source
+Artifact coordinates and physical metadata are unchanged by rendering.
+
+Mesh thumbnail recipe 3 refreshes existing previews. Similarity view-descriptor
+recipe 2 and fingerprint algorithm `geometry-v3-sh5f4577c4` distinguish the new
+pixels from earlier cached evidence. Search visual recipe 2 and the derived
+embedding-space rasterizer token `relative-f64-v1` invalidate earlier rendered
+inputs and vectors. Encoder asset manifests and their digests are unchanged.
+Historical verifier calibration remains tied to its original fingerprint and
+verification versions; it is not relabelled as a new measurement.
+
 ## Bumping a recipe
 
 The recipe constants in `app/modules/derivatives/kinds.py` are the code's

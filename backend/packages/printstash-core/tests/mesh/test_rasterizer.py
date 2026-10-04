@@ -130,6 +130,85 @@ class RecordingLogger:
 
 
 class TestRenderMeshThumbnail:
+    @pytest.mark.parametrize(
+        ("half_size", "offset"),
+        [(5.0, 1e6), (5.0, 1e9), (0.125, 1e9), (512.0, 1e12), (1 / 2048, 1e8)],
+        ids=[
+            "ordinary-offset",
+            "billion-offset",
+            "small-cube",
+            "trillion-offset",
+            "tiny-cube",
+        ],
+    )
+    def test_preserves_pixels_after_large_translations(self, half_size, offset):
+        mesh = box_mesh()
+        mesh.vertices *= half_size
+        translated = SimpleNamespace(vertices=mesh.vertices + offset, faces=mesh.faces)
+
+        original = render_mesh_thumbnail(mesh, "origin", width=128, height=128)
+        shifted = render_mesh_thumbnail(translated, "translated", width=128, height=128)
+
+        assert original is not None and shifted is not None
+        assert np.count_nonzero(pixels(original)[..., 3]) > 0
+        np.testing.assert_array_equal(pixels(shifted), pixels(original))
+
+    @pytest.mark.parametrize(
+        "camera",
+        [None, np.eye(3), np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]])],
+        ids=["hero", "front", "side"],
+    )
+    def test_preserves_camera_rendering_after_translation(self, camera):
+        mesh = box_mesh()
+        mesh.vertices *= [8, 4, 3]
+        translated = SimpleNamespace(
+            vertices=mesh.vertices + [1e9, -1e9, 1e9], faces=mesh.faces
+        )
+
+        original = render_mesh_thumbnail(
+            mesh, "origin", width=64, height=64, view_rotation=camera
+        )
+        shifted = render_mesh_thumbnail(
+            translated, "translated", width=64, height=64, view_rotation=camera
+        )
+
+        assert original is not None and shifted is not None
+        np.testing.assert_array_equal(pixels(shifted), pixels(original))
+
+    @pytest.mark.parametrize("thin_axis", [0, 1, 2], ids=["x", "y", "z"])
+    def test_preserves_thin_mesh_rendering_after_translation(self, thin_axis):
+        mesh = box_mesh()
+        scale = np.full(3, 8.0)
+        scale[thin_axis] = 0.125
+        mesh.vertices *= scale
+        translated = SimpleNamespace(vertices=mesh.vertices + 1e9, faces=mesh.faces)
+
+        original = render_mesh_thumbnail(mesh, "origin", width=64, height=64)
+        shifted = render_mesh_thumbnail(translated, "translated", width=64, height=64)
+
+        assert original is not None and shifted is not None
+        np.testing.assert_array_equal(pixels(shifted), pixels(original))
+
+    def test_preserves_source_coordinates(self):
+        mesh = box_mesh()
+        mesh.vertices += 1e9
+        original = mesh.vertices.copy()
+        mesh.vertices.flags.writeable = False
+
+        rendered = render_mesh_thumbnail(mesh, "immutable-source", width=64, height=64)
+
+        assert rendered is not None
+        np.testing.assert_array_equal(mesh.vertices, original)
+
+    def test_does_not_invent_detail_lost_from_float32_source(self):
+        mesh = box_mesh()
+        mesh.vertices = (mesh.vertices * 5 + 1e9).astype(np.float32)
+
+        rendered = render_mesh_thumbnail(mesh, "quantized-source", width=64, height=64)
+
+        assert rendered is not None
+        assert np.count_nonzero(pixels(rendered)[..., 3]) == 0
+
     def test_renders_an_explicit_orthographic_view(self) -> None:
         mesh = box_mesh()
         mesh.vertices[:, 0] *= 2

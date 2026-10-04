@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from printstash_core.inference import EmbeddingError, EmbeddingSpace
+from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.text_inputs import TextRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
@@ -92,6 +93,7 @@ class LocalModelManifest(FrozenContract):
             render_recipe=json.dumps(
                 {
                     "version": self.render_recipe,
+                    "rasterizer": RASTERIZER_RECIPE,
                     "manifest_sha256": hashlib.sha256(
                         self.model_dump_json().encode()
                     ).hexdigest(),

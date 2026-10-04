@@ -19,6 +19,19 @@ def extracted():
 
 
 class TestFingerprintLeases:
+    def test_recomputes_fingerprints_from_the_previous_view_recipe(
+        self, db_session, make_model, make_file, make_geometry_fingerprint
+    ):
+        file = make_file(make_model())
+        previous = make_geometry_fingerprint(
+            file, state="ready", algorithm_version="geometry-v2-sh5f4577c4"
+        )
+
+        claimed = fingerprints.claim(db_session, file)
+
+        assert claimed is not None
+        assert claimed[0] != previous.id
+
     def test_coalesces_overlapping_scope_work(self, db_session, make_model, make_file):
         file = make_file(make_model())
         first = fingerprints.claim(db_session, file)

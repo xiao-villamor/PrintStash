@@ -52,6 +52,17 @@ def mesh(make_model, make_file):
 
 
 class TestPending:
+    def test_rederives_thumbnails_from_the_world_float32_recipe(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=2)
+
+        subjects = _subjects(db_session)
+
+        assert subjects == [subject_key(artifact.id)]
+
     def test_a_fresh_upload_is_interactive_work(
         self, db_session: Session, mesh
     ) -> None:

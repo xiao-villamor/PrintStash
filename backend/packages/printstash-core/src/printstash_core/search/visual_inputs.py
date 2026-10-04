@@ -23,7 +23,7 @@ class VisualRecipe:
     image_size: int
     profile: VisualProfile
     aggregation: Aggregation = "mean"
-    version: str = "canonical-views-media-thumbnail-v1"
+    version: str = "canonical-views-media-thumbnail-v2"
     thumbnail_recipe: str = PREVIEW_PROFILE.recipe_fingerprint + "-w640"
 
     def __post_init__(self):
@@ -36,7 +36,7 @@ class VisualRecipe:
             or self.aggregation not in {"mean", "max"}
             or self.profile == "thumbnail"
             and self.aggregation != "mean"
-            or self.version != "canonical-views-media-thumbnail-v1"
+            or self.version != "canonical-views-media-thumbnail-v2"
             or self.thumbnail_recipe != PREVIEW_PROFILE.recipe_fingerprint + "-w640"
         ):
             raise EmbeddingError("search_visual_recipe_invalid")

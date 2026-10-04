@@ -35,6 +35,9 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   will be removed in 0.16.
 
 ### Fixed
+- Small meshes placed far from the coordinate origin retain their thumbnail
+  geometry and shading. Visual recipes now refresh previews, view fingerprints,
+  and derived image vectors while preserving original files and encoder assets.
 - Browser-local upload queues recover as interrupted after a reload, so stale
   tasks can be cleared. Resumable uploads retain their recovery controls, and
   queued browser work now asks users to keep the tab open (#336).

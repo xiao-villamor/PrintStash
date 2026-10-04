@@ -144,12 +144,9 @@ def render_mesh_thumbnail(
         return None
 
     try:
-        # float32 throughout the per-face geometry/shading pipeline halves the
-        # peak RSS of the arrays that scale with triangle count — and the render
-        # is ~3/4 of a dense mesh's memory cost (#29). Screen-space thumbnail
-        # rendering doesn't need float64 precision; the view-selection and weld
-        # quantisation below are unaffected at this scale.
-        verts = np.asarray(mesh.vertices, dtype=np.float32)
+        # World coordinates need float64 until their shared origin is removed:
+        # casting first can collapse a small object placed far from the origin.
+        verts = np.asarray(mesh.vertices, dtype=np.float64)
         faces = np.asarray(mesh.faces, dtype=np.int64)
 
         supersample = PREVIEW_PROFILE.supersample_for(width)
@@ -160,7 +157,9 @@ def render_mesh_thumbnail(
         # 1. Centre and normalise the mesh to a unit-ish bounding sphere.
         # ------------------------------------------------------------------
         center = (verts.max(axis=0) + verts.min(axis=0)) * 0.5
-        verts = verts - center
+        # Keep the existing half-width per-face geometry/shading pipeline. The
+        # subtraction allocates a render copy; source coordinates stay intact.
+        verts = (verts - center).astype(np.float32)
 
         # ------------------------------------------------------------------
         # 2. Pick a camera view.

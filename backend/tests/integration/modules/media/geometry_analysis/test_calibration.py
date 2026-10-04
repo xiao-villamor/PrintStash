@@ -16,6 +16,11 @@ from printstash_core.mesh.similarity.verification import (
 from app.modules.media.fingerprints import ALGORITHM_VERSION
 from tests.factories.similarity_corpus import ROOT, cases, mesh_for, provenance
 
+# This frozen verifier evidence predates the view-hash renderer recipe change.
+# Retain its original provenance: verification has no rasterizer dependency,
+# and test_preserves_versioned_evaluation_golden compares recomputed evidence.
+CALIBRATION_FINGERPRINT_VERSION = "geometry-v2-sh5f4577c4"
+
 
 @pytest.fixture(scope="module")
 def evaluation():
@@ -114,9 +119,11 @@ class TestFrozenCorpus:
     def test_preserves_versioned_evaluation_golden(self, evaluation):
         golden = json.loads(
             (
-                ROOT / f"{ALGORITHM_VERSION}-{VERIFICATION_VERSION}-evaluation.json"
+                ROOT
+                / f"{CALIBRATION_FINGERPRINT_VERSION}-{VERIFICATION_VERSION}-evaluation.json"
             ).read_text()
         )
+        assert golden["algorithm_version"] == CALIBRATION_FINGERPRINT_VERSION
         assert golden["verification_version"] == VERIFICATION_VERSION
         expected = {row["case_id"]: row["evidence"] for row in golden["cases"]}
         assert set(expected) == {row["case_id"] for row in evaluation}

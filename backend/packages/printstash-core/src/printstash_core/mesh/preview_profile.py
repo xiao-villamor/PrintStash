@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from importlib.resources import files
 from typing import Mapping
 
+# Renderer arithmetic participates in derived visual identities independently
+# of camera/material settings and immutable encoder asset manifests.
+RASTERIZER_RECIPE = "relative-f64-v1"
+
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
     if not isinstance(value, dict):
