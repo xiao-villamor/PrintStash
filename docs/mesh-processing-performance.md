@@ -40,6 +40,40 @@ The repository Spatula 3MF has 6,704 faces and complete solid descriptors.
   container-root limits already did. STEP capacity reservations now account for
   the admitted triangle output instead of a fixed 32 MiB allocation.
 
+## Thumbnail microbenchmark
+
+From `backend/`, run:
+
+```sh
+uv run python -m scripts.bench_thumbnails --quick --cold-runs 2 --warm-runs 5
+```
+
+Omit `--quick` for the larger synthetic dense mesh. `--external-model PATH`
+adds a local model without committing its bytes. Standard output is a JSON
+report; renderer diagnostics go to standard error.
+
+Schema version 2 replaces the earlier cold/warm summary fields. `renders`
+contains every real `ThumbnailEngine` attempt, including WebP normalization.
+`representation_reads` measures the production stored-representation delivery
+planner followed by reading the complete persisted local thumbnail. Publication
+into temporary storage is setup outside both timings; `publication_error`
+records a failed setup and no reads are reported in that case. A failed final
+render likewise has no stored representation to read.
+
+The historical `--cold-runs` flag means an uncached engine invocation in the same
+interpreter. It does not restart Python or clear filesystem caches. The
+`--warm-runs` flag means persisted local representation reads, not HTTP or database
+lookup latency. This benchmark excludes worker startup, the native process tree,
+S3, and the complete upload-to-visible-derivative flow. It cannot establish those
+costs. `protocol` repeats these measurement boundaries in the report.
+
+Every attempt retains elapsed time, output size/digest, errors and process RSS.
+RSS is the benchmark process's lifetime high-water mark (`RUSAGE_SELF`), not a
+per-attempt peak or a native-worker-tree measurement. Medians include successful
+attempts only and are `null` when there are none; failed attempts remain visible
+in the sample arrays. A report containing fast failures is not a performance
+improvement. The malformed 3MF corpus member deliberately exercises that case.
+
 ## Measurements
 
 Baseline: #154 head `9663e77a`, before merge into `77ad5313`. Same x86_64 host,
