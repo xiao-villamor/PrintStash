@@ -44,7 +44,7 @@ class TestPackRejectsInvalidValues:
     @pytest.mark.parametrize(
         "value",
         [object(), {"$bytes": "AAAA"}, {"$tuple": []}, float("nan"), float("inf")],
-        ids=repr,
+        ids=["opaque-object", "reserved-bytes", "reserved-tuple", "nan", "infinity"],
     )
     def test_rejects_unsafe_descriptor_value(self, value):
         with pytest.raises((ValueError, TypeError)):

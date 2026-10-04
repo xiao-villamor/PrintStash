@@ -8,25 +8,31 @@ from tests.paths import BACKEND_DIR
 
 
 def build_converter(destination: Path) -> Path:
-    subprocess.run(
-        [
-            "docker",
-            "buildx",
-            "build",
-            "--target",
-            "bgcode-binary",
-            "--output",
-            f"type=local,dest={destination}",
-            "-f",
-            str(BACKEND_DIR / "Dockerfile"),
-            str(BACKEND_DIR),
-        ],
-        check=True,
-        timeout=600,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "buildx",
+                "build",
+                "--progress=plain",
+                "--target",
+                "bgcode-binary",
+                "--output",
+                f"type=local,dest={destination}",
+                "-f",
+                str(BACKEND_DIR / "Dockerfile"),
+                str(BACKEND_DIR),
+            ],
+            check=True,
+            timeout=600,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if exc.stdout is not None:
+            sys.stderr.write(exc.stdout)
+        raise
     return destination / "bgcode"
 
 

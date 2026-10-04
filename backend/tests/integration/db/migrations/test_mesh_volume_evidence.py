@@ -104,6 +104,9 @@ class TestVolumeUpgrade:
                 "PrusaSlicer",
                 3600,
             )
+            # Historical evidence above belongs to REVISION; live model parity
+            # requires the complete current migration chain.
+            command.upgrade(migrate._alembic_config(volume_database), "head")
             assert migrate._orphan_schema_issues(engine) == []
         finally:
             engine.dispose()
@@ -174,6 +177,9 @@ class TestVolumeUpgrade:
                     )
                 ).one()
             assert row == (6e-9, "legacy_unassessed", None, None, None)
+            # Historical evidence above belongs to REVISION; live model parity
+            # requires the complete current migration chain.
+            command.upgrade(migrate._alembic_config(volume_database), "head")
             assert migrate._orphan_schema_issues(engine) == []
         finally:
             engine.dispose()
@@ -226,6 +232,9 @@ class TestHistoricalDimensionRepair:
                 ).one()
             assert row == (None, 1, 2, "PrusaSlicer", 3600)
             assert f"invalid historical {axis}" in caplog.text
+            # Historical evidence above belongs to REVISION; live model parity
+            # requires the complete current migration chain.
+            command.upgrade(migrate._alembic_config(volume_database), "head")
             assert migrate._orphan_schema_issues(engine) == []
         finally:
             engine.dispose()

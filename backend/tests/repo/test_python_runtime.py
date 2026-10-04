@@ -122,7 +122,7 @@ class TestPythonRuntime:
         python_images = re.findall(r"^FROM (python:[^\s]+)", source, flags=re.MULTILINE)
 
         assert python_images
-        assert set(python_images) == {f"python:{CURRENT_PYTHON}-slim-bookworm"}
+        assert set(python_images) == {f"python:{CURRENT_PYTHON}-slim-trixie"}
         assert (REPO_ROOT / "backend/unified/Dockerfile").read_text().splitlines()[
             1
         ] == ("FROM api-image")
