@@ -17,6 +17,7 @@
  * root — are what make navigation possible at all. A breadcrumb that loses a
  * level strands the user in a folder they cannot leave.
  */
+import { outlinerRoutes } from "@/test-support/outliner";
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -174,6 +175,7 @@ function renderVault(
         "GET /api/v1/documents": json([]),
         "GET /api/v1/multipart-models": json(multipartModels),
         ...collectionTreeRoutes(collections),
+        ...outlinerRoutes(collections, [], multipartModels),
         "GET /api/v1/tags": json(tags),
         ...routes,
       },

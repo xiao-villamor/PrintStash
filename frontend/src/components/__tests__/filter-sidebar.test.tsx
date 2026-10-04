@@ -1,21 +1,9 @@
 /*
- * The outliner: the library's folder tree, plus the tag and printer filters.
- *
- * The tree is derived from a flat list of collections, and *what it hides* is
- * the whole of its behaviour. Typing in the filter box narrows it to matching
- * names — but a match deep in the tree is useless unless every folder above it
- * stays visible too, so the ancestors of a hit are kept. Drop that and a search
- * finds nothing it can show.
- *
- * A tag or printer filter narrows it a different way: those come with an
- * already-filtered model list, so the tree collapses to the folders that
- * actually hold those models. The distinction matters because a text query also
- * matches folder *names* while a facet filter only ever matches models.
- *
- * Drag and drop is how models and folders are reorganised, and both directions
- * are destructive-adjacent: a model dropped on the wrong folder is a model
- * nobody finds again, and a folder dropped into its own descendant is a cycle.
+ * Lazy library navigation through real query hooks and HTTP fixtures.
+ * Counts describe the whole visible branch; pages describe only downloaded
+ * rows. Global name search is independent of which branches are open.
  */
+import { outlinerRoutes } from "@/test-support/outliner";
 
 import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
@@ -79,8 +67,14 @@ function multipartSet(over: Partial<MultipartModelListItem> = {}): MultipartMode
  */
 function renderSidebar({
   collections = TREE,
+  models = [],
+  multipartModels = [],
   ...over
-}: Partial<FilterSidebarProps> & { collections?: CollectionRead[] } = {}) {
+}: Partial<FilterSidebarProps> & {
+  collections?: CollectionRead[];
+  models?: OutlinerModelRead[];
+  multipartModels?: MultipartModelListItem[];
+} = {}) {
   const handlers = {
     onCollectionChange: vi.fn<FilterSidebarProps["onCollectionChange"]>(),
     onTagsChange: vi.fn<FilterSidebarProps["onTagsChange"]>(),
@@ -100,7 +94,11 @@ function renderSidebar({
       <>
         <output aria-label="Selected collection">{selectedCollection ?? "All Models"}</output>
         <FilterSidebar
-          models={[]}
+          outlinerFilters={{
+            tag: over.selectedTags,
+            printer_id: over.selectedPrinterId ?? undefined,
+            printer_presence: over.selectedPrinterPresence ?? undefined,
+          }}
           tags={[aTag()]}
           printers={[aPrinter({ id: 4, name: "Voron" })]}
           selectedTags={[]}
@@ -118,7 +116,12 @@ function renderSidebar({
       </>
     );
   }
-  const result = renderApp(<SidebarHarness />, { routes: collectionTreeRoutes(collections) });
+  const result = renderApp(<SidebarHarness />, {
+    routes: {
+      ...collectionTreeRoutes(collections),
+      ...outlinerRoutes(collections, models, multipartModels),
+    },
+  });
   return { ...result, ...handlers };
 }
 
@@ -215,7 +218,7 @@ describe("FilterSidebar", () => {
       const childRequests = () =>
         requests().filter(
           (call) =>
-            call.url.startsWith("/api/v1/collections/children") &&
+            call.url.startsWith("/api/v1/outliner/collections") &&
             new URL(call.url, "http://test").searchParams.get("parent_id") === "1",
         );
       expect(childRequests()).toHaveLength(0);
@@ -229,12 +232,21 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       const page = (name: string, id: number, cursor: string | null) =>
         json({
-          items: [aCollectionNode({ id, name, path: name.toLowerCase(), display_path: name })],
+          items: [
+            {
+              ...aCollectionNode({ id, name, path: name.toLowerCase(), display_path: name }),
+              direct_entry_count: 0,
+              subtree_entry_count: 0,
+              visible_child_count: 0,
+            },
+          ],
+          parent_direct_entry_count: 0,
+          revealed: null,
           next_cursor: cursor,
         });
       renderApp(
         <FilterSidebar
-          models={[]}
+          outlinerFilters={{}}
           tags={[]}
           printers={[]}
           selectedCollection={null}
@@ -251,7 +263,7 @@ describe("FilterSidebar", () => {
         />,
         {
           routes: {
-            "GET /api/v1/collections/children": (url) =>
+            "GET /api/v1/outliner/collections": (url) =>
               url.includes("cursor=") ? page("Toys", 2, null) : page("Parts", 1, "next"),
           },
         },
@@ -262,10 +274,10 @@ describe("FilterSidebar", () => {
       expect(await screen.findByText("Toys")).toBeInTheDocument();
     });
 
-    it("shows a root multipart set", () => {
+    it("shows a root multipart set", async () => {
       renderSidebar({ multipartModels: [multipartSet()] });
 
-      expect(screen.getByText("Dragon figure")).toBeInTheDocument();
+      expect(await screen.findByText("Dragon figure")).toBeInTheDocument();
     });
 
     it("nests a multipart set in its folder", async () => {
@@ -278,7 +290,7 @@ describe("FilterSidebar", () => {
 
       await openFolder(user, "Parts");
 
-      expect(screen.getByText("Dragon figure")).toBeInTheDocument();
+      expect(await screen.findByText("Dragon figure")).toBeInTheDocument();
     });
 
     it("counts a multipart set in its folder", async () => {
@@ -341,7 +353,7 @@ describe("FilterSidebar", () => {
       expect(await folderRow("Parent")).toHaveTextContent("Parent1");
     });
 
-    it("counts only matching models while filtering the outliner", async () => {
+    it("shows the location of a matching model", async () => {
       const user = userEvent.setup();
       const inChild = {
         collection: "parent/child",
@@ -368,8 +380,9 @@ describe("FilterSidebar", () => {
 
       await user.type(screen.getByPlaceholderText("Filter outliner..."), "Match");
 
-      expect(await folderRow("Parent")).toHaveTextContent("Parent1");
-      expect(await folderRow("Child")).toHaveTextContent("Child1");
+      expect(await screen.findByText("Match")).toBeInTheDocument();
+      expect(screen.getByText("Parent/Child")).toBeInTheDocument();
+      expect(screen.queryByText("Other")).toBeNull();
     });
 
     it("counts only Multipart Models in the Multipart view", async () => {
@@ -420,14 +433,14 @@ describe("FilterSidebar", () => {
       expect(await screen.findByText("Brackets")).toBeInTheDocument();
     });
 
-    it("keeps the ancestors of a match so it can be reached", async () => {
+    it("shows the ancestor path of a match", async () => {
       // A hit nobody can navigate to is a hit nobody can use.
       const user = userEvent.setup();
       renderSidebar();
 
       await filterBy(user, "brack");
 
-      expect(await folderRow("Parts")).toBeInTheDocument();
+      expect(await screen.findByText("Parts/Brackets")).toBeInTheDocument();
     });
 
     it("drops a folder that matches nothing", async () => {
@@ -464,12 +477,12 @@ describe("FilterSidebar", () => {
   });
 
   describe("narrowing the tree by facet", () => {
-    it("keeps the folder holding a filtered model", () => {
+    it("keeps the folder holding a filtered model", async () => {
       // A tag filter arrives with the model list already narrowed, so the tree
       // shows where those models actually live rather than the whole library.
       renderSidebar({ selectedTags: ["functional"], models: [outlinerModel()] });
 
-      expect(screen.getAllByText("Parts").length).toBeGreaterThan(0);
+      expect((await screen.findAllByText("Parts")).length).toBeGreaterThan(0);
     });
 
     it("drops a folder holding none of them", () => {
@@ -667,7 +680,7 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       renderSidebar({ models: [outlinerModel({ id: 5, collection: null, collection_id: null })] });
 
-      await user.click(screen.getAllByRole("button", { name: "Collapse" })[0]);
+      await user.click((await screen.findAllByRole("button", { name: "Collapse" }))[0]);
 
       await waitFor(() =>
         expect(window.sessionStorage.getItem("ps-filter-all-expanded")).toBe("false"),
@@ -691,14 +704,14 @@ describe("FilterSidebar", () => {
       expect(screen.queryByText("Benchy")).toBeNull();
     });
 
-    it("shows referenced models in the parts-only view", () => {
+    it("shows referenced models in the parts-only view", async () => {
       renderSidebar({
         models: [outlinerModel({ collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
         libraryView: "components",
       });
 
-      expect(screen.getByText("Benchy")).toBeInTheDocument();
+      expect(await screen.findByText("Benchy")).toBeInTheDocument();
     });
 
     it("hides unrelated models in the parts-only view", () => {
@@ -798,5 +811,101 @@ describe("FilterSidebar", () => {
 
       expect(window.localStorage.getItem("ps-sidebar-width")).toBe(settled);
     });
+  });
+});
+
+describe("outliner pages", () => {
+  const models = Array.from({ length: 51 }, (_, i) =>
+    outlinerModel({ id: i + 1, name: `Part ${String(i).padStart(3, "0")}` }),
+  );
+
+  it("reuses pages of the opened branch after reopening", async () => {
+    const user = userEvent.setup();
+    const app = renderSidebar({ models });
+    await screen.findByText("Parts");
+    expect(app.requests().filter((r) => r.url.includes("/outliner/entries"))).toHaveLength(0);
+    await openFolder(user, "Parts");
+    await screen.findByText("Part 000");
+    expect(screen.queryByText("Part 050")).not.toBeInTheDocument();
+    const more = screen.getByRole("button", { name: "Show more models" });
+    more.focus();
+    await user.keyboard("{Enter}");
+    await screen.findByText("Part 050");
+    expect(screen.getByRole("button", { name: "All items loaded" })).toHaveFocus();
+    const requests = app.requests().filter((r) => r.url.includes("/outliner/entries"));
+    expect(requests).toHaveLength(2);
+    expect(
+      requests.every(
+        (r) => new URL(r.url, "http://test").searchParams.get("collection_id") === "1",
+      ),
+    ).toBe(true);
+    await user.click(within(await folderRow("Parts")).getByRole("button", { name: "Collapse" }));
+    await openFolder(user, "Parts");
+    await screen.findByText("Part 050");
+    expect(app.requests().filter((r) => r.url.includes("/outliner/entries"))).toHaveLength(2);
+  });
+
+  it("recovers a failed continuation without losing loaded rows", async () => {
+    const user = userEvent.setup();
+    const app = renderSidebar({ models });
+    await openFolder(user, "Parts");
+    await screen.findByText("Part 000");
+    app.route({ "GET /api/v1/outliner/entries": json({ detail: "temporary" }, 503) });
+    await user.click(screen.getByRole("button", { name: "Show more models" }));
+    await screen.findByText("Could not load this list.");
+    expect(screen.getByText("Part 000")).toBeInTheDocument();
+    app.route(outlinerRoutes(TREE, models));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByText("Part 050");
+    expect(screen.getAllByText("Part 000")).toHaveLength(1);
+  });
+
+  it("shows an initial failure with retry instead of pretending the branch is empty", async () => {
+    const user = userEvent.setup();
+    const app = renderSidebar({ models });
+    await screen.findByText("Parts");
+    app.route({ "GET /api/v1/outliner/entries": json({ detail: "temporary" }, 503) });
+    await openFolder(user, "Parts");
+    await screen.findByText("Could not load this list.");
+    app.route(outlinerRoutes(TREE, models));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Part 000")).toBeInTheDocument();
+  });
+
+  it("reveals a selected location beyond the first sibling page without walking previous pages", async () => {
+    const collections = Array.from({ length: 65 }, (_, i) =>
+      aCollection({
+        id: i + 1,
+        name: `Folder ${String(i).padStart(3, "0")}`,
+        path: `folder-${i}`,
+        parent_id: null,
+      }),
+    );
+    const app = renderSidebar({ collections, selectedCollection: "folder-64" });
+    await screen.findByRole("button", { name: "Folder 064" });
+    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+    expect(
+      app
+        .requests()
+        .filter((r) => r.url.includes("/outliner/collections"))
+        .every((r) => !new URL(r.url, "http://test").searchParams.has("cursor")),
+    ).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Show more folders" }));
+    await screen.findByRole("button", { name: "Folder 063" });
+    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+  });
+
+  it("restores the expanded tree after Escape from global search", async () => {
+    const user = userEvent.setup();
+    renderSidebar({ models, selectedCollection: "parts" });
+    await openFolder(user, "Parts");
+    await screen.findByText("Part 000");
+    const search = screen.getByPlaceholderText("Filter outliner...");
+    await user.type(search, "Part 050");
+    await screen.findByRole("button", { name: "Part 050" });
+    expect(screen.queryByText("Part 000")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await screen.findByText("Part 000");
+    expect(screen.getByLabelText("Selected collection")).toHaveTextContent("parts");
   });
 });

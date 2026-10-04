@@ -226,3 +226,38 @@ describe("queryKeys", () => {
     expect(queryKeys.printerProfiles).toEqual(["printer-profiles"]);
   });
 });
+
+describe("outliner mutation refresh", () => {
+  it.each([
+    "/api/v1/models/1",
+    "/api/v1/models/1/star",
+    "/api/v1/models/batch/tags",
+    "/api/v1/models/batch/move",
+    "/api/v1/collections/1",
+    "/api/v1/multipart-models/1",
+    "/api/v1/files/1",
+    "/api/v1/trash",
+    "/api/v1/models/1/restore",
+    "/api/v1/ingest",
+  ])("discards continuation pages after a mutation of %s", (path) => {
+    const key = [...queryKeys.outliner, "entries", { collection_id: 1 }];
+    queryClient.setQueryData(key, {
+      pages: [
+        { items: [{ id: 1 }], next_cursor: "old" },
+        { items: [{ id: 2 }], next_cursor: null },
+      ],
+      pageParams: [null, "old"],
+    });
+    invalidateQueriesForPath(path);
+    expect(queryClient.getQueryData(key)).toBeUndefined();
+    queryClient.clear();
+  });
+
+  it("discards pages when an ingest finishes", async () => {
+    const key = [...queryKeys.outliner, "collections"];
+    queryClient.setQueryData(key, { pages: [{ items: [] }], pageParams: [null] });
+    await refreshVaultAfterIngest();
+    expect(queryClient.getQueryData(key)).toBeUndefined();
+    queryClient.clear();
+  });
+});

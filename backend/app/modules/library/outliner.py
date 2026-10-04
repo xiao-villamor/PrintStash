@@ -1,0 +1,402 @@
+"""Page the sidebar's collections and lightweight leaves without library-wide caps."""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import json
+from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import Select, func, literal, or_, select, tuple_, union_all
+from sqlalchemy.orm import aliased
+from sqlmodel import Session, col
+
+from app.core.errors import ErrorKind, OperationError
+from app.db.models import (
+    Collection,
+    Model,
+    MultipartModel,
+    MultipartModelChoice,
+    MultipartModelStar,
+    MultipartModelTagLink,
+    Tag,
+    User,
+)
+from app.db.scopes import live
+from app.modules.identity import rbac
+from app.modules.library import collection_tree
+from app.modules.library.model_views.filters import _filtered_stmt
+from app.modules.library.model_views.outliner import entry_response
+from app.schemas.models import ModelFilters
+from app.schemas.outliner import (
+    OutlinerCollection,
+    OutlinerCollectionPage,
+    OutlinerEntryPage,
+    OutlinerKind,
+    OutlinerQuery,
+    OutlinerSearchPage,
+    OutlinerView,
+)
+
+
+class Scope(str, Enum):
+    COLLECTIONS = "collections"
+    ENTRIES = "entries"
+    SEARCH = "search"
+
+
+class Cursor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1] = 1
+    key: str
+    name: str
+    kind: OutlinerKind
+    id: int = Field(gt=0, strict=True)
+
+
+def _key(user: User, query: OutlinerQuery, scope: Scope) -> str:
+    data = query.model_dump(mode="json", exclude={"cursor", "limit", "reveal_id"})
+    for key, value in data.items():
+        if isinstance(value, list):
+            data[key] = sorted(set(value))
+    raw = json.dumps([user.id, scope.value, data], sort_keys=True).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _page(session: Session, statement: Select, source, query: OutlinerQuery, key: str):
+    if query.cursor is not None:
+        try:
+            cursor = Cursor.model_validate_json(
+                base64.b64decode(query.cursor, altchars=b"-_", validate=True)
+            )
+        except (ValueError, binascii.Error, ValidationError) as exc:
+            raise OperationError("outliner_cursor_invalid") from exc
+        if cursor.key != key:
+            raise OperationError("outliner_cursor_invalid")
+        statement = statement.where(
+            tuple_(source.c.sort_name, source.c.kind, source.c.id)
+            > tuple_(
+                literal(cursor.name), literal(cursor.kind.value), literal(cursor.id)
+            )
+        )
+    rows = list(
+        session.execute(
+            statement.order_by(source.c.sort_name, source.c.kind, source.c.id).limit(
+                query.limit + 1
+            )
+        ).all()
+    )
+    next_cursor = None
+    if len(rows) > query.limit:
+        rows = rows[: query.limit]
+        last = rows[-1]
+        token = Cursor(
+            key=key, name=last.sort_name, kind=OutlinerKind(last.kind), id=last.id
+        )
+        next_cursor = base64.urlsafe_b64encode(
+            token.model_dump_json().encode()
+        ).decode()
+    return rows, next_cursor
+
+
+def _visible(session: Session, user: User):
+    return rbac.accessible_collection_ids_stmt(session, user)
+
+
+def _require_parent(session: Session, user: User, parent: int | None) -> None:
+    if (
+        parent is not None
+        and session.execute(
+            select(col(Collection.id)).where(
+                col(Collection.id) == parent,
+                col(Collection.id).in_(_visible(session, user)),
+            )
+        ).first()
+        is None
+    ):
+        raise OperationError("collection_not_found", kind=ErrorKind.NOT_FOUND)
+
+
+def _columns(entity, kind: OutlinerKind, *, counts_only: bool):
+    if counts_only:
+        return (entity.collection_id.label("collection_id"),)
+    return (
+        entity.id.label("id"),
+        entity.name.label("name"),
+        entity.collection_id.label("collection_id"),
+        literal(kind.value).label("kind"),
+        func.lower(entity.name).label("sort_name"),
+    )
+
+
+def _entries(
+    session: Session,
+    user: User,
+    query: OutlinerQuery,
+    *,
+    searching: bool = False,
+    counts_only: bool = False,
+    direct: bool = False,
+):
+    visible = _visible(session, user)
+    allowed_multipart = select(col(MultipartModel.id)).where(
+        or_(
+            col(MultipartModel.collection_id).is_(None)
+            if user.is_superuser
+            else literal(False),
+            col(MultipartModel.collection_id).in_(visible),
+        )
+    )
+    membership = (
+        select(col(MultipartModelChoice.id))
+        .where(
+            col(MultipartModelChoice.model_id) == col(Model.id),
+            col(MultipartModelChoice.multipart_model_id).in_(allowed_multipart),
+        )
+        .exists()
+    )
+    models = _filtered_stmt(session, user, query.filters()).with_only_columns(
+        *_columns(Model, OutlinerKind.MODEL, counts_only=counts_only)
+    )
+    models = models.where(
+        or_(col(Model.collection_id).is_(None), col(Model.collection_id).in_(visible))
+    )
+    if query.view == OutlinerView.MULTIPART:
+        models = models.where(literal(False))
+    elif query.view == OutlinerView.COMPONENTS:
+        models = models.where(membership)
+    elif query.view == OutlinerView.ORGANIZED and not searching:
+        models = models.where(~membership)
+    multipart = select(
+        *_columns(MultipartModel, OutlinerKind.MULTIPART, counts_only=counts_only)
+    ).where(col(MultipartModel.id).in_(allowed_multipart))
+    if query.view == OutlinerView.COMPONENTS:
+        multipart = multipart.where(literal(False))
+    for tag in query.tag:
+        multipart = multipart.where(
+            col(MultipartModel.id).in_(
+                select(col(MultipartModelTagLink.multipart_model_id))
+                .join(Tag, col(Tag.id) == col(MultipartModelTagLink.tag_id))
+                .where(col(Tag.slug) == tag, live(Tag))
+            )
+        )
+    if query.favorites:
+        multipart = multipart.where(
+            col(MultipartModel.id).in_(
+                select(col(MultipartModelStar.multipart_model_id)).where(
+                    col(MultipartModelStar.user_id) == user.id
+                )
+            )
+        )
+    if direct:
+        models = models.where(col(Model.collection_id) == query.collection_id)
+        multipart = multipart.where(
+            col(MultipartModel.collection_id) == query.collection_id
+        )
+    return union_all(models, multipart).cte("outliner_entries")
+
+
+def _counts(entries):
+    direct = (
+        select(entries.c.collection_id.label("id"), func.count().label("count"))
+        .group_by(entries.c.collection_id)
+        .cte("outliner_direct")
+    )
+    ancestry = (
+        select(direct.c.id, direct.c.count)
+        .where(direct.c.id.is_not(None))
+        .cte("outliner_ancestry", recursive=True)
+    )
+    parent = aliased(Collection)
+    ancestry = ancestry.union_all(
+        select(col(parent.parent_id), ancestry.c.count)
+        .join(parent, col(parent.id) == ancestry.c.id)
+        .where(col(parent.parent_id).is_not(None), live(parent))
+    )
+    subtree = (
+        select(ancestry.c.id, func.sum(ancestry.c.count).label("count"))
+        .group_by(ancestry.c.id)
+        .cte("outliner_subtree")
+    )
+    return direct, subtree
+
+
+def _filtered(query: OutlinerQuery) -> bool:
+    return query.filters() != ModelFilters()
+
+
+def _folders(session: Session, user: User, query: OutlinerQuery, subtree):
+    folders = select(col(Collection.id)).where(
+        col(Collection.id).in_(_visible(session, user))
+    )
+    if _filtered(query):
+        folders = folders.where(
+            col(Collection.id).in_(select(subtree.c.id).where(subtree.c.count > 0))
+        )
+    return folders
+
+
+def _page_counts(session: Session, entries, eligible, ids: list[int]):
+    """Walk only the returned branches; never aggregate every ancestor first."""
+    if not ids:
+        return {}
+    descendants = (
+        select(col(Collection.id).label("root"), col(Collection.id).label("id"))
+        .where(col(Collection.id).in_(ids))
+        .cte("page_descendants", recursive=True)
+    )
+    child = aliased(Collection)
+    descendants = descendants.union_all(
+        select(descendants.c.root, col(child.id)).join(
+            child, col(child.parent_id) == descendants.c.id
+        )
+    )
+    direct = (
+        select(entries.c.collection_id.label("id"), func.count().label("count"))
+        .group_by(entries.c.collection_id)
+        .cte("page_direct")
+    )
+    totals = (
+        select(descendants.c.root, func.sum(direct.c.count).label("count"))
+        .select_from(descendants)
+        .join(Collection, col(Collection.id) == descendants.c.id)
+        .outerjoin(direct, direct.c.id == col(Collection.id))
+        .group_by(descendants.c.root)
+        .subquery()
+    )
+    children = (
+        select(col(Collection.parent_id).label("id"), func.count().label("count"))
+        .where(col(Collection.parent_id).in_(ids), col(Collection.id).in_(eligible))
+        .group_by(col(Collection.parent_id))
+        .subquery()
+    )
+    return {
+        row.id: (row.direct, row.total, row.children)
+        for row in session.execute(
+            select(
+                col(Collection.id),
+                func.coalesce(direct.c.count, 0).label("direct"),
+                func.coalesce(totals.c.count, 0).label("total"),
+                func.coalesce(children.c.count, 0).label("children"),
+            )
+            .outerjoin(direct, direct.c.id == col(Collection.id))
+            .outerjoin(totals, totals.c.root == col(Collection.id))
+            .outerjoin(children, children.c.id == col(Collection.id))
+            .where(col(Collection.id).in_(ids))
+        )
+    }
+
+
+def collections(
+    session: Session, user: User, query: OutlinerQuery
+) -> OutlinerCollectionPage:
+    _require_parent(session, user, query.parent_id)
+    entries = _entries(session, user, query, counts_only=True)
+    _, subtree = _counts(entries)
+    eligible = _folders(session, user, query, subtree)
+    source = select(
+        col(Collection.id),
+        col(Collection.name),
+        func.lower(col(Collection.name)).label("sort_name"),
+        literal(OutlinerKind.COLLECTION.value).label("kind"),
+    ).where(col(Collection.id).in_(eligible))
+    if query.parent_id is None:
+        source = source.where(
+            or_(
+                col(Collection.parent_id).is_(None),
+                col(Collection.parent_id).not_in(_visible(session, user)),
+            )
+        )
+    else:
+        source = source.where(col(Collection.parent_id) == query.parent_id)
+    source = source.subquery()
+    rows, cursor = _page(
+        session, select(source), source, query, _key(user, query, Scope.COLLECTIONS)
+    )
+    revealed = None
+    if query.reveal_id is not None:
+        revealed = session.execute(
+            select(source).where(source.c.id == query.reveal_id)
+        ).first()
+    all_rows = rows + (
+        [revealed]
+        if revealed is not None and revealed.id not in {row.id for row in rows}
+        else []
+    )
+    nodes = collection_tree.nodes_for_ids(session, user, [row.id for row in all_rows])
+    by_id = {node.id: node for node in nodes}
+    ids = [row.id for row in all_rows]
+    counts = _page_counts(session, entries, eligible, ids)
+    projected = {
+        row.id: OutlinerCollection(
+            **by_id[row.id].model_dump(),
+            direct_entry_count=counts[row.id][0],
+            subtree_entry_count=counts[row.id][1],
+            visible_child_count=counts[row.id][2],
+        )
+        for row in all_rows
+    }
+    parent_entries = _entries(
+        session,
+        user,
+        query.model_copy(update={"collection_id": query.parent_id}),
+        counts_only=True,
+        direct=True,
+    )
+    parent_count = session.execute(
+        select(func.count()).select_from(parent_entries)
+    ).scalar_one()
+    return OutlinerCollectionPage(
+        items=[projected[row.id] for row in rows],
+        next_cursor=cursor,
+        parent_direct_entry_count=parent_count,
+        revealed=projected[revealed.id] if revealed is not None else None,
+    )
+
+
+def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching: bool):
+    entries = _entries(session, user, query, searching=searching)
+    source = select(entries)
+    if searching:
+        assert query.q is not None
+        needle = query.q.strip().lower()
+        source = source.where(entries.c.sort_name.contains(needle, autoescape=True))
+        _, subtree = _counts(entries)
+        folder_ids = _folders(session, user, query, subtree)
+        folders = select(
+            col(Collection.id),
+            col(Collection.name),
+            col(Collection.id).label("collection_id"),
+            literal(OutlinerKind.COLLECTION.value).label("kind"),
+            func.lower(col(Collection.name)).label("sort_name"),
+        ).where(
+            col(Collection.id).in_(folder_ids),
+            func.lower(col(Collection.name)).contains(needle, autoescape=True),
+        )
+        source = union_all(source, folders)
+    else:
+        _require_parent(session, user, query.collection_id)
+        source = source.where(entries.c.collection_id == query.collection_id)
+    source = source.subquery()
+    statement = select(source, col(Collection.path).label("collection")).outerjoin(
+        Collection, col(Collection.id) == source.c.collection_id
+    )
+    scope = Scope.SEARCH if searching else Scope.ENTRIES
+    rows, cursor = _page(session, statement, source, query, _key(user, query, scope))
+    labels = collection_tree.collection_labels(
+        session, user, (row.collection for row in rows if row.collection is not None)
+    )
+    return [entry_response(row, labels) for row in rows], cursor
+
+
+def entries(session: Session, user: User, query: OutlinerQuery) -> OutlinerEntryPage:
+    rows, cursor = _entry_rows(session, user, query, searching=False)
+    return OutlinerEntryPage.model_validate({"items": rows, "next_cursor": cursor})
+
+
+def search(session: Session, user: User, query: OutlinerQuery) -> OutlinerSearchPage:
+    rows, cursor = _entry_rows(session, user, query, searching=True)
+    return OutlinerSearchPage(items=rows, next_cursor=cursor)

@@ -38,6 +38,9 @@ AN_EIGHTH = {"collections": 3_125, "models": 12_500}
 THE_REST = {"collections": 21_875, "models": 87_500}
 
 BUDGET_SECONDS = {
+    "/api/v1/outliner/collections": 0.5,
+    "/api/v1/outliner/entries": 0.5,
+    "/api/v1/outliner/search": 0.5,
     # The whole tree, 25,000 rows; measured 1.0s. A lazy tree replaces it (#295).
     "/api/v1/collections": 3.0,
     "/api/v1/collections/children": 0.5,
@@ -109,7 +112,9 @@ class TestLibraryReadsAtScale:
         headers, root = reader
         if path == "/api/v1/tags":
             tag_collection(db_session, root, build_tag(db_session, "Scale tag"))
-        build_library_at_scale(db_session, under=root, **SUPPORTED)
+        seeded = build_library_at_scale(db_session, under=root, **SUPPORTED)
+        if path == "/api/v1/outliner/entries":
+            params = params | {"collection_id": seeded.collection_ids[0]}
 
         seconds = _median_seconds(
             client,
@@ -133,7 +138,9 @@ class TestLibraryReadsAtScale:
         headers, root = reader
         if path == "/api/v1/tags":
             tag_collection(db_session, root, build_tag(db_session, "Scale tag"))
-        build_library_at_scale(db_session, under=root, **AN_EIGHTH)
+        seeded = build_library_at_scale(db_session, under=root, **AN_EIGHTH)
+        if path == "/api/v1/outliner/entries":
+            params = params | {"collection_id": seeded.collection_ids[0]}
         small = max(
             _median_seconds(
                 client,

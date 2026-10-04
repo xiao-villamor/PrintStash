@@ -4,6 +4,8 @@
 
 **Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).
 
+- Remove the sidebar tree’s global 500-model limit with folder-scoped pages, complete branch counts, and global paginated name search with “Open location”. Keep permissions and library views in the server query; retry failed pages without losing loaded rows (#335).
+
 - Keep backup and vault audit clock inputs within valid minutes on Python 3.14; reject `24:00` rather than treating it as midnight.
 - Preserve traceable printer display names for extension-only and genuinely named inputs on Python 3.14.
 - Require Python 3.14 for the application and shared core, pin development and container runtimes to 3.14.8, and update the mesh stack to NumPy 2.5.3, SciPy 1.18.1 and Trimesh 5.1.1.

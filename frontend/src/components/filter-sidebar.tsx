@@ -4,23 +4,26 @@ import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
-import {
-  CollectionNodeRead,
-  MultipartModelListItem,
-  OutlinerModelRead,
-  PrinterRead,
-  TagRead,
-} from "@/types";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { CollectionNodeRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ancestorPaths } from "@/lib/collection-tree";
 import {
-  ancestorPaths,
-  buildFilteredTree,
-  type FilteredFolder,
-  type FolderEntry,
-} from "@/lib/collection-tree";
-import { useCollectionChildren, useCollectionSearch } from "@/lib/queries";
+  useCollectionLookup,
+  useOutlinerCollections,
+  useOutlinerEntries,
+  useOutlinerSearch,
+} from "@/lib/queries";
+import type {
+  OutlinerCollection,
+  OutlinerEntry,
+  OutlinerFilters,
+  OutlinerParams,
+  OutlinerView,
+} from "@/types/outliner";
+import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { useI18n } from "@/lib/i18n";
 import { Box, Boxes, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
@@ -36,7 +39,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 
-export type LibraryViewMode = "organized" | "all" | "multipart" | "components";
+export type LibraryViewMode = OutlinerView;
 
 const LIBRARY_VIEWS: LibraryViewMode[] = ["organized", "all", "multipart", "components"];
 
@@ -125,6 +128,11 @@ function DraggableModelLeaf({
         {...listeners}
         {...attributes}
         onDoubleClick={() => router.push(`/models/${model.id}`)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") router.push(`/models/${model.id}`);
+        }}
         className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
@@ -137,7 +145,7 @@ function DraggableModelLeaf({
   );
 }
 
-function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
+function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
   useUiLocale();
   const router = useRouter();
 
@@ -145,6 +153,11 @@ function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
     <Localized>
       <div
         onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") router.push(`/multipart-models/${multipart.id}`);
+        }}
         className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
         title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
       >
@@ -155,114 +168,207 @@ function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
   );
 }
 
-type OutlinerLeaf =
-  | { kind: "model"; model: OutlinerModelRead }
-  | { kind: "multipart"; multipart: MultipartModelListItem };
-
-function mergeLeaves(
-  models: OutlinerModelRead[],
-  multipartModels: MultipartModelListItem[],
-): OutlinerLeaf[] {
-  return [
-    ...models.map((model) => ({ kind: "model" as const, model })),
-    ...multipartModels.map((multipart) => ({ kind: "multipart" as const, multipart })),
-  ].sort((a, b) => {
-    const aName = a.kind === "model" ? a.model.name : a.multipart.name;
-    const bName = b.kind === "model" ? b.model.name : b.multipart.name;
-    return aName.localeCompare(bName);
-  });
-}
-
 function OutlinerLeaves({
-  leaves,
+  entries,
   dragging,
 }: {
-  leaves: OutlinerLeaf[];
+  entries: OutlinerEntry[];
   dragging: DragPayload | null;
 }) {
-  useUiLocale();
-  return leaves.map((leaf) =>
-    leaf.kind === "model" ? (
+  return entries.map((entry) =>
+    entry.kind === "model" ? (
       <DraggableModelLeaf
-        key={`model-${leaf.model.id}`}
-        model={leaf.model}
-        isDraggingThisModel={dragging?.type === "model" && dragging.model.id === leaf.model.id}
+        key={`model-${entry.id}`}
+        model={entry}
+        isDraggingThisModel={dragging?.type === "model" && dragging.model.id === entry.id}
       />
     ) : (
-      <MultipartLeaf key={`multipart-${leaf.multipart.id}`} multipart={leaf.multipart} />
+      <MultipartLeaf key={`multipart-${entry.id}`} multipart={entry} />
     ),
   );
 }
 
-/** What every row of the folder tree reads, gathered so it is passed once. */
 interface TreeContext {
   selected: string | null;
   onSelect: (path: string | null) => void;
   onIntent?: (path: string) => void;
   expanded: Set<string>;
   toggle: (path: string) => void;
-  modelsByCollection: Map<string, OutlinerModelRead[]>;
-  multipartByCollection: Map<string, MultipartModelListItem[]>;
-  visibleModelIds: Set<number> | null;
-  visibleMultipartIds: Set<number> | null;
-  /** The badge for a folder: its subtree total, or the loaded leaves below it. */
-  badge: (path: string, node: CollectionNodeRead | null) => number;
+  params: OutlinerParams;
+  revealNodes: CollectionNodeRead[];
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
 }
 
-/** A folder's own leaves, narrowed to the ones the filter kept. */
-function folderLeaves(path: string, ctx: TreeContext): OutlinerLeaf[] {
-  const models = (ctx.modelsByCollection.get(path) ?? []).filter(
-    (model) => !ctx.visibleModelIds || ctx.visibleModelIds.has(model.id),
-  );
-  const multipart = (ctx.multipartByCollection.get(path) ?? []).filter(
-    (item) => !ctx.visibleMultipartIds || ctx.visibleMultipartIds.has(item.id),
-  );
-  return mergeLeaves(models, multipart);
+function revealId(parentId: number | null, nodes: CollectionNodeRead[]): number | undefined {
+  return parentId === null ? nodes[0]?.id : nodes.find((node) => node.parent_id === parentId)?.id;
 }
 
-/**
- * One level of the tree: the children of `parentId`, or the top level when it is
- * null. Mounted only for an open folder, so the sidebar loads what the user
- * opens and nothing else; a long level loads a page at a time.
- */
+interface PageState {
+  isPending: boolean;
+  isError: boolean;
+  isFetchNextPageError: boolean;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
+  refetch: () => Promise<object>;
+  fetchNextPage: () => Promise<object>;
+}
+
+function PageControls({
+  query,
+  label,
+  initial,
+}: {
+  query: PageState;
+  label: string;
+  initial: boolean;
+}) {
+  useUiLocale();
+  const [requested, setRequested] = useState(false);
+  if (initial && query.isPending) return <Skeleton className="my-1 h-4 w-3/4" />;
+  if (query.isError)
+    return (
+      <div role="status" className="py-1 text-xs text-muted-foreground">
+        {uiText("Could not load this list.")}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={query.isFetchingNextPage}
+          onClick={() =>
+            void (query.isFetchNextPageError ? query.fetchNextPage() : query.refetch())
+          }
+        >
+          {uiText("Retry")}
+        </Button>
+      </div>
+    );
+  if (!query.hasNextPage && !requested) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-disabled={query.isFetchingNextPage || !query.hasNextPage}
+      onClick={() => {
+        if (query.isFetchingNextPage || !query.hasNextPage) return;
+        setRequested(true);
+        void query.fetchNextPage();
+      }}
+    >
+      {query.hasNextPage ? label : uiText("All items loaded")}
+    </Button>
+  );
+}
+
+function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: TreeContext }) {
+  useUiLocale();
+  const query = useOutlinerEntries({ ...ctx.params, collection_id: collectionId ?? undefined });
+  const entries = query.data?.pages.flatMap((page) => page.items) ?? [];
+  return (
+    <>
+      <OutlinerLeaves entries={entries} dragging={ctx.dragging} />
+      <PageControls
+        query={query}
+        initial={query.data === undefined}
+        label={uiText("Show more models")}
+      />
+    </>
+  );
+}
+
 function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: TreeContext }) {
   useUiLocale();
-  const level = useCollectionChildren(parentId);
-  if (level.isPending) {
-    return <Skeleton className="my-1 h-4 w-3/4" />;
+  const query = useOutlinerCollections({
+    ...ctx.params,
+    parent_id: parentId ?? undefined,
+    reveal_id: revealId(parentId, ctx.revealNodes),
+  });
+  const nodes = new Map<number, OutlinerCollection>();
+  for (const page of query.data?.pages ?? []) {
+    for (const node of page.items) nodes.set(node.id, node);
+    if (page.revealed) nodes.set(page.revealed.id, page.revealed);
   }
-  if (level.isError) {
-    return (
-      <p className="py-1 text-3xs text-muted-foreground font-mono">
-        {uiText("Folders could not be loaded.")}
-      </p>
-    );
-  }
-  const nodes = level.data.pages.flatMap((page) => page.items);
   return (
-    <Localized>
-      <>
-        {nodes.map((node) => (
+    <>
+      {[...nodes.values()]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((node) => (
           <CollectionTreeRow key={node.id} node={node} ctx={ctx} />
         ))}
-        {level.hasNextPage && (
-          <button
-            type="button"
-            disabled={level.isFetchingNextPage}
-            onClick={() => void level.fetchNextPage()}
-            className="w-full rounded px-2 py-1 text-left text-3xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            {uiText("Show more folders")}
-          </button>
-        )}
-      </>
-    </Localized>
+      <PageControls
+        query={query}
+        initial={query.data === undefined}
+        label={uiText("Show more folders")}
+      />
+    </>
   );
 }
 
-function CollectionTreeRow({ node, ctx }: { node: CollectionNodeRead; ctx: TreeContext }) {
+function SearchResults({
+  text,
+  ctx,
+  clear,
+}: {
+  text: string;
+  ctx: TreeContext;
+  clear: () => void;
+}) {
+  useUiLocale();
+  const router = useRouter();
+  const query = useOutlinerSearch({ ...ctx.params, q: text });
+  const matches = query.data?.pages.flatMap((page) => page.items) ?? [];
+  function locate(path: string | null) {
+    ctx.onSelect(path);
+    clear();
+  }
+  return (
+    <div aria-label={uiText("Search results")}>
+      {matches.map((entry) => (
+        <div key={`${entry.kind}-${entry.id}`} className="py-1 min-w-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-full justify-start"
+            onClick={() => {
+              if (entry.kind === "collection") locate(entry.collection);
+              else
+                router.push(
+                  entry.kind === "model" ? `/models/${entry.id}` : `/multipart-models/${entry.id}`,
+                );
+            }}
+          >
+            {entry.kind === "collection" ? (
+              <Folder className="h-3 w-3 shrink-0" />
+            ) : entry.kind === "model" ? (
+              <Box className="h-3 w-3 shrink-0" />
+            ) : (
+              <Boxes className="h-3 w-3 shrink-0" />
+            )}
+            <span className="truncate">{entry.name}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-w-full text-muted-foreground"
+            title={uiText("Open location")}
+            onClick={() => locate(entry.collection)}
+          >
+            <span className="truncate">{entry.collection_label ?? uiText("All Models")}</span>
+          </Button>
+        </div>
+      ))}
+      {query.isSuccess && matches.length === 0 && (
+        <p className="text-xs text-muted-foreground">{uiText("No results.")}</p>
+      )}
+      <PageControls
+        query={query}
+        initial={query.data === undefined}
+        label={uiText("Show more results")}
+      />
+    </div>
+  );
+}
+
+function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeContext }) {
   useUiLocale();
   const [confirming, setConfirming] = useState(false);
   const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
@@ -311,10 +417,9 @@ function CollectionTreeRow({ node, ctx }: { node: CollectionNodeRead; ctx: TreeC
     isDraggingCollection && node.path.startsWith(dragging.collection.path + "/");
   const canDrop = !isSelf && !isDescendantOfDragged;
 
-  const leaves = folderLeaves(node.path, ctx);
   const isOpen = expanded.has(node.path);
   const isSelected = selected === node.path;
-  const hasNestedItems = node.child_count > 0 || leaves.length > 0;
+  const hasNestedItems = node.visible_child_count > 0 || node.direct_entry_count > 0;
   const descCount = node.descendant_count;
   const hasContent = descCount > 0 || node.model_count > 0;
 
@@ -384,6 +489,7 @@ function CollectionTreeRow({ node, ctx }: { node: CollectionNodeRead; ctx: TreeC
                 }}
                 className="rounded p-0.5 hover:bg-muted/80 flex-shrink-0"
                 aria-label={isOpen ? uiText("Collapse") : uiText("Expand")}
+                aria-expanded={isOpen}
               >
                 <ChevronRight
                   className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -439,59 +545,14 @@ function CollectionTreeRow({ node, ctx }: { node: CollectionNodeRead; ctx: TreeC
               </button>
             )}
             <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-              {ctx.badge(node.path, node)}
+              {node.subtree_entry_count}
             </span>
           </div>
         )}
         {isOpen && hasNestedItems && !confirming && (
           <div className="ml-4 border-l border-border pl-3 min-w-0">
-            {node.child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
-            <OutlinerLeaves leaves={leaves} dragging={dragging} />
-          </div>
-        )}
-      </div>
-    </Localized>
-  );
-}
-
-/**
- * A folder on the way to something the outliner filter matched. Always open:
- * the filtered tree exists only to reach its matches.
- */
-function FilteredFolderRow({ folder, ctx }: { folder: FilteredFolder; ctx: TreeContext }) {
-  useUiLocale();
-  const leaves = folderLeaves(folder.path, ctx);
-  const isSelected = ctx.selected === folder.path;
-  return (
-    <Localized>
-      <div>
-        <div
-          className={`relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
-            isSelected ? "text-accent-foreground bg-accent" : "text-foreground hover:bg-muted"
-          }`}
-        >
-          <span className="inline-block w-4 flex-shrink-0" />
-          <button
-            type="button"
-            onPointerEnter={() => ctx.onIntent?.(folder.path)}
-            onFocus={() => ctx.onIntent?.(folder.path)}
-            onClick={() => ctx.onSelect(folder.path)}
-            className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
-            title={folder.name}
-          >
-            <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-            <span className="truncate">{folder.name}</span>
-          </button>
-          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-            {ctx.badge(folder.path, folder.node)}
-          </span>
-        </div>
-        {(folder.children.length > 0 || leaves.length > 0) && (
-          <div className="ml-4 border-l border-border pl-3 min-w-0">
-            {folder.children.map((child) => (
-              <FilteredFolderRow key={child.path} folder={child} ctx={ctx} />
-            ))}
-            <OutlinerLeaves leaves={leaves} dragging={ctx.dragging} />
+            {node.visible_child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
+            {node.direct_entry_count > 0 && <EntryLevel collectionId={node.id} ctx={ctx} />}
           </div>
         )}
       </div>
@@ -504,100 +565,55 @@ function DroppableAllModels({
   onClick,
   isExpanded,
   onToggleExpand,
-  rootModels,
-  rootMultipartModels,
-  dragging,
-  visibleModelIds,
-  visibleMultipartIds,
+  count,
+  ctx,
 }: {
   selected: boolean;
   onClick: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  rootModels: OutlinerModelRead[];
-  rootMultipartModels: MultipartModelListItem[];
-  dragging: DragPayload | null;
-  visibleModelIds: Set<number> | null;
-  visibleMultipartIds: Set<number> | null;
+  count: number;
+  ctx: TreeContext;
 }) {
   useUiLocale();
   const { setNodeRef, isOver } = useDroppable({
     id: "collection-root",
     data: { collectionPath: null, collectionId: null } satisfies CollectionDropData,
   });
-
-  const displayModels = visibleModelIds
-    ? rootModels.filter((m) => visibleModelIds.has(m.id))
-    : rootModels;
-  const displayMultipartModels = visibleMultipartIds
-    ? rootMultipartModels.filter((multipart) => visibleMultipartIds.has(multipart.id))
-    : rootMultipartModels;
-  const leaves = mergeLeaves(displayModels, displayMultipartModels);
-
   return (
-    <Localized>
-      <>
-        <div
-          ref={setNodeRef}
-          role="button"
-          tabIndex={0}
-          aria-label={uiText("All Models")}
-          onClick={onClick}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onClick();
-            }
-          }}
-          className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-            isOver && dragging !== null
-              ? "z-10 bg-accent"
-              : selected
-                ? "text-accent-foreground bg-accent"
-                : "text-foreground hover:bg-muted"
-          }`}
-        >
-          {rootModels.length > 0 || rootMultipartModels.length > 0 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleExpand();
-              }}
-              className="rounded p-0.5 hover:bg-muted flex-shrink-0 mr-1"
-              aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
-            >
-              <ChevronRight
-                className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-              />
-            </button>
-          ) : (
-            <ChevronRight
-              className={`h-4 w-4 mr-1 rotate-90 ${selected ? "text-primary" : "text-muted-foreground"}`}
-            />
-          )}
-          <FolderOpen className="h-4 w-4 mr-2 text-primary" />
-          {uiText("All Models")}
-        </div>
-        {isExpanded && leaves.length > 0 && (
-          <div className="ml-5 border-l border-border pl-4 min-w-0">
-            <OutlinerLeaves leaves={leaves} dragging={dragging} />
-            {leaves.length > 8 && (
-              <div className="px-2 py-1 text-3xs text-muted-foreground">
-                +{leaves.length - 8}
-                {uiText(" more")}
-              </div>
-            )}
-          </div>
+    <>
+      <div
+        ref={setNodeRef}
+        className={`flex items-center rounded ${isOver || selected ? "bg-accent text-accent-foreground" : "text-foreground"}`}
+      >
+        {count > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
+            aria-expanded={isExpanded}
+            onClick={onToggleExpand}
+          >
+            <ChevronRight className={`h-3 w-3 ${isExpanded ? "rotate-90" : ""}`} />
+          </Button>
         )}
-      </>
-    </Localized>
+        <Button variant="ghost" size="sm" aria-label={uiText("All Models")} onClick={onClick}>
+          <FolderOpen className="h-4 w-4" />
+          {uiText("All Models")}
+        </Button>
+      </div>
+      {isExpanded && count > 0 && (
+        <div className="ml-5 border-l border-border pl-4 min-w-0">
+          <EntryLevel collectionId={null} ctx={ctx} />
+        </div>
+      )}
+    </>
   );
 }
 
 export function FilterSidebarContent({
-  models = [],
-  multipartModels = [],
+  outlinerFilters,
+  onClearOutlinerFilter,
   tags,
   printers,
   selectedCollection,
@@ -623,169 +639,22 @@ export function FilterSidebarContent({
 }: FilterSidebarProps) {
   useUiLocale();
   const { t } = useI18n();
-  const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
-  // When a tag/printer filter is active the `models` list is already narrowed to
-  // matching models, so the tree should collapse to the collections that hold
-  // them (mirroring how the text filter narrows the outliner).
-  const facetFilterActive =
-    selectedTags.length > 0 || selectedPrinterId !== null || selectedPrinterPresence !== null;
-  const treeFiltered = !!outlinerQ || facetFilterActive;
-
-  const memberModelIds = useMemo(
-    () => new Set(multipartModels.flatMap((multipart) => multipart.member_model_ids)),
-    [multipartModels],
-  );
-  const treeModels = useMemo(() => {
-    if (libraryView === "multipart") return [];
-    if (libraryView === "components") {
-      return models.filter((model) => memberModelIds.has(model.id));
-    }
-    if (libraryView === "organized") {
-      return models.filter((model) => !memberModelIds.has(model.id));
-    }
-    return models;
-  }, [libraryView, memberModelIds, models]);
-  const treeMultipartModels = useMemo(
-    () => (libraryView === "components" ? [] : multipartModels),
-    [libraryView, multipartModels],
-  );
-
-  const visibleModelIds = useMemo<Set<number> | null>(() => {
-    if (!treeFiltered) return null;
-    const result = new Set<number>();
-    for (const m of treeModels) {
-      if (!outlinerQ || m.name.toLowerCase().includes(outlinerQ)) result.add(m.id);
-    }
-    return result;
-  }, [outlinerQ, treeFiltered, treeModels]);
-
-  const visibleMultipartIds = useMemo<Set<number> | null>(() => {
-    if (!treeFiltered) return null;
-    const result = new Set<number>();
-    for (const multipart of treeMultipartModels) {
-      if (!outlinerQ || multipart.name.toLowerCase().includes(outlinerQ)) {
-        result.add(multipart.id);
-      }
-    }
-    return result;
-  }, [outlinerQ, treeFiltered, treeMultipartModels]);
-
-  // The name filter also matches folders; the server searches them, since the
-  // sidebar no longer holds a list to search (#295).
-  const [nameQuery, setNameQuery] = useState(outlinerQ);
+  const outlinerQ = (outlinerFilter ?? "").trim();
+  const [searchText, setSearchText] = useState(outlinerQ);
   useEffect(() => {
-    const timer = setTimeout(() => setNameQuery(outlinerQ), 250);
+    const timer = setTimeout(() => setSearchText(outlinerQ), 250);
     return () => clearTimeout(timer);
   }, [outlinerQ]);
-  const nameMatches = useCollectionSearch(nameQuery, "view", { enabled: nameQuery !== "" });
-
-  const modelsByCollection = useMemo(() => {
-    const grouped = new Map<string, OutlinerModelRead[]>();
-    for (const model of treeModels) {
-      if (!model.collection) continue;
-      const current = grouped.get(model.collection) ?? [];
-      current.push(model);
-      grouped.set(model.collection, current);
-    }
-    for (const items of grouped.values()) {
-      items.sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return grouped;
-  }, [treeModels]);
-
-  const multipartByCollection = useMemo(() => {
-    const grouped = new Map<string, MultipartModelListItem[]>();
-    for (const multipart of treeMultipartModels) {
-      if (!multipart.collection) continue;
-      const current = grouped.get(multipart.collection) ?? [];
-      current.push(multipart);
-      grouped.set(multipart.collection, current);
-    }
-    for (const items of grouped.values()) {
-      items.sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return grouped;
-  }, [treeMultipartModels]);
-
-  // While filtering, the tree is only the folders on the way to what matched:
-  // folders named like the query, and the folders holding matching leaves, all
-  // named from the labels the server sends with them.
-  const filteredTree = useMemo(() => {
-    if (!treeFiltered) return [];
-    const entries: FolderEntry[] = [];
-    if (outlinerQ) {
-      for (const node of nameMatches.data?.pages.flatMap((page) => page.items) ?? []) {
-        entries.push({ path: node.path, label: node.display_path, node });
-      }
-    }
-    for (const model of treeModels) {
-      if (model.collection && model.collection_label && visibleModelIds?.has(model.id)) {
-        entries.push({ path: model.collection, label: model.collection_label });
-      }
-    }
-    for (const multipart of treeMultipartModels) {
-      if (
-        multipart.collection &&
-        multipart.collection_label &&
-        visibleMultipartIds?.has(multipart.id)
-      ) {
-        entries.push({ path: multipart.collection, label: multipart.collection_label });
-      }
-    }
-    return buildFilteredTree(entries);
-  }, [
-    nameMatches.data,
-    outlinerQ,
-    treeFiltered,
-    treeModels,
-    treeMultipartModels,
-    visibleModelIds,
-    visibleMultipartIds,
-  ]);
-
-  // A badge is the folder's subtree total from the server, unless the view or a
-  // filter narrows what counts; then it counts the loaded leaves below it.
-  const useCatalogCounts = !treeFiltered && (libraryView === "organized" || libraryView === "all");
-  const badge = useCallback(
-    (path: string, node: CollectionNodeRead | null) => {
-      const below = (key: string) => key === path || key.startsWith(`${path}/`);
-      let modelLeaves = 0;
-      for (const [key, items] of modelsByCollection) {
-        if (below(key)) {
-          modelLeaves += items.filter((m) => !visibleModelIds || visibleModelIds.has(m.id)).length;
-        }
-      }
-      let multipartLeaves = 0;
-      for (const [key, items] of multipartByCollection) {
-        if (below(key)) {
-          multipartLeaves += items.filter(
-            (item) => !visibleMultipartIds || visibleMultipartIds.has(item.id),
-          ).length;
-        }
-      }
-      return (useCatalogCounts && node !== null ? node.model_count : modelLeaves) + multipartLeaves;
-    },
-    [
-      modelsByCollection,
-      multipartByCollection,
-      useCatalogCounts,
-      visibleModelIds,
-      visibleMultipartIds,
-    ],
+  const lookup = useCollectionLookup(selectedCollection);
+  const revealNodes =
+    lookup.data?.collection.path === selectedCollection
+      ? [...lookup.data.ancestors, lookup.data.collection]
+      : [];
+  const params: OutlinerParams = { ...outlinerFilters, view: libraryView };
+  const roots = useOutlinerCollections(
+    { ...params, reveal_id: revealId(null, revealNodes) },
+    outlinerQ === "",
   );
-
-  const rootModels = useMemo(
-    () => treeModels.filter((m) => !m.collection).sort((a, b) => a.name.localeCompare(b.name)),
-    [treeModels],
-  );
-  const rootMultipartModels = useMemo(
-    () =>
-      treeMultipartModels
-        .filter((multipart) => !multipart.collection)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [treeMultipartModels],
-  );
-
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // A first visit starts at the top level: the tree loads a level only when
     // it is opened, and opening a large library whole is what #295 was.
@@ -892,11 +761,8 @@ export function FilterSidebarContent({
     onIntent: onCollectionIntent,
     expanded,
     toggle: toggleExpanded,
-    modelsByCollection,
-    multipartByCollection,
-    visibleModelIds,
-    visibleMultipartIds,
-    badge,
+    params,
+    revealNodes,
     dragging,
     onDelete: onDeleteCollection,
   };
@@ -999,32 +865,31 @@ export function FilterSidebarContent({
             </div>
             <div className="overflow-x-auto -mx-3 px-3">
               <div className="min-w-0 space-y-0.5 pr-2">
-                <DroppableAllModels
-                  selected={selectedCollection === null}
-                  onClick={() => onCollectionChange(null)}
-                  isExpanded={allModelsExpanded}
-                  onToggleExpand={() => setAllModelsExpanded((v) => !v)}
-                  rootModels={rootModels}
-                  rootMultipartModels={rootMultipartModels}
-                  dragging={dragging}
-                  visibleModelIds={visibleModelIds}
-                  visibleMultipartIds={visibleMultipartIds}
-                />
-                <div className="ml-5 border-l border-border pl-4 min-w-0">
-                  {!treeFiltered ? (
-                    <CollectionLevel parentId={null} ctx={treeContext} />
-                  ) : filteredTree.length === 0 &&
-                    (visibleModelIds?.size ?? 0) === 0 &&
-                    (visibleMultipartIds?.size ?? 0) === 0 ? (
-                    <p className="py-2 text-3xs text-muted-foreground font-mono">
-                      {uiText("No results.")}
-                    </p>
+                {outlinerQ !== "" ? (
+                  searchText !== outlinerQ ? (
+                    <Skeleton className="h-5 w-full" />
                   ) : (
-                    filteredTree.map((folder) => (
-                      <FilteredFolderRow key={folder.path} folder={folder} ctx={treeContext} />
-                    ))
-                  )}
-                </div>
+                    <SearchResults
+                      text={searchText}
+                      ctx={treeContext}
+                      clear={() => onClearOutlinerFilter?.()}
+                    />
+                  )
+                ) : (
+                  <>
+                    <DroppableAllModels
+                      selected={selectedCollection === null}
+                      onClick={() => onCollectionChange(null)}
+                      isExpanded={allModelsExpanded}
+                      onToggleExpand={() => setAllModelsExpanded((v) => !v)}
+                      count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
+                      ctx={treeContext}
+                    />
+                    <div className="ml-5 border-l border-border pl-4 min-w-0">
+                      <CollectionLevel parentId={null} ctx={treeContext} />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </section>
@@ -1232,8 +1097,8 @@ export function FilterSidebarContent({
 }
 
 export interface FilterSidebarProps {
-  models?: OutlinerModelRead[];
-  multipartModels?: MultipartModelListItem[];
+  outlinerFilters: OutlinerFilters;
+  onClearOutlinerFilter?: () => void;
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;
@@ -1261,6 +1126,7 @@ export interface FilterSidebarProps {
 
 export function FilterSidebar(props: FilterSidebarProps) {
   useUiLocale();
+  const desktop = useMediaQuery("(min-width: 768px)");
   const [outlinerFilter, setOutlinerFilter] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
@@ -1295,6 +1161,8 @@ export function FilterSidebar(props: FilterSidebarProps) {
     document.addEventListener("mouseup", onUp);
   }
 
+  if (!desktop) return null;
+
   return (
     <Localized>
       <aside
@@ -1312,6 +1180,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
               type="text"
               value={outlinerFilter}
               onChange={(e) => setOutlinerFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOutlinerFilter("");
+              }}
             />
             {outlinerFilter && (
               <button
@@ -1324,7 +1195,11 @@ export function FilterSidebar(props: FilterSidebarProps) {
             )}
           </div>
         </div>
-        <FilterSidebarContent {...props} outlinerFilter={outlinerFilter} />
+        <FilterSidebarContent
+          {...props}
+          outlinerFilter={outlinerFilter}
+          onClearOutlinerFilter={() => setOutlinerFilter("")}
+        />
         {/* Resize handle */}
         <div
           onMouseDown={handleResizeStart}

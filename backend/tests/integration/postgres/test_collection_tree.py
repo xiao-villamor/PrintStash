@@ -143,3 +143,59 @@ class TestEffectiveTagsOnPostgres:
         )
 
         assert counts[tag.id] == 1
+
+
+class TestOutlinerOnPostgres:
+    def test_pages_mixed_entries(self, pg_session: Session) -> None:
+        from app.modules.library import outliner
+        from app.schemas.outliner import OutlinerQuery
+        from tests.factories import build_multipart_model
+
+        admin = build_user(pg_session, superuser=True)
+        folder = build_collection(pg_session, "Folder")
+        model = build_model(pg_session, "Same", collection=folder)
+        group = build_multipart_model(pg_session, "Same", collection=folder)
+        first = outliner.entries(
+            pg_session, admin, OutlinerQuery(collection_id=folder.id, limit=1)
+        )
+        second = outliner.entries(
+            pg_session,
+            admin,
+            OutlinerQuery(collection_id=folder.id, limit=1, cursor=first.next_cursor),
+        )
+        assert [(row.kind.value, row.id) for row in first.items + second.items] == [
+            ("model", model.id),
+            ("multipart", group.id),
+        ]
+        assert second.next_cursor is None
+
+    def test_counts_filtered_descendants(self, pg_session: Session) -> None:
+        from app.modules.library import outliner
+        from app.schemas.outliner import OutlinerQuery
+        from tests.factories import tag_model
+
+        admin = build_user(pg_session, superuser=True)
+        parent = build_collection(pg_session, "Parent")
+        child = build_collection(pg_session, "Child", parent=parent)
+        tag = build_tag(pg_session, "chosen")
+        tag_model(pg_session, build_model(pg_session, "Hit", collection=child), tag)
+        build_collection(pg_session, "Empty")
+        page = outliner.collections(pg_session, admin, OutlinerQuery(tag=[tag.slug]))
+        assert [(row.id, row.subtree_entry_count) for row in page.items] == [
+            (parent.id, 1)
+        ]
+
+    def test_search_respects_collection_access(self, pg_session: Session) -> None:
+        from app.modules.library import outliner
+        from app.schemas.outliner import OutlinerQuery
+
+        parent = build_collection(pg_session, "Private")
+        child = build_collection(pg_session, "Granted", parent=parent)
+        viewer = build_user(pg_session)
+        grant_collection_role(pg_session, viewer, child, CollectionRole.VIEW)
+        visible = build_model(pg_session, "100% visible", collection=child)
+        build_model(pg_session, "100% private", collection=parent)
+        page = outliner.search(pg_session, viewer, OutlinerQuery(q="%"))
+        assert [(row.id, row.collection_label) for row in page.items] == [
+            (visible.id, "Granted")
+        ]

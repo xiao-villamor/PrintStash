@@ -105,7 +105,6 @@ import {
   useLibraryPrefetch,
   useModelList,
   useMultipartModels,
-  useOutlinerModels,
   usePrinters,
   useTags,
   type ModelListFilters,
@@ -118,7 +117,6 @@ import { Link } from "@/lib/link";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
-import { useMediaQuery } from "@/lib/use-media-query";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
 import { TabBar } from "@/components/ui/tabs";
@@ -570,7 +568,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const { user } = useAuth();
-  const desktopOutliner = useMediaQuery("(min-width: 768px)");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
   // with the detail/upload views, revalidated on focus, and refetched after any
   // collection/tag mutation (the api layer invalidates the query cache).
@@ -1068,17 +1065,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     },
     { enabled: libraryView === "organized" && !searchQuery },
   );
-  const multipartOutlinerQuery = useMultipartModels(
-    {
-      tag: selectedTags.length ? selectedTags : undefined,
-      favorites: favoritesOnly || undefined,
-      limit: 500,
-    },
-    { enabled: desktopOutliner && libraryView !== "components" },
-  );
-  const outlinerQuery = useOutlinerModels(baseFilters, 500, {
-    enabled: desktopOutliner,
-  });
 
   const models = useMemo(
     () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
@@ -1108,11 +1094,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     return models;
   })();
-  const outlinerModels = outlinerQuery.data ?? [];
-  const outlinerMultipartModels =
-    libraryView === "components"
-      ? (multipartMembershipQuery.data ?? [])
-      : (multipartOutlinerQuery.data ?? []);
   // First load shows skeletons; a filter change keeps the previous page visible
   // and just flags `refreshing` for the subtle "Updating…" hint.
   const loading =
@@ -1855,6 +1836,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           returnTo={currentLibraryHref}
         />
         <MobileFilterDrawer
+          outlinerFilters={baseFilters}
           open={filterDrawerOpen}
           onClose={closeDrawer}
           tags={tags}
@@ -1896,8 +1878,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <FilterSidebar
           filtersOpen={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
-          models={outlinerModels}
-          multipartModels={outlinerMultipartModels}
+          outlinerFilters={baseFilters}
           tags={tags}
           printers={printers}
           selectedCollection={selectedCollection}

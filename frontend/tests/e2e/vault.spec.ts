@@ -80,7 +80,7 @@ test.describe("vault route", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const outlinerRequests: string[] = [];
     page.on("request", (request) => {
-      if (new URL(request.url()).pathname === "/api/v1/models/outliner") {
+      if (new URL(request.url()).pathname.startsWith("/api/v1/outliner/")) {
         outlinerRequests.push(request.url());
       }
     });

@@ -36,7 +36,7 @@ import {
   VaultStatsRead,
 } from "@/types";
 
-function modelListSearch(params?: ListModelsParams): URLSearchParams {
+export function modelListSearch(params?: ListModelsParams): URLSearchParams {
   const search = new URLSearchParams();
   if (params?.collection) search.set("collection", params.collection);
   if (params?.direct) search.set("direct", "true");

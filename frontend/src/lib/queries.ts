@@ -1,3 +1,5 @@
+import { listOutlinerCollections, listOutlinerEntries, searchOutliner } from "@/lib/api/outliner";
+import type { OutlinerParams } from "@/types/outliner";
 import { createContext, useContext, useMemo } from "react";
 import {
   infiniteQueryOptions,
@@ -84,6 +86,9 @@ import type {
  * implementation instead of intercepting this module's imports.
  */
 export const defaultQueryApi = {
+  listOutlinerCollections,
+  listOutlinerEntries,
+  searchOutliner,
   getCollectionReadme,
   getDashboard,
   getFleetSummary,
@@ -513,5 +518,39 @@ export function useOutlinerModels(
     queryFn: () => api.listOutlinerModels({ ...filters, limit }),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useOutlinerCollections(params: OutlinerParams, enabled = true) {
+  const api = useQueryApi();
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.outliner, "collections", params],
+    queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
+      api.listOutlinerCollections({ ...params, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null,
+    getNextPageParam: (page) => page.next_cursor,
+    enabled,
+  });
+}
+export function useOutlinerEntries(params: OutlinerParams, enabled = true) {
+  const api = useQueryApi();
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.outliner, "entries", params],
+    queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
+      api.listOutlinerEntries({ ...params, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null,
+    getNextPageParam: (page) => page.next_cursor,
+    enabled,
+  });
+}
+export function useOutlinerSearch(params: OutlinerParams, enabled = true) {
+  const api = useQueryApi();
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.outliner, "search", params],
+    queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
+      api.searchOutliner({ ...params, cursor: pageParam ?? undefined }, signal),
+    initialPageParam: null,
+    getNextPageParam: (page) => page.next_cursor,
+    enabled,
   });
 }

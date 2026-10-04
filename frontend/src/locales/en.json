@@ -4164,5 +4164,11 @@
   "This file cannot be converted to a 3D preview": "This file cannot be converted to a 3D preview",
   "3D preview processing is disabled": "3D preview processing is disabled",
   "3D preview preparation was cancelled": "3D preview preparation was cancelled",
-  "Preparing 3D preview…": "Preparing 3D preview…"
+  "Preparing 3D preview…": "Preparing 3D preview…",
+  "Could not load this list.": "Could not load this list.",
+  "Show more models": "Show more models",
+  "Search results": "Search results",
+  "Open location": "Open location",
+  "Show more results": "Show more results",
+  "All items loaded": "All items loaded"
 }

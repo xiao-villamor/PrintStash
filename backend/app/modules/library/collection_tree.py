@@ -401,3 +401,21 @@ def search(
     return CollectionPage(
         items=_nodes(session, user, rows, visible), next_cursor=next_cursor
     )
+
+
+def nodes_for_ids(
+    session: Session, user: User, ids: list[int]
+) -> list[CollectionNodeRead]:
+    """Project an already bounded page through the canonical collection read model."""
+    if not ids:
+        return []
+    visible = rbac.accessible_collection_ids_stmt(session, user)
+    rows = [
+        _Row(*row)
+        for row in session.execute(
+            sa_select(*_columns()).where(
+                Collection.id.in_(ids), Collection.id.in_(visible)
+            )
+        ).all()
+    ]
+    return _nodes(session, user, rows, visible)
