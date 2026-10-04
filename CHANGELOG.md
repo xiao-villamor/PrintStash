@@ -38,6 +38,9 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 - Small meshes placed far from the coordinate origin retain their thumbnail
   geometry and shading. Visual recipes now refresh previews, view fingerprints,
   and derived image vectors while preserving original files and encoder assets.
+- Meshes with inconsistent triangle winding now report unknown volume while
+  retaining dimensions and triangle counts. Existing metadata is recalculated
+  automatically.
 - Browser-local upload queues recover as interrupted after a reload, so stale
   tasks can be cleared. Resumable uploads retain their recovery controls, and
   queued browser work now asks users to keep the tab open (#336).

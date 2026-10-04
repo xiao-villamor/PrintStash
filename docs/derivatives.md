@@ -78,6 +78,24 @@ inputs and vectors. Encoder asset manifests and their digests are unchanged.
 Historical verifier calibration remains tied to its original fingerprint and
 verification versions; it is not relabelled as a new measurement.
 
+## Mesh volume measurements
+
+Mesh metadata publishes a volume only for a closed surface with consistent
+triangle winding and a finite, positive signed volume. STL facet vertices are
+welded in a measurement copy; this does not repair winding or change the source
+Artifact. Open or inconsistently wound surfaces retain their bounding dimensions
+and triangle counts, with unknown (`null`) volume. A globally reversed surface
+also retains unknown metadata volume under the positive-orientation policy.
+Similarity fingerprints have a separate established policy: they report the
+magnitude for consistently wound closed surfaces, including a global reversal,
+and retain `volume_reason = inconsistent_winding` when winding is inconsistent.
+
+These topology checks do not establish that a surface has no self-intersections,
+and the integral is not a Boolean union of overlapping solids. STL coordinates
+are assumed to be millimetres. Metadata recipe 4 recalculates existing measurements
+to remove volumes previously published for inconsistently wound surfaces; the
+fingerprint algorithm is unchanged.
+
 ## Bumping a recipe
 
 The recipe constants in `app/modules/derivatives/kinds.py` are the code's
