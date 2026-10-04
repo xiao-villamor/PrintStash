@@ -16,6 +16,7 @@ import ctypes
 import ctypes.util
 import gc
 import io
+import math
 import os
 import struct
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
@@ -783,8 +784,15 @@ def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
             # welded topology without changing the renderer/fingerprint input.
             measured = mesh.copy()
             measured.merge_vertices()
-        vol = measured.volume if measured.is_watertight else None
-        if vol is not None and vol > 0:
+        # Closure alone does not make the signed integral meaningful: a flipped
+        # facet can halve a cube's reported volume while every edge stays closed.
+        # Keep the positive-orientation policy; do not repair or take abs here.
+        vol = (
+            measured.volume
+            if measured.is_watertight and measured.is_winding_consistent
+            else None
+        )
+        if vol is not None and math.isfinite(vol) and vol > 0:
             out["volume_mm3"] = round(float(vol), 2)
     except MemoryError:
         raise
