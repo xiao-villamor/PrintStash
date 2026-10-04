@@ -12,6 +12,7 @@ import stat as stat_module
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -1302,7 +1303,8 @@ class S3StorageBackend(StorageBackend):
     def download_to_path(self, key: str, dest: Path) -> Path:
         self._validate_managed_key(key)
         response = self._client.get_object(Bucket=self._bucket, Key=key)
-        return _copy_stream_create_only(response["Body"], dest)
+        with closing(response["Body"]) as body:
+            return _copy_stream_create_only(body, dest)
 
     def upload_file(self, src: Path, key: str) -> None:
         with src.open("rb") as source:

@@ -14,6 +14,12 @@ from app.modules.storage.storage_backend.contracts import StorageConfigurationEr
 
 
 class TestRemoteBudget:
+    def test_job_withdrawal_prevents_transport_work(self):
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+
+        with cancellation_scope(lambda: True), pytest.raises(OperationCancelled):
+            operation_timeout()
+
     def test_expired_budget_refuses_another_transport_operation(self):
         with remote_budget(deadline=0):
             with pytest.raises(

@@ -87,3 +87,11 @@ processing changes have been integrated; Deep CI has not been dispatched.
 | 58 | inference withdrawal reaps native descendants | Error | Caller cancels after child tree is ready | inference_cancelled, no live descendants | Integration | ✅ `integration/modules/media/test_visual_render.py::TestSupervision::test_inference_withdrawal_reaps_the_tree` |
 | 59 | invalid reply budgets never launch workers | Error | Zero, boolean, negative or oversized budget | ValueError before launch | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestSuperviseResult::test_rejects_invalid_reply_budget` |
 | 60 | caller reply limit bounds output | Error | Child produces more bytes than consumer permits | REPLY_LIMIT refusal | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestSuperviseResult::test_enforces_caller_reply_budget` |
+
+## Remote input cancellation
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 61 | remote operations honour the owning Job cancellation | Error | Cooperative cancellation scope already withdrawn | OperationCancelled before another transport operation | Unit | ✅ `unit/modules/storage/test_remote_deadline.py::TestRemoteBudget::test_job_withdrawal_prevents_transport_work` |
+| 62 | cancelled stream copies leave no published file | Error | Withdrawal during a multi-block download | Destination absent; private staging cleaned | Unit | ✅ `unit/modules/storage/storage_backend/test_io.py::TestCopyStream::test_withdrawal_cleans_staged_download` |
+| 63 | S3 download closes its response body | Edge | Success or destination collision | Response stream closed on every exit | Unit | ✅ `unit/modules/storage/storage_backend/test_s3.py::TestDownloadLifecycle::test_closes_download_response` |

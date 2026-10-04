@@ -1374,3 +1374,19 @@ class TestS3CopyIn:
         empty = replace(_copyable(backend), size=0)
 
         assert backend.copy_in(empty, "vault-data/files/a.stl") is None
+
+
+class TestDownloadLifecycle:
+    @pytest.mark.parametrize("collision", [False, True])
+    def test_closes_download_response(self, tmp_path, monkeypatch, collision):
+        backend, client = _memory_s3_backend(monkeypatch)
+        body = BytesIO(b"downloaded")
+        monkeypatch.setattr(client, "get_object", lambda **_kwargs: {"Body": body})
+        destination = tmp_path / "download.stl"
+        if collision:
+            destination.write_bytes(b"existing")
+            with pytest.raises(StorageCollisionError):
+                backend.download_to_path("vault-data/source.stl", destination)
+        else:
+            backend.download_to_path("vault-data/source.stl", destination)
+        assert body.closed is True

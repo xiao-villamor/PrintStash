@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Event
 
+from app.core.cancellation import checkpoint
 from app.modules.storage.storage_backend.contracts import StorageConfigurationError
 
 
@@ -38,6 +39,7 @@ def remote_budget(*, deadline: float | None = None, cancelled: Event | None = No
 
 
 def operation_timeout() -> float:
+    checkpoint()
     budget = _BUDGET.get()
     if budget.cancelled is not None and budget.cancelled.is_set():
         raise asyncio.CancelledError()
