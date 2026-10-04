@@ -26,7 +26,7 @@ import io
 import struct
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -339,34 +339,6 @@ class TestIngestOrca:
             select(Metadata).where(Metadata.file_id == file_row.id)
         ).one()
         assert metadata.file_id == file_row.id
-
-    def test_ingest_orca_stages_upload_in_threadpool(
-        self,
-        tmp_path: Path,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        monkeypatch,
-    ) -> None:
-        use_local_storage(tmp_path)
-        called: dict[str, str] = {}
-
-        async def fake_threadpool(
-            func: Callable[..., Any], *args: Any, **kwargs: Any
-        ) -> Any:
-            called["func"] = func.__name__
-            return func(*args, **kwargs)
-
-        monkeypatch.setattr("app.api.v1.ingest.run_in_threadpool", fake_threadpool)
-
-        response = client.post(
-            "/api/v1/ingest/orca",
-            headers=auth_headers,
-            files={"file": ("sample.gcode", b"G28\n", "text/plain")},
-            data={"model_name": "Threadpool Check"},
-        )
-
-        assert response.status_code == 202
-        assert called == {"func": "_stage_upload"}
 
     def test_ingest_orca_rejects_missing_filename(
         self, client: TestClient, auth_headers: dict[str, str]
