@@ -5,7 +5,7 @@ from printstash_core.inference import EmbeddingError, EmbeddingSpace
 from printstash_core.inference.context import InferenceContext
 from printstash_core.search.visual_inputs import VisualRecipe
 
-from app.modules.media import native_process, visual_render
+from app.modules.media import mesh_isolation, native_process, visual_render
 from tests.factories.geometry import tetrahedron
 
 
@@ -21,14 +21,14 @@ def render_case(tmp_path, monkeypatch):
         )
     )
     processes = []
-    original = visual_render._spawn
+    original = mesh_isolation.subprocess.Popen
 
-    def spawn(*args):
-        process = original(*args)
+    def spawn(*args, **kwargs):
+        process = original(*args, **kwargs)
         processes.append(process)
         return process
 
-    monkeypatch.setattr(visual_render, "_spawn", spawn)
+    monkeypatch.setattr(mesh_isolation.subprocess, "Popen", spawn)
     return source, recipe, processes
 
 
@@ -104,32 +104,21 @@ class TestVisualRender:
         self, render_case, monkeypatch, tmp_path
     ):
         import json
-        import subprocess
         from pathlib import Path
 
         from app.core.cancellation import OperationCancelled, cancellation_scope
         from app.modules.media.worker_bootstrap import command
-        from tests.paths import BACKEND_DIR
 
         source, recipe, processes = render_case
         pids = tmp_path / "pids"
 
-        def waiting(*_args, **_kwargs):
-            process = subprocess.Popen(
-                command(
-                    "tests.fakes.mesh_bootstrap_probe",
-                    ["tree_wait", str(pids)],
-                    256 * 1024**2,
-                ),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                cwd=BACKEND_DIR,
-            )
-            processes.append(process)
-            return process
-
-        monkeypatch.setattr(visual_render, "_spawn", waiting)
+        monkeypatch.setattr(
+            visual_render,
+            "worker_command",
+            lambda _module, _args, budget: command(
+                "tests.fakes.mesh_bootstrap_probe", ["tree_wait", str(pids)], budget
+            ),
+        )
         with cancellation_scope(pids.exists), pytest.raises(OperationCancelled):
             visual_render.render(
                 source,
@@ -143,6 +132,79 @@ class TestVisualRender:
 
 
 class TestSupervision:
+    def test_inference_withdrawal_reaps_the_tree(
+        self, render_case, monkeypatch, tmp_path
+    ):
+        import json
+        from pathlib import Path
+
+        from app.modules.media.worker_bootstrap import command
+
+        source, recipe, processes = render_case
+        pids = tmp_path / "cancelled-pids"
+        monkeypatch.setattr(
+            visual_render,
+            "worker_command",
+            lambda _module, _args, budget: command(
+                "tests.fakes.mesh_bootstrap_probe", ["tree_wait", str(pids)], budget
+            ),
+        )
+        with pytest.raises(EmbeddingError, match="inference_cancelled"):
+            visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(10, cancelled=pids.exists),
+            )
+        assert processes[0].poll() is not None
+        assert all(
+            not Path(f"/proc/{pid}").exists() for pid in json.loads(pids.read_text())
+        )
+
+    def test_refuses_reply_before_failed_exit(self, render_case, monkeypatch):
+        import sys
+
+        source, recipe, processes = render_case
+        command = [
+            sys.executable,
+            "-c",
+            "import os, struct, time; "
+            "data=b'RGB1'+struct.pack('!HHB',32,32,7)+bytes(32*32*3*7); "
+            "os.write(1,struct.pack('!I',len(data))+data); "
+            "time.sleep(0.1); raise SystemExit(3)",
+        ]
+        monkeypatch.setattr(visual_render, "worker_command", lambda *_args: command)
+        with pytest.raises(EmbeddingError, match="embedding_render_failed"):
+            visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(10),
+            )
+        assert processes[0].poll() is not None
+
+    def test_refuses_delayed_trailing_output(self, render_case, monkeypatch):
+        import sys
+
+        source, recipe, processes = render_case
+        command = [
+            sys.executable,
+            "-c",
+            "import os, struct, time; "
+            "data=b'RGB1'+struct.pack('!HHB',32,32,7)+bytes(32*32*3*7); "
+            "os.write(1,struct.pack('!I',len(data))+data); "
+            "time.sleep(0.1); os.write(1,b'trailing')",
+        ]
+        monkeypatch.setattr(visual_render, "worker_command", lambda *_args: command)
+        with pytest.raises(EmbeddingError, match="embedding_output_invalid"):
+            visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(10),
+            )
+        assert processes[0].poll() is not None
+
     def test_admission_wait_honours_the_callers_deadline(self, render_case):
         from concurrent.futures import ThreadPoolExecutor
 
@@ -167,30 +229,19 @@ class TestSupervision:
         assert processes == []
 
     def test_closed_stdout_does_not_disable_deadline(self, render_case, monkeypatch):
-        import subprocess
         import time
 
         from app.modules.media.worker_bootstrap import command
-        from tests.paths import BACKEND_DIR
 
         source, recipe, processes = render_case
 
-        def closes_stdout(*_args, **_kwargs):
-            process = subprocess.Popen(
-                command(
-                    "tests.fakes.mesh_bootstrap_probe",
-                    ["close_stdout_wait"],
-                    256 * 1024**2,
-                ),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                cwd=BACKEND_DIR,
-            )
-            processes.append(process)
-            return process
-
-        monkeypatch.setattr(visual_render, "_spawn", closes_stdout)
+        monkeypatch.setattr(
+            visual_render,
+            "worker_command",
+            lambda _module, _args, budget: command(
+                "tests.fakes.mesh_bootstrap_probe", ["close_stdout_wait"], budget
+            ),
+        )
         started = time.monotonic()
         with pytest.raises(EmbeddingError, match="inference_timeout"):
             visual_render.render(

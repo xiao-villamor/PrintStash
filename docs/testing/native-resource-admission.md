@@ -77,3 +77,13 @@ processing changes have been integrated; Deep CI has not been dispatched.
 | 53 | inherited ticket uses an explicit filesystem identity | Happy | Locked descriptor plus matching path | Credit retained without procfs access | Integration | ✅ `integration/runtime/test_native_admission.py::TestLocalResourcePool::test_inherits_without_procfs` |
 | 54 | replaced ticket cannot supply inherited authority | Error | Same ticket name but different inode | Capability refused before execution | Integration | ✅ `integration/runtime/test_native_admission.py::TestLocalResourcePool::test_refuses_replaced_ticket_path` |
 | 55 | non-Linux termination targets the worker group | Error | Native subtree without Linux guardian | Whole process group receives termination | Unit | ✅ `unit/modules/media/test_worker_bootstrap.py::TestTermination::test_nonlinux_terminates_the_group` |
+
+## Final visual worker acceptance
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 56 | complete visual output requires a successful worker exit | Error | Valid RGB reply then delayed nonzero exit | No views returned; process reaped | Integration | ✅ `integration/modules/media/test_visual_render.py::TestSupervision::test_refuses_reply_before_failed_exit` |
+| 57 | delayed trailing bytes invalidate visual output | Error | Valid RGB reply then another write | Output rejected; process reaped | Integration | ✅ `integration/modules/media/test_visual_render.py::TestSupervision::test_refuses_delayed_trailing_output` |
+| 58 | inference withdrawal reaps native descendants | Error | Caller cancels after child tree is ready | inference_cancelled, no live descendants | Integration | ✅ `integration/modules/media/test_visual_render.py::TestSupervision::test_inference_withdrawal_reaps_the_tree` |
+| 59 | invalid reply budgets never launch workers | Error | Zero, boolean, negative or oversized budget | ValueError before launch | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestSuperviseResult::test_rejects_invalid_reply_budget` |
+| 60 | caller reply limit bounds output | Error | Child produces more bytes than consumer permits | REPLY_LIMIT refusal | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestSuperviseResult::test_enforces_caller_reply_budget` |

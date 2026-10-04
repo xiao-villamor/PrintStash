@@ -485,6 +485,31 @@ def abandoned_caller_output(tmp_path):
 
 
 class TestSuperviseResult:
+    @pytest.mark.parametrize("limit", [0, -1, True, 32 * 1024**2 + 1])
+    def test_rejects_invalid_reply_budget(self, limit):
+        with pytest.raises(ValueError, match="reply limit"):
+            mesh_isolation.supervise_result(
+                ["/not-a-worker"],
+                memory_budget=1024**3,
+                timeout_seconds=5,
+                reply_limit=limit,
+            )
+
+    def test_enforces_caller_reply_budget(self):
+        import sys
+
+        from app.modules.media.mesh_telemetry import WorkerExitCause
+
+        with pytest.raises(mesh_isolation.MeshWorkerError) as raised:
+            mesh_isolation.supervise_result(
+                [sys.executable, "-c", "import os; os.write(1,bytes(128))"],
+                memory_budget=1024**3,
+                timeout_seconds=5,
+                reply_limit=64,
+            )
+        assert raised.value.supervision is not None
+        assert raised.value.supervision.exit_cause is WorkerExitCause.REPLY_LIMIT
+
     @pytest.mark.parametrize(
         "code", [3, 4, 7], ids=["face-cap", "invalid", "unavailable"]
     )

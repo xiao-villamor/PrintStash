@@ -26,6 +26,7 @@ import struct
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
@@ -249,12 +250,16 @@ def supervise_result(
     accepted_exit_codes: frozenset[int] = frozenset({0}),
     temporary_directory: Path | None = None,
     environment: dict[str, str] | None = None,
+    reply_limit: int = MAX_REPLY_BYTES,
+    withdrawn: Callable[[], bool] | None = None,
 ) -> SupervisedReply:
     """Own the process lifecycle and retain observed costs on every exit.
 
     Tree RSS is sampled, not a kernel high-water mark. None means no sample was
     available. The one terminal frame provides no phase attribution on a kill.
     """
+    if type(reply_limit) is not int or not 0 < reply_limit <= MAX_REPLY_BYTES:
+        raise ValueError("invalid worker reply limit")
     if not accepted_exit_codes or any(
         type(code) is not int or not 0 <= code <= 255 or code == RESOURCE_EXIT
         for code in accepted_exit_codes
@@ -312,6 +317,8 @@ def supervise_result(
             stdout_closed = False
             while True:
                 checkpoint()
+                if withdrawn is not None and withdrawn():
+                    raise OperationCancelled()
                 if time.monotonic() >= deadline:
                     cause = WorkerExitCause.DEADLINE
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
@@ -328,7 +335,7 @@ def supervise_result(
                         selector.unregister(process.stdout)
                         break
                     reply.extend(chunk)
-                    if len(reply) > MAX_REPLY_BYTES:
+                    if len(reply) > reply_limit:
                         cause = WorkerExitCause.REPLY_LIMIT
                         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
                 if stdout_closed and process.poll() is not None:
@@ -349,6 +356,8 @@ def supervise_result(
             cause = WorkerExitCause.EXITED_NONZERO
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
         checkpoint(force=True)
+        if withdrawn is not None and withdrawn():
+            raise OperationCancelled()
         cause = (
             WorkerExitCause.EXITED_ZERO if code == 0 else WorkerExitCause.EXITED_NONZERO
         )
