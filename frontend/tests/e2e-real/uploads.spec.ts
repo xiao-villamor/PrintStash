@@ -11,6 +11,42 @@ import { test, expect } from "./helpers";
 import { bgcodeFor, createCollectionViaVault, modelCard, uploadModel } from "./util";
 
 test.describe("uploads", () => {
+  test("clears legacy browser upload queues after a reload", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => {
+      // An older client saved queue rows before these files reached the server.
+      // Only the task descriptions survive a reload; no File objects survive.
+      localStorage.setItem(
+        "printstash:import-tasks:v1",
+        JSON.stringify(
+          ["holder.stl", "palette.stl"].map((filename, index) => ({
+            id: `legacy-queued-upload-${index}`,
+            title: `Upload ${filename}`,
+            detail: "Queued",
+            detailMessage: { key: "Queued" },
+            status: "pending",
+            progress: 0,
+            expectedJobCount: 1,
+            createdAt: 1781438400000,
+            updatedAt: 1781438400000,
+          })),
+        ),
+      );
+    });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await expect(page.getByText("Task interrupted. Start it again.")).toHaveCount(2);
+    await expect(page.getByText("pending", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Clear done" }).click();
+    await expect(page.getByText("Upload holder.stl", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Upload palette.stl", { exact: true })).toHaveCount(0);
+
+    await page.reload();
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await expect(page.getByText("No active tasks")).toBeVisible();
+  });
+
   test("@critical resumes a multipart upload after a browser reload", async ({ page }) => {
     const name = `e2e-resume-${Date.now()}`;
     const file = {

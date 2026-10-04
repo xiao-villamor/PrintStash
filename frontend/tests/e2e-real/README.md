@@ -94,7 +94,7 @@ vault (search, tag filter, list/grid toggle, empty state, narrow responsive tool
 (create / nest / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
-uploads (mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery
+uploads (legacy browser queue recovery and clearing across reloads, mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery
 (purge → UI restore → byte-for-byte download) · filament & printer presets
 (create / edit / delete) · model lifecycle (upload → edit → trash → restore →
 purge) · model detail (edit tags with save/cancel, log a manual print, download

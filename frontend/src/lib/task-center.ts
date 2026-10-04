@@ -164,22 +164,38 @@ function loadTasks(): TaskItem[] {
     // Only `persist()` writes this key, so the stored payload is a TaskItem[]
     // snapshot; a hand-edited or truncated value falls through to the catch.
     const parsed: TaskItem[] | null = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed)
-      ? keepVisibleTasks(parsed).map((task) =>
-          task.archiveUploading && (task.status === "pending" || task.status === "running")
-            ? {
-                ...task,
-                archiveUploading: false,
-                status: "failed" as const,
-                detail: uiText("ZIP upload interrupted. Select the file again."),
-                progress: 100,
-              }
-            : task,
-        )
-      : [];
+    return Array.isArray(parsed) ? keepVisibleTasks(parsed).map(recoverTaskAfterReload) : [];
   } catch {
     return [];
   }
+}
+
+/** Browser work loses its files and execution loop when the tab reloads. */
+function recoverTaskAfterReload(task: TaskItem): TaskItem {
+  if (task.status !== "pending" && task.status !== "running") return task;
+  if (
+    !task.archiveUploading &&
+    (task.jobId !== undefined || !!task.jobIds?.length || task.similarityRunId !== undefined)
+  )
+    return task;
+
+  const resumable = task.uploadSessionId !== undefined && !task.archiveUploading;
+  const message = task.archiveUploading
+    ? "ZIP upload interrupted. Select the file again."
+    : resumable
+      ? "Upload interrupted. Select the same file to resume."
+      : "Task interrupted. Start it again.";
+  return {
+    ...task,
+    archiveUploading: false,
+    status: "failed",
+    detail: uiText(message),
+    detailMessage: uiMessage(message),
+    error: null,
+    progress: 100,
+    retryable: resumable,
+    uploadPaused: resumable,
+  };
 }
 
 function keepVisibleTasks(items: TaskItem[]): TaskItem[] {

@@ -24,6 +24,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aJob } from "@/test-support/factories";
+import { uiMessage } from "@/lib/locale";
 import { aSimilarityRun } from "@/test-support/similarity";
 import type { EventSocket } from "@/lib/events";
 import type { JobSource } from "@/lib/task-center";
@@ -125,6 +126,104 @@ describe("resetTasksForNewSetup", () => {
 });
 
 describe("createTask", () => {
+  it.each(["pending", "running"] as const)(
+    "marks an orphaned %s browser task interrupted after reload",
+    async (status) => {
+      tc.createTask({
+        title: "Upload holder/base.stl",
+        status,
+        detail: uiMessage("Queued"),
+        expectedJobCount: 1,
+        retryable: true,
+      });
+
+      vi.resetModules();
+      tc = await loadTaskCenter();
+      await tc.syncImportJobs();
+
+      const task = tc.listTasks()[0];
+      expect(task).toMatchObject({ status: "failed", progress: 100, retryable: false });
+      expect(tc.taskDetail(task)).toBe("Task interrupted. Start it again.");
+    },
+  );
+
+  it("allows clearing an orphaned browser upload after reload", async () => {
+    tc.createTask({ title: "Upload palette/base.stl", detail: "Queued", expectedJobCount: 1 });
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    await tc.syncImportJobs();
+    tc.clearCompletedTasks();
+
+    expect(tc.listTasks()).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("printstash:import-tasks:v1")!)).toEqual([]);
+  });
+
+  it("retains an interrupted upload session for recovery after reload", async () => {
+    tc.createTask({
+      title: "Upload holder.stl",
+      status: "running",
+      uploadSessionId: "recoverable-upload",
+    });
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      uploadSessionId: "recoverable-upload",
+      uploadPaused: true,
+      retryable: true,
+    });
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Upload interrupted. Select the same file to resume.",
+    );
+  });
+
+  it("keeps a grouped server upload active after reload", async () => {
+    const id = tc.createTask({
+      title: "Upload holder.stl",
+      status: "running",
+      expectedJobCount: 1,
+    });
+    tc.linkTaskToJob(id, "durable-mesh-job");
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    listJobs.mockResolvedValue([aJob({ job_id: "durable-mesh-job", state: "running" })]);
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      id,
+      status: "running",
+      jobIds: ["durable-mesh-job"],
+    });
+  });
+
+  it.each(["completed", "failed"] as const)(
+    "preserves a %s task summary after reload",
+    async (status) => {
+      const id = tc.createTask({
+        title: "Upload finished.stl",
+        status,
+        detail: "Original summary",
+      });
+
+      vi.resetModules();
+      tc = await loadTaskCenter();
+
+      expect(tc.listTasks()[0]).toMatchObject({ id, status, detail: "Original summary" });
+    },
+  );
+
+  it("keeps a live browser upload pending while syncing an idle server", async () => {
+    const id = tc.createTask({ title: "Upload holder.stl", detail: "Queued", expectedJobCount: 1 });
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ id, status: "pending", detail: "Queued" });
+  });
+
   it("marks a browser ZIP transfer interrupted after reload", async () => {
     tc.createTask({ title: "Prepare parts.zip", status: "running", archiveUploading: true });
 

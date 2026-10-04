@@ -163,7 +163,9 @@ function TaskRow({ task }: { task: TaskItem }) {
             task.jobKind !== "backups.create" &&
             task.jobKind !== "backups.automatic" && (
               <p className="mt-1 text-xs text-muted-foreground">
-                {uiText("Discovering total… Safe to close this view.")}
+                {task.jobId || task.jobIds?.length
+                  ? uiText("Discovering total… Safe to close this view.")
+                  : uiText("Keep this browser tab open until this task finishes.")}
               </p>
             )}
           {task.jobReason !== "derivative_group_disabled" &&

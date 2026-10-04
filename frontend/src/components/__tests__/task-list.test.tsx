@@ -46,6 +46,58 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it.each(["pending", "running"] as const)(
+    "warns that a %s browser upload needs its tab",
+    (status) => {
+      renderTaskList([task({ title: "Upload holder.stl", status })]);
+
+      expect(
+        screen.getByText("Keep this browser tab open until this task finishes."),
+      ).toBeVisible();
+      expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+    },
+  );
+
+  it.each([
+    { label: "direct", jobId: "server-job" },
+    { label: "grouped", jobIds: ["server-job"] },
+  ])("keeps the background hint for a $label server job", ({ label: _label, ...link }) => {
+    renderTaskList([task({ status: "running", ...link })]);
+
+    expect(screen.getByText("Discovering total… Safe to close this view.")).toBeVisible();
+    expect(screen.queryByText("Keep this browser tab open until this task finishes.")).toBeNull();
+  });
+
+  it("offers clearing an interrupted local upload", () => {
+    renderTaskList([
+      task({
+        title: "Upload holder.stl",
+        status: "failed",
+        detail: "Task interrupted. Start it again.",
+        detailMessage: uiMessage("Task interrupted. Start it again."),
+        retryable: false,
+      }),
+    ]);
+
+    expect(screen.getByText("Task interrupted. Start it again.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Clear done" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review and retry" })).toBeNull();
+  });
+
+  it("offers recovery controls for an interrupted upload session", () => {
+    renderTaskList([
+      task({
+        status: "failed",
+        uploadSessionId: "recoverable-upload",
+        uploadPaused: true,
+        retryable: true,
+      }),
+    ]);
+
+    expect(screen.getByText("Resume upload")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel upload" })).toBeVisible();
+  });
+
   it("links a similarity task to its analysis", () => {
     renderTaskList([
       task({
@@ -248,7 +300,9 @@ describe("TaskList", () => {
 
   it("localizes indefinite active progress copy", () => {
     setLocale("es");
-    renderTaskList([task({ status: "running", progress: 25, total: null })]);
+    renderTaskList([
+      task({ status: "running", jobId: "indefinite-server-job", progress: 25, total: null }),
+    ]);
 
     expect(screen.getByText("En curso")).toBeVisible();
     expect(
