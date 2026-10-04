@@ -12,7 +12,7 @@ import pytest
 
 from printstash_core.mesh import rasterizer, render_geometry
 from printstash_core.mesh.similarity import GeometryError, descriptors
-from printstash_core.mesh.similarity.geometry import prepare_surface
+from printstash_core.mesh.similarity.geometry import Surface, prepare_surface
 
 from ...paths import FIXTURES_DIR
 
@@ -235,9 +235,18 @@ class TestViews:
             if row["name"] == shape and row["ambiguous_frame"] is ambiguous_frame
         )
 
-        result = descriptors.view_hashes(
-            prepare_surface(vertices, faces), ambiguous_frame=ambiguous_frame
+        # Freeze the descriptor input; a cube's PCA frame can vary by NumPy version.
+        frozen = reference["surface"]
+        surface = Surface(
+            vertices=np.asarray(frozen["vertices"], dtype=np.float64),
+            faces=np.asarray(frozen["faces"], dtype=np.int64),
+            areas=np.asarray(frozen["areas"], dtype=np.float64),
+            centroid=np.asarray(frozen["centroid"], dtype=np.float64),
+            frame=np.asarray(frozen["frame"], dtype=np.float64),
+            eigenvalues=np.asarray(frozen["eigenvalues"], dtype=np.float64),
+            radius=frozen["radius"],
         )
+        result = descriptors.view_hashes(surface, ambiguous_frame=ambiguous_frame)
 
         assert (
             baseline["provenance"]["source_commit"]

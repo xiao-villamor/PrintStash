@@ -48,7 +48,11 @@ The fixtures were captured from commit
 NumPy 2.5.2 and Pillow 12.3.0. The core fixture records source geometry/digests and
 nine views of tetrahedron, box, thin plate and sphere, with exact PNG, RGBA,
 white RGB, alpha-ignored RGB and grayscale hashes. Four independent descriptor
-literals cover tetrahedron and cube with canonical and ambiguous frames. The
+literals cover tetrahedron and cube with canonical and ambiguous frames. Their
+complete historical `Surface` inputs are pinned too, so the renderer comparison
+does not recompute an arbitrary eigenframe for the isotropic cube on a different
+runtime. Separate existing tests continue to exercise real surface preparation
+and equivalent exports. The
 application fixture pins source bytes, recipe identity, preview RGB and six RGB
 view hashes from the complete legacy visual pass.
 
