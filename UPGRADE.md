@@ -1,5 +1,13 @@
 # PrintStash Upgrade Guide
 
+## Unreleased: Python 3.14
+
+Source installations of the application and shared core require Python 3.14 or
+newer. Recreate the backend virtual environment with Python 3.14 and run
+`uv sync --all-groups` before restarting API and worker processes. Development,
+CI and official images use Python 3.14.8; image installations need no host Python
+upgrade. Earlier Python runtimes are no longer supported.
+
 ## Unreleased: DBOS 3.0
 
 The embedded background engine upgrades from DBOS 2.31.1 to 3.0.0. Its first
