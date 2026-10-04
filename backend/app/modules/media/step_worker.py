@@ -1,4 +1,4 @@
-"""Disposable STEP tessellation worker used by mesh_processing.
+"""Disposable STEP tessellation worker used by mesh_loading.
 
 This module has no application state. The parent monitors its RSS and timeout,
 and only accepts an exported mesh below the configured triangle ceiling.

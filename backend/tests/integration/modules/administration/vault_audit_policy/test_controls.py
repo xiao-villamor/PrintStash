@@ -422,11 +422,17 @@ class TestVaultAuditPolicyControls:
             details_json=f'{{"file_id":{file.id}}}',
         )
 
-        def broken_renderer(*args):
+        renderer_calls = []
+
+        def broken_renderer(request, *, on_output):
+            assert request.path.read_bytes() == content
+            assert callable(on_output)
+            renderer_calls.append(request)
             raise ValueError("private-path-token-must-not-leak")
 
         monkeypatch.setattr(producers.mesh_isolation, "generate", broken_renderer)
         repair_safe_findings(db_session, run)
+        assert len(renderer_calls) == 1
         assert path.read_bytes() == content
         db_session.refresh(finding)
         assert finding.state == VaultAuditFindingState.OPEN

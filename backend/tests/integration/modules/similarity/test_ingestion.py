@@ -10,6 +10,7 @@ from app.modules.media.fingerprints import (
     FingerprintResultState,
     extract,
 )
+from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.mesh_resources import prepare_loaded_mesh
 from app.modules.similarity import configuration, ingestion
 from tests.factories.geometry import tetrahedron
@@ -28,7 +29,10 @@ class TestIngestDerivative:
                 get_session_factory(),
                 999,
                 None,
-                FingerprintResult(FingerprintResultState.FAILED),
+                FingerprintResult(
+                    FingerprintResultState.FAILED,
+                    failure_code=FingerprintFailureCode.SOURCE_UNAVAILABLE,
+                ),
                 source_sha256="a" * 64,
             )
             == "stale"
@@ -45,7 +49,8 @@ class TestIngestDerivative:
             file.id,
             actor.id,
             FingerprintResult(
-                FingerprintResultState.FAILED, failure_code="invalid_geometry"
+                FingerprintResultState.FAILED,
+                failure_code=FingerprintFailureCode.INVALID_GEOMETRY,
             ),
             source_sha256=file.sha256,
         )
@@ -195,7 +200,10 @@ class TestIngestDerivative:
             get_session_factory(),
             file.id,
             actor.id,
-            FingerprintResult(FingerprintResultState.FAILED, failure_code="old-result")
+            FingerprintResult(
+                FingerprintResultState.FAILED,
+                failure_code=FingerprintFailureCode.ANALYSIS_FAILED,
+            )
             if cached
             else result,
             source_sha256=file.sha256,

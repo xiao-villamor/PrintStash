@@ -27,6 +27,15 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from printstash_core.mesh.measurements import (
+    VolumeLegacyUnassessed,
+    VolumeMeasured,
+    VolumeNotCalculated,
+    VolumeNotCalculatedCause,
+    VolumeUnavailable,
+    VolumeUnavailableCause,
+    encode_volume,
+)
 from printstash_core.search.passages import SearchSubject, SubjectType
 from sqlmodel import Session, select
 
@@ -46,6 +55,7 @@ from app.db.models import (
 )
 from app.db.scopes import live, trashed
 from app.modules.library import taxonomy
+from app.modules.library.model_views.projections import metadata_read
 from tests import factories
 from tests.factories.library_scale import build_library_at_scale
 
@@ -138,6 +148,27 @@ class TestGeneratedIdentities:
         # The autouse `_reset_factory_counters` fixture does this per test, which
         # is what makes `model-1` in a failure message mean something.
         assert factories.build_model(db_session).slug == first_run
+
+
+class TestBuildMetadata:
+    @pytest.mark.parametrize(
+        "volume",
+        [
+            VolumeMeasured(6e-9),
+            VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+            VolumeNotCalculated(VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED),
+            VolumeLegacyUnassessed(-1.0),
+        ],
+    )
+    def test_publishes_requested_volume_evidence(self, db_session, volume):
+        model = factories.build_model(db_session)
+        artifact = factories.build_file(db_session, model)
+        metadata = factories.build_metadata(db_session, artifact, volume=volume)
+
+        public = metadata_read(db_session, metadata).model_dump(mode="json")
+
+        assert public["volume_measurement"] == encode_volume(volume)
+        assert public["volume_mm3"] == public["volume_measurement"]["value_mm3"]
 
 
 class TestBuildSystemConfig:

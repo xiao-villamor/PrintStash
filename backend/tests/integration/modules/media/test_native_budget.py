@@ -77,4 +77,4 @@ class TestAdmittedGeometry:
         with admit(amount, Resources(4, 4 * 1024**3), checkpoint=lambda: None):
             cap = mesh_processing._ram_triangle_cap(".stl")
 
-        assert cap == (512 * 1024**2) // 2200
+        assert cap == (512 * 1024**2) // 3000

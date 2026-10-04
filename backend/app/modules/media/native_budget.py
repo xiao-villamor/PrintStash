@@ -16,13 +16,17 @@ from pathlib import Path
 
 from app.runtime.native_admission import Resources
 
-# Cold mesh_worker + NumPy + trimesh + scipy.spatial measured 399 MiB virtual
-# memory / 160 MiB RSS on Python 3.12 Linux x86_64. This floor leaves startup
+# Cold NumPy + trimesh + scipy.spatial imports measured 293 MiB virtual
+# memory / 112 MiB RSS on Python 3.14.8 Linux x86_64 with the current numeric
+# stack (NumPy 2.5.3, SciPy 1.18.1, Trimesh 5.1.1). This floor leaves startup
 # headroom for small jobs. The per-face coefficients below describe the whole
 # pipeline peak, including allocator/render buffers, rather than marginal cost.
 MIN_NATIVE_MEMORY = 512 * 1024**2
 FALLBACK_MEMORY = 2 * 1024**3
-DEFAULT_FACE_BYTES = 2200
+# A real 300k-facet STL measured ~754 MB peak virtual memory on this stack;
+# the former 2200 B/face claim (660 MB) refused valid topology measurement.
+# 3000 B/face leaves scheduling headroom for the bootstrap's hard AS ceiling.
+DEFAULT_FACE_BYTES = 3000
 THREE_MF_FACE_BYTES = 3600
 
 

@@ -147,7 +147,16 @@ def collect_environment() -> BenchmarkEnvironment:
     except (AttributeError, OSError, ValueError):
         memory = None
     versions: dict[str, str | None] = {}
-    for package in ("numpy", "trimesh", "pillow", "printstash-core", "cascadio"):
+    for package in (
+        "numpy",
+        "scipy",
+        "trimesh",
+        "pillow",
+        "printstash-core",
+        "dbos",
+        "cascadio",
+        "cadquery-ocp-novtk",
+    ):
         try:
             versions[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:

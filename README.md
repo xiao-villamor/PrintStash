@@ -20,7 +20,7 @@ Model. Run it on your own server with SQLite and local disk to get started.
 [![CI](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml/badge.svg)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
 [![Docker image](https://img.shields.io/badge/ghcr.io-printstash-2496ED?logo=docker&logoColor=white&style=flat-square)](https://github.com/xiao-villamor/PrintStash/pkgs/container/printstash-api)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
-![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&style=flat-square)
+![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-3776AB?logo=python&style=flat-square)
 ![React 19](https://img.shields.io/badge/react-19-61DAFB?logo=react&style=flat-square)
 ![Vite](https://img.shields.io/badge/vite-8-646CFF?logo=vite&style=flat-square)
 ![Status: beta](https://img.shields.io/badge/status-beta%20%C2%B7%20self--hosted-f59e0b?style=flat-square)

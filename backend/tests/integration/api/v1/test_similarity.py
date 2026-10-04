@@ -5,7 +5,11 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import select
 
-from app.db.models import SimilarityRun
+from app.db.models import (
+    GeometryFingerprint,
+    SimilarityCandidateObservation,
+    SimilarityRun,
+)
 
 
 @pytest.fixture
@@ -214,6 +218,47 @@ class TestPersistedResults:
         assert result["model_b"]["id"] == current_pair.model_b_id
         assert len(result["observations"]) == 1
         assert result["exact_equivalence"] is True
+
+    def test_obsolete_interpretation_is_excluded_from_current_results(
+        self, client, auth_headers, current_pair, db_session
+    ):
+        previous = "geometry-v4-sh5f4577c4"
+        current_pair.algorithm_version = previous
+        db_session.add(current_pair)
+        observation = db_session.exec(
+            select(SimilarityCandidateObservation).where(
+                SimilarityCandidateObservation.candidate_id == current_pair.id
+            )
+        ).one()
+        for fingerprint_id in (
+            observation.fingerprint_a_id,
+            observation.fingerprint_b_id,
+        ):
+            fingerprint = db_session.get(GeometryFingerprint, fingerprint_id)
+            fingerprint.algorithm_version = previous
+            db_session.add(fingerprint)
+        db_session.commit()
+
+        current = client.get(
+            "/api/v1/similarity/candidates?freshness=current", headers=auth_headers
+        )
+        assert current.status_code == 200, current.text
+        assert current.json()["items"] == []
+        stale = client.get(
+            "/api/v1/similarity/candidates?freshness=stale", headers=auth_headers
+        )
+        assert stale.status_code == 200, stale.text
+        assert [item["id"] for item in stale.json()["items"]] == [current_pair.id]
+        detail = stale.json()["items"][0]
+        assert detail["freshness"] == "stale"
+        assert "confirm_evidence" not in detail["allowed_actions"]
+        summary = client.get(
+            f"/api/v1/models/{current_pair.model_a_id}/similar", headers=auth_headers
+        )
+        assert summary.status_code == 200, summary.text
+        assert [item["id"] for item in summary.json()["items"]] == [current_pair.id]
+        assert summary.json()["items"][0]["freshness"] == "stale"
+        assert "confirm_evidence" not in summary.json()["items"][0]["allowed_actions"]
 
     def test_scopes_cached_candidates_to_model(
         self, client, auth_headers, current_pair, make_model, make_similarity_candidate

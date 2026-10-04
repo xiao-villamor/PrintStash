@@ -123,7 +123,7 @@ def is_valid_container(path: Path) -> bool:
                     if expected_checksum != (checksum & 0xFFFFFFFF):
                         return False
             return False
-    except (OSError, struct.error, ValueError):
+    except OSError, struct.error, ValueError:
         return False
 
 

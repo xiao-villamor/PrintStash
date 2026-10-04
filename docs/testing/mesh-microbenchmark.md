@@ -1,0 +1,21 @@
+# Mesh microbenchmark behaviour matrix
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 1 | retains returned stage statistics | Happy | rendered image with typed phase statistics | exact ordered phases/counters retained | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_returned_stage_statistics |
+| 2 | retains refusal stage statistics | Error | no image, failed load phase returned | failed phase remains in render sample | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_refusal_stage_statistics |
+| 3 | retains stages after encoding failure | Error | result returned; WebP conversion raises | returned stages preserved beside encoding error | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_stages_after_encoding_failure |
+| 4 | distinguishes missing stage evidence | Error | generate raises before return | phase_stats is empty, attempt error/cost preserved | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_unexpected_engine_failure |
+| 5 | identifies sample order | Happy | two renders, two persisted reads | indices 1 and 2 per lane | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_identifies_sample_order |
+| 6 | serializes real phase evidence | Happy | real CLI cube render | schema4 typed phase fields/timing/encoded size JSON | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_serializes_real_phase_evidence |
+| 7 | serializes refused phase evidence | Error | real malformed fixture | returned failed stage cost retained | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_serializes_refused_phase_evidence |
+| 8 | declares applied recipes | Happy | thumbnail-only microbench | geometry/fingerprint disabled and not attributed | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_declares_applied_recipes |
+| 9 | describes cache conditions | Edge | same interpreter, persisted private storage | sample/corpus order, uncontrolled OS cache, temp storage, publication setup, median exclusions explicit | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_describes_measurement_boundaries |
+| 10 | records additional dependency versions | Happy | installed scipy/dbos/STEP package metadata | exact values in environment version map | Unit | ✅ unit/scripts/test_benchmark_environment.py::TestCollectEnvironment::test_records_additional_dependency_versions |
+| 11 | preserves absent optional dependencies | Edge | optional distributions unavailable | explicit null for absent versions | Unit | ✅ unit/scripts/test_benchmark_environment.py::TestCollectEnvironment::test_preserves_absent_optional_dependencies |
+| 12 | retains real persisted output equality | Happy | rendered output published once | read bytes/hash equal final successful output | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestMain::test_reads_persisted_representation |
+| 13 | distinguishes publication errors | Error | storage write fails | publication error and no fabricated reads | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_publication_failure |
+| 14 | distinguishes failed read cost | Error | representation read fails | attempts/errors elapsed cost retained | Unit | ✅ unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_representation_read_failure |
+| 15 | preserves target contracts separately | Edge | fourteen frozen inputs | expected corpus separated from observed renders | Integration | ✅ integration/scripts/test_bench_thumbnails.py::TestContractCorpus::test_reports_target_contract_separately_from_observed_renders |
+
+Verification: test-first red15failed/23passed (48.01s), then focused green38passed (49.66s), covering both unit files and integration CLI file. Ruff check/format, git diff --check and Pyright for the two changed scripts passed. No Deep/full/fast broad gate was run. This matrix assesses the microbenchmark. See [pipeline observations](mesh-pipeline-benchmark.md) for native worker and application availability measurements.

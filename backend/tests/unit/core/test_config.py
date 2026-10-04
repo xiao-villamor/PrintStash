@@ -202,3 +202,41 @@ class TestDerivativeDefaults:
     def test_reads_a_disabled_environment_default(self, monkeypatch, name):
         monkeypatch.setenv(f"VAULT_{name.upper()}", "false")
         assert getattr(FrozenSettings(_env_file=None), name) is False
+
+
+class TestInferenceResidencySettings:
+    def test_defaults_to_a_bounded_model_partition(self, monkeypatch):
+        for name in (
+            "EMBEDDING_MEMORY_BUDGET_FRACTION",
+            "EMBEDDING_RESIDENT_WORKERS",
+            "EMBEDDING_WORKER_MEMORY_MB",
+        ):
+            monkeypatch.delenv(f"VAULT_{name}", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert configured.embedding_memory_budget_fraction == 0.25
+        assert configured.embedding_resident_workers == 1
+        assert configured.embedding_worker_memory_mb == 1024
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("embedding_memory_budget_fraction", 0),
+            ("embedding_memory_budget_fraction", 1),
+            ("embedding_memory_budget_fraction", float("nan")),
+            ("embedding_resident_workers", 0),
+            ("embedding_resident_workers", 3),
+            ("embedding_worker_memory_mb", 511),
+        ],
+    )
+    def test_rejects_an_invalid_model_partition(self, field, value):
+        with pytest.raises(ValidationError):
+            FrozenSettings(_env_file=None, **{field: value})
+
+    def test_reads_the_model_partition_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION", "0.2")
+        monkeypatch.setenv("VAULT_EMBEDDING_RESIDENT_WORKERS", "2")
+        monkeypatch.setenv("VAULT_EMBEDDING_WORKER_MEMORY_MB", "768")
+        configured = FrozenSettings(_env_file=None)
+        assert configured.embedding_memory_budget_fraction == 0.2
+        assert configured.embedding_resident_workers == 2
+        assert configured.embedding_worker_memory_mb == 768

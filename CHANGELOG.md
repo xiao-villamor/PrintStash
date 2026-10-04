@@ -1,10 +1,40 @@
 # Changelog
 
 ## Unreleased
+
+- Local ONNX models reserve a shared, bounded memory partition across API and worker processes, retain warm reuse, retire idle residents under pressure, and release their credits after guarded process-tree termination.
+
+**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).
+
 - Coordinate mesh CPU/RAM credits across local API and worker processes. Bound
   source preparation separately by bytes and I/O slots, retain native credits
   through descendant cleanup, and recover abandoned source copies before reuse.
   Report queue time independently of native execution.
+- Keep backup and vault audit clock inputs within valid minutes on Python 3.14; reject `24:00` rather than treating it as midnight.
+- Preserve traceable printer display names for extension-only and genuinely named inputs on Python 3.14.
+- Require Python 3.14 for the application and shared core, pin development and container runtimes to 3.14.8, and update the mesh stack to NumPy 2.5.3, SciPy 1.18.1 and Trimesh 5.1.1.
+- Publish mesh metadata and thumbnails before optional fingerprints finish, with durable bounded recovery that preserves completed outputs after native failures.
+- Reuse immutable mesh positions and smooth normals across each visual pass.
+  Embedding views and similarity view hashes consume pixels directly without
+  repeated PNG encoding and decoding, while preserving existing preview bytes
+  and descriptor identities.
+- Retain unique 3MF resources and explicit placements through measurement and
+  preview rendering. Measure repeated instances without first allocating a whole
+  placed mesh, materialize only for admitted fingerprints or global topology,
+  and release that mesh before rendering. Keep exact dimensions and counts when
+  optional volume or fingerprint analysis fails, with explicit volume evidence.
+  Preserve finite volume when source and placement scales compensate, and clear
+  measurement topology caches before rendering even without fingerprints.
+  Refresh mesh outputs under the new eligibility and budget policy.
+- Share bounded STL source validation across measurements, full loading, fallback
+  samples and streamed previews. Validate complete source facets and stable EOF
+  before reporting coverage, retain exact full-source bounds and counts for
+  partial samples, and refuse malformed or changed sources consistently.
+- Interpret reachable Core 3MF geometry and Production external model references
+  through an explicit bounded scene reader. Refuse unsupported required
+  capabilities with typed metadata, similarity and viewer reasons while retaining
+  original downloads and independently usable embedded previews. Refresh mesh
+  derivative recipes without introducing a Lib3MF dependency.
 - Keep mesh measurements and previews available when optional fingerprint analysis
   exceeds its triangle budget, and release analysis buffers before STL rendering fallbacks.
   Re-derive earlier terminal refusals at updated mesh recipes.
@@ -22,6 +52,16 @@ rolling back requires discarding the upgraded, disposable engine state first.
 See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Added
+
+- Measure mesh rendering, supervised native workers and upload-to-visible
+  production DBOS ingestion through separate reproducible benchmark paths.
+  Preserve phase costs, resource observations and failed samples, with an expanded
+  versioned corpus and opt-in large inputs and hash-pinned real slicer projects.
+- Publish explicit mesh volume state, method and cause independently of similarity
+  fingerprints. Preserve historical scalar provenance, keep small measurements
+  unrounded and evaluate signed volume accurately across large translations.
+  Reject nonphysical dimensions before publication and repair unusable historical
+  measurements during the additive upgrade.
 
 - Add a frozen synthetic mesh contract corpus and record benchmark environment, limits, versions and target expectations separately from observed render results.
 
@@ -46,6 +86,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   will be removed in 0.16.
 
 ### Fixed
+
+- Bounded STL previews report whether all source triangles are represented independently from a complete source scan. Mesh processing now uses separate admission, loading, measurement and preview owners with validated geometry and fingerprint contracts.
 - Mesh workers reject unknown or malformed fingerprint result states before publication.
 - Capture and similarity commands keep the API event loop responsive through database writes, background-engine notification and response projection.
 - Preserve existing paired Point model manifests and native encoder alignment when mesh rendering recipes change. Visual vector caches still track their rendering recipe.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,30 @@ class TestCollectEnvironment:
 
         assert result.commit is None
         assert result.working_tree_dirty is None
+
+    @pytest.mark.parametrize(
+        "package", ["scipy", "dbos", "cadquery-ocp-novtk"], ids=str
+    )
+    def test_records_additional_dependency_versions(
+        self, package: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(importlib.metadata, "version", lambda name: "1.2.3")
+
+        result = benchmark_environment.collect_environment()
+
+        assert result.versions[package] == "1.2.3"
+
+    @pytest.mark.parametrize(
+        "package", ["scipy", "cascadio", "cadquery-ocp-novtk"], ids=str
+    )
+    def test_preserves_absent_optional_dependencies(
+        self, package: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def absent(name: str) -> str:
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        monkeypatch.setattr(importlib.metadata, "version", absent)
+
+        result = benchmark_environment.collect_environment()
+
+        assert result.versions[package] is None

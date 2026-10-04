@@ -1,9 +1,9 @@
 """Real-file OOM / memory coverage for mesh processing (issue #29).
 
 The cap logic in ``test_mesh_limits.py`` is fast but synthetic — it monkeypatches
-``_load_mesh`` so the real trimesh load/render never runs. These tests close that
+``mesh_loading.load_mesh`` so the real trimesh load/render never runs. These tests close that
 gap: they build *real* meshes with trimesh and drive the genuine
-``analyze_mesh`` path (real load, real rasteriser, real ``_reclaim_memory``), so
+``ThumbnailEngine`` path (real load, real rasteriser, real ``mesh_policy.reclaim_memory``), so
 a regression in the actual loader/renderer/guard is caught, not just the routing.
 
 Three layers:
@@ -13,7 +13,7 @@ Three layers:
   thumbnails; a real compression-bomb 3MF is caught without being decompressed.
 * **Real happy path** — a real dense mesh still produces geometry + a PNG.
 * **Leak detector** — processing the same real mesh many times must not grow
-  resident memory, proving ``_reclaim_memory`` actually hands freed buffers back
+  resident memory, proving ``mesh_policy.reclaim_memory`` actually hands freed buffers back
   to the OS instead of letting a long scan ratchet RSS upward.
 
 A real-world corpus (the user's own NAS files — a ~900 MB 3MF, high-poly scans,
@@ -30,15 +30,27 @@ from pathlib import Path
 
 import psutil
 import pytest
+from printstash_core.mesh.measurements import VolumeMeasured
 
 from app.core.config import _overlay
-from app.modules.media import mesh_processing
-from app.modules.media.mesh_contracts import ThumbnailFailureReason, ThumbnailStrategy
+from app.modules.media import (
+    mesh_policy,
+    mesh_previews,
+)
+from app.modules.media.mesh_contracts import (
+    GeometryNotLoaded,
+    GeometryReady,
+    GeometryRefused,
+    PreviewCoverage,
+    SourceScanState,
+    ThumbnailFailureReason,
+    ThumbnailStrategy,
+)
 from tests.factories.geometry import three_mf
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
 from tests.paths import TESTDATA_DIR
 
-# mesh_processing lazy-imports trimesh, so importing it above is safe without it;
+# Loading owners lazy-import trimesh, so importing them is safe without it;
 # skip the whole module when trimesh itself is unavailable (these build real meshes).
 trimesh = pytest.importorskip("trimesh")
 
@@ -112,7 +124,7 @@ class TestLoadMesh:
         assert geometry["triangle_count"] == tri
         assert geometry["bbox_x_mm"] and geometry["bbox_x_mm"] > 0
         assert is_partial_render(result)
-        assert thumb.startswith(mesh_processing._PNG_MAGIC)
+        assert thumb.startswith(mesh_previews._PNG_MAGIC)
 
     def test_real_oversize_file_uses_streaming_fallback(
         self, tmp_path: Path, monkeypatch
@@ -131,14 +143,15 @@ class TestLoadMesh:
         assert geometry["triangle_count"] == tri
         assert geometry["bbox_x_mm"] and geometry["bbox_x_mm"] > 0
         assert is_partial_render(result)
-        assert thumb.startswith(mesh_processing._PNG_MAGIC)
+        assert thumb.startswith(mesh_previews._PNG_MAGIC)
 
     def test_real_compression_bomb_3mf_is_not_decompressed(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        # A real ZIP whose .model deflates from a few KB on disk to a huge mesh. The
-        # estimate reads the *uncompressed* size from the zip directory and skips it,
-        # so trimesh never decompresses the bomb. The embedded preview still stands in.
+        # A real ZIP whose .model deflates from a few KB on disk to a huge mesh.
+        # 3MF has no size-based triangle estimate. The bounded scene reader checks
+        # decoded size/compression ratio before opening model XML; the independent
+        # embedded preview remains usable.
         #
         # The preview has to be a *real* PNG: the early-thumbnail path decodes every
         # candidate (issue #82) rather than trusting the magic bytes, so a stub of
@@ -152,15 +165,27 @@ class TestLoadMesh:
             zf.writestr("3D/3dmodel.model", b"<triangle/>" * 2_000_000)  # tiny on disk
             zf.writestr("Metadata/thumbnail.png", png)
         assert p.stat().st_size < 200_000  # compressed small...
-        # ...but the uncompressed estimate is huge, so it's skipped.
-        assert mesh_processing._estimate_triangle_count(p) > 1000
+        assert mesh_policy.estimate_triangle_count(p) is None
+        opened_members = []
+        original_open = zipfile.ZipFile.open
+
+        def observe_open(archive, member, *args, **kwargs):
+            name = member.filename if isinstance(member, zipfile.ZipInfo) else member
+            opened_members.append(name)
+            return original_open(archive, member, *args, **kwargs)
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", observe_open)
 
         result = analyze(p)
         geometry, thumb = result.geometry, result.image
         assert geometry["triangle_count"] is None
         assert thumb == png
+        assert "Metadata/thumbnail.png" in opened_members
+        assert "3D/3dmodel.model" not in opened_members
+        assert isinstance(result.geometry_outcome, GeometryRefused)
+        assert result.geometry_outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
 
-    def test_instanced_3mf_over_budget_keeps_embedded_preview(
+    def test_instanced_3mf_preserves_measurements_with_embedded_preview(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 50)
@@ -173,26 +198,49 @@ class TestLoadMesh:
                 extras={"Metadata/thumbnail.png": preview},
             )
         )
-        assert mesh_processing._estimate_triangle_count(path) < 50
+        assert mesh_policy.estimate_triangle_count(path) is None
 
         result = analyze(path)
 
         assert result.strategy is ThumbnailStrategy.EMBEDDED
         assert result.image == preview
-        assert result.geometry["triangle_count"] is None
+        assert isinstance(result.geometry_outcome, GeometryReady)
+        assert result.geometry == {
+            "triangle_count": 80,
+            "bbox_x_mm": 10.0,
+            "bbox_y_mm": 20.0,
+            "bbox_z_mm": 30.0,
+            "volume_mm3": 20000.0,
+        }
+        assert result.volume == VolumeMeasured(20000.0)
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert isinstance(result.coverage.geometry, GeometryNotLoaded)
+        assert result.coverage.preview is PreviewCoverage.DOCUMENT_SUPPLIED
+        assert result.failure_reason is None
 
-    def test_instanced_3mf_over_budget_without_preview_reports_resource_limit(
+    def test_instanced_3mf_preserves_measurements_when_render_is_refused(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 50)
         path = tmp_path / "repeated-no-preview.3mf"
         path.write_bytes(three_mf(assemblies={2: [(1, None)]}, build=((2, None),) * 20))
-        assert mesh_processing._estimate_triangle_count(path) < 50
+        assert mesh_policy.estimate_triangle_count(path) is None
 
         result = analyze(path)
 
         assert result.image is None
-        assert result.geometry["triangle_count"] is None
+        assert isinstance(result.geometry_outcome, GeometryReady)
+        assert result.geometry == {
+            "triangle_count": 80,
+            "bbox_x_mm": 10.0,
+            "bbox_y_mm": 20.0,
+            "bbox_z_mm": 30.0,
+            "volume_mm3": 20000.0,
+        }
+        assert result.volume == VolumeMeasured(20000.0)
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert isinstance(result.coverage.geometry, GeometryNotLoaded)
+        assert result.coverage.preview is PreviewCoverage.NOT_PRODUCED
         assert result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT
 
     def test_real_dense_mesh_renders(self, tmp_path: Path, monkeypatch) -> None:
@@ -205,7 +253,7 @@ class TestLoadMesh:
         geometry, thumb = result.geometry, result.image
         assert geometry["triangle_count"] == tri
         assert geometry["bbox_x_mm"] and geometry["bbox_x_mm"] > 0
-        assert thumb is not None and thumb.startswith(mesh_processing._PNG_MAGIC)
+        assert thumb is not None and thumb.startswith(mesh_previews._PNG_MAGIC)
 
     def test_analysis_retains_no_mesh_afterwards(
         self, tmp_path: Path, monkeypatch

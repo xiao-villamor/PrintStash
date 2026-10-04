@@ -70,7 +70,7 @@ class TestLocalProvider:
         monkeypatch.setattr(
             provider,
             "_spawn",
-            lambda: subprocess.Popen(
+            lambda **_kwargs: subprocess.Popen(
                 [sys.executable, faulty_embedding_worker.__file__, mode],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -282,9 +282,9 @@ class TestLocalProvider:
             provider.embed((EmbeddingInput("text", text="red"),) * 9, provider.space)
 
     def test_contains_worker_memory_limit(self, db_session, assets, monkeypatch):
-        from app.modules.inference import local
+        from app.core.config import _overlay
 
-        monkeypatch.setattr(local, "native_memory_budget_bytes", lambda: 1)
+        monkeypatch.setitem(_overlay, "embedding_worker_memory_mb", 1)
         provider = LocalEmbeddingProvider(
             get_session_factory(), assets, "two-tower-contract", 1
         )

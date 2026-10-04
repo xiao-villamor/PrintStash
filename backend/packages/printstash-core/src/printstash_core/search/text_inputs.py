@@ -45,7 +45,7 @@ class TextRecipe:
     def for_space(cls, space: EmbeddingSpace):
         try:
             return cls(**json.loads(space.render_recipe))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise EmbeddingError("search_recipe_unavailable") from None
 
 

@@ -13,12 +13,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   FROZEN_NOW,
+  aMetadata,
   aModelListItem,
   aPrinter,
   aPrintJob,
   printerAccess,
   printerCapabilities,
 } from "@/test-support/factories";
+
+import type { VolumeMeasurement } from "@/types/models";
 
 describe("aPrinter", () => {
   it("returns a reachable printer the caller may operate", () => {
@@ -129,5 +132,263 @@ describe("aModelListItem", () => {
 
   it("applies an override", () => {
     expect(aModelListItem({ name: "Gearbox" }).name).toBe("Gearbox");
+  });
+});
+
+describe("aMetadata", () => {
+  it("returns pending volume evidence", () => {
+    const metadata = aMetadata();
+
+    expect(metadata.volume_mm3).toBeNull();
+    expect(metadata.volume_measurement).toEqual({
+      state: "not_calculated",
+      unit: "mm3",
+      method: null,
+      value_mm3: null,
+      cause: "enrichment_pending",
+    });
+  });
+
+  it("derives the scalar from measured evidence", () => {
+    const metadata = aMetadata({
+      volume_measurement: {
+        state: "measured",
+        unit: "mm3",
+        method: "mesh_surface_integral",
+        value_mm3: 100,
+        cause: null,
+      },
+    });
+
+    expect(metadata.volume_mm3).toBe(100);
+    expect(metadata.volume_measurement).toEqual({
+      state: "measured",
+      unit: "mm3",
+      method: "mesh_surface_integral",
+      value_mm3: 100,
+      cause: null,
+    });
+  });
+
+  it("accepts an exactly matching measured scalar", () => {
+    const metadata = aMetadata({
+      volume_mm3: 100,
+      volume_measurement: {
+        state: "measured",
+        unit: "mm3",
+        method: "mesh_surface_integral",
+        value_mm3: 100,
+        cause: null,
+      },
+    });
+
+    expect(metadata.volume_mm3).toBe(metadata.volume_measurement.value_mm3);
+    expect(metadata.volume_measurement.state).toBe("measured");
+  });
+
+  it.each([
+    "not_watertight",
+    "inconsistent_winding",
+    "non_positive_integral",
+    "nonfinite_integral",
+    "measurement_failed",
+  ] as const)("preserves unavailable volume causes: %s", (cause) => {
+    const metadata = aMetadata({
+      volume_measurement: {
+        state: "unavailable",
+        unit: "mm3",
+        method: "mesh_surface_integral",
+        value_mm3: null,
+        cause,
+      },
+    });
+
+    expect(metadata.volume_mm3).toBeNull();
+    expect(metadata.volume_measurement).toEqual({
+      state: "unavailable",
+      unit: "mm3",
+      method: "mesh_surface_integral",
+      value_mm3: null,
+      cause,
+    });
+  });
+
+  it.each([
+    "enrichment_pending",
+    "not_applicable",
+    "not_requested",
+    "geometry_unavailable",
+    "topology_not_evaluated",
+  ] as const)("preserves not calculated volume causes: %s", (cause) => {
+    const metadata = aMetadata({
+      volume_measurement: {
+        state: "not_calculated",
+        unit: "mm3",
+        method: null,
+        value_mm3: null,
+        cause,
+      },
+    });
+
+    expect(metadata.volume_mm3).toBeNull();
+    expect(metadata.volume_measurement).toEqual({
+      state: "not_calculated",
+      unit: "mm3",
+      method: null,
+      value_mm3: null,
+      cause,
+    });
+  });
+
+  it.each([
+    { label: "null", value: null },
+    { label: "zero", value: 0 },
+    { label: "positive", value: 100 },
+    { label: "negative", value: -100 },
+  ])("preserves historical scalar as unassessed: $label", ({ value }) => {
+    const metadata = aMetadata({ volume_mm3: value });
+
+    expect(metadata.volume_mm3).toBe(value);
+    expect(metadata.volume_measurement).toEqual({
+      state: "legacy_unassessed",
+      unit: "mm3",
+      method: null,
+      value_mm3: value,
+      cause: null,
+    });
+  });
+
+  it("preserves explicit legacy evidence", () => {
+    const metadata = aMetadata({
+      volume_measurement: {
+        state: "legacy_unassessed",
+        unit: "mm3",
+        method: null,
+        value_mm3: 0,
+        cause: null,
+      },
+    });
+
+    expect(metadata.volume_mm3).toBe(0);
+    expect(metadata.volume_measurement).toEqual({
+      state: "legacy_unassessed",
+      unit: "mm3",
+      method: null,
+      value_mm3: 0,
+      cause: null,
+    });
+  });
+
+  it("does not share default volume evidence", () => {
+    const first = aMetadata();
+    const second = aMetadata();
+
+    Object.assign(first.volume_measurement, { cause: "not_requested" });
+    expect(first.volume_measurement).not.toBe(second.volume_measurement);
+    expect(second.volume_measurement).toEqual({
+      state: "not_calculated",
+      unit: "mm3",
+      method: null,
+      value_mm3: null,
+      cause: "enrichment_pending",
+    });
+  });
+
+  it("copies caller volume evidence", () => {
+    const evidence: VolumeMeasurement = {
+      state: "measured",
+      unit: "mm3",
+      method: "mesh_surface_integral",
+      value_mm3: 100,
+      cause: null,
+    };
+    const metadata = aMetadata({ volume_measurement: evidence });
+
+    evidence.value_mm3 = 200;
+
+    expect(metadata.volume_measurement.value_mm3).toBe(100);
+    expect(metadata.volume_mm3).toBe(100);
+  });
+
+  it("preserves unrelated metadata overrides", () => {
+    const metadata = aMetadata({ triangle_count: 12, material_type: "PLA" });
+
+    expect(metadata.triangle_count).toBe(12);
+    expect(metadata.material_type).toBe("PLA");
+  });
+
+  it.each([
+    {
+      state: "measured",
+      unit: "mm3",
+      method: "mesh_surface_integral",
+      value_mm3: 100,
+      cause: null,
+    },
+    {
+      state: "unavailable",
+      unit: "mm3",
+      method: "mesh_surface_integral",
+      value_mm3: null,
+      cause: "not_watertight",
+    },
+    {
+      state: "not_calculated",
+      unit: "mm3",
+      method: null,
+      value_mm3: null,
+      cause: "topology_not_evaluated",
+    },
+    { state: "legacy_unassessed", unit: "mm3", method: null, value_mm3: 0, cause: null },
+  ] satisfies VolumeMeasurement[])("rejects conflicting volume scalars: $state", (evidence) => {
+    expect(() => aMetadata({ volume_mm3: 200, volume_measurement: evidence })).toThrow(
+      "Volume evidence must match volume_mm3",
+    );
+  });
+
+  it.each([
+    { label: "zero", value: 0 },
+    { label: "negative", value: -100 },
+    { label: "NaN", value: Number.NaN },
+    { label: "infinity", value: Number.POSITIVE_INFINITY },
+    { label: "negative infinity", value: Number.NEGATIVE_INFINITY },
+  ])("rejects invalid measured volumes: $label", ({ value }) => {
+    expect(() =>
+      aMetadata({
+        volume_measurement: {
+          state: "measured",
+          unit: "mm3",
+          method: "mesh_surface_integral",
+          value_mm3: value,
+          cause: null,
+        },
+      }),
+    ).toThrow("Measured volume must be finite and positive");
+  });
+
+  it.each([
+    { label: "NaN", value: Number.NaN },
+    { label: "infinity", value: Number.POSITIVE_INFINITY },
+    { label: "negative infinity", value: Number.NEGATIVE_INFINITY },
+  ])("rejects nonfinite historical scalars: $label", ({ value }) => {
+    expect(() => aMetadata({ volume_mm3: value })).toThrow("Legacy volume must be finite");
+  });
+
+  it.each([
+    { label: "NaN", value: Number.NaN },
+    { label: "infinity", value: Number.POSITIVE_INFINITY },
+    { label: "negative infinity", value: Number.NEGATIVE_INFINITY },
+  ])("rejects nonfinite explicit legacy evidence: $label", ({ value }) => {
+    expect(() =>
+      aMetadata({
+        volume_measurement: {
+          state: "legacy_unassessed",
+          unit: "mm3",
+          method: null,
+          value_mm3: value,
+          cause: null,
+        },
+      }),
+    ).toThrow("Legacy volume must be finite");
   });
 });

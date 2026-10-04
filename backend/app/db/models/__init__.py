@@ -156,6 +156,7 @@ from .media import (
 from .media import (
     DerivativeRegeneration as DerivativeRegeneration,
 )
+from .media import MeshFingerprintContinuation as MeshFingerprintContinuation
 from .notifications import (
     NotificationChannel as NotificationChannel,
 )

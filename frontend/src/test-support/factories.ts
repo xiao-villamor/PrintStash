@@ -1,3 +1,4 @@
+import type { VolumeMeasurement } from "@/types/models";
 import type { ArtifactCacheRead } from "@/lib/api/artifact-cache";
 /**
  * Builders for API-shaped objects — the frontend's arrange step.
@@ -331,10 +332,43 @@ export function aRevision(
   };
 }
 
-/** Unknown measurements stay unknown until a parser supplies them. */
+/** Scalar-only overrides retain legacy provenance; certified values require evidence. */
 export function aMetadata(
   override: Partial<import("@/types").MetadataRead> = {},
 ): import("@/types").MetadataRead {
+  const measurement: VolumeMeasurement =
+    override.volume_measurement ??
+    (override.volume_mm3 !== undefined
+      ? {
+          state: "legacy_unassessed",
+          unit: "mm3",
+          method: null,
+          value_mm3: override.volume_mm3,
+          cause: null,
+        }
+      : {
+          state: "not_calculated",
+          unit: "mm3",
+          method: null,
+          value_mm3: null,
+          cause: "enrichment_pending",
+        });
+  if (
+    measurement.state === "measured" &&
+    (!Number.isFinite(measurement.value_mm3) || measurement.value_mm3 <= 0)
+  ) {
+    throw new Error("Measured volume must be finite and positive");
+  }
+  if (
+    measurement.state === "legacy_unassessed" &&
+    measurement.value_mm3 !== null &&
+    !Number.isFinite(measurement.value_mm3)
+  ) {
+    throw new Error("Legacy volume must be finite");
+  }
+  if (override.volume_mm3 !== undefined && override.volume_mm3 !== measurement.value_mm3) {
+    throw new Error("Volume evidence must match volume_mm3");
+  }
   return {
     slicer_name: null,
     slicer_version: null,
@@ -358,9 +392,10 @@ export function aMetadata(
     bbox_x_mm: null,
     bbox_y_mm: null,
     bbox_z_mm: null,
-    volume_mm3: null,
     triangle_count: null,
     ...override,
+    volume_mm3: measurement.value_mm3,
+    volume_measurement: { ...measurement },
   };
 }
 

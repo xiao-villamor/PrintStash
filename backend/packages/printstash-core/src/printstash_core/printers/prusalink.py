@@ -269,7 +269,7 @@ class PrusaLinkClient:
             progress_value = progress_data or job_data.get("progress_percent", 0)
         try:
             progress = float(progress_value or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             progress = 0.0
         progress /= 100.0
         raw_telemetry = printer.get("telemetry")

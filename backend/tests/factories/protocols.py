@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from printstash_core.mesh.measurements import VolumeMeasurement
 from printstash_core.search.passages import SearchSubject, SubjectType
 
 from app.db.models import (
@@ -51,6 +52,8 @@ from app.db.models import (
     Job,
     JobKind,
     JobState,
+    MeshFingerprintContinuation,
+    Metadata,
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
@@ -193,6 +196,16 @@ class MakeMultipartModelStar(Protocol):
         multipart_model: MultipartModel,
         **overrides: Any,
     ) -> MultipartModelStar: ...
+
+
+class MakeMetadata(Protocol):
+    def __call__(
+        self,
+        file: File,
+        *,
+        volume: VolumeMeasurement | None = None,
+        **overrides: Any,
+    ) -> Metadata: ...
 
 
 class MakeFile(Protocol):
@@ -377,6 +390,12 @@ class MakeDerivative(Protocol):
     ) -> ArtifactDerivative: ...
 
 
+class MakeMeshContinuation(Protocol):
+    def __call__(
+        self, file: File, *, job: Job | None = None, **overrides: Any
+    ) -> MeshFingerprintContinuation: ...
+
+
 class MakeWorkFence(Protocol):
     def __call__(
         self,
@@ -465,6 +484,7 @@ __all__ = [
     "MakeDocument",
     "MakeExternalLibrary",
     "MakeFile",
+    "MakeMetadata",
     "MakeInboxItem",
     "MakeModel",
     "MakeMultipartModel",

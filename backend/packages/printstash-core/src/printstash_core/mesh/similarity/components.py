@@ -22,6 +22,10 @@ if TYPE_CHECKING:
     IntArray = NDArray[np.int64]
 
 
+_MAX_SCENE_RESOURCES = 4096
+_MAX_SCENE_INSTANCES = 2048
+
+
 @dataclass(frozen=True)
 class MeshResource:
     resource_id: str
@@ -134,7 +138,7 @@ def expand_scene(
     objects: tuple[MeshResource | Assembly, ...],
     build: tuple[Instance, ...],
     *,
-    max_instances: int = 2048,
+    max_instances: int = _MAX_SCENE_INSTANCES,
     max_depth: int = 64,
     max_faces: int = MAX_ANALYSIS_FACES,
 ) -> ExpandedScene:
@@ -146,13 +150,13 @@ def expand_scene(
     import numpy as np
 
     for value, ceiling in (
-        (max_instances, 2048),
+        (max_instances, _MAX_SCENE_INSTANCES),
         (max_depth, 64),
         (max_faces, MAX_ANALYSIS_FACES),
     ):
         if type(value) is not int or not 1 <= value <= ceiling:
             raise GeometryError("invalid_scene_budget")
-    if len(objects) > 4096 or len(build) > max_instances:
+    if len(objects) > _MAX_SCENE_RESOURCES or len(build) > max_instances:
         raise GeometryError("scene_resource_limit")
     by_id = {obj.resource_id: obj for obj in objects}
     if len(by_id) != len(objects) or any(not obj.resource_id for obj in objects):
@@ -221,22 +225,84 @@ def validate_transform(transform: FloatArray) -> None:
         raise GeometryError("degenerate_transform")
 
 
-def compose_scene(scene: ExpandedScene) -> tuple[FloatArray, IntArray]:
-    """Concatenate already-admitted instances, applying their full transforms."""
+def compose_scene(
+    scene: ExpandedScene,
+    *,
+    max_faces: int = MAX_ANALYSIS_FACES,
+    max_vertices: int = MAX_ANALYSIS_VERTICES,
+) -> tuple[FloatArray, IntArray]:
+    """Admit placed geometry, then fill one owned buffer per output array.
+
+    Resources remain immutable and may be shared by many placements. Counts use
+    Python integers, bounded before allocation or conversion to int64 indices.
+    Unreferenced resources contribute neither geometry nor validation work.
+    """
     import numpy as np
 
+    for value, ceiling in (
+        (max_faces, MAX_ANALYSIS_FACES),
+        (max_vertices, MAX_ANALYSIS_VERTICES),
+    ):
+        if type(value) is not int or not 1 <= value <= ceiling:
+            raise GeometryError("invalid_scene_budget")
+    if (
+        len(scene.resources) > _MAX_SCENE_RESOURCES
+        or len(scene.instances) > _MAX_SCENE_INSTANCES
+    ):
+        raise GeometryError("scene_resource_limit")
     by_id = {resource.resource_id: resource for resource in scene.resources}
-    vertices, faces = [], []
-    offset = 0
+    if len(by_id) != len(scene.resources) or any(
+        not resource.resource_id for resource in scene.resources
+    ):
+        raise GeometryError("duplicate_resource")
+    if not scene.instances:
+        raise GeometryError("empty_scene")
+
+    admitted: set[str] = set()
+    vertex_count = face_count = 0
     for instance in scene.instances:
-        resource = by_id[instance.resource_id]
-        transform = instance.transform
-        vertices.append(resource.vertices @ transform[:3, :3].T + transform[:3, 3])
-        winding = (
-            resource.faces[:, ::-1]
-            if np.linalg.det(transform[:3, :3]) < 0
-            else resource.faces
-        )
-        faces.append(winding + offset)
-        offset += len(resource.vertices)
-    return np.vstack(vertices), np.vstack(faces)
+        resource = by_id.get(instance.resource_id)
+        if resource is None:
+            raise GeometryError("missing_resource")
+        vertex_count += len(resource.vertices)
+        face_count += len(resource.faces)
+        if vertex_count > max_vertices or face_count > max_faces:
+            raise GeometryError("scene_resource_limit")
+        if resource.resource_id not in admitted:
+            validate_mesh_arrays(resource.vertices, resource.faces, FingerprintBudget())
+            admitted.add(resource.resource_id)
+        validate_transform(instance.transform)
+
+    vertices = np.empty((vertex_count, 3), dtype=np.float64)
+    faces = np.empty((face_count, 3), dtype=np.int64)
+    vertex_offset = face_offset = 0
+    try:
+        with np.errstate(over="raise", invalid="raise"):
+            for instance in scene.instances:
+                resource = by_id[instance.resource_id]
+                transform = instance.transform
+                vertex_end = vertex_offset + len(resource.vertices)
+                face_end = face_offset + len(resource.faces)
+                placed = vertices[vertex_offset:vertex_end]
+                np.matmul(resource.vertices, transform[:3, :3].T, out=placed)
+                placed += transform[:3, 3]
+                # The sign avoids determinant overflow for large finite scales.
+                winding = (
+                    resource.faces[:, ::-1]
+                    if np.linalg.slogdet(transform[:3, :3])[0] < 0
+                    else resource.faces
+                )
+                # Source indices were range-checked before allocation, so even
+                # unsigned source dtypes fit safely into bounded int64 output.
+                np.add(
+                    winding,
+                    vertex_offset,
+                    out=faces[face_offset:face_end],
+                    casting="unsafe",
+                )
+                vertex_offset, face_offset = vertex_end, face_end
+            if not np.isfinite(vertices).all():
+                raise GeometryError("numeric_range")
+    except (FloatingPointError, np.linalg.LinAlgError) as exc:
+        raise GeometryError("numeric_range") from exc
+    return vertices, faces

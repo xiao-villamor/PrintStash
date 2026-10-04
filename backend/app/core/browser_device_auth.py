@@ -66,7 +66,7 @@ def require_user_or_browser_import_user(
             subject = payload.get("sub")
             try:
                 user_id = int(subject) if isinstance(subject, (str, int)) else None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 user_id = None
             user = session.get(User, user_id) if user_id is not None else None
             if (

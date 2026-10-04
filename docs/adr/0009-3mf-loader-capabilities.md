@@ -1,6 +1,6 @@
 # ADR-0009: Preserve 3MF precision behind an explicit scene reader
 
-Status: Accepted direction — retain the current reader; scene extraction and distribution changes require separate implementation review.
+Status: Accepted — retain the bounded float64 XML reader with an explicit scene-reading owner and capability policy. Native distribution adoption remains a separate decision.
 
 ## Decision
 
@@ -11,24 +11,22 @@ Its float32 geometry/placement API and observed slicer compatibility differences
 prevent replacing the existing float64 output without changing useful geometry.
 Neither a production dependency nor an automatic parser fallback is introduced.
 
-The next adapter should expose `read_scene(source, limits)` independently of
-materialization. Its result owns reachable mesh arrays (float64 vertices, int64
-faces), source resource identity and affine instances. A consumer explicitly
-requests flattened arrays when necessary. Limits cover ZIP members/decoded bytes,
-XML, unique geometry, traversal depth, expanded instances and materialized faces;
-those are separate limits rather than one triangle cap reused for every operation.
-A malformed source, unsupported required capability and exhausted budget remain
-distinct refusals.
+The production `three_mf_scene.read_scene` owner reads reachable geometry and
+placements, while the compatibility bridge explicitly materializes the arrays
+its existing consumers require. This separation does not yet make every
+measurement, fingerprint or renderer operate on retained instances. Package,
+traversal and expanded-face safety limits continue to apply before publication.
 
-Capability policy must be explicit: primary OPC relationship, Core meshes and
-components, six physical units, and Production parts with nested nonsingular
-transforms/reflections are supported. Unknown required extensions are refused.
-Optional slicer metadata does not change geometry. Legacy slicer `printable`
-filtering is a compatibility rule: the Core 1.4 schema does not declare that
-build-item attribute. Do not select all resources merely because their parts have
-`.model` suffixes. Ignore unreachable geometry for measurements, while applying
-whole-package safety limits. Remove unused vertices from surface bounds without
-changing triangles or source bytes.
+The [implemented capability policy](../3mf-capabilities.md) covers primary OPC
+relationships, Core meshes and components, six physical units, and the Production
+external model-part reference subset with nested nonsingular transforms and
+reflections. It does not claim full Production extension conformance. Unknown
+required namespaces are refused in every reached model part; undeclared required
+prefixes are invalid input. Optional slicer metadata does not change geometry.
+Legacy slicer `printable` filtering is a compatibility rule: the Core 1.4 schema
+does not declare that build-item attribute. Unreachable model parts do not enter
+measurements, although whole-package safety checks still apply. Surface bounds
+use referenced vertices without rewriting source bytes.
 
 ## Evidence
 
@@ -54,7 +52,7 @@ a shared WSL x86_64 machine, not a pinned throughput or release gate. Linux
 diagnostic because it can carry the generator parent's high-water mark through
 process creation. Timeouts, child failures and source refusals stay in evidence.
 
-Observed capability differences:
+Historical pilot capability differences (the XML column predates the capability and reachability corrections):
 
 | Case | Current XML reader | Lib3MF permissive | Lib3MF strict |
 | --- | --- | --- | --- |
@@ -81,8 +79,8 @@ accompany this ADR. The frozen run contains 434 samples with one harness hash. U
 200,000-face and 64-instance probes use three samples per cell and support only
 exploration; they do not establish tail latency. The retained scene is unique
 geometry plus instances; the materialized arrays for 64 identical placements are
-64 times the unique array payload. Current production still materializes every
-scene, so this pilot does not claim that ingestion already gains this property.
+64 times the unique array payload. The pilot reader materialized every
+scene; these frozen results do not claim that current ingestion gains this property.
 
 ## Distribution and licensing
 
@@ -117,9 +115,9 @@ gates; producing our own common wheels is another. Neither is selected yet.
 
 ## Follow-up gates
 
-1. Review the corpus declarations and capability policy before modifying the
-   production adapter; unknown-extension and reachability issues need actual
-   regressions in that implementation PR.
+1. Keep the corpus declarations and implemented capability policy aligned.
+   Production regressions now cover required-extension refusals and reachable
+   geometry; expanding support requires equally explicit acceptance cases.
 2. Preserve float64 resource coordinates and transforms, printable compatibility
    and real slicer availability. Do not silently recenter/rewrite source data to
    conceal native float32 loss.

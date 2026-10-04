@@ -48,6 +48,8 @@ from tests.factories.protocols import (
     MakeInferenceEndpoint,
     MakeIngestRequest,
     MakeJob,
+    MakeMeshContinuation,
+    MakeMetadata,
     MakeModel,
     MakeMultipartBuild,
     MakeMultipartBuildAttempt,
@@ -189,8 +191,8 @@ def make_file(db_session: Session) -> MakeFile:
 
 
 @pytest.fixture
-def make_metadata(db_session: Session) -> Any:
-    """Slicer/mesh metadata for one artifact; every field optional."""
+def make_metadata(db_session: Session) -> MakeMetadata:
+    """Slicer/mesh facts with coherent explicit volume evidence."""
     return _bound(factories.build_metadata, db_session)
 
 
@@ -473,6 +475,7 @@ __all__ = [
     "MakeDocument",
     "MakeExternalLibrary",
     "MakeFile",
+    "MakeMetadata",
     "MakeInboxItem",
     "MakeModel",
     "MakeMultipartModel",
@@ -505,6 +508,7 @@ __all__ = [
     "make_audit_finding",
     "make_audit_run",
     "make_derivative",
+    "make_mesh_continuation",
     "make_ingest_request",
     "make_job",
     "make_work_executor",
@@ -741,3 +745,9 @@ def make_search_projection_request(db_session: Session) -> MakeSearchProjectionR
 
 
 __all__ += ["make_search_projection_request"]
+
+
+@pytest.fixture
+def make_mesh_continuation(db_session: Session) -> MakeMeshContinuation:
+    """Pending optional mesh analysis with a canonical current source snapshot."""
+    return _bound(factories.build_mesh_continuation, db_session)

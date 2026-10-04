@@ -39,6 +39,13 @@ const geometryOnlyMetadata: MetadataRead = {
   bbox_y_mm: null,
   bbox_z_mm: null,
   volume_mm3: 176138.91,
+  volume_measurement: {
+    state: "legacy_unassessed",
+    unit: "mm3",
+    method: null,
+    value_mm3: 176138.91,
+    cause: null,
+  },
   triangle_count: 49672,
 };
 

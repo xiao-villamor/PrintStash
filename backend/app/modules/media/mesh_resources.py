@@ -1,52 +1,194 @@
-"""Single-load mesh preparation that retains 3MF resource identity and instances."""
+"""Materialized mesh preparation with explicit ownership of its source scene."""
 
 from __future__ import annotations
 
-import io
-import zipfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from printstash_core.mesh.similarity import GeometryError
-from printstash_core.mesh.similarity.budgets import (
-    MAX_ANALYSIS_FACES,
-    MAX_ANALYSIS_VERTICES,
-)
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import (
-    Assembly,
     ExpandedScene,
     Instance,
-    MeshResource,
     compose_scene,
     expand_scene,
     split_components,
 )
 
-CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-PRODUCTION_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
-UNITS = {
-    "micron": 0.001,
-    "millimeter": 1.0,
-    "centimeter": 10.0,
-    "inch": 25.4,
-    "foot": 304.8,
-    "meter": 1000.0,
-}
+from app.modules.media.three_mf_scene import read_scene
+
+from .mesh_facts import (
+    CompleteGeometry,
+    FingerprintFailureCode,
+    PreparedGeometry,
+    SampledGeometry,
+)
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+    from trimesh import Trimesh
+
+
+@dataclass(frozen=True)
+class PreparedScene:
+    """An admitted source scene, without materialized placed geometry.
+
+    Admission preserves each unique resource's buffers and checks placed counts
+    before any whole-scene allocation. It does not claim materialized coverage.
+    """
+
+    scene: ExpandedScene
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scene, ExpandedScene):
+            raise TypeError("invalid_prepared_scene")
+        admitted = expand_scene(self.scene.resources, self.scene.instances)
+        object.__setattr__(self, "scene", admitted)
+
+    @property
+    def triangle_count(self) -> int:
+        counts = {
+            resource.resource_id: len(resource.faces)
+            for resource in self.scene.resources
+        }
+        return sum(counts[instance.resource_id] for instance in self.scene.instances)
 
 
 @dataclass(frozen=True)
 class PreparedMesh:
-    whole_mesh: Any
+    whole_mesh: Trimesh
     scene: ExpandedScene
-    format: str
-    complete: bool = True
-    failure_code: str | None = None
+    geometry: PreparedGeometry
     brep: dict[str, Any] | None = None
     whole_resource_id: str | None = None
 
+    def __post_init__(self) -> None:
+        import numpy as np
+        from trimesh import Trimesh
 
-def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
+        if not isinstance(self.whole_mesh, Trimesh):
+            raise TypeError("invalid_prepared_mesh")
+        if not isinstance(self.scene, ExpandedScene):
+            raise TypeError("invalid_prepared_scene")
+        if isinstance(self.geometry, SampledGeometry):
+            if (
+                self.scene.resources
+                or self.scene.instances
+                or self.whole_resource_id is not None
+                or self.brep is not None
+            ):
+                raise ValueError("invalid_sampled_geometry_resource_claim")
+        elif isinstance(self.geometry, CompleteGeometry):
+            resources = self.scene.resources
+            instances = self.scene.instances
+            if not resources or not instances:
+                raise ValueError("invalid_complete_geometry_resources")
+            identifiers = {resource.resource_id for resource in resources}
+            if len(identifiers) != len(resources) or any(
+                instance.resource_id not in identifiers for instance in instances
+            ):
+                raise ValueError("invalid_complete_geometry_resource_identity")
+            if self.whole_resource_id is not None and (
+                self.whole_resource_id not in identifiers
+                or len(resources) != 1
+                or len(instances) != 1
+                or not np.array_equal(instances[0].transform, np.eye(4))
+            ):
+                raise ValueError("invalid_whole_resource_identity")
+        else:
+            raise TypeError("invalid_prepared_geometry")
+
+    @property
+    def complete(self) -> bool:
+        """Prepared-only bridge for verify_paths/_component/embedding consumers.
+
+        These readers migrate to geometry variants during their owner extraction;
+        source scan and preview completeness never use this property.
+        """
+        return isinstance(self.geometry, CompleteGeometry)
+
+    @property
+    def failure_code(self) -> FingerprintFailureCode | None:
+        return (
+            self.geometry.reason if isinstance(self.geometry, SampledGeometry) else None
+        )
+
+
+@dataclass(frozen=True)
+class DetachedSceneMesh:
+    """Admitted placed buffers retained across preview without native caches.
+
+    The whole-scene arrays remain resident until optional analysis completes;
+    source resources and placement identity stay independent from that mesh.
+    """
+
+    vertices: NDArray[np.float64]
+    faces: NDArray[np.int64]
+    scene: ExpandedScene
+    geometry: CompleteGeometry
+    whole_resource_id: str | None
+
+    def __post_init__(self) -> None:
+        import numpy as np
+
+        if (
+            not isinstance(self.vertices, np.ndarray)
+            or not isinstance(self.faces, np.ndarray)
+            or self.vertices.dtype != np.dtype(np.float64)
+            or self.faces.dtype != np.dtype(np.int64)
+            or self.vertices.ndim != 2
+            or self.faces.ndim != 2
+            or self.vertices.shape[1] != 3
+            or self.faces.shape[1] != 3
+            or self.vertices.flags.writeable
+            or self.faces.flags.writeable
+        ):
+            raise ValueError("invalid_detached_scene_buffers")
+        if not isinstance(self.scene, ExpandedScene) or not isinstance(
+            self.geometry, CompleteGeometry
+        ):
+            raise TypeError("invalid_detached_scene_identity")
+
+
+def detach_scene_mesh(
+    prepared: PreparedMesh, *, triangle_cap: int
+) -> DetachedSceneMesh:
+    """Retain admitted arrays, never the Trimesh object or its topology caches."""
+    import numpy as np
+
+    if type(triangle_cap) is not int or not 100 <= triangle_cap <= MAX_ANALYSIS_FACES:
+        raise ValueError("invalid_triangle_cap")
+    if len(prepared.whole_mesh.faces) > triangle_cap:
+        raise GeometryError("geometry_work_limit")
+    if not isinstance(prepared.geometry, CompleteGeometry) or prepared.brep is not None:
+        raise ValueError("invalid_detached_scene_identity")
+    vertices = np.asarray(prepared.whole_mesh.vertices).view()
+    faces = np.asarray(prepared.whole_mesh.faces).view()
+    vertices.flags.writeable = False
+    faces.flags.writeable = False
+    return DetachedSceneMesh(
+        vertices, faces, prepared.scene, prepared.geometry, prepared.whole_resource_id
+    )
+
+
+def restore_scene_mesh(detached: DetachedSceneMesh) -> PreparedMesh:
+    """Wrap retained arrays for analysis without composing the scene again."""
+    import trimesh
+
+    mesh = trimesh.Trimesh(
+        vertices=detached.vertices, faces=detached.faces, process=False
+    )
+    return PreparedMesh(
+        mesh,
+        detached.scene,
+        geometry=detached.geometry,
+        whole_resource_id=detached.whole_resource_id,
+    )
+
+
+def prepare_loaded_mesh(mesh: Trimesh, *, file_type: str) -> PreparedMesh:
     import numpy as np
 
     resources = split_components(np.asarray(mesh.vertices), np.asarray(mesh.faces))
@@ -57,265 +199,40 @@ def prepare_loaded_mesh(mesh: Any, *, file_type: str) -> PreparedMesh:
     return PreparedMesh(
         mesh,
         scene,
-        file_type,
+        geometry=CompleteGeometry(),
         brep=mesh.metadata.get("brep"),
         whole_resource_id=resources[0].resource_id if len(resources) == 1 else None,
     )
 
 
-_NAMESPACES = {"c": CORE_NS}
-
-
-def _count(mesh: Any, path: str) -> int:
-    """Child count computed inside libxml2, without an element proxy per child."""
-    return int(mesh.xpath(f"count({path})", namespaces=_NAMESPACES))
-
-
-def _attribute_columns(
-    mesh: Any, path: str, names: tuple[str, ...], dtype: Any, count: int
-) -> Any:
-    """Read ``names`` from every ``path`` element as a ``(count, len(names))`` array.
-
-    One XPath per attribute hands NumPy a flat list of strings that it converts in
-    C, instead of a Python ``float(node.attrib[key])`` per coordinate. An element
-    that lacks one of the attributes makes that column short, which is refused
-    here rather than silently shifting every later row.
-    """
-    import numpy as np
-
-    columns = []
-    for name in names:
-        values = mesh.xpath(
-            f"{path}/@{name}", namespaces=_NAMESPACES, smart_strings=False
-        )
-        if len(values) != count:
-            raise GeometryError("invalid_3mf")
-        columns.append(values)
-    return np.array(columns, dtype=dtype).T.copy()
-
-
 def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh:
-    """Parse bounded XML resources once; never flatten away resource placement.
+    """Read a bounded source scene, then explicitly materialize its placed mesh."""
+    return materialize_scene(read_scene(path, max_faces=max_faces))
 
-    Production-extension external .model parts inside the same archive are
-    supported. Package paths stay inside the ZIP namespace and never resolve
-    against the filesystem or network. DTDs/entities are refused explicitly.
-    """
+
+def materialize_scene(scene: ExpandedScene) -> PreparedMesh:
+    """Allocate placed arrays only after complete source-scene admission."""
     import numpy as np
     import trimesh
-    from lxml import etree
 
-    if type(max_faces) is not int or not 1 <= max_faces <= MAX_ANALYSIS_FACES:
-        raise GeometryError("invalid_scene_budget")
+    scene = PreparedScene(scene).scene
     try:
-        with zipfile.ZipFile(path) as archive:
-            entries = archive.infolist()
-            if (
-                len(entries) > 4096
-                or sum(entry.file_size for entry in entries) > 512 * 1024 * 1024
-            ):
-                raise GeometryError("archive_resource_limit")
-            names = {entry.filename: entry for entry in entries}
-            if len(names) != len(entries):
-                raise GeometryError("duplicate_archive_entry")
-            model_names = sorted(
-                name for name in names if name.lower().endswith(".model")
-            )
-            if not model_names:
-                raise GeometryError("empty_scene")
-            main = next(
-                (name for name in model_names if name.lower() == "3d/3dmodel.model"),
-                model_names[0],
-            )
-            if "_rels/.rels" in names:
-                relationship = names["_rels/.rels"]
-                if (
-                    relationship.file_size > 1024 * 1024
-                    or relationship.file_size > max(relationship.compress_size, 1) * 200
-                ):
-                    raise GeometryError("archive_resource_limit")
-                payload = archive.read(relationship)
-                tree = etree.parse(
-                    io.BytesIO(payload),
-                    etree.XMLParser(
-                        resolve_entities=False, no_network=True, load_dtd=False
-                    ),
-                )
-                if tree.docinfo.doctype:
-                    raise GeometryError("xml_doctype_forbidden")
-                roots = [
-                    node
-                    for node in tree.getroot()
-                    if node.tag
-                    == "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
-                    and node.get("Type")
-                    == "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
-                ]
-                if (
-                    len(roots) != 1
-                    or roots[0].get("TargetMode", "Internal") != "Internal"
-                ):
-                    raise GeometryError("invalid_3mf_relationship")
-                target = roots[0].get("Target", "")
-                if (
-                    "\\" in target
-                    or ":" in target
-                    or ".." in PurePosixPath(target).parts
-                ):
-                    raise GeometryError("unsafe_resource_path")
-                main = target.lstrip("/")
-                if main not in model_names:
-                    raise GeometryError("invalid_3mf_relationship")
-            objects: list[MeshResource | Assembly] = []
-            build: list[Instance] = []
-            total_faces = total_vertices = total_xml = 0
-            for name in model_names:
-                info = names[name]
-                total_xml += info.file_size
-                if (
-                    total_xml > 64 * 1024 * 1024
-                    or info.file_size > max(info.compress_size, 1) * 200
-                ):
-                    raise GeometryError("archive_resource_limit")
-                with archive.open(info) as stream:
-                    payload = stream.read(64 * 1024 * 1024 + 1)
-                if len(payload) != info.file_size:
-                    raise GeometryError("invalid_archive")
-                parser = etree.XMLParser(
-                    resolve_entities=False,
-                    no_network=True,
-                    load_dtd=False,
-                    huge_tree=False,
-                )
-                tree = etree.parse(io.BytesIO(payload), parser)
-                if tree.docinfo.doctype:
-                    raise GeometryError("xml_doctype_forbidden")
-                root = tree.getroot()
-                if root.tag != f"{{{CORE_NS}}}model":
-                    raise GeometryError("invalid_3mf_model")
-                unit = UNITS.get(root.get("unit", "millimeter"))
-                if unit is None:
-                    raise GeometryError("unsupported_unit")
-                resources = root.find(f"{{{CORE_NS}}}resources")
-                if resources is not None:
-                    for obj in resources.findall(f"{{{CORE_NS}}}object"):
-                        resource_id = f"{name}#{_object_id(obj.get('id'))}"
-                        mesh = obj.find(f"{{{CORE_NS}}}mesh")
-                        if mesh is not None:
-                            vertex_count = _count(mesh, "c:vertices/c:vertex")
-                            triangle_count = _count(mesh, "c:triangles/c:triangle")
-                            total_vertices += vertex_count
-                            total_faces += triangle_count
-                            if (
-                                total_faces > max_faces
-                                or total_vertices > MAX_ANALYSIS_VERTICES
-                            ):
-                                raise GeometryError("resource_limit")
-                            vertices = (
-                                _attribute_columns(
-                                    mesh,
-                                    "c:vertices/c:vertex",
-                                    ("x", "y", "z"),
-                                    np.float64,
-                                    vertex_count,
-                                )
-                                * unit
-                            )
-                            faces = _attribute_columns(
-                                mesh,
-                                "c:triangles/c:triangle",
-                                ("v1", "v2", "v3"),
-                                np.int64,
-                                triangle_count,
-                            )
-                            objects.append(MeshResource(resource_id, vertices, faces))
-                        else:
-                            children = obj.findall(
-                                f"{{{CORE_NS}}}components/{{{CORE_NS}}}component"
-                            )
-                            objects.append(
-                                Assembly(
-                                    resource_id,
-                                    tuple(
-                                        _instance(child, name, unit, names)
-                                        for child in children
-                                    ),
-                                )
-                            )
-                        if len(objects) > 4096:
-                            raise GeometryError("scene_resource_limit")
-                if name == main:
-                    build = [
-                        _instance(item, name, unit, names)
-                        for item in root.findall(
-                            f"{{{CORE_NS}}}build/{{{CORE_NS}}}item"
-                        )
-                        if item.get("printable", "1") in ("1", "true")
-                    ]
-                del root, tree, payload
-            scene = expand_scene(tuple(objects), tuple(build), max_faces=max_faces)
-            vertices, faces = compose_scene(scene)
-            if not np.isfinite(vertices).all():
-                raise GeometryError("nonfinite_geometry")
-            mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-            same_resource = len(scene.resources) == len(
-                scene.instances
-            ) == 1 and np.array_equal(scene.instances[0].transform, np.eye(4))
-            return PreparedMesh(
-                mesh,
-                scene,
-                "3mf",
-                whole_resource_id=(
-                    scene.resources[0].resource_id if same_resource else None
-                ),
-            )
+        vertices, faces = compose_scene(scene)
+        if not np.isfinite(vertices).all():
+            raise GeometryError("nonfinite_geometry")
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        same_resource = len(scene.resources) == len(
+            scene.instances
+        ) == 1 and np.array_equal(scene.instances[0].transform, np.eye(4))
+        return PreparedMesh(
+            mesh,
+            scene,
+            geometry=CompleteGeometry(),
+            whole_resource_id=(
+                scene.resources[0].resource_id if same_resource else None
+            ),
+        )
     except GeometryError:
         raise
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        OverflowError,
-        zipfile.BadZipFile,
-        etree.XMLSyntaxError,
-    ) as exc:
+    except (OSError, ValueError, KeyError, OverflowError) as exc:
         raise GeometryError("invalid_3mf") from exc
-
-
-def _object_id(value: str | None) -> str:
-    if (
-        value is None
-        or not value.isascii()
-        or not value.isdecimal()
-        or not 1 <= int(value) <= 2**31 - 1
-    ):
-        raise GeometryError("invalid_resource_id")
-    return str(int(value))
-
-
-def _instance(
-    element: Any, document: str, unit: float, names: dict[str, Any]
-) -> Instance:
-    import numpy as np
-
-    target = document
-    external = element.get(f"{{{PRODUCTION_NS}}}path")
-    if external is not None:
-        target = external.lstrip("/")
-        parts = PurePosixPath(target).parts
-        if (
-            ".." in parts
-            or "\\" in target
-            or not target.lower().endswith(".model")
-            or target not in names
-        ):
-            raise GeometryError("invalid_resource_path")
-    transform = np.eye(4)
-    raw = element.get("transform")
-    if raw is not None:
-        values = [float(value) for value in raw.split()]
-        if len(values) != 12:
-            raise GeometryError("invalid_transform")
-        transform[:3, :] = np.array(values).reshape((4, 3)).T
-        transform[:3, 3] *= unit
-    return Instance(f"{target}#{_object_id(element.get('objectid'))}", transform)

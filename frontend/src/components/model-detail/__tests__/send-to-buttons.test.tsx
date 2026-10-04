@@ -143,6 +143,13 @@ const NO_SLICER_METADATA: MetadataRead = {
   bbox_y_mm: null,
   bbox_z_mm: null,
   volume_mm3: null,
+  volume_measurement: {
+    state: "legacy_unassessed",
+    unit: "mm3",
+    method: null,
+    value_mm3: null,
+    cause: null,
+  },
   triangle_count: null,
 };
 

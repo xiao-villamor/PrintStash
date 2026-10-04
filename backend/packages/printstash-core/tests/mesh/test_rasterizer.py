@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import ast
 import builtins
+import hashlib
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -40,7 +42,50 @@ import pytest
 from PIL import Image
 
 from printstash_core.mesh import rasterizer, render_mesh_thumbnail
-from printstash_core.mesh.rasterizer import RasterBudget
+from printstash_core.mesh.rasterizer import (
+    RasterBudget,
+    RenderedPixels,
+    RGBBackground,
+    render_prepared_pixels,
+    render_prepared_thumbnail,
+)
+from printstash_core.mesh.render_geometry import (
+    prepare_mesh_render,
+    prepare_scene_render,
+)
+from printstash_core.mesh.similarity import components
+from printstash_core.mesh.similarity.components import (
+    ExpandedScene,
+    Instance,
+    MeshResource,
+)
+
+from ..paths import FIXTURES_DIR
+
+_FROZEN_RENDER = json.loads((FIXTURES_DIR / "render-prepared-v1.json").read_text())
+_FROZEN_FRAMES = [
+    pytest.param(case, view, id=f"{case['name']}-{index}")
+    for case in _FROZEN_RENDER["cases"]
+    for index, view in enumerate(case["views"])
+]
+
+
+@pytest.fixture
+def frozen_frame(case, view):
+    mesh = SimpleNamespace(
+        vertices=np.array(case["vertices"], dtype=np.float64),
+        faces=np.array(case["faces"], dtype=np.int64),
+    )
+    rotation = (
+        None if view["frame"] is None else np.array(view["frame"], dtype=np.float64)
+    )
+    return mesh, dict(
+        width=case["width"],
+        height=case["height"],
+        matte=case["matte"],
+        view_rotation=rotation,
+    )
+
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 # 25°, the tilt a flat mesh is viewed at so recesses read.
@@ -842,3 +887,393 @@ class TestModuleDependencies:
                 "trimesh",
             }
         )
+
+
+class TestRenderSceneThumbnail:
+    @pytest.mark.parametrize("spacing,chunk", [(0, 5), (3, 5), (3, 1000)])
+    def test_preserves_placed_mesh_pixels_without_materialization(
+        self, spacing, chunk, monkeypatch
+    ):
+        source = box_mesh()
+        transforms = np.tile(np.eye(4), (64, 1, 1))
+        transforms[1::2, 0, 0] = -2
+        transforms[:, :3, 3] = np.arange(64)[:, None] * [spacing, spacing, 0]
+        scene = ExpandedScene(
+            (MeshResource("part", source.vertices, source.faces),),
+            tuple(Instance("part", transform) for transform in transforms),
+        )
+        vertices, faces = components.compose_scene(scene)
+        expected = render_mesh_thumbnail(
+            SimpleNamespace(vertices=vertices, faces=faces),
+            "placed",
+            width=160,
+            height=120,
+            face_chunk_size=chunk,
+        )
+        originals = (
+            source.vertices.tobytes(),
+            source.faces.tobytes(),
+            transforms.tobytes(),
+        )
+
+        def materialize(*_args, **_kwargs):
+            raise AssertionError("scene rendering must not materialize source geometry")
+
+        monkeypatch.setattr(components, "compose_scene", materialize)
+        actual = rasterizer.render_scene_thumbnail(
+            scene, "placed", width=160, height=120, face_chunk_size=chunk
+        )
+
+        assert expected is not None
+        assert actual is not None
+        np.testing.assert_array_equal(pixels(actual), pixels(expected))
+        assert (
+            source.vertices.tobytes(),
+            source.faces.tobytes(),
+            transforms.tobytes(),
+        ) == originals
+
+    @pytest.mark.parametrize("offset", [1e9, -1e9])
+    def test_preserves_scene_pixels_after_large_translation(self, offset):
+        source = box_mesh()
+        transforms = np.tile(np.eye(4), (2, 1, 1))
+        transforms[1, :3, 3] = [3, 4, 5]
+        scene = ExpandedScene(
+            (MeshResource("part", source.vertices / 100, source.faces),),
+            tuple(Instance("part", transform) for transform in transforms),
+        )
+        translated = transforms.copy()
+        translated[:, :3, 3] += offset
+        distant = ExpandedScene(
+            scene.resources,
+            tuple(Instance("part", transform) for transform in translated),
+        )
+
+        original = rasterizer.render_scene_thumbnail(
+            scene, "near", width=160, height=120
+        )
+        shifted = rasterizer.render_scene_thumbnail(
+            distant, "far", width=160, height=120
+        )
+
+        assert original is not None
+        assert shifted is not None
+        np.testing.assert_array_equal(pixels(shifted), pixels(original))
+
+    def test_ignores_unused_scene_coordinates(self):
+        source = box_mesh()
+        regular = ExpandedScene(
+            (MeshResource("part", source.vertices, source.faces),),
+            (Instance("part", np.eye(4)),),
+        )
+        unused = ExpandedScene(
+            (
+                MeshResource(
+                    "part", np.vstack((source.vertices, [1e9, -1e9, 1e9])), source.faces
+                ),
+            ),
+            regular.instances,
+        )
+
+        expected = rasterizer.render_scene_thumbnail(
+            regular, "regular", width=160, height=120
+        )
+        actual = rasterizer.render_scene_thumbnail(
+            unused, "unused", width=160, height=120
+        )
+
+        assert expected is not None
+        assert actual is not None
+        np.testing.assert_array_equal(pixels(actual), pixels(expected))
+
+    def test_keeps_silhouette_fallback_for_scene(self):
+        source = inverted_plate()
+        scene = ExpandedScene(
+            (MeshResource("part", source.vertices, source.faces),),
+            (Instance("part", np.eye(4)),),
+        )
+        expected = render_mesh_thumbnail(source, "inverted", width=160, height=120)
+
+        actual = rasterizer.render_scene_thumbnail(
+            scene, "inverted", width=160, height=120
+        )
+
+        assert expected is not None
+        assert actual is not None
+        np.testing.assert_array_equal(pixels(actual), pixels(expected))
+
+    def test_returns_nothing_for_empty_scene(self):
+        assert rasterizer.render_scene_thumbnail(ExpandedScene((), ()), "empty") is None
+
+
+@pytest.fixture
+def prepared_box():
+    prepared = prepare_mesh_render(box_mesh(), face_chunk_size=5)
+    assert prepared is not None
+    return prepared
+
+
+class TestRenderedPixels:
+    @pytest.mark.parametrize(
+        "background",
+        [RGBBackground.IGNORE_ALPHA, RGBBackground.WHITE],
+        ids=["ignore-alpha", "white"],
+    )
+    def test_preserves_declared_rgb_background(self, background):
+        rgba = bytes([10, 20, 30, 0, 70, 80, 90, 127, 120, 130, 140, 255])
+        image = Image.frombytes("RGBA", (3, 1), rgba)
+        expected = {
+            RGBBackground.IGNORE_ALPHA: image.convert("RGB").tobytes(),
+            RGBBackground.WHITE: Image.alpha_composite(
+                Image.new("RGBA", image.size, (255, 255, 255, 255)), image
+            )
+            .convert("RGB")
+            .tobytes(),
+        }[background]
+        result = RenderedPixels(width=3, height=1, rgba=rgba)
+        assert result.rgb(background) == expected
+        assert result.rgba == rgba
+
+    @pytest.mark.parametrize(
+        "width,height,rgba",
+        [
+            pytest.param(0, 1, b"", id="zero-width"),
+            pytest.param(True, 1, bytes(4), id="boolean-width"),
+            pytest.param(1, 1.0, bytes(4), id="float-height"),
+            pytest.param(1, -1, bytes(4), id="negative-height"),
+            pytest.param(1, 1, bytes(3), id="short-rgba"),
+            pytest.param(1, 1, bytes(5), id="trailing-rgba"),
+            pytest.param(1, 1, bytearray(4), id="mutable-rgba"),
+        ],
+    )
+    def test_rejects_invalid_pixel_contract(self, width, height, rgba):
+        with pytest.raises((ValueError, TypeError)):
+            RenderedPixels(width=width, height=height, rgba=rgba)
+
+    def test_rejects_unknown_background(self):
+        result = RenderedPixels(width=1, height=1, rgba=bytes(4))
+        with pytest.raises(TypeError):
+            result.rgb("white")
+
+
+class TestRenderPreparedPixels:
+    @pytest.mark.parametrize(
+        "view",
+        [np.eye(3), np.eye(3)[[1, 2, 0]], np.diag([-1.0, 1, -1])],
+        ids=["front", "side", "reversed"],
+    )
+    def test_preserves_existing_view_pixels(self, prepared_box, view):
+        reference = render_mesh_thumbnail(
+            box_mesh(),
+            "legacy-view",
+            width=80,
+            height=60,
+            face_chunk_size=5,
+            view_rotation=view,
+            matte=True,
+        )
+        actual = render_prepared_pixels(
+            prepared_box,
+            "prepared-view",
+            width=80,
+            height=60,
+            face_chunk_size=5,
+            view_rotation=view,
+            matte=True,
+        )
+        assert reference is not None
+        assert actual is not None
+        assert (actual.width, actual.height) == (80, 60)
+        assert actual.rgba == pixels(reference).tobytes()
+
+    def test_preserves_cached_geometry_across_views(self, prepared_box):
+        original = (
+            prepared_box.vertices.tobytes(),
+            prepared_box.position_ids.tobytes(),
+            prepared_box.smooth_normals.tobytes(),
+        )
+        first = render_prepared_pixels(
+            prepared_box,
+            "first",
+            width=80,
+            height=60,
+            view_rotation=np.eye(3),
+            matte=True,
+        )
+        side = render_prepared_pixels(
+            prepared_box,
+            "side",
+            width=80,
+            height=60,
+            view_rotation=np.eye(3)[[1, 2, 0]],
+            matte=True,
+        )
+        repeated = render_prepared_pixels(
+            prepared_box,
+            "first-again",
+            width=80,
+            height=60,
+            view_rotation=np.eye(3),
+            matte=True,
+        )
+        assert first is not None
+        assert side is not None
+        assert repeated == first
+        assert (
+            prepared_box.vertices.tobytes(),
+            prepared_box.position_ids.tobytes(),
+            prepared_box.smooth_normals.tobytes(),
+        ) == original
+
+    def test_renders_without_image_codec_roundtrip(self, prepared_box, monkeypatch):
+        reference = render_mesh_thumbnail(
+            box_mesh(), "encoded", width=80, height=60, face_chunk_size=5
+        )
+        assert reference is not None
+        expected = pixels(reference).tobytes()
+
+        def codec(*args, **kwargs):
+            raise AssertionError("direct pixels must not encode or decode an image")
+
+        monkeypatch.setattr(Image.Image, "save", codec)
+        monkeypatch.setattr(Image, "open", codec)
+        actual = render_prepared_pixels(
+            prepared_box, "direct", width=80, height=60, face_chunk_size=5
+        )
+        assert actual is not None
+        assert actual.rgba == expected
+
+    def test_reuses_normal_preparation_during_render(self, prepared_box, monkeypatch):
+        reference = render_mesh_thumbnail(
+            box_mesh(), "reference", width=80, height=60, face_chunk_size=5
+        )
+        assert reference is not None
+        expected = pixels(reference).tobytes()
+
+        def weld(*args, **kwargs):
+            raise AssertionError(
+                "view render must consume cached normals and position identities"
+            )
+
+        monkeypatch.setattr(np, "bincount", weld)
+        actual = render_prepared_pixels(
+            prepared_box, "cached", width=80, height=60, face_chunk_size=5
+        )
+        assert actual is not None
+        assert actual.rgba == expected
+
+    @pytest.mark.parametrize(
+        "size", [1, 5, 1000], ids=["one", "cross-placement", "whole"]
+    )
+    def test_preserves_scene_pixels_across_face_chunks(self, size):
+        mesh = box_mesh()
+        reflected = np.diag([-2.0, 2, 2, 1])
+        reflected[:3, 3] = [4, 2, 0]
+        scene = ExpandedScene(
+            (MeshResource("part", mesh.vertices, mesh.faces),),
+            (Instance("part", np.eye(4)), Instance("part", reflected)),
+        )
+        prepared = prepare_scene_render(scene, face_chunk_size=size)
+        reference = rasterizer.render_scene_thumbnail(
+            scene, "scene-old", width=80, height=60, face_chunk_size=size
+        )
+        actual = render_prepared_pixels(
+            prepared, "scene-direct", width=80, height=60, face_chunk_size=size
+        )
+        assert reference is not None
+        assert actual is not None
+        assert actual.rgba == pixels(reference).tobytes()
+
+    def test_preserves_silhouette_recovery(self):
+        prepared = prepare_mesh_render(inverted_plate())
+        assert prepared is not None
+        reference = render_mesh_thumbnail(
+            inverted_plate(), "legacy-silhouette", width=80, height=60
+        )
+        actual = render_prepared_pixels(
+            prepared, "prepared-silhouette", width=80, height=60
+        )
+        assert reference is not None
+        assert actual is not None
+        assert actual.rgba == pixels(reference).tobytes()
+
+    def test_refuses_invalid_camera(self, prepared_box):
+        assert (
+            render_prepared_pixels(
+                prepared_box, "bad-camera", view_rotation=np.ones((3, 3))
+            )
+            is None
+        )
+
+    def test_preserves_renderer_failure_result(self, prepared_box):
+        def broken(*args, **kwargs):
+            raise ArithmeticError("raster_failed")
+
+        assert (
+            render_prepared_pixels(
+                prepared_box, "broken", width=48, height=48, rasterise_triangles=broken
+            )
+            is None
+        )
+
+
+class TestRenderPreparedThumbnail:
+    @pytest.mark.parametrize("format", ["PNG", "WEBP"], ids=["png", "webp"])
+    def test_preserves_existing_encoded_bytes(self, prepared_box, format):
+        reference = render_mesh_thumbnail(
+            box_mesh(),
+            "reference",
+            width=80,
+            height=60,
+            face_chunk_size=5,
+            output_format=format,
+        )
+        actual = render_prepared_thumbnail(
+            prepared_box,
+            "prepared",
+            width=80,
+            height=60,
+            face_chunk_size=5,
+            output_format=format,
+        )
+        assert reference is not None
+        assert actual == reference
+
+
+class TestFrozenPreparedRender:
+    @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
+    def test_preserves_frozen_legacy_pixels(self, case, view, frozen_frame):
+        mesh, options = frozen_frame
+        assert (
+            _FROZEN_RENDER["provenance"]["source_commit"]
+            == "59e91d25172ca53c47f26b1ec773992defddc57a"
+        )
+        assert (
+            hashlib.sha256(mesh.vertices.tobytes()).hexdigest()
+            == case["vertices_sha256"]
+        )
+        assert hashlib.sha256(mesh.faces.tobytes()).hexdigest() == case["faces_sha256"]
+        prepared = prepare_mesh_render(mesh)
+        assert prepared is not None
+        actual = render_prepared_pixels(prepared, case["name"], **options)
+        assert actual is not None
+        ignored = actual.rgb(RGBBackground.IGNORE_ALPHA)
+        white = actual.rgb(RGBBackground.WHITE)
+        gray = (
+            Image.frombytes("RGB", (actual.width, actual.height), ignored)
+            .convert("L")
+            .tobytes()
+        )
+        assert hashlib.sha256(actual.rgba).hexdigest() == view["rgba_sha256"]
+        assert hashlib.sha256(ignored).hexdigest() == view["rgb_ignore_alpha_sha256"]
+        assert hashlib.sha256(white).hexdigest() == view["rgb_white_sha256"]
+        assert hashlib.sha256(gray).hexdigest() == view["gray_sha256"]
+
+    @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
+    def test_preserves_frozen_legacy_png(self, case, view, frozen_frame):
+        mesh, options = frozen_frame
+        prepared = prepare_mesh_render(mesh)
+        assert prepared is not None
+        actual = render_prepared_thumbnail(prepared, case["name"], **options)
+        assert actual is not None
+        assert hashlib.sha256(actual).hexdigest() == view["png_sha256"]

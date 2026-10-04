@@ -1,37 +1,17 @@
-"""Getting a mesh object out of a file, in whatever shape the file arrives.
-
-`_load_mesh` is the one place `trimesh` is called, and it exists to absorb the
-variety of what that call returns. A `.glb` or `.obj` usually loads as a
-*Scene* rather than a mesh — one geometry, or several, or none that are meshes at
-all — and every caller above this function wants a single mesh or nothing. A
-`None` here means "no thumbnail, no geometry", which is a fine outcome; an
-unhandled type means a traceback in a background scan.
-
-3MF is routed around trimesh entirely: trimesh expands repeated build/component
-placements while it loads, so 3MF goes through the bounded resource loader (#259).
-
-STEP is the exception and runs out-of-process. Tessellating a CAD file is
-unbounded work on untrusted input: a modest STEP can expand into hundreds of
-millions of triangles, and there is no way to know before trying. So the child
-is watched and killed when its RSS passes the budget — which is a real kill of a
-real process, not a raised exception, because an in-process tessellation that
-went that far would already have taken the parent with it.
-
-`_geometry_from_mesh` reads dimensions off a loaded mesh. Volume is the sharp
-edge: `trimesh` raises for a non-watertight mesh, and most models people
-download are not watertight, so the failure is the common case and has to leave
-the other measurements intact.
-"""
+"""Loading preserves scene placements and returns one materialized mesh. STEP conversion stays bounded in its child process; malformed sources decline without breaking ingestion."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
-import numpy as np
 import pytest
 import trimesh
 
-from app.modules.media import mesh_processing
+from app.modules.media import (
+    mesh_loading,
+    mesh_previews,
+)
 from tests.fixtures.mesh_analysis import analyze
 from tests.paths import FIXTURES_DIR
 
@@ -42,14 +22,14 @@ class TestLoadMesh:
     def test_load_mesh_returns_trimesh_for_real_stl(self, tmp_path: Path) -> None:
         p = tmp_path / "cube.stl"
         _real_binary_stl_cube(p)
-        mesh = mesh_processing._load_mesh(p)
+        mesh = mesh_loading.load_mesh(p)
         assert mesh is not None
         assert len(mesh.faces) > 0
 
     def test_load_mesh_renders_real_step_fixture(self) -> None:
         path = FIXTURES_DIR / "cascadio_material.stp"
 
-        mesh = mesh_processing._load_mesh(path)
+        mesh = mesh_loading.load_mesh(path)
         result = analyze(path)
         geometry, thumbnail = result.geometry, result.image
 
@@ -57,7 +37,7 @@ class TestLoadMesh:
         assert len(mesh.faces) > 0
         assert geometry["triangle_count"] == len(mesh.faces)
         assert thumbnail is not None
-        assert thumbnail.startswith(mesh_processing._PNG_MAGIC)
+        assert thumbnail.startswith(mesh_previews._PNG_MAGIC)
 
     def test_load_mesh_returns_none_for_unrecognised_extension(
         self, tmp_path: Path
@@ -66,7 +46,7 @@ class TestLoadMesh:
         # inside trimesh.load_scene — exercising _load_mesh's broad except-and-log path.
         p = tmp_path / "garbage.foobar"
         p.write_bytes(b"this is not a mesh at all \x00\x01\x02")
-        assert mesh_processing._load_mesh(p) is None
+        assert mesh_loading.load_mesh(p) is None
 
     def test_load_mesh_flattens_scene_with_multiple_geometries(
         self, tmp_path: Path, monkeypatch
@@ -83,11 +63,11 @@ class TestLoadMesh:
             trimesh.creation.box(extents=[3, 3, 3]).apply_translation([10, 0, 0]),
             node_name="b",
         )
-        p = tmp_path / "scene.3mf"
-        scene.export(p, file_type="3mf")
+        p = tmp_path / "scene.obj"
+        p.write_bytes(b"placeholder")
 
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
-        mesh = mesh_processing._load_mesh(p)
+        mesh = mesh_loading.load_mesh(p)
         assert mesh is not None
         # Concatenated geometry from both boxes.
         assert len(mesh.faces) == 24
@@ -100,7 +80,7 @@ class TestLoadMesh:
         p = tmp_path / "empty.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: empty_scene)
-        assert mesh_processing._load_mesh(p) is None
+        assert mesh_loading.load_mesh(p) is None
 
     def test_load_mesh_declines_a_scene_it_cannot_flatten(
         self, tmp_path: Path, monkeypatch
@@ -121,7 +101,7 @@ class TestLoadMesh:
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: UnflattenableScene())
 
-        assert mesh_processing._load_mesh(p) is None
+        assert mesh_loading.load_mesh(p) is None
 
     def test_load_mesh_declines_a_scene_whose_parts_will_not_concatenate(
         self, tmp_path: Path, monkeypatch
@@ -145,7 +125,30 @@ class TestLoadMesh:
 
         monkeypatch.setattr(trimesh.util, "concatenate", refuse)
 
-        assert mesh_processing._load_mesh(p) is None
+        assert mesh_loading.load_mesh(p) is None
+
+    @pytest.mark.parametrize("suffix", [".obj", ".step"], ids=["scene", "step-result"])
+    def test_declines_a_non_mesh_concatenation_result(
+        self, tmp_path, monkeypatch, suffix
+    ):
+        scene = trimesh.Scene()
+        scene.add_geometry(trimesh.creation.box(), node_name="a")
+        scene.add_geometry(trimesh.creation.box(), node_name="b")
+        path = tmp_path / ("source" + suffix)
+        path.write_bytes(b"placeholder")
+        monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
+        monkeypatch.setattr(trimesh, "load_mesh", lambda *a, **k: scene)
+        monkeypatch.setattr(trimesh.util, "concatenate", lambda *a, **k: object())
+
+        def completed_conversion(command, **_kwargs):
+            Path(command[-1]).write_bytes(b"converted placeholder")
+            return SimpleNamespace(
+                returncode=0, poll=lambda: 0, communicate=lambda: (b"", b"")
+            )
+
+        monkeypatch.setattr(mesh_loading.subprocess, "Popen", completed_conversion)
+
+        assert mesh_loading.load_mesh(path) is None
 
     def test_load_mesh_scene_with_single_geometry_returns_it_directly(
         self, tmp_path: Path, monkeypatch
@@ -157,7 +160,7 @@ class TestLoadMesh:
         p = tmp_path / "single.obj"
         p.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
-        mesh = mesh_processing._load_mesh(p)
+        mesh = mesh_loading.load_mesh(p)
         assert mesh is not None
         assert len(mesh.faces) == 12
 
@@ -165,7 +168,7 @@ class TestLoadMesh:
         self, tmp_path: Path, monkeypatch
     ) -> None:
 
-        p = tmp_path / "cloud.stl"
+        p = tmp_path / "cloud.obj"
         p.write_bytes(b"placeholder")
         # A loader may return a PointCloud (or other non-mesh geometry) for some
         # inputs; _load_mesh must decline rather than mishandle it.
@@ -174,7 +177,7 @@ class TestLoadMesh:
             "load_scene",
             lambda *a, **k: trimesh.points.PointCloud([[0, 0, 0]]),
         )
-        assert mesh_processing._load_mesh(p) is None
+        assert mesh_loading.load_mesh(p) is None
 
     def test_load_mesh_uses_typed_loader_without_processing(
         self, tmp_path: Path, monkeypatch
@@ -188,10 +191,10 @@ class TestLoadMesh:
             return expected
 
         monkeypatch.setattr(trimesh, "load_scene", typed_loader)
-        path = tmp_path / "typed.stl"
+        path = tmp_path / "typed.obj"
         path.write_bytes(b"placeholder")
 
-        assert mesh_processing._load_mesh(path) is expected
+        assert mesh_loading.load_mesh(path) is expected
         assert calls == [((str(path),), {"process": False})]
 
 
@@ -211,44 +214,5 @@ class TestLoadStepMeshIsolated:
 
         monkeypatch.setattr(mesh_isolation, "supervise_result", refused)
 
-        assert mesh_processing._load_step_mesh_isolated(path) is None
+        assert mesh_loading.load_step_mesh(path) is None
         assert current_permit() is None
-
-
-class TestGeometryFromMesh:
-    @pytest.mark.parametrize("edge", [0.001, 0.123456789, 123.456789])
-    def test_preserves_measurement_precision(self, edge):
-        mesh = trimesh.creation.box(extents=[edge, edge, edge])
-
-        geometry = mesh_processing._geometry_from_mesh(mesh)
-
-        for axis in ("x", "y", "z"):
-            assert geometry[f"bbox_{axis}_mm"] == pytest.approx(edge, rel=1e-12, abs=0)
-        assert geometry["volume_mm3"] == pytest.approx(edge**3, rel=1e-12, abs=0)
-
-    @pytest.mark.parametrize(
-        "volume", [float("inf"), float("nan")], ids=["infinite", "nan"]
-    )
-    def test_refuses_nonfinite_volume(self, monkeypatch, volume):
-        mesh = trimesh.creation.box(extents=[10, 10, 10])
-        monkeypatch.setattr(trimesh.Trimesh, "volume", property(lambda self: volume))
-
-        geometry = mesh_processing._geometry_from_mesh(mesh)
-
-        assert geometry["volume_mm3"] is None
-
-    def test_geometry_from_mesh_handles_non_watertight_volume_error(
-        self, monkeypatch
-    ) -> None:
-        class _BrokenVolume:
-            vertices = np.zeros((3, 3), dtype=np.float64)
-            bounds = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
-            faces = np.zeros((1, 3), dtype=np.int64)
-
-            @property
-            def volume(self):
-                raise ValueError("non-watertight")
-
-        geometry = mesh_processing._geometry_from_mesh(_BrokenVolume())
-        assert geometry["volume_mm3"] is None
-        assert geometry["bbox_x_mm"] == 1.0

@@ -353,3 +353,52 @@ class TestProducerAdmission:
             assert row.failure_reason == "derivative_group_disabled"
             assert row.attempts == 2
             assert row.next_attempt_at is not None
+
+
+class TestMeshContinuationCancellation:
+    @pytest.mark.parametrize("authority", ["current", "replaced", "standalone"])
+    def test_withdraws_only_current_pending_input(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_derivative,
+        make_job,
+        make_mesh_continuation,
+        authority,
+    ):
+        from app.db.models import JobState, MeshFingerprintContinuation
+
+        artifact = make_file(make_model(), filename="part.stl")
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        job = (
+            None
+            if authority == "standalone"
+            else make_job(
+                kind=JobKind.DERIVATIVES_MESH,
+                state=JobState.RUNNING,
+                subject=subject_key(artifact.id),
+                attempts=1,
+            )
+        )
+        pending = make_mesh_continuation(artifact, job=job)
+        token = pending.token
+        if authority == "replaced":
+            job.execution_epoch = "replacement-epoch"
+            db_session.add(job)
+            db_session.commit()
+        DEFINITIONS[JobKind.DERIVATIVES_MESH].cancel(
+            db_session, subject_key(artifact.id)
+        )
+        db_session.commit()
+        db_session.expire_all()
+        current = db_session.get(MeshFingerprintContinuation, artifact.id)
+        if authority == "replaced":
+            assert current is not None and current.token == token
+        else:
+            assert current is None
+        assert _states(db_session, artifact.id) == {
+            DerivativeKind.METADATA: DerivativeState.READY,
+            DerivativeKind.THUMBNAIL: DerivativeState.READY,
+        }

@@ -3,7 +3,9 @@
 Binary sources must contain exactly their declared records, including headers
 beginning with ``solid``. ASCII accepts complete facets without ``endsolid``,
 ignores blank/comment lines, and rejects content after ``endsolid``. A complete
-scan certifies source coverage, never closed topology or enclosed volume.
+scan certifies source facets/coordinates through EOF, never closed topology or
+enclosed volume. Binary stored normals are ignored because geometric normals
+are derived from vertices; ASCII normal tokens retain the finite syntax rule.
 """
 
 from __future__ import annotations
@@ -84,7 +86,27 @@ class STLReadLimits:
 
 
 @dataclass(frozen=True)
+class STLSourceSnapshot:
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+    @classmethod
+    def from_stat(cls, stat: os.stat_result) -> STLSourceSnapshot:
+        return cls(
+            stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+        )
+
+
+def snapshot_stl(path: Path) -> STLSourceSnapshot:
+    return STLSourceSnapshot.from_stat(path.stat())
+
+
+@dataclass(frozen=True)
 class STLMeasurements:
+    snapshot: STLSourceSnapshot
     triangle_count: int
     scanned_bytes: int
     bounds_min: tuple[float, float, float]
@@ -96,8 +118,8 @@ def check_deadline(limits: STLReadLimits) -> None:
         raise STLBudgetExceeded("deadline")
 
 
-def _identity(stat: os.stat_result) -> tuple[int, int, int, int, int]:
-    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+def _identity(stat: os.stat_result) -> STLSourceSnapshot:
+    return STLSourceSnapshot.from_stat(stat)
 
 
 def binary_stl_info(path: Path) -> tuple[int, int] | None:
@@ -224,15 +246,18 @@ def iter_stl_blocks(
     limits: STLReadLimits,
     *,
     source_format: STLFormat | None = None,
+    snapshot: STLSourceSnapshot | None = None,
 ) -> Iterator[NDArray[np.float64]]:
     """Yield bounded float64 source facets; certify the snapshot only at EOF."""
     import numpy as np
 
     with path.open("rb") as stream:
         before = _identity(os.fstat(stream.fileno()))
-        if before != _identity(path.stat()):
+        if (snapshot is not None and before != snapshot) or before != _identity(
+            path.stat()
+        ):
             raise STLSourceChanged("source changed while opening")
-        size = before[2]
+        size = before.size
         if size > limits.max_source_bytes:
             raise STLBudgetExceeded("source budget")
         header = stream.read(_BINARY_HEADER_BYTES)
@@ -288,6 +313,7 @@ def iter_stl_blocks(
                     batch.clear()
             if batch:
                 yield np.asarray(batch, dtype=np.float64)
+        check_deadline(limits)
         if before != _identity(os.fstat(stream.fileno())) or before != _identity(
             path.stat()
         ):
@@ -299,11 +325,12 @@ def scan_stl(
     *,
     limits: STLReadLimits | None = None,
     source_format: STLFormat | None = None,
+    snapshot: STLSourceSnapshot | None = None,
 ) -> STLMeasurements:
     """Return exact source bounds/count after a complete, stable bounded read."""
     import numpy as np
 
-    source = _identity(path.stat())
+    source = snapshot if snapshot is not None else snapshot_stl(path)
     lower = np.full(3, np.inf, dtype=np.float64)
     upper = np.full(3, -np.inf, dtype=np.float64)
     parsed = 0
@@ -311,6 +338,7 @@ def scan_stl(
         path,
         limits if limits is not None else STLReadLimits(),
         source_format=source_format,
+        snapshot=source,
     ):
         lower = np.minimum(lower, vertices.min(axis=(0, 1)))
         upper = np.maximum(upper, vertices.max(axis=(0, 1)))
@@ -318,8 +346,57 @@ def scan_stl(
     if source != _identity(path.stat()):
         raise STLSourceChanged("source changed before completing scan")
     return STLMeasurements(
+        snapshot=source,
         triangle_count=parsed,
-        scanned_bytes=source[2],
+        scanned_bytes=source.size,
         bounds_min=(float(lower[0]), float(lower[1]), float(lower[2])),
         bounds_max=(float(upper[0]), float(upper[1]), float(upper[2])),
+    )
+
+
+@dataclass(frozen=True)
+class STLMaterialized:
+    triangles: NDArray[np.float64]
+    measurements: STLMeasurements
+
+
+def materialize_stl(path: Path, *, limits: STLReadLimits) -> STLMaterialized:
+    """Materialize admitted source facets, preserving typed refusal and snapshot."""
+    import numpy as np
+
+    source = snapshot_stl(path)
+    if source.size > limits.max_source_bytes:
+        raise STLBudgetExceeded("source budget")
+    info = binary_stl_info(path)
+    if info is None:
+        measured = scan_stl(path, limits=limits, snapshot=source)
+        count = measured.triangle_count
+    else:
+        count = info[0]
+    if count > limits.max_triangles:
+        raise STLBudgetExceeded("triangle budget")
+    check_deadline(limits)
+    facets = np.empty((count, 3, 3), dtype=np.float64)
+    parsed = 0
+    for block in iter_stl_blocks(path, limits, snapshot=source):
+        stop = parsed + len(block)
+        if stop > count:
+            raise STLSourceChanged("source facet count changed")
+        facets[parsed:stop] = block
+        parsed = stop
+    if parsed != count:
+        raise STLSourceChanged("source facet count changed")
+    lower, upper = facets.min(axis=(0, 1)), facets.max(axis=(0, 1))
+    check_deadline(limits)
+    if snapshot_stl(path) != source:
+        raise STLSourceChanged("source changed before completing materialization")
+    return STLMaterialized(
+        triangles=facets,
+        measurements=STLMeasurements(
+            snapshot=source,
+            triangle_count=count,
+            scanned_bytes=source.size,
+            bounds_min=(float(lower[0]), float(lower[1]), float(lower[2])),
+            bounds_max=(float(upper[0]), float(upper[1]), float(upper[2])),
+        ),
     )

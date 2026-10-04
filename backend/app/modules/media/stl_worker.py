@@ -13,35 +13,38 @@ import sys
 from pathlib import Path
 
 from printstash_core.mesh.similarity import GeometryError
+from trimesh.exchange.stl import export_stl
 
-from app.modules.media import mesh_processing
-from app.modules.media.mesh_contracts import ThumbnailFailureReason, canonical_suffix
+from app.modules.media import mesh_policy
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
+from app.modules.media.mesh_loading import load_step_mesh, to_stl_bytes
 from app.modules.media.mesh_resources import load_3mf
 from app.modules.media.stl_isolation import FAILURE_MAGIC, encode_reply
+from app.modules.media.three_mf_scene import Unsupported3MFCapability
 
 
 def convert(path: Path, file_type: str | None) -> bytes | None:
     """Preserve resource refusal reasons instead of collapsing them into no output."""
-    file_type = canonical_suffix(path, file_type).lstrip(".")
-    if mesh_processing._exceeds_cap(path, file_type=file_type):
+    file_type = mesh_policy.canonical_suffix(path, file_type).lstrip(".")
+    if mesh_policy.exceeds_cap(path, file_type=file_type):
         raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
     if file_type not in {"3mf", "step", "stp"}:
-        return mesh_processing.to_stl_bytes(path, file_type=file_type)
-    with mesh_processing._native_scope():
+        return to_stl_bytes(path, file_type=file_type)
+    with mesh_policy.render_admission():
         try:
             mesh = (
                 load_3mf(
-                    path, max_faces=mesh_processing._load_face_budget(".3mf")
+                    path, max_faces=mesh_policy.load_face_budget(".3mf")
                 ).whole_mesh
                 if file_type == "3mf"
-                else mesh_processing._load_step_mesh_isolated(
-                    path, strict_failures=True
-                )
+                else load_step_mesh(path, strict_failures=True)
             )
         except GeometryError as exc:
             reason = (
-                ThumbnailFailureReason.RESOURCE_LIMIT
+                ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
+                if isinstance(exc, Unsupported3MFCapability)
+                else ThumbnailFailureReason.RESOURCE_LIMIT
                 if exc.code
                 in {
                     "archive_resource_limit",
@@ -57,7 +60,7 @@ def convert(path: Path, file_type: str | None) -> bytes | None:
                 else ThumbnailFailureReason.INVALID_SOURCE
             )
             raise MeshWorkerError(reason) from exc
-        return None if mesh is None else mesh.export(file_type="stl")
+        return None if mesh is None else export_stl(mesh)
 
 
 def main(argv: list[str]) -> int:

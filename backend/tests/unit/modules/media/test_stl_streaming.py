@@ -16,11 +16,13 @@ import pytest
 
 from app.core.config import _overlay
 from app.modules.media import (
-    mesh_processing,
+    mesh_loading,
+    mesh_policy,
     mesh_render,
     native_process,
     stl_streaming,
 )
+from app.modules.media.mesh_contracts import PreviewCoverage
 from app.modules.media.stl_streaming import (
     STLStreamingLimits,
     render_stl_preview_isolated,
@@ -705,10 +707,10 @@ class TestRenderStlPreviewIsolated:
     endfacet
     """
         path.write_text("solid ascii\n" + facet * 2 + "endsolid ascii\n")
-        monkeypatch.setattr(mesh_processing, "_exceeds_cap", lambda _path: True)
+        monkeypatch.setattr(mesh_policy, "exceeds_cap", lambda _path: True)
         monkeypatch.setattr(
-            mesh_processing,
-            "_load_mesh",
+            mesh_loading,
+            "load_mesh",
             lambda _path: (_ for _ in ()).throw(AssertionError("must not load")),
         )
 
@@ -716,7 +718,7 @@ class TestRenderStlPreviewIsolated:
         geometry = result.geometry
 
         assert is_partial_render(result)
-        assert result.complete is True
+        assert result.coverage.preview is PreviewCoverage.COMPLETE
         assert geometry["triangle_count"] == 2
 
     @pytest.mark.parametrize(
@@ -912,7 +914,7 @@ class TestMeshProcessing:
         geometry = result.geometry
 
         assert is_partial_render(result)
-        assert result.complete is True
+        assert result.coverage.preview is PreviewCoverage.COMPLETE
         assert geometry["triangle_count"] == 12
 
 
@@ -957,8 +959,8 @@ class TestRender:
         _binary_triangle_stl(path)
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000)
         monkeypatch.setattr(
-            mesh_processing,
-            "_load_mesh",
+            mesh_loading,
+            "load_mesh",
             lambda _path: SimpleNamespace(
                 vertices=np.zeros((3, 3)),
                 bounds=np.array([[0.0, 0.0, 0.0], [4.0, 3.0, 0.0]]),
@@ -977,7 +979,7 @@ class TestRender:
         result = analyze(path, width=96, height=72)
 
         assert is_partial_render(result)
-        assert result.complete is True
+        assert result.coverage.preview is PreviewCoverage.COMPLETE
 
 
 class TestDecode:

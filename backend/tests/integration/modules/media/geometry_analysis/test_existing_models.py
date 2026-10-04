@@ -85,5 +85,8 @@ class TestExistingModels:
         assert hashlib.sha256(BENCHY.read_bytes()).hexdigest() == before
 
     def test_rejects_spatula_when_triangle_budget_is_too_small(self):
-        with pytest.raises(GeometryError, match="geometry_work_limit"):
+        # 3MF admission comes from the bounded reader's exact face limit rather
+        # than a size estimate or analysis performed on a fully loaded mesh.
+        with pytest.raises(GeometryError) as raised:
             _load(SPATULA, "3mf", triangle_cap=100)
+        assert raised.value.code == "resource_limit"

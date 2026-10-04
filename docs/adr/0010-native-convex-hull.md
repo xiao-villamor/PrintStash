@@ -6,14 +6,14 @@ The Python QuickHull descriptor exhausts its 20-million point/plane budget on a
 valid deterministic sphere with 20,000 exterior points. A failed hull descriptor
 also follows expensive loops and allocations before reporting unavailability.
 
-Use SciPy 1.17.1/Qhull behind `mesh.similarity.hull.hull_volume`, an array-to-scalar
+Use SciPy/Qhull behind `mesh.similarity.hull.hull_volume`, an array-to-scalar
 operation. The optional `printstash-core[mesh]` dependency owns SciPy; the backend
 selects that extra. Base core imports remain independent of native mesh packages.
-The resolver range is `>=1.17.1,<1.18` and the application lock pins 1.17.1. This
-keeps Python 3.11 support: SciPy 1.18 requires Python 3.12. Official 1.17.1 wheels
-include Linux x86-64 and ARM64, CPython 3.11 and 3.13, and musl variants. Presence
-of a wheel is packaging evidence, not a claim that this change was executed on
-an ARM device. [SciPy distribution](https://pypi.org/project/scipy/1.17.1/).
+The supported Python floor is 3.14. The resolver floor is SciPy 1.18.1,
+with NumPy 2.5.3 and Pillow 12.3.0. CPython 3.14 wheels are published for Linux
+x86-64 and ARM64. Wheel availability is packaging evidence; runtime validation
+is recorded independently. [SciPy distribution](https://pypi.org/project/scipy/1.18.1/).
+The measurements below retain their original Python and dependency versions.
 
 Finite points are sorted/deduplicated and normalized before native products;
 volume is restored to physical units afterward. No QJ perturbation turns a
@@ -64,5 +64,5 @@ errors, not an excuse to silently run the exhausted algorithm.
 Run the application's normal CI against the final head and the full integrated
 gate when the ingestion changes are assembled. Deep CI remains deferred until
 the implementation plan is complete. It covers the independent core package
-on Python 3.11/3.13. Record ARM runtime validation and the final worker/load
+on Python 3.14.8. Record ARM runtime validation and the final worker/load
 measurement with the rollout evidence; do not infer those from this microbench.

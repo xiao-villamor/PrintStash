@@ -106,7 +106,7 @@ def redact_url(value: str) -> str:
                 "",
             )
         )
-    except (TypeError, ValueError, UnicodeError):
+    except TypeError, ValueError, UnicodeError:
         return "[redacted-url]"
 
 

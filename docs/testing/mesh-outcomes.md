@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|---|
 | 1 | encodes independent geometry refusal | Error | Refusal and successful image | Typed refusal survives reply | Unit | ✅ TestGeometryOutcome.test_refusal_survives_a_successful_preview_reply |
 | 2 | rejects incomplete replies | Error | Missing geometry outcome | Worker failure, no fake success | Unit | ✅ TestGeometryOutcome.test_missing_geometry_outcome_is_not_a_successful_reply |
-| 3 | refuses geometry with an embedded image | Error | Expanded 3MF above budget | Terminal metadata failure | Integration | ✅ TestDeriveMesh.test_refused_geometry_is_terminal_with_an_embedded_preview |
+| 3 | refuses geometry with an embedded image | Error | Expanded 3MF beyond hard2048-instance reader ceiling | Terminal metadata failure; embedded preview retained | Integration | ✅ TestDeriveMesh.test_refused_geometry_is_terminal_with_an_embedded_preview |
 | 4 | retains the embedded image | Happy | Same resource refusal | Thumbnail ready | Integration | ✅ TestDeriveMesh.test_embedded_preview_survives_refused_geometry |
 | 5 | exposes malformed source failure | Error | Broken 3MF package | Metadata failed, no unknown-only success | Integration | ✅ TestDeriveMesh.test_malformed_mesh_does_not_publish_successful_unknown_metadata |
 | 6 | retains legitimate unknown volume | Edge | Open STL surface | Ready geometry, volume null | Integration | ✅ TestGeometryMeasurements.test_open_mesh_keeps_unknown_volume_without_refusing_geometry |

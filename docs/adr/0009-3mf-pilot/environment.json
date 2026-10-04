@@ -73,5 +73,6 @@
       "_proc_rss",
       "check_expectations"
     ]
-  }
+  },
+  "harness_git_revision": "5f9e96fb6454693857fc1e6195f885485d179f4a"
 }

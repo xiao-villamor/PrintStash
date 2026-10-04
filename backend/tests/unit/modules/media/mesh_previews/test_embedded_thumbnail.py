@@ -35,7 +35,7 @@ import pytest
 
 from app.core.config import _overlay
 from app.modules.media import thumbnail
-from app.modules.media.mesh_processing import _PNG_MAGIC, extract_embedded_3mf_thumbnail
+from app.modules.media.mesh_previews import _PNG_MAGIC, extract_embedded_3mf_thumbnail
 
 _PNG_SMALL = _PNG_MAGIC + b"small"
 _PNG_BIG = _PNG_MAGIC + b"x" * 500
@@ -77,10 +77,10 @@ class TestExtractEmbedded3mfThumbnail:
         larger_invalid = _PNG_MAGIC + b"x" * 700
         oversized = b"x" * 2_000
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_BYTES", 1_000
+            "app.modules.media.mesh_previews._MAX_3MF_THUMBNAIL_BYTES", 1_000
         )
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_AGGREGATE_BYTES",
+            "app.modules.media.mesh_previews._MAX_3MF_THUMBNAIL_AGGREGATE_BYTES",
             1_100,
         )
         path = _make_3mf(
@@ -123,7 +123,7 @@ class TestExtractEmbedded3mfThumbnail:
     ) -> None:
         p = _make_3mf(tmp_path, {"Metadata/thumbnail.png": _PNG_BIG})
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_THUMBNAIL_BYTES", 64
+            "app.modules.media.mesh_previews._MAX_3MF_THUMBNAIL_BYTES", 64
         )
 
         original_read = zipfile.ZipFile.read
@@ -184,7 +184,7 @@ class TestExtractEmbedded3mfThumbnail:
             },
         )
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_TOTAL_UNCOMPRESSED_BYTES", 64
+            "app.modules.media.mesh_previews._MAX_3MF_TOTAL_UNCOMPRESSED_BYTES", 64
         )
 
         assert extract_embedded_3mf_thumbnail(path) is None
@@ -196,7 +196,7 @@ class TestExtractEmbedded3mfThumbnail:
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("Metadata/thumbnail.png", _PNG_MAGIC + b"x" * 10_000)
         monkeypatch.setattr(
-            "app.modules.media.mesh_processing._MAX_3MF_COMPRESSION_RATIO", 2
+            "app.modules.media.mesh_previews._MAX_3MF_COMPRESSION_RATIO", 2
         )
 
         assert extract_embedded_3mf_thumbnail(path) is None

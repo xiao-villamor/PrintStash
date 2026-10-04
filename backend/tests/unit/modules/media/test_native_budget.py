@@ -74,9 +74,9 @@ class TestFaceCapacity:
         "memory,expected",
         [
             pytest.param(1, 0, id="below-one-face"),
-            pytest.param(2200, 1, id="one-face"),
-            pytest.param(2199, 0, id="less-than-one-face"),
-            pytest.param(4400, 2, id="two-faces"),
+            pytest.param(3000, 1, id="one-face"),
+            pytest.param(2999, 0, id="less-than-one-face"),
+            pytest.param(6000, 2, id="two-faces"),
         ],
     )
     def test_matches_the_whole_pipeline_cost(self, memory, expected):

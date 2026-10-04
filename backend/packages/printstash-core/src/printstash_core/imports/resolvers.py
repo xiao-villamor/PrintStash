@@ -247,7 +247,7 @@ def parse_printables_capture(payload: Any, canonical_url: str) -> CaptureManifes
     """
     try:
         print_obj = payload["data"]["print"]
-    except (KeyError, TypeError):
+    except KeyError, TypeError:
         raise CaptureContractError("Printables payload has no print object") from None
     if not isinstance(print_obj, dict):
         raise CaptureContractError("Printables payload print object is invalid")
@@ -373,7 +373,7 @@ def makerworld_collection_title(next_data: Any, collection_id_value: str) -> str
         meta = props.get("favorite") or props.get("collection") or {}
         if isinstance(meta, dict) and (meta.get("title") or meta.get("name")):
             title = str(meta.get("title") or meta.get("name"))
-    except (KeyError, TypeError):
+    except KeyError, TypeError:
         pass
     return title
 
@@ -382,7 +382,7 @@ def makerworld_collection_members(next_data: Any) -> list[CollectionMember]:
     """Extract unique design-like entries from MakerWorld hydration JSON."""
     try:
         props = next_data["props"]["pageProps"]
-    except (KeyError, TypeError):
+    except KeyError, TypeError:
         return []
 
     members: list[CollectionMember] = []

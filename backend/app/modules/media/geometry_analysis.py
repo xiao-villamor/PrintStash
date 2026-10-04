@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from printstash_core.inference import EmbeddingInput
+from printstash_core.mesh.render_geometry import PreparedRender
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import ExpandedScene
@@ -14,8 +15,14 @@ from printstash_core.mesh.similarity.verification import Verification, verify_me
 from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
 
-from app.modules.media import mesh_processing, stl_fallback
+from app.modules.media import mesh_loading, mesh_policy, mesh_render, stl_fallback
+from app.modules.media.mesh_facts import (
+    CompleteGeometry,
+    FingerprintFailureCode,
+    SampledGeometry,
+)
 from app.modules.media.mesh_resources import PreparedMesh, load_3mf, prepare_loaded_mesh
+from app.modules.media.stl_reader import InvalidSTL
 
 MAX_VERIFICATION_SECONDS = 180.0
 
@@ -28,20 +35,25 @@ def _load(
 
     if type(triangle_cap) is not int or not 100 <= triangle_cap <= MAX_ANALYSIS_FACES:
         raise GeometryError("invalid_triangle_cap")
-    estimate = mesh_processing._estimate_triangle_count(path, file_type=file_type)
+    estimate = mesh_policy.estimate_triangle_count(path, file_type=file_type)
     over_cap = (
-        mesh_processing._exceeds_cap(path, file_type=file_type)
+        mesh_policy.exceeds_cap(path, file_type=file_type)
         or estimate is not None
         and estimate > triangle_cap
     )
     if over_cap:
         if file_type != "stl":
             raise GeometryError("geometry_work_limit")
-        sampled = stl_fallback.sample_stl_geometry(
-            path, max_triangles=min(10_000, triangle_cap)
-        )
-        if sampled is None:
-            raise GeometryError("invalid_geometry")
+        try:
+            sampled = stl_fallback.read_stl_sample(
+                path, max_triangles=min(10_000, triangle_cap)
+            )
+        except InvalidSTL as exc:
+            raise GeometryError(exc.reason.value) from exc
+        except OSError as exc:
+            raise GeometryError(
+                FingerprintFailureCode.SOURCE_UNAVAILABLE.value
+            ) from exc
         mesh = trimesh.Trimesh(
             vertices=np.asarray(sampled.coordinates, dtype=np.float64).reshape(-1, 3),
             faces=np.arange(sampled.sampled_triangles * 3).reshape(-1, 3),
@@ -50,20 +62,18 @@ def _load(
         return PreparedMesh(
             mesh,
             ExpandedScene((), ()),
-            file_type,
-            complete=False,
-            failure_code="sampled_oversized_source",
+            geometry=SampledGeometry(FingerprintFailureCode.SAMPLED_OVERSIZED_SOURCE),
         )
     if file_type == "3mf":
         prepared = load_3mf(
             path,
-            max_faces=min(triangle_cap, mesh_processing._load_face_budget(".3mf")),
+            max_faces=min(triangle_cap, mesh_policy.load_face_budget(".3mf")),
         )
     else:
         mesh = (
-            mesh_processing._load_step_mesh_isolated(path, include_brep=include_brep)
+            mesh_loading.load_step_mesh(path, include_brep=include_brep)
             if file_type == "step"
-            else mesh_processing._load_mesh(path, file_type=file_type)
+            else mesh_loading.load_mesh(path, file_type=file_type)
         )
         if mesh is None:
             raise GeometryError(
@@ -78,7 +88,9 @@ def _load(
 def _component(prepared: PreparedMesh, index: int):
     if index == 0:
         return prepared.whole_mesh.vertices, prepared.whole_mesh.faces
-    if not prepared.complete or not 1 <= index <= len(prepared.scene.resources):
+    if not isinstance(prepared.geometry, CompleteGeometry) or not 1 <= index <= len(
+        prepared.scene.resources
+    ):
         raise GeometryError("component_unavailable")
     resource = prepared.scene.resources[index - 1]
     return resource.vertices, resource.faces
@@ -100,19 +112,22 @@ def verify_paths(
     left = right = None
     deadline = deadline_after(verification_seconds)
     try:
-        with mesh_processing._native_scope():
+        with mesh_policy.render_admission():
             left = _load(first, first_type, triangle_cap=triangle_cap)
             right = _load(second, second_type, triangle_cap=triangle_cap)
             return verify_meshes(
                 *_component(left, first_component),
                 *_component(right, second_component),
                 sample_points=sample_points,
-                partial=not (left.complete and right.complete),
+                partial=not (
+                    isinstance(left.geometry, CompleteGeometry)
+                    and isinstance(right.geometry, CompleteGeometry)
+                ),
                 deadline=deadline,
             )
     finally:
         left = right = None
-        mesh_processing._reclaim_memory()
+        mesh_policy.reclaim_memory()
 
 
 def embedding_views(
@@ -128,13 +143,16 @@ def embedding_views(
 
     if not 32 <= image_size <= 512:
         raise GeometryError("invalid_view_budget")
-    with mesh_processing._native_scope():
+    with mesh_policy.render_admission():
         prepared = _load(path, file_type, triangle_cap=triangle_cap)
-        if not prepared.complete:
+        if not isinstance(prepared.geometry, CompleteGeometry):
             raise GeometryError("embedding_requires_complete_geometry")
         vertices, faces = _component(prepared, component_index)
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-        return _render_views(mesh, image_size, canonical_frames())
+        visual = mesh_render.prepare_mesh_render(mesh)
+        if visual is None:
+            raise GeometryError("embedding_view_failed")
+        return _render_views(visual, image_size, canonical_frames())
 
 
 def canonical_frames():
@@ -148,17 +166,13 @@ def canonical_frames():
     )
 
 
-def _render_views(mesh, image_size, frames):
-    import io
-
+def _render_views(prepared: PreparedRender, image_size: int, frames):
     import numpy as np
-    from PIL import Image
-    from printstash_core.mesh.rasterizer import render_mesh_thumbnail
 
     views = []
     for frame in frames:
-        rendered = render_mesh_thumbnail(
-            mesh,
+        rendered = mesh_render.render_prepared_pixels(
+            prepared,
             "",
             width=image_size,
             height=image_size,
@@ -169,13 +183,13 @@ def _render_views(mesh, image_size, frames):
         )
         if rendered is None:
             raise GeometryError("embedding_view_failed")
-        with Image.open(io.BytesIO(rendered)) as image:
-            rgba = image.convert("RGBA")
-            background = Image.new("RGBA", rgba.size, "white")
-            background.alpha_composite(rgba)
-            rgb = background.convert("RGB").tobytes()
         views.append(
-            EmbeddingInput("image", rgb=rgb, width=image_size, height=image_size)
+            EmbeddingInput(
+                "image",
+                rgb=rendered.rgb(mesh_render.RGBBackground.WHITE),
+                width=image_size,
+                height=image_size,
+            )
         )
     return tuple(views)
 
@@ -195,14 +209,15 @@ def visual_views(
 ) -> VisualViews:
     """One source load and render permit for the thumbnail and canonical views."""
     prepared = None
+    visual: PreparedRender | None = None
     try:
-        with mesh_processing._native_scope():
+        with mesh_policy.render_admission():
             # Visual encoding needs triangles only. The parent owns temporary
             # capacity; this isolated renderer never connects to the database.
             prepared = _load(
                 path, file_type, triangle_cap=triangle_cap, include_brep=False
             )
-            if not prepared.complete:
+            if not isinstance(prepared.geometry, CompleteGeometry):
                 raise GeometryError("embedding_requires_complete_geometry")
             if isinstance(recipe, PointRecipe):
                 from printstash_core.inference.points import point_input
@@ -211,10 +226,13 @@ def visual_views(
                     prepared.whole_mesh.vertices, prepared.whole_mesh.faces
                 )
                 return VisualViews(None, (points,))
-            from app.modules.media import mesh_render, thumbnail
+            from app.modules.media import thumbnail
 
-            encoded = mesh_render.render_mesh_thumbnail(
-                prepared.whole_mesh, "", width=640, height=480, output_format="WEBP"
+            visual = mesh_render.prepare_mesh_render(prepared.whole_mesh)
+            if visual is None:
+                raise GeometryError("embedding_view_failed")
+            encoded = mesh_render.render_prepared_thumbnail(
+                visual, "", width=640, height=480, output_format="WEBP"
             )
             if encoded is None:
                 raise GeometryError("embedding_view_failed")
@@ -222,16 +240,15 @@ def visual_views(
                 thumbnail.to_webp(encoded, width=640), recipe.image_size
             )
             rendered = (
-                _render_views(
-                    prepared.whole_mesh, recipe.image_size, canonical_frames()
-                )
+                _render_views(visual, recipe.image_size, canonical_frames())
                 if recipe.profile == "multiview"
                 else (preview,)
             )
             return VisualViews(preview, rendered)
     finally:
+        visual = None
         prepared = None
-        mesh_processing._reclaim_memory()
+        mesh_policy.reclaim_memory()
 
 
 def thumbnail_input(encoded: bytes, size: int) -> EmbeddingInput:
@@ -239,6 +256,8 @@ def thumbnail_input(encoded: bytes, size: int) -> EmbeddingInput:
     from printstash_core.inference.images import decode_image
 
     source = decode_image(encoded, "image/webp")
+    if source.rgb is None:
+        raise GeometryError("embedding_view_failed")
     # Match the pinned v1 encoder's bicubic resize exactly. Keeping the pipe's
     # frames at native size avoids carrying a large cached image to the worker.
     image = Image.frombytes("RGB", (source.width, source.height), source.rgb)

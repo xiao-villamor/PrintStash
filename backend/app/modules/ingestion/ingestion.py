@@ -45,6 +45,7 @@ from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.identity import rbac
 from app.modules.library import taxonomy
+from app.modules.library.volume_metadata import apply_volume, incoming_volume
 from app.modules.storage import storage
 from app.modules.storage.hashing import sha256_file
 from app.modules.storage.storage_backend.contracts import (
@@ -402,6 +403,7 @@ def persist_artifact(
       upload is moved onto the library root.
     """
     assert model.id is not None
+    volume = incoming_volume(meta, file_type)
     backend = get_backend()
 
     if is_external:
@@ -587,7 +589,9 @@ def persist_artifact(
             for k, v in meta.items()
             if k in Metadata.model_fields and k not in {"id", "file_id", "created_at"}
         }
-        session.add(Metadata(file_id=file_row.id, **md_fields))
+        metadata = Metadata(file_id=file_row.id, **md_fields)
+        apply_volume(metadata, volume)
+        session.add(metadata)
         requirements = meta.get("material_requirements")
         if isinstance(requirements, list):
             for requirement in requirements:

@@ -59,6 +59,12 @@ it retained roughly 170–190 MiB from the generator parent on some native child
 whose actual peak was about 47 MiB. Reporting that inherited value would conceal
 the reader's memory difference.
 
+The published 434 observations are historical evidence from the harness at
+`5f9e96fb6454693857fc1e6195f885485d179f4a`, with the digest recorded in the CSV
+and environment. Subsequent scene-reader extraction moved instrumentation to the
+canonical parser owner. That change does not imply a new measurement: rerunning
+the current harness records its own digest and results separately.
+
 ## Observed exploratory medians
 
 Times are milliseconds. `total` starts before backend imports and ends after

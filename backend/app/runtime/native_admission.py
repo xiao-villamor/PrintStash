@@ -207,6 +207,18 @@ class LocalResourcePool:
                 live.append(ticket)
         return live, abandoned
 
+    def has_waiters(self, *, checkpoint: Callable[[], None]) -> bool:
+        """Inspect live bounded receipts without running callbacks under the lock.
+
+        Dead native receipts may be retired; prepared workspaces retain their
+        records for the normal recovery path. Neither disk cleanup nor external
+        cancellation probes run while the coordinator is held.
+        """
+        with ExitStack() as recovery:
+            with self._coordinator(checkpoint):
+                live, _abandoned = self._live(recovery)
+                return any(ticket.state is _State.QUEUED for ticket in live)
+
     @staticmethod
     def _available(ticket: _Ticket, live: list[_Ticket]) -> bool:
         registered = next((item for item in live if item.name == ticket.name), None)

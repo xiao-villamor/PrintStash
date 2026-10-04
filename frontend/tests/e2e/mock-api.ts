@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 import type { SubjectCaption } from "../../src/types/captions";
 import type { SearchStatus } from "../../src/types/search";
+import type { MetadataRead } from "../../src/types/models";
 
 const now = "2026-06-04T00:24:22.000000";
 
@@ -34,7 +35,7 @@ function mockNode(row: ReturnType<typeof mockCollection>) {
   return { ...row, child_count: 0, descendant_count: 0, display_path: row.name };
 }
 
-const metadata = {
+const metadata: MetadataRead = {
   slicer_name: "OrcaSlicer",
   slicer_version: "OrcaSlicer 2.3.1",
   printer_model: "Creality Ender-3 V3 SE",
@@ -58,6 +59,13 @@ const metadata = {
   bbox_y_mm: null,
   bbox_z_mm: null,
   volume_mm3: null,
+  volume_measurement: {
+    state: "legacy_unassessed",
+    unit: "mm3",
+    method: null,
+    value_mm3: null,
+    cause: null,
+  },
   triangle_count: null,
 };
 

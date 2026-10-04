@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from app.modules.media import mesh_resources, three_mf_scene
 from scripts.pilot_lib3mf import _arrays, check_expectations, enabled_backends, measure
 from tests.factories.three_mf_pilot import load_case, load_mesh
 
@@ -62,6 +63,27 @@ class TestPilotWorker:
         assert observed["import_ms"] >= 0
         assert observed["read_ms"] >= 0
         assert observed["peak_rss_bytes"] > 0
+
+
+class TestCurrentInstrumentation:
+    @pytest.mark.parametrize("name", ["core-basic", "expanded-budget"])
+    def test_restores_current_reader_seams(self, tmp_path, name):
+        case = load_case(name)
+        path = tmp_path / "source.3mf"
+        path.write_bytes(case.payload)
+        originals = (
+            three_mf_scene._attribute_columns,
+            three_mf_scene.expand_scene,
+            mesh_resources.compose_scene,
+        )
+
+        measure(path, "current", max_faces=case.max_faces)
+
+        assert (
+            three_mf_scene._attribute_columns,
+            three_mf_scene.expand_scene,
+            mesh_resources.compose_scene,
+        ) == originals
 
 
 # Register only applicable research cases; current-reader cases always exist.

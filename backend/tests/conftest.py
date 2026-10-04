@@ -376,6 +376,9 @@ def _patch_engine(
     from app.runtime.native_runtime import bind_pool
 
     bind_pool(LocalResourcePool(tmp_path_factory.mktemp("native-admission")))
+    from app.runtime.inference_resources import bind_pool as bind_inference_pool
+
+    bind_inference_pool(LocalResourcePool(tmp_path_factory.mktemp("inference-models")))
     from app.runtime.preparation_runtime import bind_pools, make_pools
 
     bind_pools(

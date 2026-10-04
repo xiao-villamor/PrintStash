@@ -92,7 +92,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen

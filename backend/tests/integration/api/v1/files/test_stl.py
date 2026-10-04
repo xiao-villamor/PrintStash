@@ -29,6 +29,7 @@ from app.modules.derivatives import records
 from app.modules.derivatives.kinds import group
 from app.modules.derivatives.source import DerivativeSource
 from app.modules.storage.storage_backend.runtime import get_backend
+from tests.factories.three_mf_pilot import load_case
 from tests.fixtures.three_mf_projects import (
     build_3d_builder_component_project,
     build_instanced_project,
@@ -207,6 +208,43 @@ class TestFileAsStl:
             select(Job).where(Job.kind == JobKind.DERIVATIVES_VIEWER_STL)
         ).all()
         assert len(jobs) == 1 and jobs[0].attempts == 1
+
+    def test_retains_required_extension_refusal_without_reprocessing(
+        self, client, auth_headers, make_model, make_file, db_session
+    ):
+        payload = load_case("unknown-required-extension").payload
+        key = "unsupported.3mf"
+        get_backend().write_bytes(payload, key)
+        file = make_file(
+            make_model("unsupported-viewer"),
+            filename=key,
+            ftype="3mf",
+            path=key,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        accepted = client.get(f"/api/v1/files/{file.id}/stl", headers=auth_headers)
+        assert accepted.status_code == 202, accepted.text
+        drain_work()
+        first = client.get(f"/api/v1/files/{file.id}/stl", headers=auth_headers)
+        drain_work()
+        second = client.get(f"/api/v1/files/{file.id}/stl", headers=auth_headers)
+
+        assert first.status_code == second.status_code == 422
+        assert first.json() == second.json()
+        assert second.json()["detail"] == "unsupported_capability"
+        assert second.json()["failure_reason"] == "unsupported_capability"
+        assert second.json()["state"] == "failed"
+        db_session.refresh(file)
+        derivative = records.rows_for(db_session, file)[DerivativeKind.VIEWER_STL]
+        assert derivative.storage_key is None
+        jobs = db_session.exec(
+            select(Job).where(Job.kind == JobKind.DERIVATIVES_VIEWER_STL)
+        ).all()
+        assert len(jobs) == 1 and jobs[0].attempts == 1
+        original = client.get(f"/api/v1/files/{file.id}/download", headers=auth_headers)
+        assert original.status_code == 200, original.text
+        assert original.content == payload
 
     def test_permits_explicit_retry(
         self, client, auth_headers, project, db_session, make_derivative

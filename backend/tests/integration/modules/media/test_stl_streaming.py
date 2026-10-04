@@ -70,6 +70,35 @@ class TestPreviewCoverage:
         assert np.any(alpha[:, -128:])
         assert not np.any(alpha[:, 192:320])
 
+    def test_preserves_long_appendage(self, tmp_path: Path) -> None:
+        import io
+
+        import numpy as np
+        import trimesh
+        from PIL import Image
+
+        body = trimesh.creation.icosphere(subdivisions=4, radius=5.0)
+        appendage = trimesh.creation.box(extents=(100.0, 2.0, 2.0))
+        appendage.apply_translation((50.0, 0.0, 0.0))
+        source = tmp_path / "long-appendage.stl"
+        source.write_bytes(
+            trimesh.util.concatenate([body, appendage]).export(file_type="stl")
+        )
+
+        result = stl_streaming.render_stl_preview_isolated(
+            source, width=512, height=512
+        )
+
+        assert result is not None
+        assert result.triangle_count == 5132
+        assert result.bounds_min == pytest.approx((-5.0, -5.0, -5.0))
+        assert result.bounds_max == pytest.approx((100.0, 5.0, 5.0))
+        with Image.open(io.BytesIO(result.png)) as image:
+            alpha = np.asarray(image.getchannel("A"))
+        assert np.any(alpha[:, :128])
+        assert np.any(alpha[:, 192:320])
+        assert np.any(alpha[:, -128:])
+
     def test_preserves_ascii_render_after_translation(self, tmp_path: Path) -> None:
         import trimesh
 
@@ -178,6 +207,20 @@ endsolid oblique
             assert image.getchannel("A").getbbox() is not None
 
 
+class TestReusableMeasurements:
+    def test_refuses_scan_hints_outside_an_owned_worker(self, tmp_path, monkeypatch):
+        from app.modules.media.stl_reader import scan_stl
+        from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+        source = tmp_path / "part.stl"
+        source.write_bytes(content.binary_stl())
+        measurements = scan_stl(source)
+        monkeypatch.delenv(WORKER_MARKER, raising=False)
+
+        with pytest.raises(ValueError, match="measurements require an owned worker"):
+            stl_streaming.render_stl_preview_isolated(source, measurements=measurements)
+
+
 class TestRenderStlPreviewIsolated:
     def test_retains_credit_while_decoding(self, tmp_path, monkeypatch):
         from app.runtime.native_runtime import current_permit
@@ -208,7 +251,7 @@ class TestRenderStlPreviewIsolated:
     def test_nested_work_consumes_existing_credit(self, tmp_path, monkeypatch):
         import os
 
-        from app.modules.media import mesh_processing
+        from app.modules.media import mesh_policy
         from app.modules.media.worker_bootstrap import WORKER_MARKER
 
         source = tmp_path / "part.stl"
@@ -220,7 +263,7 @@ class TestRenderStlPreviewIsolated:
         monkeypatch.setattr(mesh_isolation, "supervise_result", unexpected)
         monkeypatch.setenv(WORKER_MARKER, str(os.getpid()))
 
-        with mesh_processing._native_scope() as permit:
+        with mesh_policy.render_admission() as permit:
             result = stl_streaming.render_stl_preview_isolated(
                 source, width=32, height=32
             )

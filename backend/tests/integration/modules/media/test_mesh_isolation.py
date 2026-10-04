@@ -13,15 +13,21 @@ from pathlib import Path
 import pytest
 import trimesh
 from PIL import Image
+from printstash_core.mesh.measurements import VolumeMeasured
 
 from app.core.config import _overlay
 from app.modules.media import mesh_isolation
-from app.modules.media.fingerprints import FingerprintResultState
+from app.modules.media.fingerprints import ALGORITHM_VERSION, FingerprintResultState
 from app.modules.media.mesh_contracts import (
+    GeometryNotLoaded,
+    GeometryReady,
+    PreviewCoverage,
+    SourceScanState,
     ThumbnailFailureReason,
     ThumbnailRequest,
     ThumbnailStrategy,
 )
+from app.modules.media.mesh_telemetry import WorkerExitCause
 from app.modules.media.thumbnail_engine import ThumbnailEngine
 from tests.factories import content
 from tests.factories.geometry import three_mf
@@ -70,7 +76,7 @@ class TestGenerate:
         assert isolated.image is not None
         assert isolated.geometry == direct.geometry
         assert isolated.strategy == direct.strategy
-        assert isolated.complete == direct.complete
+        assert isolated.coverage == direct.coverage
         assert isolated.failure_reason == direct.failure_reason
         assert isolated.fingerprint_result == direct.fingerprint_result
         assert isolated.fingerprint_result is not None
@@ -127,20 +133,15 @@ class TestGenerate:
 
         assert result.peak_rss_bytes is not None and result.peak_rss_bytes > 0
 
-    def test_a_3mf_that_repeats_one_part_beyond_the_budget_fails_inside_the_worker(
+    def test_repeated_3mf_preserves_measurements_when_worker_refuses_preview(
         self, tmp_path, monkeypatch
     ):
-        """#259 end to end: a small file whose placements expand past the budget.
-
-        The parent's runtime overrides reach the worker, so it is held to a 1,000-face
-        budget. Whatever the engine decides, the parent gets an
-        answer instead of a dead process.
-        """
+        """The runtime render cap binds preview while retained measurements survive."""
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
         monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
         path = tmp_path / "instanced.3mf"
-        # 400 placements of a 4-face part: ~25 KiB of XML the size estimate prices
-        # at ~350 faces, against 1,600 once expanded.
+        # 400 placements share a four-face resource:1600 placed faces exceed
+        # the render cap, while unique source measurements remain admitted.
         placements = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 5} 0 0") for i in range(400))
         path.write_bytes(three_mf(build=placements))
 
@@ -150,7 +151,20 @@ class TestGenerate:
 
         assert result.image is None
         assert result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT
-        assert result.geometry["triangle_count"] is None
+        assert isinstance(result.geometry_outcome, GeometryReady)
+        assert result.geometry == {
+            "triangle_count": 1600,
+            "bbox_x_mm": 2005.0,
+            "bbox_y_mm": 20.0,
+            "bbox_z_mm": 30.0,
+            "volume_mm3": 400000.0,
+        }
+        assert result.volume == VolumeMeasured(400000.0)
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert isinstance(result.coverage.geometry, GeometryNotLoaded)
+        assert result.coverage.preview is PreviewCoverage.NOT_PRODUCED
+        assert result.supervision is not None
+        assert result.supervision.exit_cause is WorkerExitCause.EXITED_ZERO
 
     def test_a_worker_over_its_memory_budget_raises_instead_of_dying_with_it(
         self, tmp_path, monkeypatch
@@ -173,7 +187,7 @@ class TestGeometryMeasurements:
 
         result = mesh_isolation.generate(_request(path))
 
-        assert result.fingerprint_result.algorithm_version == "geometry-v4-sh5f4577c4"
+        assert result.fingerprint_result.algorithm_version == ALGORITHM_VERSION
         values = result.fingerprint_result.records[0].values
         assert values["hull_ratio"] == pytest.approx(1)
         assert not any(name == "hull_ratio" for name, _ in values["unavailable"])

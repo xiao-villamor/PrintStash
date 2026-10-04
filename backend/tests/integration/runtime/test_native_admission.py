@@ -477,3 +477,152 @@ class TestLocalResourcePool:
             assert process_tree_rss_bytes(native) in (None, 0)
             assert process_tree_rss_bytes(descendants[1]) in (None, 0)
             assert not (tmp_path / "printstash-mesh-guarded").exists()
+
+
+class TestHasWaiters:
+    def test_active_claim_is_not_queue_pressure(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ):
+            assert not pool.has_waiters(checkpoint=lambda: None)
+
+    def test_observes_registered_waiter(self, tmp_path, waiter):
+        pool = LocalResourcePool(tmp_path)
+        polled, checkpoint = waiter
+
+        def contender():
+            with pool.reserve(
+                Resources(1, 100), Resources(1, 100), checkpoint=checkpoint
+            ):
+                return True
+
+        with ThreadPoolExecutor(1) as executor:
+            with pool.reserve(
+                Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+            ):
+                future = executor.submit(contender)
+                assert polled.wait(5)
+                assert pool.has_waiters(checkpoint=lambda: None)
+            assert future.result(timeout=5)
+        assert not pool.has_waiters(checkpoint=lambda: None)
+
+    def test_checkpoint_runs_outside_coordinator(self, tmp_path):
+        import fcntl
+
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ):
+
+            def check():
+                with (tmp_path / "coordinator").open("r+b") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            assert not pool.has_waiters(checkpoint=check)
+
+
+class TestNamespace:
+    def test_shared_ledger_retains_credit_across_pid_namespace(self, tmp_path, waiter):
+        from pathlib import Path
+
+        probe = subprocess.run(
+            [
+                "unshare",
+                "--user",
+                "--map-root-user",
+                "--pid",
+                "--fork",
+                "/usr/bin/true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if probe.returncode != 0 and (
+            "Operation not permitted" in probe.stderr
+            or "Permission denied" in probe.stderr
+        ):
+            pytest.skip(
+                "host denies user/PID namespace creation (unshare EPERM/EACCES)"
+            )
+        assert probe.returncode == 0, probe.stderr
+        pool = LocalResourcePool(tmp_path)
+        amount = Resources(1, 100)
+        launcher = None
+        polled, observe_wait = waiter
+        deadline = time.monotonic() + 10
+
+        def checkpoint():
+            observe_wait()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("namespace credit was not reclaimed")
+
+        def replacement():
+            with pool.reserve(amount, amount, checkpoint=checkpoint) as permit:
+                return permit.identity
+
+        try:
+            with pool.reserve(amount, amount, checkpoint=lambda: None) as original:
+                launcher = subprocess.Popen(
+                    [
+                        "unshare",
+                        "--user",
+                        "--map-root-user",
+                        "--pid",
+                        "--fork",
+                        "--kill-child=SIGKILL",
+                        sys.executable,
+                        "-m",
+                        "tests.fakes.native_namespace_process",
+                        str(original.fileno),
+                        str(original.path),
+                    ],
+                    cwd=BACKEND_DIR,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    pass_fds=(original.fileno,),
+                    text=True,
+                )
+                assert launcher.stdout is not None
+                with selectors.DefaultSelector() as readiness:
+                    readiness.register(launcher.stdout, selectors.EVENT_READ)
+                    assert readiness.select(5), (
+                        "namespace worker did not announce readiness"
+                    )
+                reported = json.loads(launcher.stdout.readline())
+                assert reported["pid"] == 1
+                assert (
+                    reported["pid_namespace"] != Path("/proc/self/ns/pid").stat().st_ino
+                )
+                assert reported["identity"] == original.identity
+                assert reported["slots"] == amount.slots
+                assert reported["bytes"] == amount.bytes
+            with pytest.raises(ValueError):
+                _ = original.fileno
+            with ThreadPoolExecutor(1) as executor:
+                future = executor.submit(replacement)
+                try:
+                    assert polled.wait(5)
+                    assert not future.done(), (
+                        "namespace holder released its live credit"
+                    )
+                    assert launcher.stdin is not None
+                    launcher.stdin.write("release\n")
+                    launcher.stdin.flush()
+                    assert launcher.wait(timeout=5) == 0
+                    assert future.result(timeout=5) != original.identity
+                finally:
+                    if launcher.poll() is None:
+                        launcher.kill()
+                        launcher.wait(timeout=5)
+        finally:
+            if launcher is not None:
+                if launcher.poll() is None:
+                    launcher.kill()
+                    launcher.wait(timeout=5)
+                for stream in (launcher.stdin, launcher.stdout, launcher.stderr):
+                    if stream is not None:
+                        stream.close()

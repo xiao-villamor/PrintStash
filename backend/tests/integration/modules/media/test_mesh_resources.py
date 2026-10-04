@@ -341,3 +341,46 @@ class TestMeshAttributeParsing:
 
         with pytest.raises(GeometryError, match="degenerate_surface"):
             load_3mf(path)
+
+
+class TestDetachedSceneMesh:
+    def test_restores_preparation_without_reallocating_placed_buffers(self, tmp_path):
+        import gc
+        import weakref
+
+        from app.modules.media import mesh_resources
+
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+        prepared = load_3mf(path)
+        mesh_ref = weakref.ref(prepared.whole_mesh)
+        detached = mesh_resources.detach_scene_mesh(prepared, triangle_cap=100)
+        assert np.shares_memory(detached.vertices, prepared.whole_mesh.vertices)
+        assert np.shares_memory(detached.faces, prepared.whole_mesh.faces)
+        assert not detached.vertices.flags.writeable
+        assert not detached.faces.flags.writeable
+        vertices_ref = weakref.ref(detached.vertices)
+        faces_ref = weakref.ref(detached.faces)
+        del prepared
+        gc.collect()
+        assert mesh_ref() is None
+
+        restored = mesh_resources.restore_scene_mesh(detached)
+        assert np.shares_memory(restored.whole_mesh.vertices, detached.vertices)
+        assert np.shares_memory(restored.whole_mesh.faces, detached.faces)
+        assert restored.scene is detached.scene
+        assert restored.geometry == detached.geometry
+        del restored, detached
+        gc.collect()
+        assert vertices_ref() is None
+        assert faces_ref() is None
+
+    def test_refuses_retention_before_fingerprint_admission(self, tmp_path):
+        from app.modules.media import mesh_resources
+
+        path = tmp_path / "many.3mf"
+        path.write_bytes(three_mf(build=((1, None),) * 26))
+        prepared = load_3mf(path)
+
+        with pytest.raises(GeometryError, match="geometry_work_limit"):
+            mesh_resources.detach_scene_mesh(prepared, triangle_cap=100)

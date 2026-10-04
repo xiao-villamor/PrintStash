@@ -29,7 +29,9 @@ import struct
 import zipfile
 from pathlib import Path
 
-from app.modules.media import mesh_processing
+from app.modules.media import (
+    mesh_policy,
+)
 
 from .._meshes import _write_binary_stl, _write_obj
 
@@ -38,7 +40,7 @@ class TestEstimateTriangleCount:
     def test_binary_stl_triangle_count_is_exact(self, tmp_path: Path) -> None:
         p = tmp_path / "cube.stl"
         _write_binary_stl(p, 1234)
-        assert mesh_processing._estimate_triangle_count(p) == 1234
+        assert mesh_policy.estimate_triangle_count(p) == 1234
 
     def test_binary_stl_with_trailing_bytes_is_not_underestimated(
         self, tmp_path: Path
@@ -54,7 +56,7 @@ class TestEstimateTriangleCount:
         with p.open("ab") as fh:
             fh.write(b"exported by SomeSlicer\x00\x01\x02" * 50)  # trailing junk
 
-        est = mesh_processing._estimate_triangle_count(p)
+        est = mesh_policy.estimate_triangle_count(p)
         assert est is not None
         assert est >= n  # never below the true count (the OOM-unsafe direction)
         # And nowhere near the 5x-low ASCII misread.
@@ -75,7 +77,7 @@ class TestEstimateTriangleCount:
         with p.open("ab") as fh:
             fh.write(b"trailer")  # break the exact size match
 
-        est = mesh_processing._estimate_triangle_count(p)
+        est = mesh_policy.estimate_triangle_count(p)
         assert est is not None
         assert est >= n
 
@@ -94,34 +96,35 @@ class TestEstimateTriangleCount:
         p = tmp_path / "ascii.stl"
         p.write_bytes(b"solid mymesh\n" + facet * 300 + b"endsolid mymesh\n")
 
-        est = mesh_processing._estimate_triangle_count(p)
+        est = mesh_policy.estimate_triangle_count(p)
         # ASCII estimate is size // 250; the file holds 300 real facets, and the
         # estimate should land in the same order of magnitude (not the 5x-too-low
         # binary misread of size // 50-equivalents).
         assert est == p.stat().st_size // 250
         assert est > 0
 
-    def test_3mf_triangle_count_from_uncompressed_xml(self, tmp_path: Path) -> None:
+    def test_3mf_reserves_an_unknown_count_for_the_bounded_reader(
+        self, tmp_path: Path
+    ) -> None:
         p = tmp_path / "dense.3mf"
         model_xml = b"<triangle/>" * 10_000  # 110_000 bytes of "mesh"
         with zipfile.ZipFile(p, "w") as zf:
             zf.writestr("3D/3dmodel.model", model_xml)
-        # ~70 bytes per triangle proxy.
-        assert mesh_processing._estimate_triangle_count(p) == len(model_xml) // 70
+        # XML includes unused resources and omits placement multiplicity.
+        assert mesh_policy.estimate_triangle_count(p) is None
 
-    def test_3mf_without_model_part_falls_back_to_total_uncompressed_size(
+    def test_3mf_without_model_part_stays_unknown_for_the_bounded_reader(
         self,
         tmp_path: Path,
     ) -> None:
-        # No ".model" entry: the estimator must not return None (which would let the
-        # archive load blind). It falls back to the total uncompressed payload as a
-        # conservative upper bound (issue #29).
+        # The bounded reader diagnoses absent geometry without inventing a
+        # triangle count from unrelated archive bytes.
         p = tmp_path / "weird.3mf"
         payload = b"x" * 700_000
         with zipfile.ZipFile(p, "w", zipfile.ZIP_STORED) as zf:
             zf.writestr("3D/mesh.bin", payload)
-        est = mesh_processing._estimate_triangle_count(p)
-        assert est == len(payload) // 70
+        est = mesh_policy.estimate_triangle_count(p)
+        assert est is None
 
     def test_ply_face_count_from_header(self, tmp_path: Path) -> None:
         p = tmp_path / "scan.ply"
@@ -140,7 +143,7 @@ class TestEstimateTriangleCount:
         # alone, never from loading the (declared-huge) body.
         p.write_bytes(header + b"\x00" * 32)
 
-        assert mesh_processing._estimate_triangle_count(p) == 1234567
+        assert mesh_policy.estimate_triangle_count(p) == 1234567
 
     def test_ply_without_face_element_returns_none(self, tmp_path: Path) -> None:
         p = tmp_path / "points.ply"
@@ -148,43 +151,43 @@ class TestEstimateTriangleCount:
             b"ply\nformat ascii 1.0\nelement vertex 3\n"
             b"property float x\nend_header\n0 0 0\n"
         )
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None
 
     def test_ply_header_without_end_header_returns_none(self, tmp_path: Path) -> None:
         p = tmp_path / "truncated.ply"
         # File ends mid-header, before an "end_header" line is ever seen.
         p.write_bytes(b"ply\nformat ascii 1.0\nelement vertex 3\n")
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None
 
     def test_ply_face_count_non_integer_returns_none(self, tmp_path: Path) -> None:
         p = tmp_path / "bad-count.ply"
         p.write_bytes(b"ply\nformat ascii 1.0\nelement face notanumber\nend_header\n")
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None
 
     def test_obj_triangle_count_from_face_directives(self, tmp_path: Path) -> None:
         p = tmp_path / "mesh.obj"
         _write_obj(p, tri_faces=300)
         # 300 triangular faces -> 300 triangles (exact for tris).
-        assert mesh_processing._estimate_triangle_count(p) == 300
+        assert mesh_policy.estimate_triangle_count(p) == 300
 
     def test_obj_ngon_faces_count_conservatively(self, tmp_path: Path) -> None:
         p = tmp_path / "quads.obj"
         _write_obj(p, tri_faces=10, quads=5)  # 10 + 5*(4-2) = 20 triangles
-        assert mesh_processing._estimate_triangle_count(p) == 20
+        assert mesh_policy.estimate_triangle_count(p) == 20
 
     def test_obj_without_faces_returns_none(self, tmp_path: Path) -> None:
         p = tmp_path / "points.obj"
         p.write_bytes(b"v 0 0 0\nv 1 0 0\nvn 0 0 1\n")
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None
 
     def test_estimator_returns_none_for_unrecognised_suffix(
         self, tmp_path: Path
     ) -> None:
         p = tmp_path / "part.step"
         p.write_bytes(b"not a real STEP file")
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None
 
     def test_estimator_returns_none_for_corrupt_3mf(self, tmp_path: Path) -> None:
         p = tmp_path / "corrupt.3mf"
         p.write_bytes(b"not actually a zip")
-        assert mesh_processing._estimate_triangle_count(p) is None
+        assert mesh_policy.estimate_triangle_count(p) is None

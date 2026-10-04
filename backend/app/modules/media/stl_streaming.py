@@ -20,6 +20,8 @@ from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.modules.media import native_process
+from app.modules.media.stl_reader import STLMeasurements
+from app.modules.media.worker_bootstrap import WORKER_MARKER
 
 logger = get_logger(__name__)
 
@@ -97,7 +99,7 @@ def _effective_limits() -> STLStreamingLimits:
     timeout = 45.0
     try:
         timeout = float(getattr(settings, "mesh_stream_timeout_seconds", 45))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
     timeout = min(max(timeout, 1.0), 45.0)
     return STLStreamingLimits(
@@ -234,7 +236,7 @@ def _decode_result(
             scanned_bytes=int(manifest["scanned_bytes"]),
             raster_candidates=int(manifest["raster_candidates"]),
         )
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except OSError, ValueError, TypeError, KeyError, json.JSONDecodeError:
         return None
     except Exception:  # noqa: BLE001 - Pillow must not take down ingestion
         return None
@@ -246,8 +248,16 @@ def render_stl_preview_isolated(
     width: int = 640,
     height: int = 480,
     limits: STLStreamingLimits | None = None,
+    measurements: STLMeasurements | None = None,
 ) -> STLStreamingResult | None:
-    """Render *path* in a disposable worker with bounded memory and CPU."""
+    """Render *path* in a disposable worker with bounded memory and CPU.
+
+    An outer native worker may reuse its exact scan for the render pass. That
+    hint remains in-process; standalone callers retain the original two passes.
+    """
+    in_worker = os.environ.get(WORKER_MARKER) == str(os.getpid())
+    if measurements is not None and not in_worker:
+        raise ValueError("measurements require an owned worker")
 
     if not (1 <= int(width) <= _MAX_RENDER_DIMENSION) or not (
         1 <= int(height) <= _MAX_RENDER_DIMENSION
@@ -280,7 +290,7 @@ def render_stl_preview_isolated(
     from app.modules.media.mesh_isolation import MeshWorkerError, supervise_result
     from app.modules.media.native_budget import MeshSource, estimate_sources
     from app.modules.media.native_execution import admission
-    from app.modules.media.worker_bootstrap import WORKER_MARKER, WorkerLifecycle
+    from app.modules.media.worker_bootstrap import WorkerLifecycle
     from app.modules.media.worker_bootstrap import command as worker_command
     from app.runtime.native_runtime import current_permit
 
@@ -306,13 +316,13 @@ def render_stl_preview_isolated(
             str(int(height)),
             *worker_limits.as_worker_args(expected_parent_pid=os.getpid()),
         ]
-        if os.environ.get(WORKER_MARKER) == str(os.getpid()):
+        if in_worker:
             # The outer worker already owns a hard ceiling and deadline.
             # Streaming consumes that allowance, rather than spawning a second
             # process with another full allowance.
             from app.modules.media.stl_preview_worker import main
 
-            if main(arguments, apply_limits=False) != 0:
+            if main(arguments, apply_limits=False, measurements=measurements) != 0:
                 return None
             return _decode_result(
                 output,

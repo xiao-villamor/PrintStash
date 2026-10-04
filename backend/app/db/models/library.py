@@ -1,8 +1,15 @@
 """Models, Artifacts, taxonomies, multipart compositions and saved library views."""
 
 from datetime import datetime
+from sys import float_info
 from typing import List, Optional
 
+from printstash_core.mesh.measurements import (
+    VolumeMethod,
+    VolumeNotCalculatedCause,
+    VolumeState,
+    VolumeUnavailableCause,
+)
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -19,6 +26,7 @@ from sqlalchemy import (
 from sqlmodel import Field, Relationship
 
 from app.core.time import utcnow
+from app.db.enum_columns import EnumText, enum_check
 
 from .base import SQLModel
 from .types import DocumentKind, FileRevisionStatus, FileType
@@ -28,6 +36,48 @@ class Metadata(SQLModel, table=True):
     """Slicer-derived facts. 1:1 with File."""
 
     __tablename__ = "metadata"
+    __table_args__ = (
+        CheckConstraint(
+            f"bbox_x_mm IS NULL OR (bbox_x_mm >= 0 AND bbox_x_mm <= {float_info.max!r})",
+            name="bbox_x_mm_physical",
+        ),
+        CheckConstraint(
+            f"bbox_y_mm IS NULL OR (bbox_y_mm >= 0 AND bbox_y_mm <= {float_info.max!r})",
+            name="bbox_y_mm_physical",
+        ),
+        CheckConstraint(
+            f"bbox_z_mm IS NULL OR (bbox_z_mm >= 0 AND bbox_z_mm <= {float_info.max!r})",
+            name="bbox_z_mm_physical",
+        ),
+        enum_check("volume_state", VolumeState),
+        enum_check("volume_method", VolumeMethod),
+        enum_check("volume_unavailable_cause", VolumeUnavailableCause),
+        enum_check("volume_not_calculated_cause", VolumeNotCalculatedCause),
+        CheckConstraint(
+            f"(volume_state = '{VolumeState.MEASURED.value}' "
+            f"AND volume_mm3 IS NOT NULL AND volume_mm3 > 0 "
+            f"AND volume_mm3 <= {float_info.max!r} "
+            f"AND volume_method IS NOT NULL AND volume_method = '{VolumeMethod.MESH_SURFACE_INTEGRAL.value}' "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NULL) OR "
+            f"(volume_state = '{VolumeState.UNAVAILABLE.value}' "
+            "AND volume_mm3 IS NULL "
+            f"AND volume_method IS NOT NULL AND volume_method = '{VolumeMethod.MESH_SURFACE_INTEGRAL.value}' "
+            "AND volume_unavailable_cause IS NOT NULL "
+            "AND volume_not_calculated_cause IS NULL) OR "
+            f"(volume_state = '{VolumeState.NOT_CALCULATED.value}' "
+            "AND volume_mm3 IS NULL AND volume_method IS NULL "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NOT NULL) OR "
+            f"(volume_state = '{VolumeState.LEGACY_UNASSESSED.value}' "
+            f"AND (volume_mm3 IS NULL OR (volume_mm3 >= {-float_info.max!r} "
+            f"AND volume_mm3 <= {float_info.max!r})) "
+            "AND volume_method IS NULL "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NULL)",
+            name="volume_evidence",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     file_id: int = Field(foreign_key="files.id", unique=True, index=True)
@@ -63,6 +113,32 @@ class Metadata(SQLModel, table=True):
     bbox_y_mm: Optional[float] = None
     bbox_z_mm: Optional[float] = None
     volume_mm3: Optional[float] = None
+    volume_state: VolumeState = Field(
+        default=VolumeState.NOT_CALCULATED,
+        sa_column=Column(
+            EnumText(VolumeState),
+            nullable=False,
+            server_default=VolumeState.NOT_CALCULATED.value,
+        ),
+    )
+    # Nullability belongs to the exclusive persisted variants; the public
+    # result requires every applicable field and rejects incompatible states.
+    volume_method: Optional[VolumeMethod] = Field(
+        default=None,
+        sa_column=Column(EnumText(VolumeMethod), nullable=True),
+    )
+    volume_unavailable_cause: Optional[VolumeUnavailableCause] = Field(
+        default=None,
+        sa_column=Column(EnumText(VolumeUnavailableCause), nullable=True),
+    )
+    volume_not_calculated_cause: Optional[VolumeNotCalculatedCause] = Field(
+        default=VolumeNotCalculatedCause.ENRICHMENT_PENDING,
+        sa_column=Column(
+            EnumText(VolumeNotCalculatedCause).evaluates_none(),
+            nullable=True,
+            server_default=VolumeNotCalculatedCause.ENRICHMENT_PENDING.value,
+        ),
+    )
     triangle_count: Optional[int] = None
 
     created_at: datetime = Field(default_factory=utcnow)

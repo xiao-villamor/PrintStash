@@ -27,6 +27,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.media.fingerprints import ALGORITHM_VERSION
 from app.modules.similarity.configuration import read_settings
 from app.modules.similarity.fingerprints import (
     current_source,
@@ -68,6 +69,7 @@ def current_evidence(candidate=SimilarityCandidate):
             fb.sha256 == observation.input_hash_b,
             a.source_sha256 == fa.sha256,
             b.source_sha256 == fb.sha256,
+            candidate.algorithm_version == ALGORITHM_VERSION,
             a.algorithm_version == candidate.algorithm_version,
             b.algorithm_version == candidate.algorithm_version,
             col(a.state).in_(("ready", "partial")),

@@ -35,7 +35,7 @@ class PointRecipe:
     def for_space(cls, space: EmbeddingSpace) -> PointRecipe:
         try:
             recipe = cls(**json.loads(space.render_recipe))
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             raise EmbeddingError("embedding_point_recipe_invalid") from None
         if (
             space.profile != recipe.profile

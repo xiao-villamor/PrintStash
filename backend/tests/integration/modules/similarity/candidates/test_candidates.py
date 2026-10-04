@@ -3,9 +3,17 @@
 import json
 
 import pytest
+from sqlmodel import select
 
-from app.db.models import FileRevisionStatus, FileType
-from app.modules.similarity import candidates
+from app.core.errors import OperationError
+from app.db.models import (
+    FileRevisionStatus,
+    FileType,
+    GeometryFingerprint,
+    SimilarityReviewDecision,
+)
+from app.modules.media.fingerprints import ALGORITHM_VERSION
+from app.modules.similarity import candidates, review
 from tests.factories import (
     build_geometry_fingerprint,
     build_similarity_candidate,
@@ -134,3 +142,95 @@ class TestCandidateProjection:
             ]
             == row.id
         )
+
+
+class TestInterpretationVersion:
+    @pytest.mark.parametrize(
+        "algorithm_version,expected_current",
+        [
+            ("geometry-v4-sh5f4577c4", False),
+            ("geometry-v6-sh5f4577c4", False),
+            (ALGORITHM_VERSION, True),
+        ],
+        ids=["previous", "previous-reader", "current"],
+    )
+    def test_version_controls_current_evidence(
+        self, db_session, pair, make_user, algorithm_version, expected_current
+    ):
+        candidate, observation, _, _ = pair
+        candidate.algorithm_version = algorithm_version
+        db_session.add(candidate)
+        for fingerprint_id in (
+            observation.fingerprint_a_id,
+            observation.fingerprint_b_id,
+        ):
+            fingerprint = db_session.get(GeometryFingerprint, fingerprint_id)
+            fingerprint.algorithm_version = algorithm_version
+            db_session.add(fingerprint)
+        db_session.commit()
+        actor = make_user(superuser=True)
+
+        assert candidates.is_current(db_session, candidate) is expected_current
+        detail = candidates.project(db_session, candidate, detail=True)
+        assert detail["freshness"] == ("current" if expected_current else "stale")
+        assert ("confirm_evidence" in detail["allowed_actions"]) is expected_current
+        current = candidates.list_visible(db_session, actor, freshness="current")
+        stale = candidates.list_visible(db_session, actor, freshness="stale")
+        assert [item["id"] for item in current.items] == (
+            [candidate.id] if expected_current else []
+        )
+        assert [item["id"] for item in stale.items] == (
+            [] if expected_current else [candidate.id]
+        )
+        assert len(detail["observations"]) == 1
+        assert detail["observations"][0]["source_a"]["surface_area"] == 120
+
+    def test_version_change_preserves_review_history(self, db_session, pair, make_user):
+        candidate, observation, _, _ = pair
+        actor = make_user(superuser=True)
+        decision = review.decide(
+            db_session,
+            actor,
+            candidate.id,
+            review.DecisionRequest(
+                request_id="prior-confirmation",
+                version=candidate.version,
+                action="confirm_evidence",
+            ),
+        )
+        db_session.refresh(candidate)
+        snapshot = decision.snapshot_json
+        old_version = "geometry-v4-sh5f4577c4"
+        candidate.algorithm_version = old_version
+        db_session.add(candidate)
+        for fingerprint_id in (
+            observation.fingerprint_a_id,
+            observation.fingerprint_b_id,
+        ):
+            fingerprint = db_session.get(GeometryFingerprint, fingerprint_id)
+            fingerprint.algorithm_version = old_version
+            db_session.add(fingerprint)
+        db_session.commit()
+
+        detail = candidates.project(db_session, candidate, detail=True)
+        assert detail["freshness"] == "stale"
+        assert detail["review_state"] == "confirmed"
+        assert "confirm_evidence" not in detail["allowed_actions"]
+        db_session.refresh(decision)
+        assert decision.after_state == "confirmed"
+        assert decision.snapshot_json == snapshot
+        assert len(db_session.exec(select(SimilarityReviewDecision)).all()) == 1
+        assert len(db_session.exec(select(GeometryFingerprint)).all()) == 2
+        assert len(detail["observations"]) == 1
+        with pytest.raises(OperationError, match="similarity_evidence_stale"):
+            review.decide(
+                db_session,
+                actor,
+                candidate.id,
+                review.DecisionRequest(
+                    request_id="obsolete-confirmation",
+                    version=candidate.version,
+                    action="confirm_evidence",
+                ),
+            )
+        assert len(db_session.exec(select(SimilarityReviewDecision)).all()) == 1

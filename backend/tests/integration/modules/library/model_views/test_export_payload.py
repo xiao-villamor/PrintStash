@@ -19,9 +19,20 @@ internal and a cover's bytes are private to the instance.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime, timedelta, timezone
 
+import pytest
+from printstash_core.mesh.measurements import (
+    VolumeLegacyUnassessed,
+    VolumeMeasured,
+    VolumeNotCalculated,
+    VolumeNotCalculatedCause,
+    VolumeUnavailable,
+    VolumeUnavailableCause,
+)
 from sqlmodel import Session, select
 
 import app.modules.library.model_views.exports as models_exports
@@ -40,6 +51,7 @@ from app.db.models import (
 from tests.factories import (
     build_collection,
     build_file,
+    build_metadata,
     build_model,
     build_user,
     grant_collection_role,
@@ -357,3 +369,85 @@ class TestExportPayload:
         payload = models_exports.export_payload(db_session, user)
 
         assert (payload["models"], payload["counts"]) == ([], {"models": 0, "files": 0})
+
+
+class TestExportVolumeEvidence:
+    @pytest.mark.parametrize(
+        ("volume", "expected"),
+        [
+            (
+                VolumeMeasured(1e-9),
+                ("measured", "mm3", "mesh_surface_integral", "", "1e-09"),
+            ),
+            (
+                VolumeUnavailable(VolumeUnavailableCause.INCONSISTENT_WINDING),
+                (
+                    "unavailable",
+                    "mm3",
+                    "mesh_surface_integral",
+                    "inconsistent_winding",
+                    "",
+                ),
+            ),
+            (
+                VolumeNotCalculated(VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED),
+                ("not_calculated", "mm3", "", "topology_not_evaluated", ""),
+            ),
+            (VolumeLegacyUnassessed(0.0), ("legacy_unassessed", "mm3", "", "", "0.0")),
+            (VolumeLegacyUnassessed(None), ("legacy_unassessed", "mm3", "", "", "")),
+        ],
+    )
+    def test_export_preserves_volume_evidence(self, db_session, volume, expected):
+        user = build_user(db_session, "volume-export", superuser=True)
+        model = build_model(db_session, "Measured mesh")
+        artifact = build_file(
+            db_session, model, filename="measured.stl", file_type=FileType.STL
+        )
+        build_metadata(db_session, artifact, volume=volume)
+        payload = models_exports.export_payload(db_session, user)
+        wire = payload["models"][0]["files"][0]["metadata"]["volume_measurement"]
+        assert wire["state"] == expected[0]
+        assert wire["unit"] == expected[1]
+        assert (
+            wire["value_mm3"]
+            == payload["models"][0]["files"][0]["metadata"]["volume_mm3"]
+        )
+        row = next(csv.DictReader(io.StringIO(models_exports.export_csv(payload))))
+        assert (
+            tuple(
+                row[column]
+                for column in (
+                    "volume_state",
+                    "volume_unit",
+                    "volume_method",
+                    "volume_cause",
+                    "volume_mm3",
+                )
+            )
+            == expected
+        )
+        assert list(row)[-5:] == [
+            "triangle_count",
+            "volume_state",
+            "volume_unit",
+            "volume_method",
+            "volume_cause",
+        ]
+
+    def test_csv_keeps_absent_metadata_distinct_from_volume_evidence(self, db_session):
+        user = build_user(db_session, "no-volume-export", superuser=True)
+        model = build_model(db_session, "Unenriched mesh")
+        build_file(db_session, model, filename="unenriched.stl", file_type=FileType.STL)
+        payload = models_exports.export_payload(db_session, user)
+        assert payload["models"][0]["files"][0]["metadata"] is None
+        row = next(csv.DictReader(io.StringIO(models_exports.export_csv(payload))))
+        assert tuple(
+            row[column]
+            for column in (
+                "volume_state",
+                "volume_unit",
+                "volume_method",
+                "volume_cause",
+                "volume_mm3",
+            )
+        ) == ("", "", "", "", "")

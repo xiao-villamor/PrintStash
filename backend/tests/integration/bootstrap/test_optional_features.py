@@ -10,6 +10,7 @@ from app.db.session import get_session_factory
 from app.modules.ingestion import extensions as ingestion
 from app.modules.library.model_views import extensions as annotations
 from app.modules.media.fingerprints import FingerprintResult, FingerprintResultState
+from app.modules.media.mesh_facts import FingerprintFailureCode
 
 
 class TestOptionalFeatures:
@@ -48,7 +49,10 @@ class TestOptionalFeatures:
                     sessions,
                     123,
                     actor.id,
-                    FingerprintResult(state=FingerprintResultState.READY),
+                    FingerprintResult(
+                        state=FingerprintResultState.FAILED,
+                        failure_code=FingerprintFailureCode.ANALYSIS_UNAVAILABLE,
+                    ),
                     source_sha256="a" * 64,
                 )
                 is None

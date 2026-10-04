@@ -32,5 +32,5 @@ def load_sqlite_vector_extension(connection) -> bool:
             finally:
                 connection.enable_load_extension(False)
         return True
-    except (ImportError, AttributeError, OSError, sqlite3.Error):
+    except ImportError, AttributeError, OSError, sqlite3.Error:
         return False

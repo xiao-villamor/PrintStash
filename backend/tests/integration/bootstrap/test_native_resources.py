@@ -8,9 +8,10 @@ from app.runtime.native_admission import Resources
 
 class TestConfigure:
     def test_works_without_linux_procfs(self, tmp_path, monkeypatch):
-        native, prepared = [], []
+        native, prepared, models = [], [], []
         monkeypatch.setattr(native_resources, "bind_pool", native.append)
         monkeypatch.setattr(native_resources, "bind_pools", prepared.append)
+        monkeypatch.setattr(native_resources, "bind_inference_pool", models.append)
         original = Path.read_text
 
         def read(path, *args, **kwargs):
@@ -23,6 +24,9 @@ class TestConfigure:
         amount = Resources(1, 100)
         with native[0].reserve(amount, amount, checkpoint=lambda: None) as permit:
             assert permit.resources == amount
+        with models[0].reserve(amount, amount, checkpoint=lambda: None) as permit:
+            assert permit.resources == amount
+            assert permit.path.parent == tmp_path / "runtime" / "inference-models"
         with prepared[0].prepared.reserve(
             amount, amount, checkpoint=lambda: None
         ) as permit:

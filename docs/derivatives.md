@@ -54,7 +54,7 @@ library at backfill priority while uploads keep interactive priority.
 
 | Definition | Lane | Kinds | Produced from |
 | --- | --- | --- | --- |
-| `derivatives.mesh` | `derive.native` | `metadata` (geometry), `thumbnail` | One native mesh load (also hands similarity its fingerprints) |
+| `derivatives.mesh` | `derive.native` | `metadata` (geometry), `thumbnail` | One bounded source preparation; 3MF resources and placements remain retained until topology or fingerprints need materialization |
 | `derivatives.gcode` | `derive.light` | `metadata` (slicer facts, material requirements), `thumbnail` | One header read; no embedded image means `skipped` |
 | `derivatives.toolpath` | `derive.native` | `toolpath` | The binary G-code converter, under resource limits |
 
@@ -63,6 +63,13 @@ kind's row, and tells viewers of the Model on `model:<id>` so an open page
 refreshes when a thumbnail lands.
 
 ## Mesh rendering
+
+A visual pass owns one immutable render preparation: referenced relative
+positions, welded identities and smooth normals. The preview and orthographic
+views reuse it; embeddings and view fingerprints consume final pixels without
+PNG serialization. Stored previews retain the existing PNG/WebP encoding and
+recipe identities. See [the preparation contract](shared-visual-preparation.md)
+for memory bounds, RGB policies and compatibility evidence.
 
 The software renderer subtracts the mesh's bounding-box center in float64 before
 converting relative coordinates to float32 for camera projection and shading.
@@ -76,8 +83,9 @@ selection and normal welding. The renderer compacts that surface in a private
 view and remaps faces inside each existing chunk; unused source vertices remain
 unchanged. Face indices must refer to the source vertex array.
 
-Mesh thumbnail recipe 4 refreshes existing previews. Similarity uses view-descriptor
-recipe 2 and fingerprint algorithm `geometry-v4-sh5f4577c4`. Search visual recipe 3
+Referenced-relative rendering was introduced with mesh thumbnail recipe 4 and
+view-descriptor recipe 2. The current mesh recipe identities are listed below.
+Search visual recipe 3
 and the derived embedding-space rasterizer token `referenced-relative-f64-v2`
 invalidate earlier rendered inputs and vectors. Encoder asset manifests and
 their digests are unchanged.
@@ -141,6 +149,46 @@ Mesh thumbnail recipe 6 refreshes streamed previews whose valid oblique facets
 were discarded by the former degeneracy filter. Collinear and repeated facets
 retain the same rejection threshold.
 
+## Retained 3MF measurements and previews
+
+The bounded 3MF reader preserves each reachable resource once, with explicit
+instance transforms. Dimensions and triangle counts are measured from referenced
+placed surfaces in bounded point chunks, without allocating a whole placed mesh.
+Closed indexed resources use the existing component-local signed volume integral;
+negative cavity contributions survive until the aggregate is evaluated. This
+preserves the established additive policy for overlapping closed solids, rather
+than computing a Boolean union.
+
+Resources that need global welding produce an explicit topology decision. The
+engine attempts whole-scene materialization once within the load budget. If that
+evaluation cannot run within its budget, exact dimensions and counts remain
+available with volume not calculated and cause `topology_not_evaluated`.
+Unexpected failures confined to volume calculation retain the dimensions/counts
+with `measurement_failed`.
+Optional fingerprint admission uses the placed face count and can refuse analysis
+without withdrawing those measurements or a usable preview.
+
+Rendering consumes the retained resources after any topology/fingerprint mesh is
+released. Relative float32 positions and global normal arrays still scale with
+expanded referenced vertices; face traversal is repeatable and chunked. This
+avoids retaining a full float64 mesh and a full face buffer merely to produce the
+preview, but is not zero-copy instancing.
+
+| Current output identity | Version |
+| --- | --- |
+| Mesh metadata recipe | 12 |
+| Mesh thumbnail recipe | 11 |
+| Fingerprint interpretation | `geometry-v7-sh5f4577c4` |
+| Viewer STL recipe | 2 (unchanged) |
+
+The mesh recipes refresh prior measurements/previews under the retained-scene
+eligibility and budget policy. The fingerprint version invalidates earlier
+eligibility receipts; descriptor mathematics, SH basis and verifier calibration
+are unchanged. Historical measured evidence and human review decisions are not
+relabelled. Viewer conversion continues to require a materialized STL output.
+The [retained-scene contract](retained-3mf-scenes.md) records the behavior and
+verification evidence.
+
 ## Bounded STL measurements
 
 Mesh metadata recipe 6 refreshes existing measurements. An STL that exceeds the
@@ -164,8 +212,44 @@ near the float32 limit therefore remain renderable after rotation. Raster work
 budgets still determine whether a preview is complete.
 
 Mesh metadata recipe 8 and thumbnail recipe 7 refresh measurements and previews
-from the former streaming camera policy. Fallback sampling and full mesh loading
-migrate to the block iterator separately.
+from the former streaming camera policy. Fallback sampling and full mesh loading now share the block iterator described
+below.
+
+## Shared STL source validation
+
+STL scanning, retained fallback sampling and full mesh materialization share one
+bounded binary/ASCII reader. The reader validates all source facet coordinates
+through EOF before certifying completion. A successful sample reports exact
+source bounds and facet count even when its retained representation is partial.
+`source_complete` certifies that source read; `complete` additionally requires
+all source facets to be retained and the raster budget to complete. Neither flag
+certifies closed topology. Binary stored normals are ignored because normals
+are derived from vertices; ASCII normal tokens retain the finite syntax rule.
+
+Sources are pinned by device, inode, size, modification time and change time
+across scan/materialization/render passes. A replaced source is refused even if
+its size and modification time are restored. The canonical reader and sampler
+raise distinct invalid-source, resource-limit and source-changed failures;
+legacy preview/analysis adapters retain their existing refusal result until their
+outcome contracts migrate together.
+
+Retained fallback facets use fixed vectorized index priorities and source order,
+with the first and last facet retained when the cap permits. The subset is
+independent of block size and binary/ASCII encoding. Unlike selective binary
+record seeks, source validation reads the full bounded source even for a tiny
+sample; this additional work detects malformed facets outside the retained set.
+Binary materialization needs one full pass after its header probe. ASCII scans
+for exact allocation size before a second full pass; both share one deadline
+and source snapshot. Preparation/pass reuse is a separate concern. Source
+validation is bounded by 1 GiB by default; it is not a timing improvement.
+
+Fingerprint interpretation version `geometry-v6-sh5f4577c4` invalidates eligibility
+receipts from the former partial sampling policy. Historical descriptor evidence
+and human review decisions remain retained; descriptor math, the SH basis and
+verifier calibration are unchanged. Metadata recipe 11 and thumbnail recipe 10
+refresh affected outputs; viewer STL remains recipe 2. The earlier 3MF capability
+policy and independent embedded previews remain in force. The
+[STL reader contract](stl-reader.md) specifies completion, sampling and refusals.
 
 ## Measurement precision
 
@@ -177,6 +261,20 @@ streaming and fallback scans. Existing rounded metadata is eligible for backfill
 Binary STL still carries float32 coordinates; removing output rounding cannot
 recover precision already absent from the input. Volume retains the closure,
 winding, finite-value and positive-orientation requirements of recipe 4.
+
+## Measurement evidence availability
+
+Mesh metadata recipe 9 publishes required volume provenance independently of
+optional similarity fingerprints. Complete bounded STL scans retain dimensions
+and counts with explicitly unassessed topology. G-code metadata recipe 2 marks
+mesh volume as not applicable. The additive migration preserves finite historical
+scalars as unassessed, and replaces unusable nonfinite volume or nonphysical
+dimensions with unknown values before enforcing the new constraints.
+
+The public variant, scalar compatibility, signed component-local integral,
+upgrade behavior, CSV additions and exact test matrix are described in
+[mesh measurement evidence](mesh-measurements.md). Thumbnail and fingerprint
+recipes retain their existing identities for this measurement change.
 
 ## Bumping a recipe
 
@@ -228,9 +326,22 @@ new recipe makes work eligible; timeout backoff keeps the configured maximum.
 Original downloads and signed slicer downloads continue to use Artifact bytes.
 
 
+## 3MF required capabilities
+
+The [3MF capability policy](3mf-capabilities.md) applies to reached Core model
+parts and the supported Production external-reference subset. Unknown required
+namespaces produce `unsupported_capability` metadata/viewer refusals and
+`unsupported_3mf_capability` fingerprint refusals. No incomplete geometry is
+published as successful. Original downloads remain usable, and a validated
+embedded preview can independently become ready. Mesh metadata recipe 10,
+thumbnail recipe 9 and viewer STL recipe 2 refresh outputs under this policy;
+the fingerprint mathematical algorithm is unchanged. Its interpretation cache
+version advances to `geometry-v5-sh5f4577c4`, so earlier candidate evidence remains
+historical rather than actionable as a current interpretation.
+
 ## On-demand 3D viewer STL
 
-`viewer_stl` recipe 1 is produced by `derivatives.viewer_stl` in `derive.native`.
+`viewer_stl` recipe 2 is produced by `derivatives.viewer_stl` in `derive.native`.
 Only 3MF, OBJ and STEP Artifacts with `files.viewer_requested_at` set are eligible;
 uploads, scans and card hover do not request conversion. The first authorized
 `GET /api/v1/files/{id}/stl` (or the scoped share endpoint) persists this demand
@@ -345,3 +456,5 @@ Fingerprint algorithm `geometry-v4-sh5f4577c4` separates new hull values and
 newly available descriptors from the former Python hull recipe. Existing
 fingerprints are recalculated without rewriting historical records or verifier
 calibration. Mesh measurements and thumbnail recipes are unchanged.
+
+Mesh metadata and thumbnails publish before optional fingerprints. Pending analysis remains durable after basic outputs commit; see [staged mesh outputs](staged-mesh-outputs.md) for framing, recovery and publication fences.

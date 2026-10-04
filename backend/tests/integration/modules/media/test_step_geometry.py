@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from app.modules.media import mesh_isolation, mesh_processing, native_process
+from app.modules.media import mesh_isolation, mesh_loading, native_process
 from app.modules.media.fingerprints import FingerprintResultState
 from app.modules.media.mesh_contracts import ThumbnailRequest
 from app.modules.media.thumbnail_engine import ThumbnailEngine
@@ -43,7 +43,7 @@ class TestStepGeometry:
 
         monkeypatch.setattr(mesh_isolation.subprocess, "Popen", observed_worker)
 
-        mesh = mesh_processing._load_step_mesh_isolated(ocp_box, include_brep=True)
+        mesh = mesh_loading.load_step_mesh(ocp_box, include_brep=True)
 
         assert mesh.metadata["brep"]["volume_mm3"] == pytest.approx(6000)
         assert limits == [MAX_ANALYSIS_FACES]
@@ -64,7 +64,7 @@ class TestStepGeometry:
     def test_converts_source_metres_to_mm(
         self,
     ):
-        mesh = mesh_processing._load_step_mesh_isolated(
+        mesh = mesh_loading.load_step_mesh(
             FIXTURES_DIR / "cascadio_material.stp", include_brep=True
         )
         assert mesh.metadata["brep"]["source_units"] == ["metre"]
@@ -94,7 +94,7 @@ class TestStepGeometry:
         path = tmp_path / "assembly.step"
         writer.Write(str(path))
 
-        mesh = mesh_processing._load_step_mesh_isolated(path, include_brep=True)
+        mesh = mesh_loading.load_step_mesh(path, include_brep=True)
         assert mesh.extents.tolist() == pytest.approx([60, 20, 30])
         assert mesh.metadata["brep"]["counts"]["solids"] == 2
         assert mesh.metadata["brep"]["volume_mm3"] == pytest.approx(12000)
@@ -281,7 +281,7 @@ class TestStepWorkerContainment:
             "unavailable": "step_unavailable",
         }[failure]
         with pytest.raises(GeometryError, match=code):
-            mesh_processing._load_step_mesh_isolated(ocp_box, include_brep=True)
+            mesh_loading.load_step_mesh(ocp_box, include_brep=True)
         assert all(process.poll() is not None for process in processes)
         assert all(not path.exists() for path in directories)
         assert db_session.exec(select(CapacityReservation)).all() == []

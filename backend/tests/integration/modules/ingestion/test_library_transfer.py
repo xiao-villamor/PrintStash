@@ -31,6 +31,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from printstash_core.mesh.measurements import (
+    VolumeLegacyUnassessed,
+    VolumeMeasured,
+    VolumeUnavailable,
+    VolumeUnavailableCause,
+    encode_volume,
+)
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -1396,6 +1403,94 @@ class TestImportArchive:
                 library_transfer.import_archive(db_session, archive_path, user)
         finally:
             archive_path.unlink(missing_ok=True)
+
+
+class TestPortableVolumeEvidence:
+    @pytest.mark.parametrize(
+        "volume",
+        [
+            VolumeMeasured(1e-9),
+            VolumeUnavailable(VolumeUnavailableCause.INCONSISTENT_WINDING),
+            VolumeLegacyUnassessed(500.0),
+            VolumeLegacyUnassessed(None),
+        ],
+    )
+    def test_portable_archive_retains_public_volume_evidence(
+        self, db_session, auth_headers, tmp_path, volume
+    ):
+        from app.modules.library.volume_metadata import apply_volume, read_volume
+
+        user, _, artifact = _seed(db_session, tmp_path)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        apply_volume(metadata, volume)
+        db_session.add(metadata)
+        db_session.commit()
+        archive = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive) as zipped:
+                manifest = json.loads(zipped.read("manifest.json"))
+            exported = manifest["models"][0]["artifacts"][0]["metadata"]
+            assert exported["volume_measurement"] == encode_volume(volume)
+            assert not {
+                "volume_state",
+                "volume_method",
+                "volume_unavailable_cause",
+                "volume_not_calculated_cause",
+            }.intersection(exported)
+
+            def new_identity(payload):
+                payload["models"][0]["hash"] = "f" * 64
+                payload["models"][0]["slug"] = "volume-imported"
+
+            _rewrite_manifest(archive, new_identity)
+            result = library_transfer.import_archive(db_session, archive, user)
+            assert result["created_files"] == 1
+            imported_model = db_session.exec(
+                select(Model).where(Model.hash == "f" * 64)
+            ).one()
+            imported = db_session.exec(
+                select(Metadata)
+                .join(File, File.id == Metadata.file_id)
+                .where(File.model_id == imported_model.id)
+            ).one()
+            assert read_volume(imported) == volume
+        finally:
+            archive.unlink(missing_ok=True)
+
+    @pytest.mark.parametrize("scalar", [None, 0.0, -1.0, 1e-9, 500.0])
+    def test_imports_scalar_only_archive_without_certifying_volume(
+        self, db_session, auth_headers, tmp_path, scalar
+    ):
+        from app.modules.library.volume_metadata import read_volume
+
+        user, _, _ = _seed(db_session, tmp_path)
+        archive = library_transfer.create_archive(db_session, user)
+        try:
+
+            def legacy_identity(payload):
+                model = payload["models"][0]
+                model["hash"] = "e" * 64
+                model["slug"] = "legacy-volume-imported"
+                facts = model["artifacts"][0]["metadata"]
+                facts.pop("volume_measurement")
+                facts["volume_mm3"] = scalar
+
+            _rewrite_manifest(archive, legacy_identity)
+            result = library_transfer.import_archive(db_session, archive, user)
+            assert result["created_files"] == 1
+            imported_model = db_session.exec(
+                select(Model).where(Model.hash == "e" * 64)
+            ).one()
+            imported = db_session.exec(
+                select(Metadata)
+                .join(File, File.id == Metadata.file_id)
+                .where(File.model_id == imported_model.id)
+            ).one()
+            assert read_volume(imported) == VolumeLegacyUnassessed(scalar)
+        finally:
+            archive.unlink(missing_ok=True)
 
 
 class TestPortableManifestValidation:

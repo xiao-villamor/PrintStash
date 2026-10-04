@@ -187,20 +187,20 @@ def measure(
 
             import_module("lxml.etree")
 
-            from app.modules.media import mesh_resources
+            from app.modules.media import mesh_resources, three_mf_scene
         else:
             from lib3mf import Lib3MF  # noqa: F401
         costs["import_ms"] = (time.perf_counter() - started) * 1000
         if backend == "current":
             # Instrument existing pure seams; leave parsing/output behavior intact.
-            originals = {}
-            for name, phase in (
-                ("_attribute_columns", "arrays_ms"),
-                ("expand_scene", "scene_ms"),
-                ("compose_scene", "materialize_ms"),
+            originals = []
+            for owner, name, phase in (
+                (three_mf_scene, "_attribute_columns", "arrays_ms"),
+                (three_mf_scene, "expand_scene", "scene_ms"),
+                (mesh_resources, "compose_scene", "materialize_ms"),
             ):
-                original = getattr(mesh_resources, name)
-                originals[name] = original
+                original = getattr(owner, name)
+                originals.append((owner, name, original))
 
                 def timed(*args, _original=original, _phase=phase, **kwargs):
                     phase_start = time.perf_counter()
@@ -211,7 +211,7 @@ def measure(
                         if _phase == "scene_ms":
                             costs["scene_rss_bytes"] = _proc_rss("VmRSS")
 
-                setattr(mesh_resources, name, timed)
+                setattr(owner, name, timed)
             phase_start = time.perf_counter()
             try:
                 prepared = mesh_resources.load_3mf(path, max_faces=max_faces)
@@ -227,8 +227,8 @@ def measure(
                     - costs["scene_ms"]
                     - costs["materialize_ms"]
                 )
-                for name, original in originals.items():
-                    setattr(mesh_resources, name, original)
+                for owner, name, original in originals:
+                    setattr(owner, name, original)
         else:
             scene = _native_scene(path, backend, max_faces, costs, strict=strict)
             costs["scene_rss_bytes"] = _proc_rss("VmRSS")

@@ -21,6 +21,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from printstash_core.imports import CaptureManifestV2
+from printstash_core.mesh.measurements import VolumeLegacyUnassessed
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,7 @@ from tests.containers import postgres_url
 from tests.factories import (
     build_collection,
     build_file,
+    build_metadata,
     build_model,
     build_printer,
     build_user,
@@ -105,7 +107,9 @@ def _reset_postgres_schema(postgres_engine) -> None:
 
 
 @pytest.fixture
-def released_postgres(postgres_engine) -> Iterator:
+def released_postgres(
+    postgres_engine, fresh_postgres_schema_issues, fresh_mesh_measurement_checks
+) -> Iterator:
     """A v0.12.1 create-all PostgreSQL database, restored to head afterwards."""
     _reset_postgres_schema(postgres_engine)
     with postgres_engine.begin() as connection:
@@ -477,3 +481,125 @@ class TestManufacturingQueuePostgres:
         outcomes, reserved = race_queues(postgres_engine)
         assert outcomes == [("conflict", 0), ("success", 1)]
         assert reserved == 4
+
+
+@pytest.fixture
+def fresh_mesh_measurement_checks(postgres_engine):
+    """Capture PostgreSQL's exact rendering before the released-schema reset."""
+    return {
+        item["name"]: item["sqltext"]
+        for item in inspect(postgres_engine).get_check_constraints("metadata")
+    }
+
+
+class TestMeshMeasurementContract:
+    @pytest.mark.postgres
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+    def test_upgrade_retires_unrepresentable_measurement_facts(
+        self,
+        fresh_postgres_schema_issues,
+        fresh_mesh_measurement_checks,
+        released_postgres,
+        value,
+    ):
+        config = _migration_config(released_postgres)
+        command.upgrade(config, "67494831ae72")
+        with released_postgres.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE metadata SET volume_mm3=:value,bbox_x_mm=:value,bbox_y_mm=-1,bbox_z_mm=1e-9 WHERE id=1"
+                ),
+                {"value": value},
+            )
+        command.upgrade(config, "head")
+        with released_postgres.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT volume_mm3,volume_state,volume_method,volume_unavailable_cause,volume_not_calculated_cause,bbox_x_mm,bbox_y_mm,bbox_z_mm,slicer_name,estimated_time_s FROM metadata WHERE id=1"
+                )
+            ).one()
+        assert row == (
+            None,
+            "legacy_unassessed",
+            None,
+            None,
+            None,
+            None,
+            None,
+            1e-9,
+            "PrusaSlicer",
+            3600,
+        )
+        upgraded_issues = tuple(migrate_mod._orphan_schema_issues(released_postgres))
+        checks = {
+            item["name"]: item["sqltext"]
+            for item in inspect(released_postgres).get_check_constraints("metadata")
+        }
+        assert upgraded_issues == fresh_postgres_schema_issues
+        assert set(checks) == {
+            "ck_metadata_bbox_x_mm_physical",
+            "ck_metadata_bbox_y_mm_physical",
+            "ck_metadata_bbox_z_mm_physical",
+            "ck_metadata_volume_evidence",
+            "ck_metadata_volume_method_values",
+            "ck_metadata_volume_not_calculated_cause_values",
+            "ck_metadata_volume_state_values",
+            "ck_metadata_volume_unavailable_cause_values",
+        }
+        assert checks == fresh_mesh_measurement_checks
+
+    @pytest.mark.postgres
+    @pytest.mark.parametrize(
+        ("state", "value", "cause"),
+        [("measured", 1.0, None), ("unavailable", None, "not_watertight")],
+    )
+    def test_rejects_integral_evidence_without_method(
+        self, postgres_engine, state, value, cause
+    ):
+        with Session(postgres_engine) as session:
+            model = build_model(session, slug="volume-evidence", hash="v" * 64)
+            artifact = build_file(
+                session,
+                model,
+                path="cube.stl",
+                filename="cube.stl",
+                file_type=FileType.STL,
+                size_bytes=1,
+                sha256="a" * 64,
+            )
+            metadata = build_metadata(session, artifact)
+            with pytest.raises(IntegrityError):
+                session.execute(
+                    text(
+                        "UPDATE metadata SET volume_state=:state,volume_mm3=:value,volume_method=NULL,volume_unavailable_cause=:cause,volume_not_calculated_cause=NULL WHERE id=:id"
+                    ),
+                    {"state": state, "value": value, "cause": cause, "id": metadata.id},
+                )
+            session.rollback()
+
+    @pytest.mark.postgres
+    @pytest.mark.parametrize(
+        "field", ["bbox_x_mm", "bbox_y_mm", "bbox_z_mm", "volume_mm3"]
+    )
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+    def test_rejects_nonfinite_measurement_facts(self, postgres_engine, field, value):
+        with Session(postgres_engine) as session:
+            model = build_model(session, slug="finite-evidence", hash="q" * 64)
+            artifact = build_file(
+                session,
+                model,
+                path="cube.stl",
+                filename="cube.stl",
+                file_type=FileType.STL,
+                size_bytes=1,
+                sha256="a" * 64,
+            )
+            metadata = build_metadata(
+                session, artifact, volume=VolumeLegacyUnassessed(1.0)
+            )
+            with pytest.raises(IntegrityError):
+                session.execute(
+                    text(f"UPDATE metadata SET {field}=:value WHERE id=:id"),
+                    {"value": value, "id": metadata.id},
+                )
+            session.rollback()

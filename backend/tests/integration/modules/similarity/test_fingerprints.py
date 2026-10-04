@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 import pytest
+from printstash_core.mesh.similarity.components import ExpandedScene
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -12,7 +13,8 @@ from app.modules.media.fingerprints import (
     FingerprintResultState,
     extract,
 )
-from app.modules.media.mesh_resources import prepare_loaded_mesh
+from app.modules.media.mesh_facts import FingerprintFailureCode, SampledGeometry
+from app.modules.media.mesh_resources import PreparedMesh, prepare_loaded_mesh
 from app.modules.similarity import fingerprints
 from tests.factories.geometry import tetrahedron
 
@@ -23,6 +25,32 @@ def extracted():
 
 
 class TestFingerprintLeases:
+    @pytest.mark.parametrize("state", ["ready", "partial", "failed"])
+    @pytest.mark.parametrize(
+        "previous_version", ["geometry-v5-sh5f4577c4", "geometry-v6-sh5f4577c4"]
+    )
+    def test_recomputes_fingerprints_from_the_previous_stl_sample_recipe(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_geometry_fingerprint,
+        state,
+        previous_version,
+    ):
+        file = make_file(make_model())
+        previous = make_geometry_fingerprint(
+            file, state=state, algorithm_version=previous_version
+        )
+
+        claimed = fingerprints.claim(db_session, file)
+
+        assert claimed is not None
+        assert claimed[0] != previous.id
+        db_session.refresh(previous)
+        assert previous.algorithm_version == previous_version
+        assert previous.state == state
+
     @pytest.mark.parametrize("state", ["ready", "partial", "failed"])
     def test_recomputes_fingerprints_from_the_python_hull_recipe(
         self, db_session, make_model, make_file, make_geometry_fingerprint, state
@@ -136,9 +164,21 @@ class TestFingerprintLeases:
     ):
         file = make_file(make_model())
         claimed = fingerprints.claim(db_session, file)
-        failed = FingerprintResult(
-            FingerprintResultState(state), failure_code="invalid_source"
+        failed = (
+            extract(
+                PreparedMesh(
+                    tetrahedron(),
+                    ExpandedScene((), ()),
+                    SampledGeometry(FingerprintFailureCode.SAMPLED_SOURCE),
+                )
+            )
+            if state == "partial"
+            else FingerprintResult(
+                FingerprintResultState(state),
+                failure_code=FingerprintFailureCode.INVALID_SOURCE,
+            )
         )
+        assert failed.state.value == state
         assert fingerprints.publish(
             db_session, file, failed, fingerprint_id=claimed[0], token=claimed[1]
         )
@@ -163,19 +203,33 @@ class TestFingerprintLeases:
 class TestFingerprintPublication:
     @pytest.mark.parametrize("state", list(FingerprintResultState))
     def test_persists_each_outcome_as_a_text_state(
-        self, db_session, make_model, make_file, state
+        self, db_session, make_model, make_file, state, extracted
     ):
         file = make_file(make_model())
-        result = FingerprintResult(state=state)
+        if state is FingerprintResultState.READY:
+            result = extracted
+        elif state is FingerprintResultState.PARTIAL:
+            result = extract(
+                PreparedMesh(
+                    tetrahedron(),
+                    ExpandedScene((), ()),
+                    SampledGeometry(FingerprintFailureCode.SAMPLED_SOURCE),
+                )
+            )
+        else:
+            result = FingerprintResult(
+                state=state, failure_code=FingerprintFailureCode.INVALID_SOURCE
+            )
 
         published = fingerprints.publish_precomputed(db_session, file, result)
 
         assert type(published) is str
         assert published == state.value
         db_session.expire_all()
-        row = db_session.exec(select(GeometryFingerprint)).one()
-        assert type(row.state) is str
-        assert row.state == state.value
+        rows = db_session.exec(select(GeometryFingerprint)).all()
+        assert rows
+        assert all(type(row.state) is str for row in rows)
+        assert all(row.state == state.value for row in rows)
 
     def test_persists_component_lineage(
         self, db_session, make_model, make_file, extracted

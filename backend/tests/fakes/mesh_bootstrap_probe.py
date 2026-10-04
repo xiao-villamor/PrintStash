@@ -4,6 +4,14 @@ import os
 import resource
 import sys
 import time
+from pathlib import Path
+
+
+def _publish_readiness(path: Path, content: str) -> None:
+    """Expose a complete handshake only after closing its sibling write."""
+    staged = path.with_name(path.name + ".part")
+    staged.write_text(content, encoding="utf-8")
+    staged.replace(path)
 
 
 def main():
@@ -32,32 +40,28 @@ def main():
         )
         if len(sys.argv) > 2:
             import json
-            from pathlib import Path
 
-            Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
+            _publish_readiness(Path(sys.argv[2]), json.dumps([os.getpid(), child.pid]))
         _hold = bytearray(hold_mb * 1024**2)
         time.sleep(60)
     elif case in ("tree_wait", "leaves_child", "resource_reply"):
         import json
         import subprocess
-        from pathlib import Path
 
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-        Path(sys.argv[2]).write_text(json.dumps([os.getpid(), child.pid]))
+        _publish_readiness(Path(sys.argv[2]), json.dumps([os.getpid(), child.pid]))
         if case == "tree_wait":
             if len(sys.argv) > 3:
                 temporary = Path(os.environ["TMPDIR"])
                 (temporary / "partial.stl").write_bytes(b"partial native output")
-                Path(sys.argv[3]).write_text(str(temporary))
+                _publish_readiness(Path(sys.argv[3]), str(temporary))
             time.sleep(60)
         elif case == "resource_reply":
             raise MemoryError("resource refusal after withdrawal")
         else:
             print("reply", flush=True)
     elif case == "wait":
-        from pathlib import Path
-
-        Path(sys.argv[2]).write_text(str(os.getpid()))
+        _publish_readiness(Path(sys.argv[2]), str(os.getpid()))
         time.sleep(60)
     else:
         raise ValueError(case)

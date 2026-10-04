@@ -35,6 +35,13 @@ function metadata(size: number): MetadataRead {
     bbox_y_mm: size,
     bbox_z_mm: size,
     volume_mm3: null,
+    volume_measurement: {
+      state: "legacy_unassessed",
+      unit: "mm3",
+      method: null,
+      value_mm3: null,
+      cause: null,
+    },
     triangle_count: 252,
   };
 }

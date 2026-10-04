@@ -35,6 +35,7 @@ from app.db.models import (
     DerivativeState,
     File,
     JobKind,
+    MeshFingerprintContinuation,
     ReconcileCursor,
     WorkPriority,
 )
@@ -94,6 +95,13 @@ def pending_predicate(
         not_(_satisfied(kind, recipe, now=now, regenerated_at=regen.get(kind)))
         for kind, recipe in group.kinds.items()
     ]
+    if group.definition is JobKind.DERIVATIVES_MESH:
+        missing.append(
+            exists().where(
+                col(MeshFingerprintContinuation.file_id) == col(File.id),
+                col(MeshFingerprintContinuation.available_at) <= now,
+            )
+        )
     return and_(live(File), group.applies(), or_(*missing))
 
 
@@ -208,4 +216,17 @@ class DerivativeSource:
                 col(ArtifactDerivative.next_attempt_at) > now,
             )
         ).one()
-        return ensure_utc(due) if due is not None else None
+        dates = [] if due is None else [ensure_utc(due)]
+        if self.group.definition is JobKind.DERIVATIVES_MESH:
+            continuation_due = session.exec(
+                select(func.min(MeshFingerprintContinuation.available_at))
+                .join(File, col(File.id) == col(MeshFingerprintContinuation.file_id))
+                .where(
+                    live(File),
+                    self.group.applies(),
+                    col(MeshFingerprintContinuation.available_at) > now,
+                )
+            ).one()
+            if continuation_due is not None:
+                dates.append(ensure_utc(continuation_due))
+        return min(dates) if dates else None

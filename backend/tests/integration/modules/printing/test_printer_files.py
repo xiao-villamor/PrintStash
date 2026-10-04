@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlmodel import Session, select
 
 from app.db.models import File, Model, PrinterFile
@@ -65,6 +66,34 @@ class TestTraceableFilename:
     def test_empty_stem_falls_back_to_print(self) -> None:
         f = _FakeFile(7, "....gcode", "deadbeef" * 8)
         assert build_traceable_remote_filename(f).startswith("print__vault-f7-")
+
+    @pytest.mark.parametrize("suffix", [".gcode", ".bgcode", ".g", ".gco", "...BGCODE"])
+    def test_extension_only_filename_uses_print_display_name(self, suffix: str) -> None:
+        f = _FakeFile(7, suffix, "deadbeef" * 8)
+        extension = "." + suffix.lstrip(".")
+        assert build_traceable_remote_filename(f) == (
+            f"print__vault-f7-deadbeefdead{extension}"
+        )
+
+    @pytest.mark.parametrize("stem", ["gcode", "bgcode", "g", "gco"])
+    def test_extension_word_retains_its_display_name(self, stem: str) -> None:
+        f = _FakeFile(7, stem, "deadbeef" * 8)
+        assert build_traceable_remote_filename(f) == (
+            f"{stem}__vault-f7-deadbeefdead.gcode"
+        )
+
+    @pytest.mark.parametrize("stem", ["gcode", "bgcode"])
+    def test_dotted_stem_retains_its_display_name(self, stem: str) -> None:
+        f = _FakeFile(7, f".{stem}.{stem}", "deadbeef" * 8)
+        assert build_traceable_remote_filename(f) == (
+            f"{stem}__vault-f7-deadbeefdead.{stem}"
+        )
+
+    def test_empty_filename_uses_print_display_name(self) -> None:
+        f = _FakeFile(7, "", "deadbeef" * 8)
+        assert (
+            build_traceable_remote_filename(f) == "print__vault-f7-deadbeefdead.gcode"
+        )
 
     def test_non_gcode_suffix_is_coerced(self) -> None:
         f = _FakeFile(9, "model.stl", "cafe" * 16)

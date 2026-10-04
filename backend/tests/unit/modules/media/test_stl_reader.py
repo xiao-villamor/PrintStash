@@ -454,3 +454,27 @@ class TestReadLimits:
     def test_rejects_nonfinite_deadline(self, deadline: float) -> None:
         with pytest.raises(ValueError, match="finite"):
             STLReadLimits(deadline=deadline)
+
+
+class TestCompletionBudget:
+    def test_deadline_must_hold_when_final_block_is_consumed(
+        self, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from app.modules.media import stl_reader
+
+        source = tmp_path / "completion.stl"
+        source.write_bytes(_binary_stl([TRIANGLE]))
+        now = [0.0]
+        monkeypatch.setattr(
+            stl_reader, "time", SimpleNamespace(monotonic=lambda: now[0])
+        )
+        blocks = stl_reader.iter_stl_blocks(
+            source, stl_reader.STLReadLimits(deadline=100)
+        )
+        assert len(next(blocks)) == 1
+        now[0] = 101.0
+
+        with pytest.raises(stl_reader.STLBudgetExceeded, match="deadline"):
+            next(blocks)

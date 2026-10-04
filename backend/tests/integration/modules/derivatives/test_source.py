@@ -55,6 +55,64 @@ class TestPending:
     @pytest.mark.parametrize(
         ("kind", "old_recipe", "other_kind"),
         [
+            (DerivativeKind.METADATA, 10, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 9, DerivativeKind.METADATA),
+            (DerivativeKind.METADATA, 11, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 10, DerivativeKind.METADATA),
+        ],
+    )
+    @pytest.mark.parametrize("state", [DerivativeState.READY, DerivativeState.FAILED])
+    def test_rederives_stl_outputs_from_the_previous_reader_recipe(
+        self, db_session, mesh, make_derivative, kind, old_recipe, other_kind, state
+    ):
+        artifact = mesh()
+        make_derivative(
+            artifact,
+            kind,
+            recipe_version=old_recipe,
+            state=state,
+            exhausted=state is DerivativeState.FAILED,
+            failure_reason="invalid_source"
+            if state is DerivativeState.FAILED
+            else None,
+        )
+        make_derivative(artifact, other_kind)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_rederives_previews_with_ambiguous_completeness(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            recipe_version=7,
+            output_json='{"strategy":"fallback","complete":true}',
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        ("kind", "previous_recipe", "other_kind"),
+        [
+            (DerivativeKind.METADATA, 8, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 7, DerivativeKind.METADATA),
+        ],
+    )
+    def test_rederives_outputs_from_the_previous_stl_reader_recipe(
+        self, db_session, mesh, make_derivative, kind, previous_recipe, other_kind
+    ):
+        artifact = mesh()
+        make_derivative(artifact, kind, recipe_version=previous_recipe)
+        make_derivative(artifact, other_kind)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        ("kind", "old_recipe", "other_kind"),
+        [
             (DerivativeKind.METADATA, 7, DerivativeKind.THUMBNAIL),
             (DerivativeKind.THUMBNAIL, 6, DerivativeKind.METADATA),
         ],
@@ -373,3 +431,91 @@ class TestSubjects:
     def test_refuses_what_is_not_a_derivative_subject(self, subject: str) -> None:
         with pytest.raises(ValueError, match="not_a_derivative_subject"):
             file_id_of(subject)
+
+
+class TestMeshContinuationSource:
+    @staticmethod
+    def _ready(artifact, make_derivative):
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+    def test_discovers_pending_analysis_after_basics_ready(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(artifact)
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_waits_until_continuation_due(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        due = utcnow() + timedelta(minutes=3)
+        make_mesh_continuation(artifact, available_at=due)
+        now = utcnow()
+        assert MESH.pending(db_session, now=now, limit=10) == []
+        assert MESH.next_due(db_session, now=now) == due
+        assert [
+            item.subject_key for item in MESH.pending(db_session, now=due, limit=10)
+        ] == [subject_key(artifact.id)]
+
+    def test_discovers_obsolete_input_for_retirement(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(
+            artifact, source_sha256="b" * 64, algorithm_version="historical-recipe"
+        )
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize("hidden", ["trash", "wrong-type"])
+    def test_ignores_inapplicable_continuation(
+        self, db_session, mesh, make_derivative, make_mesh_continuation, hidden
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(artifact, available_at=utcnow() + timedelta(minutes=1))
+        if hidden == "trash":
+            artifact.deleted_at = utcnow()
+        else:
+            artifact.file_type = FileType.GCODE
+        db_session.add(artifact)
+        db_session.commit()
+        assert _subjects(db_session) == []
+        assert MESH.next_due(db_session, now=utcnow()) is None
+
+    def test_bounds_continuation_discovery(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifacts = [mesh() for _ in range(5)]
+        for artifact in artifacts:
+            self._ready(artifact, make_derivative)
+            make_mesh_continuation(artifact)
+        subjects = _subjects(db_session, limit=2)
+        assert subjects == [subject_key(artifact.id) for artifact in artifacts[:2]]
+
+    def test_job_retention_preserves_pending_analysis(
+        self, db_session, mesh, make_derivative, make_mesh_continuation, make_job
+    ):
+        from app.db.models import JobState, MeshFingerprintContinuation
+
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.COMPLETED,
+            attempts=1,
+            subject=subject_key(artifact.id),
+        )
+        pending = make_mesh_continuation(artifact, job=job)
+        historical_id = job.id
+        db_session.delete(job)
+        db_session.commit()
+        db_session.expire_all()
+        current = db_session.get(MeshFingerprintContinuation, artifact.id)
+        assert current is not None and current.token == pending.token
+        assert current.job_id == historical_id
+        assert _subjects(db_session) == [subject_key(artifact.id)]

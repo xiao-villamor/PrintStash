@@ -1,9 +1,14 @@
 """Optional mesh derivatives, bound outside the Artifact ingestion owner."""
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, TypedDict
 
+from sqlmodel import Session
+
+from app.db.models import File
 from app.db.session import SessionFactory
-from app.modules.media.fingerprints import FingerprintResult
+from app.modules.media.fingerprints import FingerprintResult, FingerprintResultState
 from app.modules.work.contracts import JobExecution
 
 
@@ -12,8 +17,32 @@ class MeshExtractionOptions(TypedDict, total=False):
     triangle_cap: int
 
 
+@dataclass(frozen=True)
+class MeshFingerprintPublished:
+    state: FingerprintResultState
+
+
+@dataclass(frozen=True)
+class MeshFingerprintDeferred:
+    available_at: datetime
+
+
+@dataclass(frozen=True)
+class MeshFingerprintRejected:
+    pass
+
+
+MeshFingerprintPublication = (
+    MeshFingerprintPublished | MeshFingerprintDeferred | MeshFingerprintRejected
+)
+
+
 class MeshDerivatives(Protocol):
     def extraction_options(self, sessions: SessionFactory) -> MeshExtractionOptions: ...
+
+    def publish_mesh_fingerprint_continuation(
+        self, session: Session, file: File, result: FingerprintResult
+    ) -> MeshFingerprintPublication: ...
 
     def after_commit(
         self,
@@ -60,3 +89,12 @@ def after_commit(
         if _derivatives
         else None
     )
+
+
+def publish_mesh_fingerprint_continuation(
+    session: Session, file: File, result: FingerprintResult
+) -> MeshFingerprintPublication:
+    """Persist optional evidence and follow-up intent inside the owner's fence."""
+    if _derivatives is None:
+        raise RuntimeError("mesh_derivative_provider_unbound")
+    return _derivatives.publish_mesh_fingerprint_continuation(session, file, result)

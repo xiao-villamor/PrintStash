@@ -9,7 +9,7 @@ See the [root README](../README.md) for the big picture.
 
 ## Stack
 
-- Python 3.11+, FastAPI, SQLModel, Uvicorn
+- Python 3.14+ (development and images use 3.14.8), FastAPI, SQLModel, Uvicorn
 - SQLite by default, optional Postgres for larger installs
 - Trimesh for mesh geometry, thumbnails, and cached STL conversion
 

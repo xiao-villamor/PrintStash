@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
+from app.schemas.mesh_measurements import VolumeMeasurementRead
 from app.schemas.orca import OrcaNativeContext
 from app.schemas.printers import (
     PrintJobIdentityRead,
@@ -40,11 +41,24 @@ class MetadataRead(BaseModel):
     material_brand: Optional[str] = None
     native_context: Optional[OrcaNativeContext] = None
 
-    bbox_x_mm: Optional[float] = None
-    bbox_y_mm: Optional[float] = None
-    bbox_z_mm: Optional[float] = None
-    volume_mm3: Optional[float] = None
+    bbox_x_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    bbox_y_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    bbox_z_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    volume_mm3: Optional[float] = Field(default=None, strict=True, allow_inf_nan=False)
+    volume_measurement: VolumeMeasurementRead
     triangle_count: Optional[int] = None
+
+    @model_validator(mode="after")
+    def volume_scalar_matches_evidence(self):
+        if self.volume_mm3 != self.volume_measurement.value_mm3:
+            raise ValueError("volume scalar disagrees with evidence")
+        return self
 
 
 class FileRead(BaseModel):

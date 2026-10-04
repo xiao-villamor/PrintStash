@@ -8,6 +8,7 @@ import pytest
 from printstash_core.mesh.similarity import GeometryError
 
 from app.modules.media import verification_worker
+from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.verification_isolation import decode_reply
 from tests.factories.geometry import tetrahedron
 
@@ -58,4 +59,4 @@ class TestMain:
         assert status == 0
         with pytest.raises(GeometryError) as raised:
             decode_reply(reply)
-        assert raised.value.code == "invalid_geometry"
+        assert raised.value.code == FingerprintFailureCode.INVALID_SOURCE.value

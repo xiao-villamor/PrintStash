@@ -9,7 +9,7 @@ import trimesh
 from printstash_core.mesh.similarity import GeometryError
 
 from app.core.config import _overlay
-from app.modules.media import mesh_isolation, mesh_processing, native_process
+from app.modules.media import mesh_isolation, mesh_loading, mesh_policy, native_process
 from app.modules.media.worker_bootstrap import command
 from app.runtime.native_admission import Resources
 from tests.paths import FIXTURES_DIR
@@ -18,9 +18,7 @@ from tests.paths import FIXTURES_DIR
 @pytest.fixture
 def step_fault_worker_factory(tmp_path, monkeypatch):
     budget = 160 * 1024**2
-    monkeypatch.setattr(
-        native_process, "native_capacity", lambda: Resources(1, budget)
-    )
+    monkeypatch.setattr(native_process, "native_capacity", lambda: Resources(1, budget))
     monkeypatch.setattr(native_process, "native_memory_budget_bytes", lambda: budget)
     monkeypatch.setitem(_overlay, "mesh_step_timeout_seconds", 1.5)
     original = mesh_isolation.subprocess.Popen
@@ -83,7 +81,7 @@ class TestLoadStepMeshIsolated:
 
         monkeypatch.setattr(trimesh, "load_mesh", decode)
 
-        mesh = mesh_processing._load_step_mesh_isolated(
+        mesh = mesh_loading.load_step_mesh(
             FIXTURES_DIR / "cascadio_material.stp",
             strict_failures=True,
         )
@@ -105,7 +103,7 @@ class TestLoadStepMeshIsolated:
     )
     def test_preserves_domain_exit_causes(self, step_fault_worker, expected):
         with pytest.raises(GeometryError) as error:
-            mesh_processing._load_step_mesh_isolated(
+            mesh_loading.load_step_mesh(
                 FIXTURES_DIR / "cascadio_material.stp",
                 strict_failures=True,
             )
@@ -114,7 +112,7 @@ class TestLoadStepMeshIsolated:
 
     def test_refuses_descendant_memory(self, descendant_step_worker):
         with pytest.raises(GeometryError) as error:
-            mesh_processing._load_step_mesh_isolated(
+            mesh_loading.load_step_mesh(
                 FIXTURES_DIR / "cascadio_material.stp",
                 strict_failures=True,
             )
@@ -127,7 +125,7 @@ class TestLoadStepMeshIsolated:
 
     def test_deadline_remains_active_after_stdout_eof(self, deadline_step_worker):
         with pytest.raises(GeometryError) as error:
-            mesh_processing._load_step_mesh_isolated(
+            mesh_loading.load_step_mesh(
                 FIXTURES_DIR / "cascadio_material.stp",
                 strict_failures=True,
             )
@@ -146,8 +144,8 @@ class TestLoadStepMeshIsolated:
         monkeypatch.setattr(mesh_isolation, "supervise_result", unexpected)
         monkeypatch.setenv(WORKER_MARKER, str(os.getpid()))
 
-        with mesh_processing._native_scope() as permit:
-            mesh = mesh_processing._load_step_mesh_isolated(
+        with mesh_policy.render_admission() as permit:
+            mesh = mesh_loading.load_step_mesh(
                 FIXTURES_DIR / "cascadio_material.stp",
                 strict_failures=True,
             )
@@ -164,7 +162,7 @@ class TestLoadStepMeshIsolated:
             cancellation_scope(descendant_step_worker.exists),
             pytest.raises(OperationCancelled),
         ):
-            mesh_processing._load_step_mesh_isolated(
+            mesh_loading.load_step_mesh(
                 FIXTURES_DIR / "cascadio_material.stp",
                 strict_failures=True,
             )

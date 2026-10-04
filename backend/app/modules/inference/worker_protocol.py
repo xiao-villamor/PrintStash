@@ -1,11 +1,19 @@
 """Bounded, validated messages exchanged with the isolated native worker."""
 
+from enum import IntEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 MAX_INPUT_BYTES = 34 * 1024**2
 MAX_OUTPUT_BYTES = 1024**2
+
+
+class WorkerExit(IntEnum):
+    RESIDENCY_RETIRED = 73
+
+
+RETIREMENT_EXIT = WorkerExit.RESIDENCY_RETIRED
 
 
 class WorkerInput(BaseModel):

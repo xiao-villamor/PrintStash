@@ -17,8 +17,9 @@ import tempfile
 from pathlib import Path
 
 from app.modules.media import mesh_isolation
-from app.modules.media.mesh_contracts import ThumbnailFailureReason, canonical_suffix
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.mesh_policy import canonical_suffix
 from app.modules.media.native_budget import MeshSource
 
 SIZE_MAGIC = b"STL1"
@@ -44,7 +45,7 @@ def decode_reply(payload: bytes) -> int | None:
             reason = ThumbnailFailureReason(
                 payload[len(FAILURE_MAGIC) :].decode("ascii")
             )
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from None
         raise MeshWorkerError(reason)
     if len(payload) == len(SIZE_MAGIC) + 8 and payload.startswith(SIZE_MAGIC):
@@ -53,10 +54,11 @@ def decode_reply(payload: bytes) -> int | None:
 
 
 def to_stl_bytes(path: Path, *, file_type: str | None = None) -> bytes | None:
-    """`mesh_processing.to_stl_bytes`, run in a supervised child.
+    """`mesh_loading.to_stl_bytes`, run in a supervised child.
 
     Returns None when the mesh cannot be converted (unreadable);
-    raises `MeshWorkerError` for a resource refusal, kill, timeout or worker failure.
+    raises `MeshWorkerError` for unsupported required capabilities, resource refusals,
+    kills, timeouts or worker failures.
     """
     if canonical_suffix(path, file_type) == ".stl":
         # Already STL: the bytes are returned untouched and nothing is parsed.

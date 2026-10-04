@@ -25,9 +25,12 @@ from app.db.models import (
     DerivativeRegeneration,
     DerivativeState,
     File,
+    FileType,
+    JobKind,
 )
 from app.modules.derivatives import records
-from app.modules.derivatives.kinds import recipes_for
+from app.modules.derivatives.kinds import group, recipes_for
+from app.modules.derivatives.source import DerivativeSource, subject_key
 
 
 @pytest.fixture
@@ -100,6 +103,55 @@ class TestSatisfied:
 
 
 class TestNeeded:
+    @pytest.mark.parametrize("state", [DerivativeState.READY, DerivativeState.FAILED])
+    def test_reopens_viewer_receipts_from_the_previous_scene_recipe(
+        self, db_session, make_model, make_file, make_derivative, state
+    ):
+        now = utcnow()
+        artifact = make_file(
+            make_model(),
+            filename="required-extension.3mf",
+            file_type=FileType.THREE_MF,
+            viewer_requested_at=now,
+        )
+        previous = make_derivative(
+            artifact,
+            DerivativeKind.VIEWER_STL,
+            recipe_version=1,
+            state=state,
+            attempts=settings.derivative_max_attempts,
+            storage_key="old-viewer.stl" if state is DerivativeState.READY else None,
+            failure_reason="invalid_source"
+            if state is DerivativeState.FAILED
+            else None,
+            next_attempt_at=None,
+        )
+        viewer = group(JobKind.DERIVATIVES_VIEWER_STL)
+        assert viewer.kinds == {DerivativeKind.VIEWER_STL: 2}
+
+        assert DerivativeKind.VIEWER_STL not in records.rows_for(db_session, artifact)
+        assert records.needed(db_session, artifact, viewer.kinds, now=now) == {
+            DerivativeKind.VIEWER_STL
+        }
+        offered = DerivativeSource(viewer).pending(db_session, now=now, limit=1)
+        assert [item.subject_key for item in offered] == [subject_key(artifact.id)]
+        fresh = records.begin(
+            db_session, artifact, DerivativeKind.VIEWER_STL, 2, now=now
+        )
+        db_session.commit()
+
+        assert fresh.recipe_version == 2
+        assert fresh.state is DerivativeState.RUNNING
+        assert fresh.attempts == 1
+        assert (
+            records.rows_for(db_session, artifact)[DerivativeKind.VIEWER_STL].id
+            == fresh.id
+        )
+        db_session.refresh(previous)
+        assert previous.recipe_version == 1
+        assert previous.state is state
+        assert previous.attempts == settings.derivative_max_attempts
+
     def test_lists_the_kinds_still_owed(
         self, db_session: Session, mesh, make_derivative
     ) -> None:
@@ -901,3 +953,50 @@ class TestPublicationTransactions:
                 DerivativeState.READY,
                 DerivativeState.READY,
             ]
+
+
+class TestCommittedContext:
+    def test_context_survives_basic_output_commit(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        db_session.commit()
+
+        assert records.require_context(db_session, context).id == mesh.id
+        with pytest.raises(records.AttemptSuperseded):
+            records.claim_running(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )
+
+    @pytest.mark.parametrize("changed", ["source", "generation"])
+    def test_committed_context_rejects_replaced_input(self, db_session, mesh, changed):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        if changed == "source":
+            mesh.source_etag = "new-source"
+            db_session.add(mesh)
+        else:
+            db_session.add(
+                DerivativeRegeneration(
+                    kind=DerivativeKind.METADATA, requested_at=utcnow()
+                )
+            )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.require_context(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )

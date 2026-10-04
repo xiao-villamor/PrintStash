@@ -15,6 +15,7 @@ from printstash_core.mesh.similarity import GeometryError
 from app.core.config import _overlay
 from app.modules.media import geometry_analysis, mesh_isolation, verification_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
+from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.mesh_isolation import MeshWorkerError
 from tests.factories.geometry import tetrahedron
 
@@ -50,7 +51,7 @@ class TestVerifyPaths:
         with pytest.raises(GeometryError) as raised:
             _verify(verification_isolation.verify_paths, broken, broken)
 
-        assert raised.value.code == "invalid_geometry"
+        assert raised.value.code == FingerprintFailureCode.INVALID_SOURCE.value
 
     def test_the_callers_arguments_reach_the_worker(self, pair):
         """A cap below the analysis minimum is refused by the code that owns it."""

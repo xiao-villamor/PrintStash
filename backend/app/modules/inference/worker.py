@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import select
 import struct
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -20,6 +22,7 @@ from app.modules.inference.manifest import (
 from app.modules.inference.worker_protocol import (
     MAX_INPUT_BYTES,
     MAX_OUTPUT_BYTES,
+    RETIREMENT_EXIT,
     WorkerRequest,
 )
 
@@ -28,7 +31,8 @@ class NativeWorker:
     def __init__(self, modeldir: Path, model_key: str, threads: int):
         self.manifest = read_manifest(modeldir, model_key)
         self.directory, self.threads = modeldir, threads
-        self.provider = None
+        self._sparse_provider = None
+        self._dense_provider = None
 
     def execute(self, payload: bytes) -> bytes:
         from app.modules.inference.onnx_cpu import OnnxCpuProvider
@@ -45,11 +49,15 @@ class NativeWorker:
                 or request.space_json
             ):
                 raise EmbeddingError("embedding_space_mismatch")
-            if self.provider is None:
-                self.provider = SparseNativeProvider(
+            if self._sparse_provider is None:
+                self._sparse_provider = SparseNativeProvider(
                     self.directory, self.manifest, self.threads
                 )
-            return self.provider.expand(request.sparse_text).model_dump_json().encode()
+            return (
+                self._sparse_provider.expand(request.sparse_text)
+                .model_dump_json()
+                .encode()
+            )
         if request.sparse_text is not None:
             raise EmbeddingError("embedding_sparse_required")
         space = (
@@ -85,16 +93,20 @@ class NativeWorker:
                     points=points,
                 )
             )
-        if self.provider is None:
-            self.provider = OnnxCpuProvider(self.directory, self.manifest, self.threads)
+        if self._dense_provider is None:
+            self._dense_provider = OnnxCpuProvider(
+                self.directory, self.manifest, self.threads
+            )
         vectors = (
-            self.provider.embed(tuple(inputs), self.provider.space) if inputs else ()
+            self._dense_provider.embed(tuple(inputs), self._dense_provider.space)
+            if inputs
+            else ()
         )
         result = json.dumps(
             {
                 "vectors": vectors,
                 "config_hash": space.config_hash,
-                "truncated": self.provider.truncations if inputs else [],
+                "truncated": self._dense_provider.truncations if inputs else [],
             },
             allow_nan=False,
         ).encode()
@@ -107,9 +119,21 @@ def execute(payload: bytes, modeldir: Path, model_key: str, threads: int) -> byt
     return NativeWorker(modeldir, model_key, threads).execute(payload)
 
 
-def serve(source: BinaryIO, destination: BinaryIO) -> int:
+def serve(
+    source: BinaryIO,
+    destination: BinaryIO,
+    *,
+    idle_pressure: Callable[[], bool] | None = None,
+) -> int:
     worker = None
-    while header := source.read(4):
+    while True:
+        if worker is not None and idle_pressure is not None:
+            while not select.select([source], [], [], 0.1)[0]:
+                if idle_pressure():
+                    return RETIREMENT_EXIT
+        header = source.read(4)
+        if not header:
+            return 0
         if len(header) != 4:
             return 2
         length = struct.unpack("!I", header)[0]
@@ -124,7 +148,9 @@ def serve(source: BinaryIO, destination: BinaryIO) -> int:
             result = worker.execute(payload)
         except EmbeddingError as exc:
             result = json.dumps({"code": exc.code}).encode()
-        except (Exception, MemoryError):
+        except MemoryError:
+            raise
+        except Exception:
             result = b'{"code":"embedding_inference_failed"}'
         destination.write(struct.pack("!I", len(result)) + result)
         destination.flush()
@@ -149,7 +175,9 @@ def main(
         status = 0
     except EmbeddingError as exc:
         result, status = json.dumps({"code": exc.code}).encode(), 3
-    except (Exception, MemoryError):
+    except MemoryError:
+        raise
+    except Exception:
         # Neither native exceptions nor query text cross the process boundary.
         result, status = b'{"code":"embedding_inference_failed"}', 4
     destination.write(result)
@@ -162,10 +190,19 @@ if __name__ == "__main__":
     # stderr. ONNX diagnostics cannot corrupt or grow the response pipe.
     import os
 
+    from app.runtime import inference_resources
+    from app.runtime.native_runtime import current_permit
+
     with os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0) as protocol:
         os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
         raise SystemExit(
-            serve(sys.stdin.buffer, protocol)
+            serve(
+                sys.stdin.buffer,
+                protocol,
+                idle_pressure=inference_resources.has_pressure
+                if current_permit() is not None
+                else None,
+            )
             if len(sys.argv) == 5 and sys.argv[4] == "--persistent"
             else main(output_stream=protocol)
         )

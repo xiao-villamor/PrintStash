@@ -11,10 +11,20 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, or_, select
 
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import ExternalLibraryTombstone, File, GeometryFingerprint, Model
 from app.db.scopes import live
-from app.modules.media.fingerprints import ALGORITHM_VERSION, FingerprintResult
+from app.modules.ingestion.extensions import (
+    MeshFingerprintDeferred,
+    MeshFingerprintPublication,
+    MeshFingerprintPublished,
+    MeshFingerprintRejected,
+)
+from app.modules.media.fingerprints import (
+    ALGORITHM_VERSION,
+    FingerprintResult,
+    FingerprintResultState,
+)
 
 LEASE_SECONDS = 900
 JSON_LIMIT = 2 * 1024 * 1024
@@ -82,7 +92,7 @@ def _row(
         return session.exec(query).one()
 
 
-def claim(
+def claim_in_transaction(
     session: Session, file: File, *, retry_incomplete: bool = False
 ) -> tuple[int, str] | None:
     if file.id is None or not current_source(session, file.id, file.sha256):
@@ -114,8 +124,15 @@ def claim(
             updated_at=now,
         )
     )
-    session.commit()
     return (row.id, token) if changed.rowcount == 1 else None
+
+
+def claim(
+    session: Session, file: File, *, retry_incomplete: bool = False
+) -> tuple[int, str] | None:
+    claimed = claim_in_transaction(session, file, retry_incomplete=retry_incomplete)
+    session.commit()
+    return claimed
 
 
 def release(session: Session, fingerprint_id: int, token: str) -> None:
@@ -130,7 +147,7 @@ def release(session: Session, fingerprint_id: int, token: str) -> None:
     session.commit()
 
 
-def publish(
+def publish_in_transaction(
     session: Session,
     file: File,
     result: FingerprintResult,
@@ -169,70 +186,125 @@ def publish(
             lease_token=None,
             lease_expires_at=None,
             state=result.state.value,
-            failure_code=result.failure_code,
+            failure_code=(
+                result.failure_code.value if result.failure_code is not None else None
+            ),
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss_bytes,
             updated_at=now,
         )
     )
     if fenced.rowcount != 1:
-        session.rollback()
         return False
+    for record in result.records:
+        row = _row(session, file, record.component_index, result.algorithm_version)
+        session.refresh(row)
+        values = record.values
+        for key in (
+            "vertex_count",
+            "face_count",
+            "component_count",
+            "euler_characteristic",
+            "watertight",
+            "surface_area",
+            "volume",
+            "area_volume_ratio",
+            "normalized_area",
+            "hull_ratio",
+            "fill_ratio",
+            "eigen_ratio_0",
+            "inertia_ratio_0",
+            "inertia_ratio_1",
+            "radius",
+            "d2_blob",
+            "sh_blob",
+            "view_blob",
+        ):
+            setattr(row, key, values.get(key))
+        keys = values["keys"]
+        for group in ("physical", "normalized"):
+            for index in range(4):
+                setattr(
+                    row,
+                    f"{group}_hash_{index}",
+                    keys[group][index] if keys is not None else None,
+                )
+        row.instance_count = record.instance_count
+        row.recipe_json = encode_json(values["recipe"])
+        row.unavailable_json = encode_json(values["unavailable"])
+        row.instances_json = encode_json(record.instances)
+        row.metrics_json = encode_json(
+            {
+                key: value
+                for key, value in values.items()
+                if not key.endswith("_blob")
+                and key not in ("recipe", "unavailable", "keys")
+            }
+        )
+        row.state = result.state.value
+        row.failure_code = (
+            result.failure_code.value if result.failure_code is not None else None
+        )
+        row.updated_at = now
+        session.add(row)
+    session.flush()
+    return True
+
+
+def publish(
+    session: Session,
+    file: File,
+    result: FingerprintResult,
+    *,
+    fingerprint_id: int,
+    token: str,
+    duration_ms: int | None = None,
+    peak_rss_bytes: int | None = None,
+) -> bool:
     try:
-        for record in result.records:
-            row = _row(session, file, record.component_index, result.algorithm_version)
-            session.refresh(row)
-            values = record.values
-            for key in (
-                "vertex_count",
-                "face_count",
-                "component_count",
-                "euler_characteristic",
-                "watertight",
-                "surface_area",
-                "volume",
-                "area_volume_ratio",
-                "normalized_area",
-                "hull_ratio",
-                "fill_ratio",
-                "eigen_ratio_0",
-                "inertia_ratio_0",
-                "inertia_ratio_1",
-                "radius",
-                "d2_blob",
-                "sh_blob",
-                "view_blob",
-            ):
-                setattr(row, key, values.get(key))
-            keys = values["keys"]
-            for group in ("physical", "normalized"):
-                for index in range(4):
-                    setattr(
-                        row,
-                        f"{group}_hash_{index}",
-                        keys[group][index] if keys is not None else None,
-                    )
-            row.instance_count = record.instance_count
-            row.recipe_json = encode_json(values["recipe"])
-            row.unavailable_json = encode_json(values["unavailable"])
-            row.instances_json = encode_json(record.instances)
-            row.metrics_json = encode_json(
-                {
-                    key: value
-                    for key, value in values.items()
-                    if not key.endswith("_blob")
-                    and key not in ("recipe", "unavailable", "keys")
-                }
-            )
-            row.state = result.state.value
-            row.failure_code = result.failure_code
-            row.updated_at = now
-            session.add(row)
-        session.commit()
+        published = publish_in_transaction(
+            session,
+            file,
+            result,
+            fingerprint_id=fingerprint_id,
+            token=token,
+            duration_ms=duration_ms,
+            peak_rss_bytes=peak_rss_bytes,
+        )
+        if published:
+            session.commit()
+        else:
+            session.rollback()
+        return published
     except Exception:
         session.rollback()
         raise
-    return True
+
+
+def publish_precomputed_in_transaction(
+    session: Session,
+    file: File,
+    result: FingerprintResult,
+) -> MeshFingerprintPublication:
+    """Retain the caller's output fence through cache and continuation retirement."""
+    if file.id is None or not current_source(session, file.id, file.sha256):
+        return MeshFingerprintRejected()
+    if result.algorithm_version != ALGORITHM_VERSION:
+        raise ValueError("precomputed_fingerprint_algorithm_changed")
+    claimed = claim_in_transaction(session, file, retry_incomplete=True)
+    if claimed is None:
+        row = _row(session, file, 0, ALGORITHM_VERSION)
+        session.refresh(row)
+        if row.state == "pending":
+            if row.lease_expires_at is None:
+                raise ValueError("pending_fingerprint_without_lease")
+            return MeshFingerprintDeferred(ensure_utc(row.lease_expires_at))
+        return MeshFingerprintPublished(FingerprintResultState(row.state))
+    if not publish_in_transaction(
+        session, file, result, fingerprint_id=claimed[0], token=claimed[1]
+    ):
+        return MeshFingerprintRejected()
+    return MeshFingerprintPublished(result.state)
 
 
 def publish_precomputed(session: Session, file: File, result: FingerprintResult) -> str:

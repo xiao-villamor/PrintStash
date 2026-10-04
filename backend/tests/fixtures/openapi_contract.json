@@ -7234,6 +7234,49 @@
         "title": "LegacyInboxManifestRead",
         "type": "object"
       },
+      "LegacyUnassessedVolumeRead": {
+        "additionalProperties": false,
+        "properties": {
+          "cause": {
+            "title": "Cause",
+            "type": "null"
+          },
+          "method": {
+            "title": "Method",
+            "type": "null"
+          },
+          "state": {
+            "const": "legacy_unassessed",
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "const": "mm3",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_mm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Mm3"
+          }
+        },
+        "required": [
+          "unit",
+          "state",
+          "method",
+          "value_mm3",
+          "cause"
+        ],
+        "title": "LegacyUnassessedVolumeRead",
+        "type": "object"
+      },
       "LibraryCreate": {
         "additionalProperties": false,
         "properties": {
@@ -8600,11 +8643,50 @@
         "title": "MaterialToolWrite",
         "type": "object"
       },
+      "MeasuredVolumeRead": {
+        "additionalProperties": false,
+        "properties": {
+          "cause": {
+            "title": "Cause",
+            "type": "null"
+          },
+          "method": {
+            "const": "mesh_surface_integral",
+            "title": "Method",
+            "type": "string"
+          },
+          "state": {
+            "const": "measured",
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "const": "mm3",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_mm3": {
+            "exclusiveMinimum": 0.0,
+            "title": "Value Mm3",
+            "type": "number"
+          }
+        },
+        "required": [
+          "unit",
+          "state",
+          "method",
+          "value_mm3",
+          "cause"
+        ],
+        "title": "MeasuredVolumeRead",
+        "type": "object"
+      },
       "MetadataRead": {
         "properties": {
           "bbox_x_mm": {
             "anyOf": [
               {
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -8616,6 +8698,7 @@
           "bbox_y_mm": {
             "anyOf": [
               {
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -8627,6 +8710,7 @@
           "bbox_z_mm": {
             "anyOf": [
               {
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -8854,6 +8938,32 @@
             ],
             "title": "Triangle Count"
           },
+          "volume_measurement": {
+            "discriminator": {
+              "mapping": {
+                "legacy_unassessed": "#/components/schemas/LegacyUnassessedVolumeRead",
+                "measured": "#/components/schemas/MeasuredVolumeRead",
+                "not_calculated": "#/components/schemas/NotCalculatedVolumeRead",
+                "unavailable": "#/components/schemas/UnavailableVolumeRead"
+              },
+              "propertyName": "state"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredVolumeRead"
+              },
+              {
+                "$ref": "#/components/schemas/UnavailableVolumeRead"
+              },
+              {
+                "$ref": "#/components/schemas/NotCalculatedVolumeRead"
+              },
+              {
+                "$ref": "#/components/schemas/LegacyUnassessedVolumeRead"
+              }
+            ],
+            "title": "Volume Measurement"
+          },
           "volume_mm3": {
             "anyOf": [
               {
@@ -8877,6 +8987,9 @@
             "title": "Wall Loops"
           }
         },
+        "required": [
+          "volume_measurement"
+        ],
         "title": "MetadataRead",
         "type": "object"
       },
@@ -11420,6 +11533,41 @@
           "parts"
         ],
         "title": "MultipartPartsReplace",
+        "type": "object"
+      },
+      "NotCalculatedVolumeRead": {
+        "additionalProperties": false,
+        "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/VolumeNotCalculatedCause"
+          },
+          "method": {
+            "title": "Method",
+            "type": "null"
+          },
+          "state": {
+            "const": "not_calculated",
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "const": "mm3",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_mm3": {
+            "title": "Value Mm3",
+            "type": "null"
+          }
+        },
+        "required": [
+          "unit",
+          "state",
+          "method",
+          "value_mm3",
+          "cause"
+        ],
+        "title": "NotCalculatedVolumeRead",
         "type": "object"
       },
       "NotificationTarget": {
@@ -18422,6 +18570,42 @@
         "title": "TrashedSourceFileRead",
         "type": "object"
       },
+      "UnavailableVolumeRead": {
+        "additionalProperties": false,
+        "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/VolumeUnavailableCause"
+          },
+          "method": {
+            "const": "mesh_surface_integral",
+            "title": "Method",
+            "type": "string"
+          },
+          "state": {
+            "const": "unavailable",
+            "title": "State",
+            "type": "string"
+          },
+          "unit": {
+            "const": "mm3",
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_mm3": {
+            "title": "Value Mm3",
+            "type": "null"
+          }
+        },
+        "required": [
+          "unit",
+          "state",
+          "method",
+          "value_mm3",
+          "cause"
+        ],
+        "title": "UnavailableVolumeRead",
+        "type": "object"
+      },
       "UrlIngestRequest": {
         "description": "Body for POST /ingest/url.\n\n``url`` may be a direct file/.zip link *or* a model *page* on a supported\nhost (Printables / Thingiverse); pages are resolved to their download link\nserver-side. Authenticated MakerWorld packages are captured by the browser\nextension and uploaded through the inbox. The optional cookie fields remain\naccepted for backwards compatibility; ``makerworld_cookie`` is ignored.",
         "properties": {
@@ -19865,6 +20049,28 @@
         ],
         "title": "VolumeEvidence",
         "type": "object"
+      },
+      "VolumeNotCalculatedCause": {
+        "enum": [
+          "enrichment_pending",
+          "not_applicable",
+          "not_requested",
+          "geometry_unavailable",
+          "topology_not_evaluated"
+        ],
+        "title": "VolumeNotCalculatedCause",
+        "type": "string"
+      },
+      "VolumeUnavailableCause": {
+        "enum": [
+          "not_watertight",
+          "inconsistent_winding",
+          "non_positive_integral",
+          "nonfinite_integral",
+          "measurement_failed"
+        ],
+        "title": "VolumeUnavailableCause",
+        "type": "string"
       },
       "WorkOverview": {
         "properties": {

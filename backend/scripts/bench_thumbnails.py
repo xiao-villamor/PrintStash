@@ -27,6 +27,7 @@ from trimesh.exchange.stl import export_stl
 from app.core.config import settings
 from app.modules.derivatives.kinds import MESH_THUMBNAIL_RECIPE
 from app.modules.media.mesh_contracts import ThumbnailRequest, ThumbnailStrategy
+from app.modules.media.mesh_telemetry import PhaseStats
 from app.modules.media.thumbnail import to_webp
 from app.modules.media.thumbnail_engine import ThumbnailEngine
 from app.modules.storage.artifact_delivery import (
@@ -49,6 +50,7 @@ def _peak_rss_bytes() -> int:
 
 @dataclass(frozen=True)
 class Sample:
+    sample_index: int
     elapsed_ms: float
     output_bytes: int
     output_sha256: str | None
@@ -59,6 +61,7 @@ class Sample:
 @dataclass(frozen=True)
 class RenderSample(Sample):
     strategy: ThumbnailStrategy
+    phase_stats: tuple[PhaseStats, ...]
 
 
 @dataclass(frozen=True)
@@ -125,11 +128,12 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
     renders: list[RenderSample] = []
     reads: list[Sample] = []
     output: bytes | None = None
-    for _ in range(cold_runs):
+    for sample_index in range(1, cold_runs + 1):
         started = time.perf_counter()
         output = None
         error = None
         strategy = ThumbnailStrategy.NONE
+        phase_stats: tuple[PhaseStats, ...] = ()
         try:
             result = ThumbnailEngine().generate(
                 ThumbnailRequest(
@@ -140,6 +144,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                 )
             )
             strategy = result.strategy
+            phase_stats = result.phase_stats
             if result.image is None:
                 error = (
                     result.failure_reason.value
@@ -156,6 +161,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
         elapsed_ms = (time.perf_counter() - started) * 1000
         renders.append(
             RenderSample(
+                sample_index=sample_index,
                 elapsed_ms=elapsed_ms,
                 output_bytes=len(output) if output is not None else 0,
                 output_sha256=hashlib.sha256(output).hexdigest()
@@ -164,6 +170,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                 peak_rss_bytes=_peak_rss_bytes(),
                 error=error,
                 strategy=strategy,
+                phase_stats=phase_stats,
             )
         )
 
@@ -198,7 +205,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                 publication_error = f"{type(exc).__name__}: {exc}"
                 logging.exception("benchmark publication failed: %s", path.name)
             else:
-                for _ in range(warm_runs):
+                for sample_index in range(1, warm_runs + 1):
                     started = time.perf_counter()
                     content: bytes | None = None
                     error = None
@@ -234,6 +241,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                     elapsed_ms = (time.perf_counter() - started) * 1000
                     reads.append(
                         Sample(
+                            sample_index=sample_index,
                             elapsed_ms=elapsed_ms,
                             output_bytes=len(content) if content is not None else 0,
                             output_sha256=hashlib.sha256(content).hexdigest()
@@ -309,7 +317,7 @@ def main() -> int:
             for path in corpus
         ]
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "environment": asdict(environment),
         "corpus_manifest": asdict(manifest) if manifest is not None else None,
         "output_dimensions": {
@@ -318,12 +326,31 @@ def main() -> int:
         },
         "label": args.label,
         "mesh_thumbnail_recipe": MESH_THUMBNAIL_RECIPE,
+        "recipes": {
+            "mesh_thumbnail": MESH_THUMBNAIL_RECIPE,
+            "mesh_metadata": None,
+            "fingerprint": None,
+        },
+        "request": {
+            "include_geometry": False,
+            "include_fingerprint": False,
+            "include_thumbnail": True,
+            "output_format": "WEBP",
+        },
+        "corpus_order": [measurement.name for measurement in measurements],
         "cold_runs": args.cold_runs,
         "warm_runs": args.warm_runs,
         "protocol": {
             "render": "uncached_engine_same_interpreter",
             "representation_read": "local_storage_delivery_plan_and_full_body_read",
             "filesystem_cache": "uncontrolled",
+            "sample_order": "corpus_sequential_then_renders_then_publication_then_reads",
+            "representation_cache": "final_render_published_to_private_local_storage",
+            "temporary_storage": "per_file_removed_after_reads",
+            "publication": "setup_excluded_from_sample_timings",
+            "median_scope": "successful_attempts_only_raw_failures_retained",
+            "phase_scope": "engine_spans_inclusive_not_additive_to_elapsed_ms",
+            "phase_bytes": "known_logical_sizes_not_measured_io",
             "rss_scope": "process_lifetime_high_water_self",
             "includes_http": False,
             "includes_database": False,

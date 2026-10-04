@@ -27,8 +27,12 @@ from app.modules.media.stl_reader import (
     STLBudgetExceeded as _BudgetExceeded,
 )
 from app.modules.media.stl_reader import (
+    STLMeasurements,
     STLReadLimits,
+    STLSourceChanged,
+    STLSourceSnapshot,
     iter_stl_blocks,
+    snapshot_stl,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +103,7 @@ class _Limits:
 
 @dataclass(frozen=True)
 class _PassStats:
+    snapshot: STLSourceSnapshot
     triangle_count: int
     scanned_bytes: int
     bounds_min: tuple[float, float, float]
@@ -125,23 +130,72 @@ def _read_pass(
     path: Path,
     limits: _Limits,
     callback: Callable[[object], None],
+    *,
+    snapshot: STLSourceSnapshot | None = None,
 ) -> _PassStats:
     import numpy as np
 
     lower = np.full(3, np.inf, dtype=np.float64)
     upper = np.full(3, -np.inf, dtype=np.float64)
     parsed = 0
-    for vertices in iter_stl_blocks(path, _reader_limits(limits)):
+    source = snapshot if snapshot is not None else snapshot_stl(path)
+    for vertices in iter_stl_blocks(path, _reader_limits(limits), snapshot=source):
         # Preserve source precision until the relative visual projection.
         callback(vertices)
         lower = np.minimum(lower, vertices.min(axis=(0, 1)))
         upper = np.maximum(upper, vertices.max(axis=(0, 1)))
         parsed += len(vertices)
     return _PassStats(
+        source,
         parsed,
-        path.stat().st_size,
+        source.size,
         (float(lower[0]), float(lower[1]), float(lower[2])),
         (float(upper[0]), float(upper[1]), float(upper[2])),
+    )
+
+
+def _reuse_measurements(
+    measured: STLMeasurements, source: STLSourceSnapshot, limits: _Limits
+) -> _PassStats:
+    """Reuse only a complete scan of the current source within preview budgets."""
+    _check_deadline(limits)
+    if not isinstance(measured, STLMeasurements):
+        raise _InvalidSTL("invalid source measurements")
+    if measured.snapshot != source:
+        raise STLSourceChanged("source changed after measurement")
+    if (
+        type(measured.triangle_count) is not int
+        or measured.triangle_count <= 0
+        or type(measured.scanned_bytes) is not int
+        or measured.scanned_bytes != source.size
+    ):
+        raise _InvalidSTL("invalid measured source counts")
+    if measured.triangle_count > limits.max_triangles:
+        raise _BudgetExceeded("triangle budget")
+    if measured.scanned_bytes > limits.max_source_bytes:
+        raise _BudgetExceeded("source budget")
+    if (
+        type(measured.bounds_min) is not tuple
+        or type(measured.bounds_max) is not tuple
+        or len(measured.bounds_min) != 3
+        or len(measured.bounds_max) != 3
+    ):
+        raise _InvalidSTL("invalid measured source bounds")
+    for lower, upper in zip(measured.bounds_min, measured.bounds_max, strict=True):
+        if (
+            type(lower) not in (int, float)
+            or type(upper) not in (int, float)
+            or not math.isfinite(lower)
+            or not math.isfinite(upper)
+            or lower > upper
+        ):
+            raise _InvalidSTL("invalid measured source bounds")
+    return _PassStats(
+        source,
+        measured.triangle_count,
+        measured.scanned_bytes,
+        measured.bounds_min,
+        measured.bounds_max,
     )
 
 
@@ -283,7 +337,7 @@ def _render(
         ):
             raise _BudgetExceeded("candidate budget")
 
-    second = _read_pass(path, limits, draw)
+    second = _read_pass(path, limits, draw, snapshot=first.snapshot)
     if second.triangle_count != first.triangle_count:
         raise _InvalidSTL("source changed between passes")
     if not np.allclose(first.bounds_min, second.bounds_min, rtol=0, atol=0):
@@ -415,7 +469,16 @@ def _write_manifest(path: Path, manifest: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
-def main(argv: list[str] | None = None, *, apply_limits: bool = True) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    apply_limits: bool = True,
+    measurements: STLMeasurements | None = None,
+) -> int:
+    if measurements is not None and apply_limits:
+        # A hint never crosses the subprocess wire. The outer native worker
+        # already owns containment before requesting in-process scan reuse.
+        return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
@@ -482,19 +545,18 @@ def main(argv: list[str] | None = None, *, apply_limits: bool = True) -> int:
         deadline=time.monotonic() + args.timeout_seconds,
     )
     try:
-        source_stat = args.source.stat()
-        if source_stat.st_size > limits.max_source_bytes:
+        source = snapshot_stl(args.source)
+        if source.size > limits.max_source_bytes:
             raise _BudgetExceeded("source budget")
-        first = _read_pass(args.source, limits, lambda _vertices: None)
+        first = (
+            _reuse_measurements(measurements, source, limits)
+            if measurements is not None
+            else _read_pass(
+                args.source, limits, lambda _vertices: None, snapshot=source
+            )
+        )
         if first.triangle_count > limits.max_triangles:
             raise _BudgetExceeded("triangle budget")
-        first_after = args.source.stat()
-        if (
-            first_after.st_size != source_stat.st_size
-            or first_after.st_mtime_ns != source_stat.st_mtime_ns
-        ):
-            raise _InvalidSTL("source changed during first pass")
-        before = first_after
         candidates = _render(
             args.source,
             args.output,
@@ -503,9 +565,8 @@ def main(argv: list[str] | None = None, *, apply_limits: bool = True) -> int:
             limits,
             first,
         )
-        after = args.source.stat()
-        if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
-            raise _InvalidSTL("source changed during render")
+        if snapshot_stl(args.source) != source:
+            raise STLSourceChanged("source changed before publication")
         _write_manifest(
             args.manifest,
             {

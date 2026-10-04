@@ -1,4 +1,4 @@
-"""Opt-in provider that contains ONNX failures under the existing render budget."""
+"""Opt-in ONNX provider with bounded, process-shared warm-model residency."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import os
 import selectors
 import struct
 import subprocess
-import sys
 import threading
 import time
 from contextlib import ExitStack
@@ -34,13 +33,15 @@ from app.modules.inference.worker_pool import pool
 from app.modules.inference.worker_protocol import (
     MAX_INPUT_BYTES,
     MAX_OUTPUT_BYTES,
+    RETIREMENT_EXIT,
     WorkerError,
     WorkerResult,
 )
-from app.modules.media.native_process import (
-    native_memory_budget_bytes,
-    process_rss_bytes,
-)
+from app.modules.media.native_process import process_tree_rss_bytes
+from app.modules.media.worker_bootstrap import RESOURCE_EXIT, command
+from app.runtime import inference_resources
+from app.runtime.preparation_runtime import PERMIT_ENV as PREPARATION_ENV
+from app.runtime.preparation_runtime import PERMIT_PATH_ENV as PREPARATION_PATH_ENV
 
 _admission = threading.Condition()
 _waiting_queries = 0
@@ -84,6 +85,10 @@ def release_slot() -> None:
     with _admission:
         _running -= 1
         _admission.notify_all()
+
+
+class _WorkerRetired(Exception):
+    """The child voluntarily released residency before any reply was accepted."""
 
 
 class LocalEmbeddingProvider:
@@ -225,14 +230,41 @@ class LocalEmbeddingProvider:
             if len(payload) > MAX_INPUT_BYTES:
                 raise EmbeddingError("embedding_input_budget")
             key = self._worker_key()
-            with pool.acquire(
-                key, self.directory, self._spawn, admission_context
-            ) as process:
+            exchange_deadline: float | None = None
+            for attempt in range(2):
+                admission_context.remaining()
+                if (
+                    exchange_deadline is not None
+                    and time.monotonic() >= exchange_deadline
+                ):
+                    raise EmbeddingError("embedding_timeout")
                 try:
-                    output = self._exchange(process, payload, context)
+                    with pool.acquire(
+                        key,
+                        self.directory,
+                        lambda deadline=exchange_deadline: self._spawn(
+                            context=admission_context, deadline=deadline
+                        ),
+                        admission_context,
+                        deadline=exchange_deadline,
+                    ) as process:
+                        if exchange_deadline is None:
+                            exchange_deadline = time.monotonic() + min(
+                                settings.mesh_step_timeout_seconds, 90
+                            )
+                        output = self._exchange(
+                            process,
+                            payload,
+                            admission_context,
+                            deadline=exchange_deadline,
+                        )
+                except _WorkerRetired:
+                    if attempt == 1:
+                        raise EmbeddingError("embedding_compute_busy") from None
+                    continue
                 except EmbeddingError:
                     raise
-                except (OSError, ValueError):
+                except OSError, ValueError:
                     raise EmbeddingError("embedding_inference_failed") from None
                 if self.directory.parent == settings.embedding_cache_dir.absolute():
                     try:
@@ -240,9 +272,15 @@ class LocalEmbeddingProvider:
                     except OSError:
                         pass  # Read-only offline mounts still support inference.
                 return output
+            raise RuntimeError("inference attempts exhausted without an outcome")
 
-    def _spawn(self) -> subprocess.Popen:
+    def _spawn(
+        self, *, context: InferenceContext | None = None, deadline: float | None = None
+    ) -> subprocess.Popen:
+        context = context or InferenceContext.bounded(120, priority="background")
         env = os.environ.copy()
+        env.pop(PREPARATION_ENV, None)
+        env.pop(PREPARATION_PATH_ENV, None)
         env.update(
             OMP_NUM_THREADS=str(self.threads),
             OPENBLAS_NUM_THREADS=str(self.threads),
@@ -250,35 +288,76 @@ class LocalEmbeddingProvider:
             HF_HUB_OFFLINE="1",
             TRANSFORMERS_OFFLINE="1",
         )
-        return subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "app.modules.inference.worker",
-                str(self.directory),
-                self.model_key,
-                str(self.threads),
-                "--persistent",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            cwd=Path(application_file).resolve().parent.parent,
-        )
+
+        def checkpoint() -> None:
+            context.remaining()
+            if deadline is not None and time.monotonic() >= deadline:
+                raise EmbeddingError("embedding_timeout")
+
+        with inference_resources.reserve(checkpoint=checkpoint) as permit:
+            resources = inference_resources.launch_resources(permit)
+            env.update(resources.environment)
+            return subprocess.Popen(
+                command(
+                    "app.modules.inference.worker",
+                    [
+                        str(self.directory),
+                        self.model_key,
+                        str(self.threads),
+                        "--persistent",
+                    ],
+                    permit.resources.bytes,
+                ),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                cwd=Path(application_file).resolve().parent.parent,
+                pass_fds=resources.descriptors,
+                start_new_session=True,
+            )
 
     @staticmethod
     def _exchange(
-        process: subprocess.Popen, payload: bytes, context: InferenceContext | None
+        process: subprocess.Popen,
+        payload: bytes,
+        context: InferenceContext | None,
+        *,
+        deadline: float | None = None,
     ) -> bytes:
-        """Monitor both pipe directions without blocking on a stalled child."""
+        """Drain replies before classifying exit; partial replies are never replayed."""
         assert process.stdin is not None and process.stdout is not None
-        deadline = time.monotonic() + min(settings.mesh_step_timeout_seconds, 90)
-        budget = native_memory_budget_bytes()
+        exchange_limit = (
+            deadline
+            if deadline is not None
+            else time.monotonic() + min(settings.mesh_step_timeout_seconds, 90)
+        )
+        budget = inference_resources.worker_memory_budget_bytes()
         result = bytearray()
         framed = struct.pack("!I", len(payload)) + payload
         offset = 0
-        expected = None
+        expected: int | None = None
+
+        def receive() -> bytes | None:
+            nonlocal expected
+            assert process.stdout is not None
+            try:
+                chunk = os.read(process.stdout.fileno(), 65536)
+            except BlockingIOError:
+                return None
+            if not chunk:
+                raise _worker_failure(process, has_response=bool(result))
+            result.extend(chunk)
+            if len(result) >= 4 and expected is None:
+                expected = struct.unpack("!I", result[:4])[0]
+                if expected > MAX_OUTPUT_BYTES:
+                    raise EmbeddingError("embedding_output_budget")
+            if expected is not None and len(result) >= expected + 4:
+                if len(result) != expected + 4:
+                    raise EmbeddingError("embedding_output_invalid")
+                return bytes(result[4:])
+            return None
+
         with selectors.DefaultSelector() as selector:
             os.set_blocking(process.stdin.fileno(), False)
             os.set_blocking(process.stdout.fileno(), False)
@@ -287,36 +366,53 @@ class LocalEmbeddingProvider:
             while True:
                 if context is not None:
                     context.remaining()
-                pool.enforce_memory_budget(process, budget, process_rss_bytes)
-                if time.monotonic() >= deadline:
+                if (process_tree_rss_bytes(process.pid) or 0) > budget:
+                    raise EmbeddingError("embedding_worker_oom")
+                if time.monotonic() >= exchange_limit:
                     raise EmbeddingError("embedding_timeout")
-                if process.poll() is not None:
-                    raise EmbeddingError(
-                        "embedding_worker_oom"
-                        if process.returncode == -9
-                        else "embedding_inference_failed"
-                    )
-                for key, _ in selector.select(0.05):
-                    if key.fileobj is process.stdin:
+                # A retiring worker may already have a complete reply buffered.
+                # Always consume readable output before writing or judging exit.
+                events = selector.select(0.05)
+                for key, _ in sorted(
+                    events, key=lambda item: item[0].fileobj is process.stdin
+                ):
+                    if key.fileobj is process.stdout:
+                        reply = receive()
+                        if reply is not None:
+                            return reply
+                    else:
                         try:
                             offset += os.write(key.fd, framed[offset : offset + 65536])
                         except BrokenPipeError:
-                            raise EmbeddingError("embedding_inference_failed") from None
+                            selector.unregister(process.stdin)
+                            continue
                         if offset == len(framed):
                             selector.unregister(process.stdin)
-                    else:
-                        chunk = os.read(key.fd, 65536)
-                        if not chunk:
-                            raise EmbeddingError("embedding_inference_failed")
-                        result.extend(chunk)
-                        if len(result) >= 4 and expected is None:
-                            expected = struct.unpack("!I", result[:4])[0]
-                            if expected > MAX_OUTPUT_BYTES:
-                                raise EmbeddingError("embedding_output_budget")
-                        if expected is not None and len(result) >= expected + 4:
-                            if len(result) != expected + 4:
-                                raise EmbeddingError("embedding_output_invalid")
-                            return bytes(result[4:])
+                if process.poll() is not None:
+                    while True:
+                        before = len(result)
+                        reply = receive()
+                        if reply is not None:
+                            return reply
+                        if len(result) == before:
+                            raise _worker_failure(process, has_response=bool(result))
+
+
+def _worker_failure(
+    process: subprocess.Popen, *, has_response: bool
+) -> EmbeddingError | _WorkerRetired:
+    """Only classified retirement without accepted response bytes permits replay."""
+    try:
+        status = process.wait(timeout=0.1)
+    except subprocess.TimeoutExpired:
+        status = None
+    if status == RETIREMENT_EXIT and not has_response:
+        return _WorkerRetired()
+    return EmbeddingError(
+        "embedding_worker_oom"
+        if status in (-9, RESOURCE_EXIT)
+        else "embedding_inference_failed"
+    )
 
 
 def configured_provider(sessions: SessionFactory) -> LocalEmbeddingProvider:

@@ -1,6 +1,6 @@
 # Local native resource admission
 
-Status: Implementation in progress; integrated load and recovery qualification pending.
+Status: Accepted; focused mixed-source load, recovery and PID-namespace qualification passed.
 
 ## Context
 
@@ -26,6 +26,37 @@ preflight is bounded and unknown complexity claims the whole pool. Capacity
 changes drain old active claims; registration order governs FIFO admission.
 This deliberately trades some utilization for progress of large jobs. A queue
 wait retains its Job attempt rather than consuming another production attempt.
+
+Warm ONNX models have a separate process-shared residency ledger under
+`runtime/inference-models`. Its default partition is 25% of detected physical
+memory, separate from geometry's effective 50% partition. Their sum must stay
+below 100%; unknown physical capacity refuses model admission. Each resident
+claims one configured model slot and at most its configured virtual-memory
+ceiling (1024 MiB by default). The parent transfers only the model descriptor;
+prepared Artifact descriptors never enter the cached worker lifetime.
+
+A resident uses the same pre-import guarded bootstrap as mesh work. The guardian
+retains credit until the process tree exits. An idle model retires when the
+residency ledger has a queued claimant, including a model protected from ordinary
+cache expiration. Warm requests otherwise reuse their existing model. Residency
+slots bound retained processes; each model's existing thread configuration bounds
+its execution threads. They do not form a unified global CPU scheduler.
+
+Cold model loads publish a pending identity before releasing the worker-pool
+condition. Native admission, process startup and process-tree cleanup run outside
+that condition, so another request can honor cancellation or its deadline.
+Pending loads and retiring children still count toward capacity. Pool shutdown
+invalidates pending generations; a late child is reaped instead of cached, and
+model-directory eviction refuses while its load or cleanup remains pending.
+A cleanup failure retains that ownership for an explicit retry; cleanup still
+attempts the remaining selected children before propagating the original error.
+
+All API and worker processes in this resource domain must use the same memory
+partitions, model ceiling and resident count. Changing either partition requires
+stopping every process, updating the shared profile, then restarting together.
+Rolling processes with different partitions can overcommit physical memory and
+are outside this contract. Geometry slot/claim capacity changes within an
+unchanged partition continue to drain existing claims before admission.
 
 Source batches reserve their combined byte window first, then take an I/O slot
 only during materialization, then acquire native resources. No materialization
@@ -63,7 +94,12 @@ resource configuration; their native descendants are observed in their own PID
 namespace while file-description locks coordinate the common resource domain.
 The ledger and prepared workspaces are runtime state, not backup payloads.
 
-Weights are conservative estimates, not measured allocations. Tree RSS sampling
+Weights are conservative estimates, not measured allocations. The current
+Python 3.14.8 numeric stack measured approximately 754 MB peak virtual memory
+for a real 300,000-facet STL, while RSS peaked around 473 MB. Its former 660 MB
+claim refused valid measurement under RLIMIT_AS. Known-source weights now use
+3000 bytes per face with a 512 MiB startup floor; this source claims 900 MB.
+Qualification checks both measured RSS and virtual-memory peaks against claims. Tree RSS sampling
 can miss transient peaks; RLIMIT_AS additionally constrains virtual mappings.
 The startup floor was measured on Linux x86-64 and needs continued qualification
 on supported images. CPU thread defaults remain one BLAS/OpenMP thread per
@@ -73,6 +109,11 @@ Queue telemetry is parent-owned and records wait time independently of startup,
 execution and cleanup. It uses bounded outcome labels and carries no source
 path or Artifact identity in metric labels.
 
-Integrated mixed-size load, cancellation, configuration-change, namespace and
-source-workspace recovery checks must complete before this implementation is
-considered qualified. Ordinary CI remains separate from the deeper release gate.
+Focused mixed-size native execution, cancellation, configuration draining,
+actual PID namespaces and source-workspace recovery are covered by the acceptance
+matrix. The measured mixed-STL workload overlaps two real supervised workers,
+checks RSS and peak virtual memory against claims, preserves original bytes and
+returns complete geometry plus PNGs. It establishes bounded concurrency, not a
+throughput speedup or a general memory calibration for every topology or image.
+Extended soak, coverage and supported-image compatibility remain release-gate
+work; the focused qualification does not claim those broader checks.

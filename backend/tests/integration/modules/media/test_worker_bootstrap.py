@@ -238,3 +238,86 @@ class TestCancelledReply:
             )
         for pid in json.loads(pids.read_text()):
             assert not Path(f"/proc/{pid}").exists()
+
+
+class TestProbeReadiness:
+    @pytest.mark.parametrize(
+        "case", ["wait", "tree", "tree_wait", "leaves_child", "resource_reply"]
+    )
+    def test_publishes_complete_markers_before_they_become_visible(
+        self, tmp_path, monkeypatch, case
+    ):
+        import json
+        from types import SimpleNamespace
+
+        from tests.fakes import mesh_bootstrap_probe as probe
+
+        pids = tmp_path / "pids"
+        ready = tmp_path / "ready"
+        temporary = tmp_path / "owned-temporary"
+        temporary.mkdir()
+        markers = [pids, ready] if case == "tree_wait" else [pids]
+        opened = []
+        publications = []
+        open_file = Path.open
+        replace_file = Path.replace
+
+        def observe_open(path, *args, **kwargs):
+            stream = open_file(path, *args, **kwargs)
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if "w" in mode and path.parent == tmp_path:
+                if any(
+                    marker.exists() for marker in markers if marker not in publications
+                ):
+                    stream.close()
+                    pytest.fail(
+                        "readiness marker became visible before its write completed"
+                    )
+                opened.append((path, stream))
+            return stream
+
+        def observe_publication(path, target):
+            target = Path(target)
+            assert target in markers
+            assert not target.exists()
+            assert path != target
+            assert opened[-1][0] == path
+            assert opened[-1][1].closed
+            content = path.read_text()
+            if target == ready:
+                assert content == str(temporary)
+                assert (
+                    temporary / "partial.stl"
+                ).read_bytes() == b"partial native output"
+            elif case == "wait":
+                assert int(content) == os.getpid()
+            else:
+                assert json.loads(content) == [os.getpid(), 424242]
+            result = replace_file(path, target)
+            assert target.read_text() == content
+            publications.append(target)
+            return result
+
+        argv = ["probe", case, str(pids)]
+        if case == "tree":
+            argv.append("1")
+        elif case == "tree_wait":
+            argv.append(str(ready))
+        monkeypatch.setattr(sys, "argv", argv)
+        monkeypatch.setenv("TMPDIR", str(temporary))
+        monkeypatch.setattr(
+            subprocess, "Popen", lambda *_args, **_kwargs: SimpleNamespace(pid=424242)
+        )
+        monkeypatch.setattr(probe.time, "sleep", lambda _seconds: None)
+        monkeypatch.setattr(Path, "open", observe_open)
+        monkeypatch.setattr(Path, "replace", observe_publication)
+
+        if case == "resource_reply":
+            with pytest.raises(MemoryError, match="resource refusal"):
+                probe.main()
+        else:
+            probe.main()
+
+        assert publications == markers
+        assert len(opened) == len(markers)
+        assert all(not path.exists() for path, _stream in opened)

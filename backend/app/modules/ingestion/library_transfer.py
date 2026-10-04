@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal
 
 from printstash_core.imports import CaptureContractError, CaptureManifestV2
+from printstash_core.mesh.measurements import encode_volume
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
 from sqlmodel import Session, delete, select
@@ -61,6 +62,7 @@ from app.modules.library import (
     source_covers,
     taxonomy,
 )
+from app.modules.library.volume_metadata import read_volume
 from app.modules.storage import capacity_estimates, storage
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager
@@ -250,9 +252,11 @@ class PortableMultipartModel(BaseModel):
 
 def _retired_group_filter(row: dict) -> bool:
     filters = row.get("filters", {})
-    return "family_export_id" in row or any(
-        key in filters for key in ("family_id", "family_role", "in_family")
-    ) or filters.get("browse") == "families_collapsed"
+    return (
+        "family_export_id" in row
+        or any(key in filters for key in ("family_id", "family_role", "in_family"))
+        or filters.get("browse") == "families_collapsed"
+    )
 
 
 def _export_saved_views(rows: list[SavedView]) -> list[dict]:
@@ -269,11 +273,14 @@ def _import_saved_views(session: Session, user: User, rows: list[dict]) -> None:
     for row in rows:
         if _retired_group_filter(row):
             continue
-        if session.exec(
-            select(SavedView.id).where(
-                SavedView.user_id == user.id, SavedView.name == row["name"]
-            )
-        ).first() is not None:
+        if (
+            session.exec(
+                select(SavedView.id).where(
+                    SavedView.user_id == user.id, SavedView.name == row["name"]
+                )
+            ).first()
+            is not None
+        ):
             continue
         session.add(
             SavedView(
@@ -526,14 +533,23 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
                     "is_recommended": artifact.is_recommended,
                     "tags": tags_by_file.get(artifact.id, []),
                     "metadata": {
-                        key: _json_value(value)
-                        for key, value in md.model_dump(
-                            # created_at is set fresh by Metadata's
-                            # default_factory on import — carrying the source
-                            # instance's ISO string through crashes Artifact
-                            # persistence's SQLite datetime write.
-                            exclude={"id", "file_id", "created_at"}
-                        ).items()
+                        **{
+                            key: _json_value(value)
+                            for key, value in md.model_dump(
+                                # Timestamps are local to the imported row;
+                                # volume uses its public disjoint wire contract.
+                                exclude={
+                                    "id",
+                                    "file_id",
+                                    "created_at",
+                                    "volume_state",
+                                    "volume_method",
+                                    "volume_unavailable_cause",
+                                    "volume_not_calculated_cause",
+                                }
+                            ).items()
+                        },
+                        "volume_measurement": encode_volume(read_volume(md)),
                     }
                     if md
                     else {},

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pytest
 
@@ -25,6 +26,8 @@ class TestRecordSupervision:
     def test_keeps_costs_in_log_message(
         self, supervision: SupervisionStats, caplog: pytest.LogCaptureFixture
     ) -> None:
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+
         mesh_observability.record_supervision(supervision)
 
         record = next(
@@ -59,6 +62,7 @@ class TestRecordPhases:
         self, supervision: SupervisionStats, caplog: pytest.LogCaptureFixture
     ) -> None:
         phase = PhaseStats(MeshPhase.LOAD, 100, 12, None, 4, PhaseOutcome.COMPLETED)
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
 
         mesh_observability.record_phases((phase,), supervision)
 

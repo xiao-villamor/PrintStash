@@ -6,6 +6,7 @@ import json
 from collections import defaultdict
 from typing import Optional
 
+from printstash_core.mesh.measurements import encode_volume
 from pydantic import ValidationError
 from sqlalchemy import case, func
 from sqlmodel import Session, select
@@ -30,6 +31,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.modules.library import collection_tree
+from app.modules.library.volume_metadata import read_volume
 from app.modules.printing.costing import (
     cost_profiles,
     match_cost_profile,
@@ -62,6 +64,7 @@ def metadata_read(
     profiles: list[FilamentProfile] | None = None,
 ) -> MetadataRead:
     data = metadata.model_dump()
+    data["volume_measurement"] = encode_volume(read_volume(metadata))
     raw_context = data.pop("native_context_json", None)
     if raw_context:
         try:

@@ -31,12 +31,12 @@ from sqlmodel import col
 from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, JobKind
 
 # Recipe versions. Bump rule: see the module docstring.
-MESH_GEOMETRY_RECIPE = 8
-MESH_THUMBNAIL_RECIPE = 7
-GCODE_METADATA_RECIPE = 1
+MESH_GEOMETRY_RECIPE = 12
+MESH_THUMBNAIL_RECIPE = 11
+GCODE_METADATA_RECIPE = 2
 GCODE_THUMBNAIL_RECIPE = 1
 TOOLPATH_RECIPE = 1
-VIEWER_STL_RECIPE = 1
+VIEWER_STL_RECIPE = 2
 VIEWER_TYPES = (FileType.THREE_MF, FileType.OBJ, FileType.STEP)
 
 MESH_TYPES = (FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP)

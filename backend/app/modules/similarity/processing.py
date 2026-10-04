@@ -14,7 +14,8 @@ from app.db.models import File, GeometryFingerprint, SimilarityRun, User
 from app.db.session import SessionFactory
 from app.modules.media import mesh_isolation, verification_isolation
 from app.modules.media.fingerprints import FingerprintResult, FingerprintResultState
-from app.modules.media.mesh_contracts import ThumbnailFailureReason, ThumbnailRequest
+from app.modules.media.mesh_contracts import ThumbnailRequest
+from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.source_preparation import prepare_sources
 from app.modules.similarity import (
     candidates,
@@ -118,7 +119,7 @@ class SimilarityProcessor:
                     run,
                     token,
                     state="failed",
-                    failure_code="analysis_unavailable",
+                    failure_code=FingerprintFailureCode.ANALYSIS_UNAVAILABLE,
                 )
             except Exception:
                 session.rollback()
@@ -179,7 +180,7 @@ class SimilarityProcessor:
                         if fingerprints.source_digest(path) != file.sha256:
                             result = FingerprintResult(
                                 FingerprintResultState.FAILED,
-                                failure_code="source_changed",
+                                failure_code=FingerprintFailureCode.SOURCE_CHANGED,
                             )
                             metrics = None
                         else:
@@ -196,12 +197,13 @@ class SimilarityProcessor:
                             )
                             result = metrics.fingerprint_result or FingerprintResult(
                                 FingerprintResultState.FAILED,
-                                failure_code="analysis_unavailable",
+                                failure_code=FingerprintFailureCode.ANALYSIS_UNAVAILABLE,
                             )
                 except artifact_content.ArtifactContentChangedError:
                     result, metrics = (
                         FingerprintResult(
-                            FingerprintResultState.FAILED, failure_code="source_changed"
+                            FingerprintResultState.FAILED,
+                            failure_code=FingerprintFailureCode.SOURCE_CHANGED,
                         ),
                         None,
                     )
@@ -212,9 +214,9 @@ class SimilarityProcessor:
                         FingerprintResult(
                             FingerprintResultState.FAILED,
                             failure_code=(
-                                ThumbnailFailureReason.RESOURCE_LIMIT.value
+                                FingerprintFailureCode.RESOURCE_LIMIT
                                 if isinstance(exc, AdmissionTooLarge)
-                                else exc.reason.value
+                                else FingerprintFailureCode(exc.reason.value)
                             ),
                         ),
                         None,
@@ -223,7 +225,7 @@ class SimilarityProcessor:
                     result, metrics = (
                         FingerprintResult(
                             FingerprintResultState.FAILED,
-                            failure_code="source_unavailable",
+                            failure_code=FingerprintFailureCode.SOURCE_UNAVAILABLE,
                         ),
                         None,
                     )
