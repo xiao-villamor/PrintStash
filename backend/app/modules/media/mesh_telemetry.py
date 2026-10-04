@@ -14,6 +14,23 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 
 
+class AdmissionOutcome(StrEnum):
+    ADMITTED = "admitted"
+    CANCELLED = "cancelled"
+    DEADLINE = "deadline"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class AdmissionStats:
+    elapsed_ns: int
+    requested_slots: int
+    requested_bytes: int
+    capacity_slots: int
+    capacity_bytes: int
+    outcome: AdmissionOutcome
+
+
 class MeshPhase(StrEnum):
     ADMISSION = "admission"
     EMBEDDED = "embedded"
@@ -71,6 +88,7 @@ class SupervisionStats:
 class SupervisedReply:
     payload: bytes
     stats: SupervisionStats
+    returncode: int = 0
 
 
 MAX_PHASE_STATS_BYTES = 4096

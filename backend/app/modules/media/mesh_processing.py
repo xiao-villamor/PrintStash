@@ -19,23 +19,20 @@ import io
 import math
 import os
 import struct
-import subprocess  # nosec B404 - fixed interpreter/module invocation only
-import sys
 import tempfile
-import threading
-import time
 import warnings
 import zipfile
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
-from app import __file__ as application_file
 from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.modules.media import native_process
+from app.modules.media.mesh_contracts import canonical_suffix
 
 logger = get_logger(__name__)
 
@@ -51,7 +48,7 @@ _MAX_3MF_ENTRY_NAME_BYTES = 1024
 
 # Resolved once: the glibc handle used by _reclaim_memory, or False on a libc
 # without malloc_trim (musl/Alpine, non-Linux). None means "not looked up yet".
-_LIBC: "ctypes.CDLL | bool | None" = None
+_LIBC: "ctypes.CDLL | Literal[False] | None" = None
 
 
 def _reclaim_memory() -> None:
@@ -77,94 +74,24 @@ def _reclaim_memory() -> None:
         _LIBC = False
 
 
-class _RenderAdmission:
-    """One admission controller, including while administrators change its limit.
+@contextmanager
+def _native_scope():
+    """Inline/nested mesh work shares the same process-wide resource owner.
 
-    A new allocation split becomes effective after old admissions drain. Mixing
-    old large shares with new small ones could otherwise exceed the total budget.
-    Nested work in the same thread consumes the existing admission.
+    Isolated workers inherit a weighted permit. Direct internal callers with no
+    source plan conservatively reserve the whole pool rather than bypassing it.
     """
+    from app.modules.media.native_execution import admission
+    from app.runtime.native_admission import Resources
+    from app.runtime.native_runtime import current_permit
 
-    def __init__(self) -> None:
-        self.condition = threading.Condition()
-        self.active = 0
-        self.limit = 1
-        self.requested = 1
-        self.local = threading.local()
-
-    def configure(self, limit: int) -> None:
-        with self.condition:
-            self.requested = limit
-            self.condition.notify_all()
-
-    def __enter__(self):
-        depth = getattr(self.local, "depth", 0)
-        if depth:
-            self.local.depth = depth + 1
-            return self
-        while True:
-            # A checkpoint may consult durable job state. Never hold the
-            # admission lock while that external operation blocks.
-            checkpoint()
-            with self.condition:
-                if self.active == 0:
-                    self.limit = self.requested
-                if self.limit == self.requested and self.active < self.limit:
-                    self.active += 1
-                    self.local.depth = 1
-                    self.local.limit = self.limit
-                    return self
-                self.condition.wait(0.1)
-
-    def __exit__(self, *_args) -> None:
-        self.local.depth -= 1
-        if self.local.depth:
-            return
-        with self.condition:
-            self.active -= 1
-            self.condition.notify_all()
+    capacity = native_process.native_capacity()
+    active = current_permit()
+    amount = active.resources if active is not None else Resources(1, capacity.bytes)
+    with admission(amount, capacity, checkpoint=checkpoint) as permit:
+        yield permit
 
 
-_RENDER_SEMAPHORE: _RenderAdmission | None = None
-_RENDER_SEMAPHORE_LOCK = threading.Lock()
-
-
-def _configured_render_jobs() -> int:
-    try:
-        return max(int(settings.max_render_jobs), 1)
-    except (TypeError, ValueError):
-        return 1
-
-
-def _render_jobs_limit() -> int:
-    """The allocation split belonging to this thread's admission."""
-    gate = _RENDER_SEMAPHORE
-    if gate is not None and getattr(gate.local, "depth", 0):
-        return gate.local.limit
-    return _configured_render_jobs()
-
-
-def _render_semaphore() -> _RenderAdmission:
-    global _RENDER_SEMAPHORE
-    with _RENDER_SEMAPHORE_LOCK:
-        if _RENDER_SEMAPHORE is None:
-            _RENDER_SEMAPHORE = _RenderAdmission()
-        _RENDER_SEMAPHORE.configure(_configured_render_jobs())
-        return _RENDER_SEMAPHORE
-
-
-def _canonical_suffix(path: Path, file_type: str | None = None) -> str:
-    """Return the source suffix even when *path* is an FD-backed alias.
-
-    External-library scans deliberately read through ``/proc/self/fd`` so a
-    mount replacement cannot change the bytes being processed.  Those aliases
-    have no filename suffix, so callers that know the catalogued type pass it
-    explicitly here.
-    """
-    if file_type is None:
-        return path.suffix.lower()
-    suffix = str(file_type).lower()
-    return suffix if suffix.startswith(".") else f".{suffix}"
 
 
 def _estimate_triangle_count(
@@ -186,7 +113,7 @@ def _estimate_triangle_count(
     without optional CAD deps anyway) — the caller then relies on the post-load
     cap, which still skips the render.
     """
-    suffix = _canonical_suffix(path, file_type)
+    suffix = canonical_suffix(path, file_type)
     try:
         if suffix == ".stl":
             size = path.stat().st_size
@@ -274,92 +201,24 @@ def _estimate_triangle_count(
     return None
 
 
-# Measured peak RSS per triangle for a full load + thumbnail render, rounded up
-# for safety margin. 3MF's XML loader plus the crease-aware rasteriser cost far
-# more than a raw STL of the same geometry (~4.5x), so it gets its own factor.
-_PEAK_BYTES_PER_TRIANGLE: dict[str, int] = {".3mf": 3600}
-_DEFAULT_PEAK_BYTES_PER_TRIANGLE = 2200  # stl / ply / obj
-
-# Cached once: the memory ceiling this process can reach before the OOM killer
-# fires. False means "looked up, nothing usable"; None means "not looked up yet".
-_MEMORY_LIMIT_BYTES: "int | bool | None" = None
-
-
-def _detect_memory_limit_bytes() -> int | None:
-    """Best-effort bytes of RAM the process may use before being OOM-killed.
-
-    Container-aware: a Docker/NAS deployment is usually capped well below host
-    RAM by its cgroup, and that limit — not the host's total — is what the kernel
-    enforces. Takes the smallest of the cgroup limit (v2 then v1) and host
-    ``MemTotal`` so the RAM-aware cap reflects the real ceiling. Returns None when
-    nothing can be read (non-Linux, locked-down /proc), disabling the RAM cap.
-    """
-    limits: list[int] = []
-    try:  # cgroup v2
-        raw = Path("/sys/fs/cgroup/memory.max").read_text().strip()
-        if raw != "max":
-            limits.append(int(raw))
-    except (OSError, ValueError):
-        pass
-    # On a host service the cgroup filesystem is mounted above this process's
-    # group. Reading only its root misses MemoryMax on the service or a parent
-    # slice. Containers with a cgroup namespace already expose their group at /.
-    try:
-        root = Path("/sys/fs/cgroup")
-        for line in Path("/proc/self/cgroup").read_text().splitlines():
-            if not line.startswith("0::/"):
-                continue
-            parts = PurePosixPath(line[3:]).parts[1:]
-            if len(parts) > 128 or any(part in (".", "..") for part in parts):
-                continue
-            group = root.joinpath(*parts)
-            while group != root:
-                try:
-                    value = int((group / "memory.max").read_text().strip())
-                    if value > 0:
-                        limits.append(value)
-                except (OSError, ValueError):
-                    pass
-                group = group.parent
-    except OSError:
-        pass
-    try:  # cgroup v1
-        v1 = int(
-            Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip()
-        )
-        if 0 < v1 < (1 << 62):  # v1 uses a huge sentinel for "unlimited"
-            limits.append(v1)
-    except (OSError, ValueError):
-        pass
-    try:  # host total
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemTotal:"):
-                limits.append(int(line.split()[1]) * 1024)
-                break
-    except (OSError, ValueError, IndexError):
-        pass
-    return min(limits) if limits else None
 
 
 def _ram_triangle_cap(suffix: str) -> Optional[int]:
     """RAM-derived triangle ceiling for *suffix*, or None when RAM capping is off.
 
-    Turns the ``mesh_memory_budget_fraction`` of detected memory into a triangle
-    count using the format's measured per-triangle peak cost, so the same config
-    auto-skips a mesh on a 4 GB box that a 32 GB box renders fine. The budget is
-    divided by ``max_render_jobs`` so concurrent renders share the RAM ceiling
-    rather than each claiming the whole of it (#29)."""
+    Use the admitted job's whole-pipeline memory allowance. Outside native
+    admission, the whole configured pool is the conservative loader ceiling;
+    worker count never makes a large job impossible when it could run alone.
+    """
     fraction = settings.mesh_memory_budget_fraction
     if fraction <= 0:
         return None
-    global _MEMORY_LIMIT_BYTES
-    if _MEMORY_LIMIT_BYTES is None:
-        _MEMORY_LIMIT_BYTES = _detect_memory_limit_bytes() or False
-    if not _MEMORY_LIMIT_BYTES:
-        return None
-    budget = _MEMORY_LIMIT_BYTES * fraction / _render_jobs_limit()
-    per_tri = _PEAK_BYTES_PER_TRIANGLE.get(suffix, _DEFAULT_PEAK_BYTES_PER_TRIANGLE)
-    return max(int(budget / per_tri), 1)
+    from app.modules.media.native_budget import face_capacity
+    from app.runtime.native_runtime import current_permit
+
+    permit = current_permit()
+    memory = permit.resources.bytes if permit is not None else native_process.native_capacity().bytes
+    return face_capacity(memory, suffix)
 
 
 def _load_face_budget(suffix: str) -> int:
@@ -409,7 +268,7 @@ def _exceeds_cap(path: Path, *, file_type: str | None = None) -> bool:
             )
             return True
 
-    suffix = _canonical_suffix(path, file_type)
+    suffix = canonical_suffix(path, file_type)
     if file_type is None:
         estimate = _estimate_triangle_count(path)
     else:
@@ -447,76 +306,18 @@ def _exceeds_cap(path: Path, *, file_type: str | None = None) -> bool:
 _3MF_THUMBNAIL_DIRS = ("metadata/", "3d/thumbnails/", "thumbnails/")
 
 
-def _process_rss_bytes(pid: int) -> int | None:
-    """Read one Linux process's resident set; unavailable platforms return None."""
-
-    try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        return None
-    return None
 
 
-def _step_memory_budget_bytes() -> int | None:
-    limit = _detect_memory_limit_bytes()
-    fraction = settings.mesh_memory_budget_fraction
-    if limit is None:
-        return None
-    # Zero disables triangle estimation, never containment.
-    safety_fraction = fraction if fraction > 0 else 0.5
-    return max(int(limit * safety_fraction / _render_jobs_limit()), 1)
 
 
-def process_rss_bytes(pid: int) -> int | None:
-    """A child process's resident set, for owners that police their own children."""
-    return _process_rss_bytes(pid)
 
 
-def process_tree_rss_bytes(pid: int) -> int | None:
-    """Resident memory of an admitted worker including its descendants."""
-    pending = [pid]
-    seen: set[int] = set()
-    total = 0
-    found = False
-    while pending:
-        current = pending.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        rss = _process_rss_bytes(current)
-        if rss is not None:
-            total += rss
-            found = True
-        try:
-            pending.extend(
-                int(value)
-                for value in Path(f"/proc/{current}/task/{current}/children")
-                .read_text()
-                .split()
-            )
-        except (OSError, ValueError):
-            # A process can exit between the two reads.
-            continue
-    return total if found else None
 
 
-def step_memory_budget_bytes() -> int | None:
-    """The RSS one native render step may use; ``None`` when undetectable."""
-    return _step_memory_budget_bytes()
 
 
-def native_memory_budget_bytes() -> int:
-    """The render-step RSS policy, applied to one native worker process.
 
-    Bounded even when automatic geometry RAM caps are disabled on a platform
-    where cgroup or host memory cannot be detected. Embedding and search-view
-    workers are killed past it.
-    """
-    return min(
-        step_memory_budget_bytes() or 1024**3 // _render_jobs_limit(), 2 * 1024**3
-    )
+
 
 
 def _load_step_mesh_isolated(
@@ -538,8 +339,9 @@ def _load_step_mesh_isolated(
 
     isolated = os.environ.get(WORKER_MARKER) == str(os.getpid())
     with ExitStack() as resources:
+        permit = resources.enter_context(_native_scope())
         tmp = resources.enter_context(
-            tempfile.TemporaryDirectory(prefix="printstash-step-")
+            tempfile.TemporaryDirectory(prefix="printstash-mesh-")
         )
         if include_brep and not isolated:
             import secrets
@@ -566,43 +368,43 @@ def _load_step_mesh_isolated(
             failure = ""
             stderr = b""
         else:
-            env = os.environ.copy()
-            env["PRINTSTASH_STEP_BREP"] = "1" if include_brep else "0"
-            env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(triangle_limit)
-            command = [
-                sys.executable,
-                "-m",
-                "app.modules.media.step_worker",
-                str(path),
-                str(output),
-            ]
-            process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=env,
-                cwd=Path(application_file).resolve().parent.parent,
+            from app.modules.media.mesh_contracts import ThumbnailFailureReason
+            from app.modules.media.mesh_isolation import (
+                MeshWorkerError,
+                supervise_result,
             )
-            deadline = time.monotonic() + settings.mesh_step_timeout_seconds
-            memory_budget = _step_memory_budget_bytes()
+            from app.modules.media.worker_bootstrap import WorkerLifecycle, command
+
             failure = ""
-            while process.poll() is None:
-                if time.monotonic() >= deadline:
-                    failure = "timeout"
-                    process.kill()
-                    break
-                rss = _process_rss_bytes(process.pid)
-                if (
-                    memory_budget is not None
-                    and rss is not None
-                    and rss > memory_budget
-                ):
-                    failure = "memory budget"
-                    process.kill()
-                    break
-                time.sleep(0.05)
-            _stdout, stderr = process.communicate()
-            returncode = process.returncode
+            stderr = b""
+            try:
+                reply = supervise_result(
+                    command(
+                        "app.modules.media.step_worker",
+                        [str(path.absolute()), str(output)],
+                        permit.resources.bytes,
+                    ),
+                    memory_budget=permit.resources.bytes,
+                    timeout_seconds=float(settings.mesh_step_timeout_seconds),
+                    permit=permit,
+                    lifecycle=WorkerLifecycle.GUARDED,
+                    accepted_exit_codes=frozenset({0, 3, 4, 7}),
+                    temporary_directory=Path(tmp),
+                    environment={
+                        "PRINTSTASH_STEP_BREP": "1" if include_brep else "0",
+                        "PRINTSTASH_STEP_TRIANGLE_LIMIT": str(triangle_limit),
+                    },
+                )
+                returncode = reply.returncode
+            except MeshWorkerError as exc:
+                failure = (
+                    "timeout"
+                    if exc.reason is ThumbnailFailureReason.TIMEOUT
+                    else "memory budget"
+                    if exc.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+                    else "worker failed"
+                )
+                returncode = 4
         if failure or returncode != 0 or not output.is_file():
             if include_brep or strict_failures:
                 from printstash_core.mesh.similarity import GeometryError
@@ -655,16 +457,9 @@ def _load_step_mesh_isolated(
                 exc_info=True,
             )
             return None
-        if isinstance(loaded, trimesh.Trimesh):
-            return loaded
-        if isinstance(loaded, trimesh.Scene):
-            meshes = [
-                geometry
-                for geometry in loaded.dump()
-                if isinstance(geometry, trimesh.Trimesh)
-            ]
-            return trimesh.util.concatenate(meshes) if meshes else None
-        return None
+        # The pinned trimesh.load_mesh delegates to load_scene(...).to_mesh();
+        # its result is already a transformed, concatenated Trimesh.
+        return loaded
 
 
 def _load_3mf_mesh(path: Path, suffix: str):
@@ -693,7 +488,7 @@ def _load_mesh(path: Path, *, file_type: str | None = None):
     """Return a single `trimesh.Trimesh` for *path*, or None on failure."""
     import trimesh
 
-    suffix = _canonical_suffix(path, file_type)
+    suffix = canonical_suffix(path, file_type)
     if suffix in (".step", ".stp"):
         return _load_step_mesh_isolated(path)
     if suffix == ".3mf":
@@ -822,7 +617,7 @@ def extract_embedded_3mf_thumbnail(
     the default remains permissive for callers that only need a bounded raw
     archive read, while persistence still validates through ``thumbnail.to_webp``.
     """
-    if _canonical_suffix(path, file_type) != ".3mf":
+    if canonical_suffix(path, file_type) != ".3mf":
         return None
     try:
         with zipfile.ZipFile(path) as zf:
@@ -975,7 +770,7 @@ def extract_geometry(path: Path) -> Dict[str, Optional[float]]:
     """
     if _exceeds_cap(path):
         return _geometry_from_mesh(None)
-    with _render_semaphore():
+    with _native_scope():
         mesh = _load_mesh(path)
         try:
             return _geometry_from_mesh(mesh)
@@ -991,7 +786,7 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> Optional[bytes]
     If *path* is already an STL, its raw bytes are returned untouched.
     Returns None on conversion failure.
     """
-    if _canonical_suffix(path, file_type) == ".stl":
+    if canonical_suffix(path, file_type) == ".stl":
         try:
             return path.read_bytes()
         except OSError:
@@ -1008,7 +803,7 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> Optional[bytes]
     if over_cap:
         return None
 
-    with _render_semaphore():
+    with _native_scope():
         mesh = (
             _load_mesh(path)
             if file_type is None

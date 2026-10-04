@@ -19,17 +19,35 @@ from app import __file__ as application_file
 from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.modules.inference.worker_pool import pool
-from app.modules.media import mesh_processing
+from app.modules.media import native_process
 from app.modules.media.geometry_analysis import VisualViews
-from app.modules.media.stl_streaming import _terminate_process_group
+from app.modules.media.native_budget import MeshSource, estimate_sources
+from app.modules.media.native_execution import admission
 from app.modules.media.visual_worker import MAX_REPLY
-from app.modules.media.worker_bootstrap import RESOURCE_EXIT, reap_descendants
+from app.modules.media.worker_bootstrap import (
+    RESOURCE_EXIT,
+    WorkerLifecycle,
+    launch_resources,
+    reap_descendants,
+    terminate_worker,
+)
 from app.modules.media.worker_bootstrap import command as worker_command
+from app.runtime.native_admission import NativePermit
+from app.runtime.native_runtime import current_permit
 
 
-def _spawn(path: Path, file_type: str, recipe: VisualRecipe | PointRecipe):
+def _spawn(
+    path: Path, file_type: str, recipe: VisualRecipe | PointRecipe, permit: NativePermit
+):
     env = os.environ.copy()
-    env.update(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
+    env.update(
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MKL_NUM_THREADS="1",
+        NUMEXPR_NUM_THREADS="1",
+    )
+    inherited = launch_resources(permit)
+    env.update(inherited.environment)
     env["VAULT_MESH_MAX_RENDER_TRIANGLES"] = str(
         min(MAX_ANALYSIS_FACES, settings.mesh_max_render_triangles)
     )
@@ -37,12 +55,13 @@ def _spawn(path: Path, file_type: str, recipe: VisualRecipe | PointRecipe):
         worker_command(
             "app.modules.media.visual_worker",
             [str(path), file_type, recipe.encode()],
-            mesh_processing.native_memory_budget_bytes(),
+            native_process.native_memory_budget_bytes(),
         ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        pass_fds=inherited.descriptors,
         env=env,
         cwd=Path(application_file).resolve().parent.parent,
     )
@@ -56,14 +75,27 @@ def render(
     context: InferenceContext,
 ) -> VisualViews:
     """Caller holds the durable compute permit; this shares media's local cap too."""
-    context.remaining()
-    with mesh_processing._render_semaphore():
-        process = _spawn(path, file_type, recipe)
+
+    def remaining() -> None:
+        checkpoint()
+        context.remaining()
+
+    remaining()
+    capacity = native_process.native_capacity()
+    existing = current_permit()
+    amount = (
+        existing.resources
+        if existing is not None
+        else estimate_sources(capacity, (MeshSource(path, file_type),))
+    )
+    with admission(amount, capacity, checkpoint=remaining) as permit:
+        process = _spawn(path, file_type, recipe, permit)
         try:
             assert process.stdout is not None
             os.set_blocking(process.stdout.fileno(), False)
             result = bytearray()
             expected = None
+            stdout_closed = False
             with selectors.DefaultSelector() as selector:
                 selector.register(process.stdout, selectors.EVENT_READ)
                 while True:
@@ -71,18 +103,15 @@ def render(
                     context.remaining()
                     pool.enforce_memory_budget(
                         process,
-                        mesh_processing.native_memory_budget_bytes(),
-                        mesh_processing.process_tree_rss_bytes,
+                        native_process.native_memory_budget_bytes(),
+                        native_process.process_tree_rss_bytes,
                     )
                     for key, _ in selector.select(0.025):
                         chunk = os.read(key.fd, 65536)
                         if not chunk:
-                            code = process.wait()
-                            raise EmbeddingError(
-                                "worker_oom"
-                                if code in (RESOURCE_EXIT, -9)
-                                else "embedding_render_failed"
-                            )
+                            stdout_closed = True
+                            selector.unregister(process.stdout)
+                            break
                         result.extend(chunk)
                         if len(result) >= 4 and expected is None:
                             expected = struct.unpack("!I", result[:4])[0]
@@ -93,8 +122,14 @@ def render(
                                 raise EmbeddingError("embedding_output_invalid")
                             checkpoint(force=True)
                             return decode_reply(bytes(result[4:]), recipe)
+                    if stdout_closed and process.poll() is not None:
+                        raise EmbeddingError(
+                            "worker_oom"
+                            if process.returncode in (RESOURCE_EXIT, -9)
+                            else "embedding_render_failed"
+                        )
         finally:
-            _terminate_process_group(process)
+            terminate_worker(process, WorkerLifecycle.GUARDED)
             process.wait()
             reap_descendants(process.pid)
             if process.stdout is not None:

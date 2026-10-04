@@ -15,7 +15,7 @@ from pathlib import Path
 from printstash_core.mesh.similarity import GeometryError
 
 from app.modules.media import mesh_processing
-from app.modules.media.mesh_contracts import ThumbnailFailureReason
+from app.modules.media.mesh_contracts import ThumbnailFailureReason, canonical_suffix
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
 from app.modules.media.mesh_resources import load_3mf
 from app.modules.media.stl_isolation import FAILURE_MAGIC, encode_reply
@@ -23,12 +23,12 @@ from app.modules.media.stl_isolation import FAILURE_MAGIC, encode_reply
 
 def convert(path: Path, file_type: str | None) -> bytes | None:
     """Preserve resource refusal reasons instead of collapsing them into no output."""
-    file_type = mesh_processing._canonical_suffix(path, file_type).lstrip(".")
+    file_type = canonical_suffix(path, file_type).lstrip(".")
     if mesh_processing._exceeds_cap(path, file_type=file_type):
         raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
     if file_type not in {"3mf", "step", "stp"}:
         return mesh_processing.to_stl_bytes(path, file_type=file_type)
-    with mesh_processing._render_semaphore():
+    with mesh_processing._native_scope():
         try:
             mesh = (
                 load_3mf(

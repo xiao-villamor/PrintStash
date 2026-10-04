@@ -88,3 +88,19 @@ class TestRecordPhases:
 
         assert result is None
         assert "failed to publish mesh phase metrics" in caplog.text
+
+
+class TestRecordAdmission:
+    def test_contains_metrics_sink_failure(self, monkeypatch, caplog):
+        from app.modules.media.mesh_telemetry import AdmissionOutcome, AdmissionStats
+
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("metrics unavailable")
+
+        monkeypatch.setattr(mesh_observability._admission_duration, "labels", fail)
+        result = mesh_observability.record_admission(
+            AdmissionStats(100, 1, 40, 2, 100, AdmissionOutcome.ADMITTED)
+        )
+
+        assert result is None
+        assert "failed to publish native admission metrics" in caplog.text

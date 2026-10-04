@@ -15,10 +15,14 @@ from typing import Any
 import pytest
 
 from app.core.config import _overlay
-from app.modules.media import mesh_processing, mesh_render, stl_streaming
+from app.modules.media import (
+    mesh_processing,
+    mesh_render,
+    native_process,
+    stl_streaming,
+)
 from app.modules.media.stl_streaming import (
     STLStreamingLimits,
-    STLStreamingResult,
     render_stl_preview_isolated,
 )
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
@@ -206,7 +210,7 @@ class TestWorkerMemoryBudget:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            mesh_processing, "_step_memory_budget_bytes", lambda: 64 * 1024 * 1024
+            native_process, "native_memory_budget_bytes", lambda: 64 * 1024 * 1024
         )
 
         assert stl_streaming._worker_memory_budget() == 64 * 1024 * 1024
@@ -214,7 +218,7 @@ class TestWorkerMemoryBudget:
     def test_never_goes_below_a_floor_a_render_can_work_in(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(mesh_processing, "_step_memory_budget_bytes", lambda: 1)
+        monkeypatch.setattr(native_process, "native_memory_budget_bytes", lambda: 1)
 
         # A budget below this cannot load Pillow, so the worker would die on
         # every file rather than on large ones.
@@ -223,7 +227,7 @@ class TestWorkerMemoryBudget:
     def test_falls_back_when_there_is_no_shared_budget(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(mesh_processing, "_step_memory_budget_bytes", lambda: None)
+        monkeypatch.setattr(native_process, "native_memory_budget_bytes", lambda: None)
 
         assert stl_streaming._worker_memory_budget() > 0
 
@@ -789,112 +793,35 @@ class TestRenderStlPreviewIsolated:
             is None
         )
 
-    @pytest.mark.parametrize("case", ["timeout", "rss", "crash"])
-    def test_worker_failure_is_killed_or_reaped_without_publishing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+    @pytest.mark.parametrize(
+        "reason",
+        ["timeout", "resource_limit", "worker_failed"],
+        ids=["deadline", "memory", "crash"],
+    )
+    def test_preserves_supervisor_refusal_without_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        reason: str,
     ) -> None:
-        from app.modules.media import stl_streaming
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+        from app.runtime.native_runtime import current_permit
 
-        path = tmp_path / "worker-failure.stl"
+        path = tmp_path / "refused.stl"
         _binary_triangle_stl(path, count=1)
-        calls: list[tuple[str, object]] = []
-        limits = _limits()
+        source = path.read_bytes()
 
-        class FakeProcess:
-            pid = 4242
-            returncode = -9 if case == "crash" else None
+        def refused(*args, **kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason(reason))
 
-            def poll(self):
-                return self.returncode
+        monkeypatch.setattr(mesh_isolation, "supervise_result", refused)
 
-            def communicate(self, **kwargs):
-                calls.append(("communicate", kwargs))
-                return b"", b""
-
-        process = FakeProcess()
-
-        def kill_group(pgid: int, sig: signal.Signals) -> None:
-            calls.append(("killpg", (pgid, sig)))
-            process.returncode = -9
-
-        monkeypatch.setattr(stl_streaming.subprocess, "Popen", lambda *a, **k: process)
-        monkeypatch.setattr(stl_streaming.os, "getpgid", lambda _pid: process.pid)
-        monkeypatch.setattr(stl_streaming.os, "killpg", kill_group)
-        if case == "rss":
-            monkeypatch.setattr(
-                stl_streaming,
-                "_read_rss_bytes",
-                lambda _pid: _limits().max_rss_bytes + 1,
-            )
-        elif case == "timeout":
-            times = iter((0.0, 1.0))
-            monkeypatch.setattr(stl_streaming.time, "monotonic", lambda: next(times))
-            monkeypatch.setattr(stl_streaming.time, "sleep", lambda _seconds: None)
-            limits = STLStreamingLimits(
-                max_triangles=100,
-                max_source_bytes=1_000_000,
-                max_candidates=1_000_000,
-                soft_timeout_seconds=0.1,
-                hard_timeout_seconds=0.5,
-            )
-
-        result = render_stl_preview_isolated(path, limits=limits)
-
-        assert result is None
-        assert any(name == "communicate" for name, _value in calls)
-        if case != "crash":
-            assert any(name == "killpg" for name, _value in calls)
-
-    def test_worker_invocation_avoids_thread_unsafe_preexec_hook(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from app.modules.media import stl_streaming
-
-        path = tmp_path / "invocation.stl"
-        _binary_triangle_stl(path, count=1)
-        calls: dict[str, object] = {}
-
-        class FinishedProcess:
-            pid = 1234
-            returncode = 0
-
-            def poll(self):
-                return self.returncode
-
-            def communicate(self, **kwargs):
-                return b"", b""
-
-        def fake_popen(command, **kwargs):
-            calls["command"] = command
-            calls["kwargs"] = kwargs
-            return FinishedProcess()
-
-        monkeypatch.setattr(stl_streaming.subprocess, "Popen", fake_popen)
-        monkeypatch.setattr(
-            stl_streaming,
-            "_decode_result",
-            lambda *args, **kwargs: STLStreamingResult(
-                png=b"png",
-                bounds_min=(0.0, 0.0, 0.0),
-                bounds_max=(1.0, 1.0, 0.0),
-                triangle_count=1,
-                parsed_triangles=1,
-                scanned_bytes=134,
-                raster_candidates=1,
-            ),
-        )
         result = render_stl_preview_isolated(path, limits=_limits())
 
-        assert result is not None
-        kwargs = calls["kwargs"]
-        assert isinstance(kwargs, dict)
-        assert "preexec_fn" not in kwargs
-        assert kwargs["shell"] is False
-        assert kwargs["start_new_session"] is True
-        command = calls["command"]
-        assert isinstance(command, list)
-        expected_parent_index = command.index("--expected-parent-pid")
-        assert command[expected_parent_index + 1] == str(stl_streaming.os.getpid())
+        assert result is None
+        assert current_permit() is None
+        assert path.read_bytes() == source
 
     @pytest.mark.parametrize(
         ("ppids", "expected_parent_pid", "prctl_result"),
@@ -972,113 +899,6 @@ class TestRenderStlPreviewIsolated:
         )
 
         assert observed == [(1, signal.SIGKILL, 0, 0, 0)]
-
-
-class TestTerminateProcessGroup:
-    """Killing a worker means killing everything it started, not just the worker."""
-
-    class _FakeProcess:
-        def __init__(self, pid: int = 4242) -> None:
-            self.pid = pid
-            self.killed = False
-
-        def kill(self) -> None:
-            self.killed = True
-
-    def test_kills_the_whole_process_group(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        killed: list[tuple[int, int]] = []
-        monkeypatch.setattr(stl_streaming.os, "getpgid", lambda _pid: 99)
-        monkeypatch.setattr(
-            stl_streaming.os, "killpg", lambda pgid, sig: killed.append((pgid, sig))
-        )
-        process = self._FakeProcess()
-
-        stl_streaming._terminate_process_group(process)
-
-        # A worker that spawned a child would otherwise leave it holding the
-        # memory this whole design exists to bound.
-        assert killed == [(99, signal.SIGKILL)]
-        assert process.killed is False
-
-    def test_falls_back_to_the_process_when_it_has_no_group(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def no_group(_pid: int) -> int:
-            raise ProcessLookupError
-
-        monkeypatch.setattr(stl_streaming.os, "getpgid", no_group)
-        process = self._FakeProcess()
-
-        stl_streaming._terminate_process_group(process)
-
-        assert process.killed is True
-
-    def test_falls_back_when_the_group_kill_fails(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def refused(_pgid: int, _sig: int) -> None:
-            raise ProcessLookupError
-
-        monkeypatch.setattr(stl_streaming.os, "getpgid", lambda _pid: 99)
-        monkeypatch.setattr(stl_streaming.os, "killpg", refused)
-        process = self._FakeProcess()
-
-        stl_streaming._terminate_process_group(process)
-
-        assert process.killed is True
-
-    def test_survives_a_process_that_is_already_gone(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        class _Gone(self._FakeProcess):
-            def kill(self) -> None:
-                raise ProcessLookupError
-
-        monkeypatch.setattr(stl_streaming.os, "getpgid", lambda _pid: 99)
-        monkeypatch.setattr(
-            stl_streaming.os,
-            "killpg",
-            lambda _pgid, _sig: (_ for _ in ()).throw(ProcessLookupError),
-        )
-
-        # Reaping a worker that already exited must not raise into ingestion.
-        stl_streaming._terminate_process_group(_Gone())
-
-
-class TestReadRssBytes:
-    """Peak memory is read from /proc where it exists, and simply unknown elsewhere."""
-
-    def test_reports_the_resident_size(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        status = tmp_path / "status"
-        status.write_text("Name:\tworker\nVmRSS:\t   2048 kB\n")
-        monkeypatch.setattr(stl_streaming, "Path", lambda _p: status)
-
-        assert stl_streaming._read_rss_bytes(1) == 2048 * 1024
-
-    def test_says_it_does_not_know_on_a_platform_without_proc(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        class _Missing:
-            def read_text(self) -> str:
-                raise OSError("no /proc here")
-
-        monkeypatch.setattr(stl_streaming, "Path", lambda _p: _Missing())
-
-        # macOS has no /proc; a missing measurement is not a failed render.
-        assert stl_streaming._read_rss_bytes(1) is None
-
-    def test_says_it_does_not_know_when_the_line_is_absent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        status = tmp_path / "status"
-        status.write_text("Name:\tworker\n")
-        monkeypatch.setattr(stl_streaming, "Path", lambda _p: status)
-
-        assert stl_streaming._read_rss_bytes(1) is None
 
 
 class TestMeshProcessing:

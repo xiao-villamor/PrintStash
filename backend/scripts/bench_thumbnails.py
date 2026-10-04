@@ -293,6 +293,9 @@ def main() -> int:
 
     environment = collect_environment()
     with tempfile.TemporaryDirectory(prefix="printstash-thumbnail-bench-") as raw:
+        from app.bootstrap.native_resources import configure
+
+        configure(Path(raw) / "native-runtime")
         manifest = build_contract_corpus(Path(raw)) if args.contract_corpus else None
         corpus = (
             [Path(raw) / entry.filename for entry in manifest.fixtures]

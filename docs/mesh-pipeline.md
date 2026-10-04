@@ -21,11 +21,40 @@ RSS monitoring counts the complete process tree; a wall-clock deadline defaults
 to 300 seconds. A resource refusal is terminal for unchanged bytes and recipe;
 timeouts retain the configured bounded retry policy.
 
-The shared admission controller divides the configured memory allocation by
-`max_render_jobs`. Runtime changes wait for current admissions to drain before
-using the new split. Setting `mesh_memory_budget_fraction=0` disables estimates
-while retaining a half-memory safety allocation divided by concurrency. If
-memory detection is unavailable, workers share a bounded 2 GiB fallback.
+Native admission shares one byte and slot budget across processes using the
+same local data root. Descriptor ownership recovers stale records across reboots. Binary STL preflight reads the fixed header
+and exact file size; its face count selects a memory weight. Unknown complexity
+reserves the whole pool. Weights use the greater of the measured startup floor
+and historical whole-pipeline cost per face, capped by the configured pool.
+These are scheduling estimates; the hard process limit remains authoritative.
+
+`max_render_jobs` limits simultaneous jobs without dividing the maximum mesh
+size by that count. A large job can wait and use the whole pool. FIFO order starts
+at registration and prevents later small jobs from continually overtaking a
+large waiter. New capacity settings wait for prior active credits to drain.
+Setting `mesh_memory_budget_fraction=0` disables geometry estimates while keeping
+half of detected memory for containment; unknown memory uses a bounded 2 GiB pool.
+
+Sources acquire a separate prepared-byte reservation before materialization or
+native admission. `mesh_prepared_max_mb` defaults to 4096 MiB, accounting for two
+copies per source and all sources of a verification pair together.
+`mesh_prepared_max_jobs=0` follows `max_render_jobs + 1`, with at least two batches.
+`mesh_source_io_jobs` defaults to two concurrent materializations. I/O slots close
+when a path is ready; prepared bytes remain reserved while waiting for native
+resources and through execution. Storage still reserves free disk space on the
+actual workspace filesystem. Persistent Artifact caches retain their own leases.
+
+Credits are held by locked file descriptions, explicitly inherited by native
+children and their guardian. Releasing a parent handle does not free a child's
+credit. Prepared source copies live under the reservation's private workspace;
+an abandoned workspace is removed under a recovery claim before its credits can
+be reused. Recovery I/O and cancellation checks run outside the coordinator lock.
+See [ADR-0012](adr/0012-local-native-resource-admission.md) for deployment boundaries.
+
+`mesh_admission` JSON and Prometheus admission histograms report queue duration,
+requested resources and admitted/cancelled/deadline/failed outcomes separately
+from worker supervision. Nested or inherited calls do not emit another queue
+record. Process metrics retain their existing exit and memory observations.
 
 CAD tessellation and STL streaming inside a mesh worker use its existing process,
 budget and deadline. CAD output capacity belongs to the supervising parent,

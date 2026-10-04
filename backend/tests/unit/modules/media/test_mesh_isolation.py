@@ -569,7 +569,7 @@ class TestSupervisionStats:
 
     def test_preserves_unobserved_rss(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            mesh_isolation.mesh_processing, "process_tree_rss_bytes", lambda _pid: None
+            mesh_isolation.native_process, "process_tree_rss_bytes", lambda _pid: None
         )
 
         result = mesh_isolation.supervise_result(

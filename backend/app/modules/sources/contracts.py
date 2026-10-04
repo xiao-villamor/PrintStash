@@ -53,5 +53,9 @@ class LibrarySource(Protocol):
 
     @contextmanager
     def materialize(
-        self, key: str, *, expected: SourceEntry | None = None
+        self,
+        key: str,
+        *,
+        expected: SourceEntry | None = None,
+        directory: Path | None = None,
     ) -> Iterator[SourceContent]: ...

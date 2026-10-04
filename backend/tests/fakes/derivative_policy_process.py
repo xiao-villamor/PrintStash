@@ -59,7 +59,7 @@ class StalledStorage(LocalStorageBackend):
         self.marker = marker
 
     @contextmanager
-    def local_path(self, key):
+    def local_path(self, key, *, directory=None):
         with get_session_factory().scoped_session() as session:
             file = session.exec(select(File).where(File.path == key)).first()
             running = (

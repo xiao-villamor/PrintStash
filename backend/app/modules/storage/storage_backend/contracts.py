@@ -608,7 +608,7 @@ class StorageBackend(ABC):
         ...
 
     @contextmanager
-    def local_path(self, key: str) -> Iterator[Path]:
+    def local_path(self, key: str, *, directory: Path | None = None) -> Iterator[Path]:
         """Yield a local filesystem path for *key*.
 
         Local backend yields the real path. Remote backends download to a
@@ -619,7 +619,7 @@ class StorageBackend(ABC):
         if direct is not None:
             yield direct
             return
-        fd, name = tempfile.mkstemp(suffix=Path(key).suffix)
+        fd, name = tempfile.mkstemp(suffix=Path(key).suffix, dir=directory)
         os.close(fd)
         tmp = Path(name)
         tmp.unlink()

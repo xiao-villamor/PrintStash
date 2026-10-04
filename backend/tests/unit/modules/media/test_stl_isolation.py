@@ -85,7 +85,7 @@ class TestViewerResourceBounds:
         monkeypatch.setattr(
             stl_isolation.mesh_isolation,
             "run_worker",
-            lambda *_args: encode_reply(84),
+            lambda *_args, **_kwargs: encode_reply(84),
         )
         with pytest.raises(MeshWorkerError) as error:
             stl_isolation.to_stl_bytes(tmp_path / "mesh.obj")

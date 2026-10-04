@@ -16,9 +16,10 @@ import struct
 import tempfile
 from pathlib import Path
 
-from app.modules.media import mesh_isolation, mesh_processing
-from app.modules.media.mesh_contracts import ThumbnailFailureReason
+from app.modules.media import mesh_isolation
+from app.modules.media.mesh_contracts import ThumbnailFailureReason, canonical_suffix
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.native_budget import MeshSource
 
 SIZE_MAGIC = b"STL1"
 NOTHING_MAGIC = b"NONE"
@@ -57,7 +58,7 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> bytes | None:
     Returns None when the mesh cannot be converted (unreadable);
     raises `MeshWorkerError` for a resource refusal, kill, timeout or worker failure.
     """
-    if mesh_processing._canonical_suffix(path, file_type) == ".stl":
+    if canonical_suffix(path, file_type) == ".stl":
         # Already STL: the bytes are returned untouched and nothing is parsed.
         try:
             if path.stat().st_size > MAX_STL_BYTES:
@@ -73,7 +74,11 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> bytes | None:
             "output": str(output),
         }
         size = decode_reply(
-            mesh_isolation.run_worker("app.modules.media.stl_worker", spec)
+            mesh_isolation.run_worker(
+                "app.modules.media.stl_worker",
+                spec,
+                sources=(MeshSource(path, file_type or path.suffix),),
+            )
         )
         if size is None:
             return None

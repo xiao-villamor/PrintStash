@@ -31,6 +31,8 @@ from app.db.session import get_session_factory
 from app.modules.similarity.processing import SimilarityProcessor
 from app.modules.storage.storage_backend.runtime import get_backend
 use_local_storage(Path(sys.argv[1]))
+from app.bootstrap.native_resources import configure
+configure(Path(sys.argv[1]))
 from tests.factories.similarity import advance_oldest_run
 worker = SimilarityProcessor(get_session_factory(), get_backend())
 # Each process is a new attempt, so it takes the write fence afresh.

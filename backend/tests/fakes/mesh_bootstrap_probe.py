@@ -8,7 +8,10 @@ import time
 
 def main():
     case = sys.argv[1]
-    if case == "burst":
+    if case == "close_stdout_wait":
+        os.close(1)
+        time.sleep(2)
+    elif case == "burst":
         bytearray(8 * 1024**3)
     elif case == "native":
         import numpy as np

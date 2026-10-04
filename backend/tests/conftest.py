@@ -343,7 +343,9 @@ def _rate_limiters_in(target: object) -> Iterator[object]:
 
 
 @pytest.fixture(autouse=True)
-def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     """Override the session factory ContextVar to use the in-memory test engine.
 
     Single override point — replaces the previous double-monkeypatch of
@@ -370,6 +372,18 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     bind_backend(LocalStorageBackend())
+    from app.runtime.native_admission import LocalResourcePool
+    from app.runtime.native_runtime import bind_pool
+
+    bind_pool(LocalResourcePool(tmp_path_factory.mktemp("native-admission")))
+    from app.runtime.preparation_runtime import bind_pools, make_pools
+
+    bind_pools(
+        make_pools(
+            tmp_path_factory.mktemp("source-preparation"),
+            tmp_path_factory.mktemp("source-io"),
+        )
+    )
     # Drop the process-wide httpx client so a test that drives async egress in
     # its own asyncio.run() loop doesn't inherit one bound to a prior (closed)
     # loop — the cache only rebinds on is_closed, which a closed loop doesn't

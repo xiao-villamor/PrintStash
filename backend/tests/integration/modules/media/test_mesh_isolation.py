@@ -42,6 +42,22 @@ def _request(path, **overrides) -> ThumbnailRequest:
 
 
 class TestGenerate:
+    def test_small_3mf_remains_available_with_half_gibibyte_native_budget(
+        self, tmp_path, monkeypatch
+    ):
+        source = tmp_path / "small.3mf"
+        source.write_bytes(three_mf())
+        monkeypatch.setattr(
+            mesh_isolation, "memory_budget_bytes", lambda: 512 * 1024**2
+        )
+
+        result = mesh_isolation.generate(
+            _request(source, file_type="3mf", include_fingerprint=False)
+        )
+
+        assert result.geometry["triangle_count"] == 4
+        assert result.image is not None
+
     def test_matches_the_in_process_engine(self, tmp_path):
         path = tmp_path / "cube.stl"
         path.write_bytes(content.binary_stl())
@@ -416,3 +432,130 @@ class TestTelemetry:
             )
             == before + 1
         )
+
+
+@pytest.fixture
+def abandoned_caller_output(tmp_path):
+    import subprocess
+    import sys
+    import time
+
+    from app.modules.media.worker_bootstrap import reap_descendants
+    from tests.paths import BACKEND_DIR
+
+    directory = tmp_path / "printstash-mesh-caller"
+    directory.mkdir()
+    ready, pids = tmp_path / "ready", tmp_path / "pids"
+    script = (
+        "from pathlib import Path; "
+        "from app.modules.media.mesh_isolation import supervise_result; "
+        "from app.modules.media.worker_bootstrap import command, WorkerLifecycle; "
+        f"supervise_result(command('tests.fakes.mesh_bootstrap_probe', "
+        f"['tree_wait', {str(pids)!r}, {str(ready)!r}], 268435456), "
+        "memory_budget=268435456, timeout_seconds=60, "
+        f"temporary_directory=Path({str(directory)!r}), lifecycle=WorkerLifecycle.GUARDED)"
+    )
+    parent = subprocess.Popen([sys.executable, "-c", script], cwd=BACKEND_DIR)
+
+    def await_ready():
+        deadline = time.monotonic() + 15
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists(), "fault worker did not announce its caller-owned outputs"
+
+    def abandon():
+        parent.kill()
+        parent.wait()
+        deadline = time.monotonic() + 5
+        while directory.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return directory.exists()
+
+    try:
+        await_ready()
+        yield directory, abandon
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait()
+        if pids.exists():
+            import json
+
+            reap_descendants(json.loads(pids.read_text())[0])
+
+
+class TestSuperviseResult:
+    @pytest.mark.parametrize(
+        "code", [3, 4, 7], ids=["face-cap", "invalid", "unavailable"]
+    )
+    def test_preserves_accepted_domain_exit(self, code):
+        import sys
+
+        result = mesh_isolation.supervise_result(
+            [sys.executable, "-c", f"raise SystemExit({code})"],
+            memory_budget=128 * 1024**2,
+            timeout_seconds=5,
+            accepted_exit_codes=frozenset({0, 3, 4, 7}),
+        )
+
+        assert result.returncode == code
+        assert result.stats.exit_cause.value == "exited_nonzero"
+
+    def test_keeps_caller_output_for_decoding(self, tmp_path):
+        import sys
+
+        output = tmp_path / "result.bin"
+        result = mesh_isolation.supervise_result(
+            [
+                sys.executable,
+                "-c",
+                "import os; from pathlib import Path; "
+                "Path(os.environ['TMPDIR'], 'result.bin').write_bytes(b'native-output')",
+            ],
+            memory_budget=128 * 1024**2,
+            timeout_seconds=5,
+            temporary_directory=tmp_path,
+        )
+
+        assert result.payload == b""
+        assert output.read_bytes() == b"native-output"
+        assert tmp_path.is_dir()
+
+    def test_refuses_unaccepted_domain_exit(self):
+        import sys
+
+        with pytest.raises(mesh_isolation.MeshWorkerError) as error:
+            mesh_isolation.supervise_result(
+                [sys.executable, "-c", "raise SystemExit(3)"],
+                memory_budget=128 * 1024**2,
+                timeout_seconds=5,
+            )
+
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+    def test_abandonment_cleans_caller_output(self, abandoned_caller_output):
+        directory, abandon = abandoned_caller_output
+        assert (directory / "partial.stl").read_bytes() == b"partial native output"
+
+        remains = abandon()
+
+        assert remains is False
+
+    @pytest.mark.parametrize(
+        "codes",
+        [
+            frozenset(),
+            frozenset({-9}),
+            frozenset({mesh_isolation.RESOURCE_EXIT}),
+            frozenset({True}),
+        ],
+        ids=["empty", "signal", "bootstrap-resource", "boolean"],
+    )
+    def test_rejects_invalid_domain_exit_policy(self, codes):
+        with pytest.raises(ValueError, match="accepted worker exit codes"):
+            mesh_isolation.supervise_result(
+                [],
+                memory_budget=128 * 1024**2,
+                timeout_seconds=5,
+                accepted_exit_codes=codes,
+            )

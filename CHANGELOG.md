@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Coordinate mesh CPU/RAM credits across local API and worker processes. Bound
+  source preparation separately by bytes and I/O slots, retain native credits
+  through descendant cleanup, and recover abandoned source copies before reuse.
+  Report queue time independently of native execution.
 - Keep mesh measurements and previews available when optional fingerprint analysis
   exceeds its triangle budget, and release analysis buffers before STL rendering fallbacks.
   Re-derive earlier terminal refusals at updated mesh recipes.

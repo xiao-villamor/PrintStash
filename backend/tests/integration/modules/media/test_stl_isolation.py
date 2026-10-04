@@ -113,8 +113,8 @@ class TestToStlBytes:
         """The size in the reply is checked against the file, not trusted."""
         real = mesh_isolation.run_worker
 
-        def lying(module, spec):
-            real(module, spec)
+        def lying(module, spec, *, sources):
+            real(module, spec, sources=sources)
             return stl_isolation.encode_reply(10**6)
 
         monkeypatch.setattr(mesh_isolation, "run_worker", lying)

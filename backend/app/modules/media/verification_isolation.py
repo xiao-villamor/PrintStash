@@ -30,6 +30,7 @@ from app.modules.media.mesh_isolation import (
     raise_reported_error,
     unpack_value,
 )
+from app.modules.media.native_budget import MeshSource
 
 EVIDENCE_MAGIC = b"VRF1"
 
@@ -76,5 +77,9 @@ def verify_paths(
         "verification_seconds": verification_seconds,
     }
     return decode_reply(
-        mesh_isolation.run_worker("app.modules.media.verification_worker", spec)
+        mesh_isolation.run_worker(
+            "app.modules.media.verification_worker",
+            spec,
+            sources=(MeshSource(first, first_type), MeshSource(second, second_type)),
+        )
     )

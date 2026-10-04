@@ -14,7 +14,7 @@ class GatedDerivativeStorage(LocalStorageBackend):
         self.release = release
 
     @contextmanager
-    def local_path(self, key):
+    def local_path(self, key, *, directory=None):
         if key == self.held_key:
             self.admitted.set()
             if not self.release.wait(30):

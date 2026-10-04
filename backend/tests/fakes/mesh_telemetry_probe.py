@@ -19,6 +19,9 @@ def main() -> int:
     parser.add_argument("mode", choices=("metadata", "failure"))
     parser.add_argument("source", type=Path)
     args = parser.parse_args()
+    from app.bootstrap.native_resources import configure
+
+    configure(args.source.parent)
     if args.mode == "metadata":
         generate(
             ThumbnailRequest(

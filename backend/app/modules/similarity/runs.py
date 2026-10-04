@@ -38,7 +38,7 @@ TERMINAL = ("completed", "cancelled", "failed")
 
 
 def normalize_scope(
-    session: Session, actor: User, scope: Scope, ids: list[int]
+    session: Session, actor: User, scope: str, ids: list[int]
 ) -> tuple[int, ...]:
     if scope not in ("library", "collections", "models", "sources"):
         raise OperationError("similarity_scope_invalid")
@@ -138,7 +138,8 @@ def cancel(session: Session, actor: User, run_id: int) -> SimilarityRun:
         session.connection().execute(
             update(SimilarityRun)
             .where(
-                SimilarityRun.id == run_id, col(SimilarityRun.state).not_in(TERMINAL)
+                col(SimilarityRun.id) == run_id,
+                col(SimilarityRun.state).not_in(TERMINAL),
             )
             .values(cancel_requested=True, state="cancelling")
         )
@@ -156,7 +157,9 @@ def take(session: Session, run_id: int, writer: str) -> SimilarityRun | None:
     """
     changed = session.connection().execute(
         update(SimilarityRun)
-        .where(SimilarityRun.id == run_id, col(SimilarityRun.state).not_in(TERMINAL))
+        .where(
+            col(SimilarityRun.id) == run_id, col(SimilarityRun.state).not_in(TERMINAL)
+        )
         .values(writer=writer)
     )
     session.commit()
@@ -182,7 +185,7 @@ def checkpoint(
     """Commit a bounded unit only while ``token`` is the run's writer; cancellation wins."""
     now = utcnow()
     cancelling = session.exec(
-        select(SimilarityRun.cancel_requested).where(SimilarityRun.id == run.id)
+        select(SimilarityRun.cancel_requested).where(col(SimilarityRun.id) == run.id)
     ).first()
     if cancelling:
         state = "cancelled"
@@ -203,8 +206,8 @@ def checkpoint(
     changed = session.connection().execute(
         update(SimilarityRun)
         .where(
-            SimilarityRun.id == run.id,
-            SimilarityRun.writer == token,
+            col(SimilarityRun.id) == run.id,
+            col(SimilarityRun.writer) == token,
             col(SimilarityRun.state).not_in(TERMINAL),
         )
         .values(**values)
@@ -217,7 +220,7 @@ def source_query(session: Session, run: SimilarityRun, actor: User):
     """A cutoff and stable id cursor exclude new arrivals until the next run."""
     query = (
         select(File)
-        .join(Model, Model.id == File.model_id)
+        .join(Model, col(Model.id) == File.model_id)
         .where(
             *live_source_predicates(),
             File.uploaded_at <= run.cutoff,
@@ -241,14 +244,14 @@ def source_query(session: Session, run: SimilarityRun, actor: User):
             escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             clauses.extend(
                 (
-                    Collection.path == path,
+                    col(Collection.path) == path,
                     col(Collection.path).like(escaped + "/%", escape="\\"),
                 )
             )
-        query = query.join(Collection, Collection.id == Model.collection_id).where(
+        query = query.join(Collection, col(Collection.id) == Model.collection_id).where(
             or_(*clauses)
         )
-    return query.order_by(File.id)
+    return query.order_by(col(File.id))
 
 
 def system_actor(session: Session) -> User | None:
@@ -262,7 +265,7 @@ def system_actor(session: Session) -> User | None:
     return session.exec(
         select(User)
         .where(col(User.is_superuser).is_(True), col(User.is_active).is_(True))
-        .order_by(User.id)
+        .order_by(col(User.id))
         .limit(1)
     ).first()
 

@@ -5,7 +5,7 @@ from printstash_core.inference import EmbeddingError, EmbeddingSpace
 from printstash_core.inference.context import InferenceContext
 from printstash_core.search.visual_inputs import VisualRecipe
 
-from app.modules.media import mesh_processing, visual_render
+from app.modules.media import native_process, visual_render
 from tests.factories.geometry import tetrahedron
 
 
@@ -77,9 +77,9 @@ class TestVisualRender:
     ):
         source, recipe, processes = render_case
         monkeypatch.setattr(
-            mesh_processing,
+            native_process,
             "process_tree_rss_bytes",
-            lambda _pid: mesh_processing.native_memory_budget_bytes() + 1,
+            lambda _pid: native_process.native_memory_budget_bytes() + 1,
         )
         with pytest.raises(EmbeddingError, match="embedding_worker_oom"):
             visual_render.render(
@@ -140,3 +140,64 @@ class TestVisualRender:
         assert processes[0].poll() is not None
         for pid in json.loads(pids.read_text()):
             assert not Path(f"/proc/{pid}").exists()
+
+
+class TestSupervision:
+    def test_admission_wait_honours_the_callers_deadline(self, render_case):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from app.runtime.native_runtime import admit
+
+        source, recipe, processes = render_case
+        capacity = native_process.native_capacity()
+        with (
+            admit(capacity, capacity, checkpoint=lambda: None),
+            ThreadPoolExecutor(1) as executor,
+        ):
+            result = executor.submit(
+                visual_render.render,
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(0.1),
+            )
+            with pytest.raises(EmbeddingError, match="inference_timeout"):
+                result.result(timeout=5)
+
+        assert processes == []
+
+    def test_closed_stdout_does_not_disable_deadline(self, render_case, monkeypatch):
+        import subprocess
+        import time
+
+        from app.modules.media.worker_bootstrap import command
+        from tests.paths import BACKEND_DIR
+
+        source, recipe, processes = render_case
+
+        def closes_stdout(*_args, **_kwargs):
+            process = subprocess.Popen(
+                command(
+                    "tests.fakes.mesh_bootstrap_probe",
+                    ["close_stdout_wait"],
+                    256 * 1024**2,
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                cwd=BACKEND_DIR,
+            )
+            processes.append(process)
+            return process
+
+        monkeypatch.setattr(visual_render, "_spawn", closes_stdout)
+        started = time.monotonic()
+        with pytest.raises(EmbeddingError, match="inference_timeout"):
+            visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(0.5),
+            )
+        assert time.monotonic() - started < 5
+        assert processes[0].poll() is not None

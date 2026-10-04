@@ -145,6 +145,56 @@ def embedding_unit(
 
 
 class TestEmbeddingRecovery:
+    def test_text_only_provider_preserves_geometric_review(
+        self, db_session, embedding_unit, monkeypatch, tmp_path
+    ):
+        from app.modules.inference.local import configured_provider
+        from app.modules.similarity import vector_sources as store
+        from tests.factories.embeddings import text_embedding_assets
+
+        _actor, _file, fp, _provider, _generation, run = embedding_unit
+        directory = text_embedding_assets(tmp_path / "text-model")
+        monkeypatch.setitem(_overlay, "embedding_local_model_dir", str(directory))
+        monkeypatch.setitem(_overlay, "embedding_model_key", "text-contract")
+        provider = configured_provider(get_session_factory())
+        generation = store.initialize(get_session_factory(), provider)
+        run.checkpoint_json = json.dumps(
+            {"generation_id": generation, "space_hash": provider.space.config_hash}
+        )
+        db_session.add(run)
+        db_session.commit()
+
+        assert advance_oldest_run(
+            SimilarityProcessor(get_session_factory(), get_backend())
+        )
+        db_session.refresh(run)
+        db_session.refresh(fp)
+        assert run.state == "running"
+        assert run.phase == "candidates"
+        assert (
+            json.loads(run.checkpoint_json)["embedding_failure_code"]
+            == "embedding_visual_model_required"
+        )
+        assert fp.state == "ready"
+        assert db_session.exec(select(PassageVector)).all() == []
+
+    def test_oversized_source_fails_only_its_embedding_unit(
+        self, db_session, embedding_unit, monkeypatch
+    ):
+        from app.modules.media import source_preparation
+        from app.runtime.native_admission import Resources
+
+        _actor, _file, fp, _provider, _generation, run = embedding_unit
+        monkeypatch.setattr(source_preparation, "capacity", lambda: Resources(1, 1))
+        assert advance_oldest_run(
+            SimilarityProcessor(get_session_factory(), get_backend())
+        )
+        db_session.refresh(run)
+        assert run.state == "running"
+        assert json.loads(run.counters_json)["embedding_failed"] == 1
+        assert json.loads(run.checkpoint_json)["embedding_fingerprint_id"] == fp.id
+        assert db_session.exec(select(PassageVector)).all() == []
+
     @pytest.mark.parametrize("failure", ["changed_source", "missing_content"])
     def test_contains_materialization_failure(
         self, db_session, embedding_unit, failure

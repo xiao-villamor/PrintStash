@@ -48,6 +48,9 @@ def main() -> None:
     cube = TESTDATA_DIR / "Calibration Cube.stl"
     baseline = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
     with tempfile.TemporaryDirectory(prefix="similarity-resource-") as folder:
+        from app.bootstrap.native_resources import configure
+
+        configure(Path(folder) / "native-runtime")
         prepared = _load(
             source, file_type, triangle_cap=SimilaritySettings().triangle_cap
         )

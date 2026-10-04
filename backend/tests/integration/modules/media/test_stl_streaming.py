@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
-from app.modules.media import stl_streaming
+from app.modules.media import mesh_isolation, stl_streaming
 from app.modules.media.worker_bootstrap import command
+from app.runtime.native_runtime import current_permit
 from tests.factories import content
 
 
@@ -16,7 +17,7 @@ class TestStreamingCancellation:
         source = tmp_path / "part.stl"
         source.write_bytes(content.binary_stl())
         pids = tmp_path / "pids"
-        original = stl_streaming.subprocess.Popen
+        original = mesh_isolation.subprocess.Popen
         processes = []
 
         def waiting(_argv, **kwargs):
@@ -24,14 +25,14 @@ class TestStreamingCancellation:
                 command(
                     "tests.fakes.mesh_bootstrap_probe",
                     ["tree_wait", str(pids)],
-                    256 * 1024**2,
+                    current_permit().resources.bytes,
                 ),
                 **kwargs,
             )
             processes.append(process)
             return process
 
-        monkeypatch.setattr(stl_streaming.subprocess, "Popen", waiting)
+        monkeypatch.setattr(mesh_isolation.subprocess, "Popen", waiting)
         with cancellation_scope(pids.exists), pytest.raises(OperationCancelled):
             stl_streaming.render_stl_preview_isolated(source)
         assert processes[0].poll() is not None
@@ -175,3 +176,56 @@ endsolid oblique
         assert result.raster_candidates > 0
         with Image.open(io.BytesIO(result.png)) as image:
             assert image.getchannel("A").getbbox() is not None
+
+
+class TestRenderStlPreviewIsolated:
+    def test_retains_credit_while_decoding(self, tmp_path, monkeypatch):
+        from app.runtime.native_runtime import current_permit
+
+        source = tmp_path / "part.stl"
+        source.write_bytes(content.binary_stl())
+        original = stl_streaming._decode_result
+        observed = []
+
+        def decode(output, manifest, **kwargs):
+            permit = current_permit()
+            assert permit is not None
+            assert output.parent.name.startswith("printstash-mesh-")
+            assert output.exists() and manifest.exists()
+            observed.append(output.parent)
+            return original(output, manifest, **kwargs)
+
+        monkeypatch.setattr(stl_streaming, "_decode_result", decode)
+
+        result = stl_streaming.render_stl_preview_isolated(source, width=32, height=32)
+
+        assert result is not None
+        assert result.triangle_count == 12
+        assert len(observed) == 1
+        assert not observed[0].exists()
+        assert current_permit() is None
+
+    def test_nested_work_consumes_existing_credit(self, tmp_path, monkeypatch):
+        import os
+
+        from app.modules.media import mesh_processing
+        from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+        source = tmp_path / "part.stl"
+        source.write_bytes(content.binary_stl())
+
+        def unexpected(*args, **kwargs):
+            raise AssertionError("nested STL must not launch another supervisor")
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", unexpected)
+        monkeypatch.setenv(WORKER_MARKER, str(os.getpid()))
+
+        with mesh_processing._native_scope() as permit:
+            result = stl_streaming.render_stl_preview_isolated(
+                source, width=32, height=32
+            )
+            assert current_permit() is permit
+
+        assert result is not None
+        assert result.triangle_count == 12
+        assert current_permit() is None

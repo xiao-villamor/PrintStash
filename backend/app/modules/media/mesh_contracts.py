@@ -114,3 +114,11 @@ def decode_geometry(raw: dict[str, str]) -> GeometryOutcome:
     if set(raw) == {"state", "reason"} and raw["state"] == "refused":
         return GeometryRefused(ThumbnailFailureReason(raw["reason"]))
     raise ValueError("invalid geometry outcome")
+
+
+def canonical_suffix(path: Path, file_type: str | None = None) -> str:
+    """Return the source suffix even when path is an FD-backed alias."""
+    if file_type is None:
+        return path.suffix.lower()
+    suffix = str(file_type).lower()
+    return suffix if suffix.startswith(".") else f".{suffix}"

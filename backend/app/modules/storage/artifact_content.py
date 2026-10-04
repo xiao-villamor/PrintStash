@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterator
 
+from app.core.cancellation import checkpoint
 from app.core.errors import ErrorKind, OperationError
 from app.db.models import ExternalLibrary, File, LibrarySourceKind
 from app.db.session import get_session_factory
@@ -58,37 +59,42 @@ class ArtifactHandle:
     file: File
     backend: StorageBackend | None
 
-    def _temporary_capacity_claim(self, operation: str):
+    def _temporary_capacity_claim(self, operation: str, directory: Path | None = None):
         from app.modules.storage.capacity import CapacityManager, CapacityResource
 
         return CapacityManager(get_session_factory()).reserve(
             f"artifact-{operation}:{secrets.token_hex(12)}",
             [
                 CapacityResource.for_path(
-                    Path(tempfile.gettempdir()),
-                    self.file.size_bytes,
+                    directory if directory is not None else Path(tempfile.gettempdir()),
+                    self.file.size_bytes * (2 if self.file.is_external else 1),
                     role=f"Artifact {operation}",
                 )
             ],
         )
 
-    def _verified_remote_copy(self) -> Path:
+    def _verified_remote_copy(self, directory: Path | None = None) -> Path:
         try:
             source, key = source_for_file(self.file)
             with source.materialize(
-                key, expected=SourceEntry(key, self.file.size_bytes)
+                key,
+                expected=SourceEntry(key, self.file.size_bytes),
+                **({"directory": directory} if directory is not None else {}),
             ) as content:
                 materialized = content.path
-                fd, raw_temp = tempfile.mkstemp(suffix=materialized.suffix)
+                fd, raw_temp = tempfile.mkstemp(
+                    suffix=materialized.suffix, dir=directory
+                )
                 temp = Path(raw_temp)
                 digest = hashlib.sha256()
                 copied = 0
                 try:
                     with (
-                        materialized.open("rb") as incoming,
                         os.fdopen(fd, "wb") as output,
+                        materialized.open("rb") as incoming,
                     ):
                         while chunk := incoming.read(_CHUNK_SIZE):
+                            checkpoint()
                             copied += len(chunk)
                             if copied > self.file.size_bytes:
                                 raise ArtifactContentChangedError(self.file.path)
@@ -102,17 +108,13 @@ class ArtifactHandle:
                     ):
                         raise ArtifactContentChangedError(self.file.path)
                     return temp
-                except Exception:
+                except BaseException:
                     temp.unlink(missing_ok=True)
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
                     raise
         except LibrarySourceError as exc:
             raise ArtifactContentMissingError(self.file.path) from exc
 
-    def _verified_external_content(self) -> Path:
+    def _verified_external_content(self, directory: Path | None = None) -> Path:
         if self.file.source_key and self.file.external_library_id is not None:
             # Mounted scans also retain source_key for reconciliation.
             with get_session_factory().scoped_session() as session:
@@ -122,12 +124,12 @@ class ArtifactHandle:
                     and library.source_kind == LibrarySourceKind.MOUNTED
                 )
             if mounted:
-                return self._verified_external_copy()
+                return self._verified_external_copy(directory)
         if self.file.source_key:
-            return self._verified_remote_copy()
-        return self._verified_external_copy()
+            return self._verified_remote_copy(directory)
+        return self._verified_external_copy(directory)
 
-    def _verified_external_copy(self) -> Path:
+    def _verified_external_copy(self, directory: Path | None = None) -> Path:
         source = Path(self.file.path)
         try:
             before = source.stat(follow_symlinks=False)
@@ -138,19 +140,21 @@ class ArtifactHandle:
         if before.st_size != self.file.size_bytes:
             raise ArtifactContentChangedError(self.file.path)
 
-        fd, raw_temp = tempfile.mkstemp(suffix=source.suffix)
+        fd, raw_temp = tempfile.mkstemp(suffix=source.suffix, dir=directory)
         temp = Path(raw_temp)
         digest = hashlib.sha256()
         copied = 0
         try:
-            source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            with os.fdopen(source_fd, "rb") as incoming, os.fdopen(fd, "wb") as output:
-                while chunk := incoming.read(_CHUNK_SIZE):
-                    copied += len(chunk)
-                    if copied > self.file.size_bytes:
-                        raise ArtifactContentChangedError(self.file.path)
-                    output.write(chunk)
-                    digest.update(chunk)
+            with os.fdopen(fd, "wb") as output:
+                source_fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                with os.fdopen(source_fd, "rb") as incoming:
+                    while chunk := incoming.read(_CHUNK_SIZE):
+                        checkpoint()
+                        copied += len(chunk)
+                        if copied > self.file.size_bytes:
+                            raise ArtifactContentChangedError(self.file.path)
+                        output.write(chunk)
+                        digest.update(chunk)
                 output.flush()
                 os.fsync(output.fileno())
             after = source.stat(follow_symlinks=False)
@@ -167,12 +171,8 @@ class ArtifactHandle:
         except FileNotFoundError as exc:
             temp.unlink(missing_ok=True)
             raise ArtifactContentMissingError(self.file.path) from exc
-        except Exception:
+        except BaseException:
             temp.unlink(missing_ok=True)
-            try:
-                os.close(fd)
-            except OSError:
-                pass
             raise
 
     def cache_representation(self) -> Representation | None:
@@ -313,16 +313,17 @@ class ArtifactHandle:
         *,
         authoritative: bool = False,
         capacity_claimed: bool = False,
+        directory: Path | None = None,
     ) -> Iterator[Path]:
         """Yield a stable local file for consumers that require a path."""
         if self.file.is_external:
             claim = (
                 None
                 if capacity_claimed
-                else self._temporary_capacity_claim("materialization")
+                else self._temporary_capacity_claim("materialization", directory)
             )
             try:
-                temp = self._verified_external_content()
+                temp = self._verified_external_content(directory)
                 try:
                     yield temp
                 finally:
@@ -368,9 +369,14 @@ class ArtifactHandle:
                     else direct_path(self.file.path)
                 )
                 if direct is None and not capacity_claimed:
-                    claim = self._temporary_capacity_claim("materialization")
+                    claim = self._temporary_capacity_claim("materialization", directory)
                     stack.callback(claim.release)
-                path = stack.enter_context(backend.local_path(self.file.path))
+                path = stack.enter_context(
+                    backend.local_path(
+                        self.file.path,
+                        **({"directory": directory} if directory is not None else {}),
+                    )
+                )
             yield path
 
 

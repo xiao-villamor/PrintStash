@@ -37,7 +37,7 @@ from app.modules.inference.worker_protocol import (
     WorkerError,
     WorkerResult,
 )
-from app.modules.media.mesh_processing import (
+from app.modules.media.native_process import (
     native_memory_budget_bytes,
     process_rss_bytes,
 )

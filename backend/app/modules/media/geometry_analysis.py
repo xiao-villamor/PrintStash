@@ -100,7 +100,7 @@ def verify_paths(
     left = right = None
     deadline = deadline_after(verification_seconds)
     try:
-        with mesh_processing._render_semaphore():
+        with mesh_processing._native_scope():
             left = _load(first, first_type, triangle_cap=triangle_cap)
             right = _load(second, second_type, triangle_cap=triangle_cap)
             return verify_meshes(
@@ -128,7 +128,7 @@ def embedding_views(
 
     if not 32 <= image_size <= 512:
         raise GeometryError("invalid_view_budget")
-    with mesh_processing._render_semaphore():
+    with mesh_processing._native_scope():
         prepared = _load(path, file_type, triangle_cap=triangle_cap)
         if not prepared.complete:
             raise GeometryError("embedding_requires_complete_geometry")
@@ -196,7 +196,7 @@ def visual_views(
     """One source load and render permit for the thumbnail and canonical views."""
     prepared = None
     try:
-        with mesh_processing._render_semaphore():
+        with mesh_processing._native_scope():
             # Visual encoding needs triangles only. The parent owns temporary
             # capacity; this isolated renderer never connects to the database.
             prepared = _load(

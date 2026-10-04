@@ -12,18 +12,14 @@ import io
 import json
 import math
 import os
-import signal
-import subprocess  # nosec B404 - the command below is fixed
-import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from app import __file__ as application_file
 from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.modules.media import native_process
 
 logger = get_logger(__name__)
 
@@ -114,9 +110,9 @@ def _worker_memory_budget() -> int:
     """Use the existing per-job RAM share when it is lower than our hard target."""
 
     try:
-        from app.modules.media.mesh_processing import _step_memory_budget_bytes
+        from app.modules.media.native_process import native_memory_budget_bytes
 
-        budget = _step_memory_budget_bytes()
+        budget = native_memory_budget_bytes()
     except Exception:  # pragma: no cover - defensive import boundary
         budget = None
     if budget is None:
@@ -139,25 +135,6 @@ def _within_worker_hard_bounds(limits: STLStreamingLimits) -> bool:
         and 0 < limits.max_rss_bytes
         and 0 < limits.address_space_bytes <= _DEFAULT_WORKER_ADDRESS_SPACE_BYTES
     )
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    """Terminate a worker and every descendant, then leave reaping to caller."""
-
-    try:
-        pgid = os.getpgid(process.pid)
-    except (OSError, ProcessLookupError):
-        pgid = None
-    if pgid is not None:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-            return
-        except (OSError, ProcessLookupError):
-            pass
-    try:
-        process.kill()
-    except (OSError, ProcessLookupError):
-        pass
 
 
 def _valid_manifest(manifest: object, *, width: int, height: int) -> bool:
@@ -300,30 +277,42 @@ def render_stl_preview_isolated(
         max_rss_bytes=min(limits.max_rss_bytes, _worker_memory_budget()),
         address_space_bytes=limits.address_space_bytes,
     )
-    with tempfile.TemporaryDirectory(prefix="printstash-stl-") as temporary:
+    from app.modules.media.mesh_isolation import MeshWorkerError, supervise_result
+    from app.modules.media.native_budget import MeshSource, estimate_sources
+    from app.modules.media.native_execution import admission
+    from app.modules.media.worker_bootstrap import WORKER_MARKER, WorkerLifecycle
+    from app.modules.media.worker_bootstrap import command as worker_command
+    from app.runtime.native_runtime import current_permit
+
+    capacity = native_process.native_capacity()
+    active = current_permit()
+    amount = (
+        active.resources
+        if active is not None
+        else estimate_sources(capacity, (MeshSource(path, "stl"),))
+    )
+    with (
+        admission(amount, capacity, checkpoint=checkpoint) as permit,
+        tempfile.TemporaryDirectory(prefix="printstash-mesh-") as temporary,
+    ):
         root = Path(temporary)
         output = root / "preview.png.part"
         manifest = root / "result.json"
-        command = [
-            sys.executable,
-            "-m",
-            "app.modules.media.stl_preview_worker",
-            str(path),
+        arguments = [
+            str(path.absolute()),
             str(output),
             str(manifest),
             str(int(width)),
             str(int(height)),
             *worker_limits.as_worker_args(expected_parent_pid=os.getpid()),
         ]
-        from app.modules.media.worker_bootstrap import WORKER_MARKER
-
         if os.environ.get(WORKER_MARKER) == str(os.getpid()):
             # The outer worker already owns a hard ceiling and deadline.
             # Streaming consumes that allowance, rather than spawning a second
             # process with another full allowance.
             from app.modules.media.stl_preview_worker import main
 
-            if main(command[3:], apply_limits=False) != 0:
+            if main(arguments, apply_limits=False) != 0:
                 return None
             return _decode_result(
                 output,
@@ -332,73 +321,22 @@ def render_stl_preview_isolated(
                 height=int(height),
                 limits=worker_limits,
             )
-        env = os.environ.copy()
-        env.update(
-            {
-                "OMP_NUM_THREADS": "1",
-                "OPENBLAS_NUM_THREADS": "1",
-                "MKL_NUM_THREADS": "1",
-                "NUMEXPR_NUM_THREADS": "1",
-            }
-        )
         try:
-            process = subprocess.Popen(  # nosec B603 - fixed argv, shell disabled
-                command,
-                cwd=Path(application_file).resolve().parent.parent,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                shell=False,
-                start_new_session=True,
+            supervised = supervise_result(
+                worker_command(
+                    "app.modules.media.stl_preview_worker",
+                    arguments,
+                    permit.resources.bytes,
+                ),
+                memory_budget=min(worker_limits.max_rss_bytes, permit.resources.bytes),
+                timeout_seconds=worker_limits.hard_timeout_seconds,
+                permit=permit,
+                lifecycle=WorkerLifecycle.GUARDED,
+                temporary_directory=root,
             )
-        except (OSError, ValueError):
-            logger.warning("stl_streaming: could not start worker for %s", path.name)
-            return None
-
-        started = time.monotonic()
-        failure = ""
-        peak_rss = 0
-        try:
-            while process.poll() is None:
-                checkpoint()
-                elapsed = time.monotonic() - started
-                if elapsed >= worker_limits.hard_timeout_seconds:
-                    failure = "timeout"
-                    _terminate_process_group(process)
-                    break
-                rss = _read_rss_bytes(process.pid)
-                if rss is not None:
-                    peak_rss = max(peak_rss, rss)
-                if rss is not None and rss > worker_limits.max_rss_bytes:
-                    failure = "memory budget"
-                    _terminate_process_group(process)
-                    break
-                time.sleep(0.05)
-            process.communicate(timeout=5)
-        except (subprocess.TimeoutExpired, OSError):
-            failure = failure or "worker reap failed"
-            _terminate_process_group(process)
-            try:
-                process.communicate(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                pass
-        finally:
-            if process.poll() is None:
-                _terminate_process_group(process)
-                try:
-                    process.communicate(timeout=5)
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
-            from app.modules.media.worker_bootstrap import reap_descendants
-
-            reap_descendants(process.pid)
-        checkpoint(force=True)
-        if failure or process.returncode != 0:
+        except MeshWorkerError as exc:
             logger.warning(
-                "stl_streaming: worker failed for %s (%s)",
-                path.name,
-                failure or f"exit {process.returncode}",
+                "stl_streaming: worker failed for %s (%s)", path.name, exc.reason.value
             )
             return None
         result = _decode_result(
@@ -414,24 +352,14 @@ def render_stl_preview_isolated(
             )
         else:
             logger.info(
-                "stl_streaming: rendered %s (%d triangles, %d candidates, %.2fs, peak_rss=%d)",
+                "stl_streaming: rendered %s (%d triangles, %d candidates, %.2fs, peak_rss=%s)",
                 path.name,
                 result.triangle_count,
                 result.raster_candidates,
-                time.monotonic() - started,
-                peak_rss,
+                supervised.stats.elapsed_ns / 1_000_000_000,
+                supervised.stats.peak_tree_rss_bytes,
             )
         return result
-
-
-def _read_rss_bytes(pid: int) -> int | None:
-    try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        return None
-    return None
 
 
 __all__ = [

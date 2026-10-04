@@ -880,7 +880,7 @@ class TestMeshCancellation:
                 lambda _module, _args, budget: command(
                     "tests.fakes.mesh_bootstrap_probe",
                     ["tree_wait", str(pids), str(ready)],
-                    min(budget, 256 * 1024**2),
+                    budget,
                 ),
             )
             submit(job.id)
@@ -1147,9 +1147,18 @@ class TestDeriveViewerStl:
                     "to_stl_bytes",
                     lambda *_args, **_kwargs: fresh_bytes,
                 )
-                assert producers.derive_viewer_stl(artifact.id).kinds == {
-                    DerivativeKind.VIEWER_STL: DerivativeState.READY
-                }
+                from concurrent.futures import ThreadPoolExecutor
+                from contextvars import copy_context
+
+                # A replacement attempt runs in another executor, with independent
+                # resource scopes and sessions, while this one still lives.
+                with ThreadPoolExecutor(1) as executor:
+                    replacement = executor.submit(
+                        copy_context().run, producers.derive_viewer_stl, artifact.id
+                    )
+                    assert replacement.result(timeout=10).kinds == {
+                        DerivativeKind.VIEWER_STL: DerivativeState.READY
+                    }
             published_key = _rows(db_session, artifact.id)[
                 DerivativeKind.VIEWER_STL
             ].storage_key
@@ -1205,9 +1214,18 @@ class TestDeriveViewerStl:
                     "to_stl_bytes",
                     lambda *_args, **_kwargs: fresh_bytes,
                 )
-                assert producers.derive_viewer_stl(artifact.id).kinds == {
-                    DerivativeKind.VIEWER_STL: DerivativeState.READY
-                }
+                from concurrent.futures import ThreadPoolExecutor
+                from contextvars import copy_context
+
+                # A replacement attempt runs in another executor, with independent
+                # resource scopes and sessions, while this one still lives.
+                with ThreadPoolExecutor(1) as executor:
+                    replacement = executor.submit(
+                        copy_context().run, producers.derive_viewer_stl, artifact.id
+                    )
+                    assert replacement.result(timeout=10).kinds == {
+                        DerivativeKind.VIEWER_STL: DerivativeState.READY
+                    }
             db_session.rollback()
             raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
 
@@ -1219,3 +1237,37 @@ class TestDeriveViewerStl:
         assert row.state is DerivativeState.READY
         assert row.failure_reason is None
         assert get_backend().read_bytes(row.storage_key) == fresh_bytes
+
+
+class TestSourcePreparationAdmission:
+    @pytest.mark.parametrize("viewer", [False, True], ids=["mesh", "viewer"])
+    def test_oversized_source_records_resource_limit_before_native_work(
+        self, db_session, stored, monkeypatch, viewer
+    ):
+        from app.core.time import utcnow
+        from app.modules.media import source_preparation
+        from app.runtime.native_admission import Resources
+
+        artifact = stored(
+            "cube.obj" if viewer else "cube.stl",
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n" if viewer else content.binary_stl(),
+            viewer_requested_at=utcnow(),
+        )
+        monkeypatch.setattr(source_preparation, "capacity", lambda: Resources(1, 1))
+
+        def unexpected(*_args, **_kwargs):
+            pytest.fail("oversized source reached native processing")
+
+        monkeypatch.setattr(mesh_isolation, "generate", unexpected)
+        monkeypatch.setattr(producers.stl_isolation, "to_stl_bytes", unexpected)
+        if viewer:
+            result = producers.derive_viewer_stl(artifact.id)
+            kinds = {DerivativeKind.VIEWER_STL}
+        else:
+            result = producers.derive_mesh(artifact.id)
+            kinds = {DerivativeKind.METADATA, DerivativeKind.THUMBNAIL}
+        assert result.kinds == {kind: DerivativeState.FAILED for kind in kinds}
+        rows = _rows(db_session, artifact.id)
+        for kind in kinds:
+            assert rows[kind].failure_reason == "resource_limit"
+            assert rows[kind].next_attempt_at is None

@@ -291,28 +291,26 @@ class Settings(BaseSettings):
     # tightens it further on small hosts.
     mesh_max_render_triangles: int = Field(default=2_000_000, gt=0)
 
-    # Fraction of detected available RAM that a single mesh load+render may peak
-    # to. The effective triangle cap is derived from this (per format, using the
-    # measured per-triangle peak cost), divided by ``max_render_jobs`` so the
-    # budget is shared across concurrent renders, and combined with the static
-    # ceiling above via a min(), so a small 4 GB container automatically skips
-    # meshes a 32 GB host would happily render — no per-host tuning needed to keep
-    # a scan from being OOM-killed (#29). Container-aware: honours the cgroup
-    # memory limit, not just host RAM. Set to 0 to disable RAM-aware capping. 0.5
-    # leaves headroom for the rest of the app and the OS while still rendering
-    # typical detailed models; 0.30–0.35 is safer for production / self-hosted
-    # setups that run other workloads alongside the scan.
+    # Fraction of host/cgroup RAM shared by native mesh work. Admission reserves
+    # a startup floor or the estimated whole-pipeline peak for each job;
+    # unknown complexity reserves the full pool. The job's admitted bytes set
+    # its hard worker ceiling and loader cap. Zero disables geometry estimation,
+    # while retaining containment at half of detected RAM.
     mesh_memory_budget_fraction: float = Field(default=0.5, ge=0, le=1)
 
-    # Maximum number of mesh load+render jobs allowed to run at once in one
-    # process. A bulk/folder upload (#26) can otherwise fire dozens of concurrent
-    # renders that each peak hundreds of MB and collectively OOM the box. This is
-    # the default concurrency of the derive.native lane, the process's local
-    # inference admission, and the divisor of the RAM-aware triangle cap, so each
-    # concurrent job stays within its share. 1 (serialised) is the safe default;
-    # raise it on hosts with RAM headroom. Zero is the supported sentinel for
-    # serial execution.
+    # Maximum simultaneous native mesh jobs across processes sharing this local
+    # data root. This also defaults the derive.native lane. Memory reservations
+    # can reduce actual concurrency when large models need more of the pool.
+    # One is the safe default; zero retains serial execution compatibility.
     max_render_jobs: int = Field(default=1, ge=0)
+
+    # Bounded prepared inputs, independent of native RAM. Zero jobs follows
+    # max_render_jobs + one waiting batch (at least two). Bytes account for two
+    # copies of each source, including verification pairs; I/O slots are held
+    # only during materialization, never while awaiting CPU/RAM.
+    mesh_prepared_max_jobs: int = Field(default=0, ge=0)
+    mesh_prepared_max_mb: int = Field(default=4096, gt=0)
+    mesh_source_io_jobs: int = Field(default=2, gt=0)
 
     # Number of faces processed per chunk in the software rasteriser. The renderer
     # builds its per-face geometry/shading arrays (each O(faces)) one chunk at a

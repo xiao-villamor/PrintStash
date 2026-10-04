@@ -196,36 +196,23 @@ class TestLoadMesh:
 
 
 class TestLoadStepMeshIsolated:
-    def test_step_tessellation_is_killed_when_child_exceeds_rss_budget(
+    def test_preserves_supervisor_memory_refusal(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+        from app.runtime.native_runtime import current_permit
+
         path = tmp_path / "complex.step"
         path.write_text("ISO-10303-21;")
 
-        class MemoryHungryProcess:
-            pid = 4242
-            returncode = None
-            killed = False
+        def refused(*args, **kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
 
-            def poll(self):
-                return -9 if self.killed else None
-
-            def kill(self):
-                self.killed = True
-                self.returncode = -9
-
-            def communicate(self):
-                return b"", b""
-
-        process = MemoryHungryProcess()
-        monkeypatch.setattr(
-            mesh_processing.subprocess, "Popen", lambda *a, **k: process
-        )
-        monkeypatch.setattr(mesh_processing, "_step_memory_budget_bytes", lambda: 1024)
-        monkeypatch.setattr(mesh_processing, "_process_rss_bytes", lambda _pid: 2048)
+        monkeypatch.setattr(mesh_isolation, "supervise_result", refused)
 
         assert mesh_processing._load_step_mesh_isolated(path) is None
-        assert process.killed is True
+        assert current_permit() is None
 
 
 class TestGeometryFromMesh:

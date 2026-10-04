@@ -11,7 +11,11 @@ from prometheus_client import Counter, Histogram
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import registry
-from app.modules.media.mesh_telemetry import PhaseStats, SupervisionStats
+from app.modules.media.mesh_telemetry import (
+    AdmissionStats,
+    PhaseStats,
+    SupervisionStats,
+)
 
 logger = get_logger(__name__)
 _worker_exits = Counter(
@@ -58,6 +62,43 @@ _phase_triangles = Histogram(
     buckets=(12, 1000, 10000, 100000, 1000000, 2000000),
     registry=registry,
 )
+
+
+_admission_duration = Histogram(
+    "printstash_mesh_admission_duration_seconds",
+    "Native resource queue time, excluding process execution.",
+    ("outcome",),
+    registry=registry,
+)
+_admission_memory = Histogram(
+    "printstash_mesh_admission_requested_bytes",
+    "Memory requested at native resource admission.",
+    ("outcome",),
+    buckets=(2**24, 2**26, 2**28, 2**29, 2**30, 2**32),
+    registry=registry,
+)
+
+
+def record_admission(stats: AdmissionStats) -> None:
+    try:
+        logger.info(
+            "mesh_admission %s",
+            json.dumps(
+                {
+                    "version": 1,
+                    "process_id": os.getpid(),
+                    "process_role": settings.process_role.value,
+                    **asdict(stats),
+                },
+                allow_nan=False,
+                separators=(",", ":"),
+            ),
+        )
+        outcome = stats.outcome.value
+        _admission_duration.labels(outcome).observe(stats.elapsed_ns / 1_000_000_000)
+        _admission_memory.labels(outcome).observe(stats.requested_bytes)
+    except Exception:
+        logger.exception("failed to publish native admission metrics")
 
 
 def record_supervision(stats: SupervisionStats) -> None:

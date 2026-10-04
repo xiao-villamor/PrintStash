@@ -35,6 +35,7 @@ from app.modules.media.mesh_contracts import (
     ThumbnailRequest,
     ThumbnailResult,
     ThumbnailStrategy,
+    canonical_suffix,
 )
 from app.modules.media.mesh_resources import (
     ExpandedScene,
@@ -122,7 +123,7 @@ class ThumbnailEngine:
             source_bytes = None
         width = int(request.width or settings.model_thumbnail_width)
         height = int(request.height or round(width * 3 / 4))
-        suffix = mesh_processing._canonical_suffix(request.path, request.file_type)
+        suffix = canonical_suffix(request.path, request.file_type)
         geometry = _empty_geometry()
         geometry_outcome: GeometryOutcome = (
             GeometryRefused(ThumbnailFailureReason.INVALID_SOURCE)
@@ -161,7 +162,7 @@ class ThumbnailEngine:
 
         embedded = None
         try:
-            with mesh_processing._render_semaphore():
+            with mesh_processing._native_scope():
                 if (
                     request.include_thumbnail
                     and suffix == ".3mf"

@@ -258,6 +258,9 @@ def prepare_process(*, owner: bool) -> PreparedProcess:
         logger.critical(
             "interrupted restore detected; application remains in restore maintenance"
         )
+    from app.bootstrap.native_resources import configure as configure_native_resources
+
+    configure_native_resources(Path(settings.data_root))
     # Storage must be configured and bound before either publication recovery
     # or Inbox recovery can inspect durable capture-slot receipts.
     backend = _prepare_storage_for_startup(
