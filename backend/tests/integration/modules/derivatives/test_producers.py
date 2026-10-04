@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+import trimesh
 from sqlmodel import Session, select
 
 from app.core.config import _overlay, settings
@@ -113,6 +114,25 @@ class TestDeriveMesh:
         assert published is not None and published.thumbnail_path
         assert get_backend().exists(published.thumbnail_path)
         assert rows[DerivativeKind.THUMBNAIL].storage_key == published.thumbnail_path
+
+    def test_replaces_stale_inconsistent_winding_volume(
+        self, db_session, stored, make_derivative, make_metadata
+    ):
+        mesh = trimesh.creation.box(extents=[10, 10, 10])
+        mesh.faces[0] = mesh.faces[0][::-1]
+        artifact = stored("inconsistent.stl", mesh.export(file_type="stl"))
+        make_metadata(artifact, volume_mm3=500)
+        make_derivative(artifact, DerivativeKind.METADATA, recipe_version=3)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        db_session.expire_all()
+        meta = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
+        assert meta.volume_mm3 is None
 
     def test_refused_geometry_is_terminal_with_an_embedded_preview(
         self, db_session, stored, monkeypatch
