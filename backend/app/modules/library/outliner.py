@@ -161,9 +161,12 @@ def _entries(
     models = _filtered_stmt(session, user, query.filters()).with_only_columns(
         *_columns(Model, OutlinerKind.MODEL, counts_only=counts_only)
     )
-    models = models.where(
-        or_(col(Model.collection_id).is_(None), col(Model.collection_id).in_(visible))
-    )
+    # The canonical model predicate already scopes non-admins to live folders.
+    # Administrators also need to exclude entries inside a trashed folder.
+    if user.is_superuser:
+        models = models.where(
+            or_(col(Model.collection_id).is_(None), col(Model.collection_id).in_(visible))
+        )
     if query.view == OutlinerView.MULTIPART:
         models = models.where(literal(False))
     elif query.view == OutlinerView.COMPONENTS:
@@ -239,7 +242,9 @@ def _folders(session: Session, user: User, query: OutlinerQuery, subtree):
     return folders
 
 
-def _page_counts(session: Session, entries, eligible, ids: list[int]):
+def _page_counts(
+    session: Session, entries, eligible, visible, ids: list[int], parent_id: int | None
+):
     """Walk only the returned branches; never aggregate every ancestor first."""
     if not ids:
         return {}
@@ -259,11 +264,24 @@ def _page_counts(session: Session, entries, eligible, ids: list[int]):
         .group_by(entries.c.collection_id)
         .cte("page_direct")
     )
+    raw = (
+        select(col(Model.collection_id).label("id"), func.count().label("count"))
+        .where(live(Model))
+        .group_by(col(Model.collection_id))
+        .subquery()
+    )
     totals = (
-        select(descendants.c.root, func.sum(direct.c.count).label("count"))
+        select(
+            descendants.c.root,
+            func.sum(direct.c.count).label("count"),
+            func.coalesce(func.sum(raw.c.count), 0).label("models"),
+            (func.count(col(Collection.id)) - 1).label("folders"),
+        )
         .select_from(descendants)
         .join(Collection, col(Collection.id) == descendants.c.id)
         .outerjoin(direct, direct.c.id == col(Collection.id))
+        .outerjoin(raw, raw.c.id == col(Collection.id))
+        .where(live(Collection), col(Collection.id).in_(visible))
         .group_by(descendants.c.root)
         .subquery()
     )
@@ -274,13 +292,21 @@ def _page_counts(session: Session, entries, eligible, ids: list[int]):
         .subquery()
     )
     return {
-        row.id: (row.direct, row.total, row.children)
+        row.id: row
         for row in session.execute(
             select(
                 col(Collection.id),
                 func.coalesce(direct.c.count, 0).label("direct"),
                 func.coalesce(totals.c.count, 0).label("total"),
                 func.coalesce(children.c.count, 0).label("children"),
+                totals.c.models,
+                totals.c.folders,
+                func.coalesce(
+                    select(direct.c.count)
+                    .where(direct.c.id == parent_id)
+                    .scalar_subquery(),
+                    0,
+                ).label("parent_direct"),
             )
             .outerjoin(direct, direct.c.id == col(Collection.id))
             .outerjoin(totals, totals.c.root == col(Collection.id))
@@ -326,29 +352,44 @@ def collections(
         if revealed is not None and revealed.id not in {row.id for row in rows}
         else []
     )
-    nodes = collection_tree.nodes_for_ids(session, user, [row.id for row in all_rows])
-    by_id = {node.id: node for node in nodes}
     ids = [row.id for row in all_rows]
-    counts = _page_counts(session, entries, eligible, ids)
+    counts = _page_counts(
+        session, entries, eligible, _visible(session, user), ids, query.parent_id
+    )
+    nodes = collection_tree.nodes_for_ids(
+        session,
+        user,
+        ids,
+        {
+            id: collection_tree.SubtreeCounts(
+                models=int(row.models), collections=int(row.folders)
+            )
+            for id, row in counts.items()
+        },
+    )
+    by_id = {node.id: node for node in nodes}
     projected = {
         row.id: OutlinerCollection(
             **by_id[row.id].model_dump(),
-            direct_entry_count=counts[row.id][0],
-            subtree_entry_count=counts[row.id][1],
-            visible_child_count=counts[row.id][2],
+            direct_entry_count=counts[row.id].direct,
+            subtree_entry_count=counts[row.id].total,
+            visible_child_count=counts[row.id].children,
         )
         for row in all_rows
     }
-    parent_entries = _entries(
-        session,
-        user,
-        query.model_copy(update={"collection_id": query.parent_id}),
-        counts_only=True,
-        direct=True,
-    )
-    parent_count = session.execute(
-        select(func.count()).select_from(parent_entries)
-    ).scalar_one()
+    if ids:
+        parent_count = counts[ids[0]].parent_direct
+    else:
+        parent_entries = _entries(
+            session,
+            user,
+            query.model_copy(update={"collection_id": query.parent_id}),
+            counts_only=True,
+            direct=True,
+        )
+        parent_count = session.execute(
+            select(func.count()).select_from(parent_entries)
+        ).scalar_one()
     return OutlinerCollectionPage(
         items=[projected[row.id] for row in rows],
         next_cursor=cursor,

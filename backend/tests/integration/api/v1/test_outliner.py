@@ -223,7 +223,9 @@ class TestOutliner:
         child = make_collection("Child", parent=parent)
         make_collection("Empty")
         tag_model(make_model("Hit", collection=child), make_tag("chosen"))
+        make_model("Unfiltered sibling", collection=child)
         page = _read(client, auth_headers, COLLECTIONS, tag="chosen")
+        assert page["items"][0]["model_count"] == 2
         assert [(row["id"], row["subtree_entry_count"]) for row in page["items"]] == [
             (parent.id, 1)
         ]
