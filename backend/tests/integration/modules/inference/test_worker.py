@@ -33,17 +33,25 @@ class TestManifest:
         with pytest.raises(EmbeddingError, match="embedding_space_mismatch"):
             manifest.validate_space(contract, changed)
 
-    def test_preserves_legacy_visual_space_identity(self):
+    def test_invalidates_legacy_render_vectors(self):
         from tests.paths import FIXTURES_DIR
 
         payload = (
             FIXTURES_DIR / "embeddings" / "clip-vit-base-patch32-fp32.json"
         ).read_bytes()
-        # Verified against the implementation at main c11db102 before changing it.
-        assert (
-            manifest.LocalModelManifest.model_validate_json(payload).space().config_hash
-            == "7f56e23951620776f8a65d4de5441b6ff1eecd1f48c8ddf1eca8a82f1dea2089"
+        current = manifest.LocalModelManifest.model_validate_json(payload).space()
+        previous_recipe = json.loads(current.render_recipe)
+        del previous_recipe["rasterizer"]
+        previous = replace(
+            current, render_recipe=json.dumps(previous_recipe, sort_keys=True)
         )
+
+        # Historical encoder and render identity verified at main c11db102.
+        # New rendered pixels invalidate its vectors, not its encoder assets.
+        assert previous.config_hash == (
+            "7f56e23951620776f8a65d4de5441b6ff1eecd1f48c8ddf1eca8a82f1dea2089"
+        )
+        assert current.config_hash != previous.config_hash
 
     @pytest.mark.parametrize(
         "change", ["missing", "symlink", "large", "invalid", "key"]
