@@ -42,7 +42,6 @@ from app.modules.library.volume_metadata import apply_volume
 from app.modules.media import gcode_parser, mesh_isolation, stl_isolation, thumbnail
 from app.modules.media.mesh_contracts import (
     GeometryReady,
-    GeometryRefused,
     MeshMeasurements,
     PreviewCoverage,
     ThumbnailFailureReason,
@@ -194,6 +193,7 @@ def _publish_thumbnail(
     complete: bool,
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
+    abort_on_failure: bool = False,
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
@@ -204,6 +204,8 @@ def _publish_thumbnail(
             "invalid_source",
             deterministic=True,
         )
+        if abort_on_failure:
+            raise
         return DerivativeState.FAILED
     backend = get_backend()
     with get_session_factory().scoped_session() as session:
@@ -225,6 +227,8 @@ def _publish_thumbnail(
                 "storage",
                 deterministic=False,
             )
+            if abort_on_failure:
+                raise
             return DerivativeState.FAILED
         fresh = records.mark_ready(
             session,
@@ -261,23 +265,120 @@ def _thumbnail_failure(
 
 
 def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
-    """Geometry and a rendered thumbnail from one mesh load."""
+    """Publish each fenced basic output before optional fingerprint completion."""
+    from app.modules.ingestion.extensions import extraction_options
+    from app.modules.media.fingerprints import ALGORITHM_VERSION
+    from app.modules.media.mesh_facts import FingerprintFailureCode
+    from app.modules.media.mesh_protocol import (
+        BasicOutput,
+        GeometryOutput,
+        ThumbnailOutput,
+    )
+
+    from . import mesh_continuations
+    from .mesh_continuation_values import FingerprintPlan
+
     begun = _begin(file_id, JobKind.DERIVATIVES_MESH, execution=execution)
     if begun is None:
         return Outcome({})
     file_row, attempts = begun
-    needed = attempts.keys()
     outcome: dict[DerivativeKind, DerivativeState] = {}
-    if not needed:
-        return Outcome(outcome)
-    from app.modules.ingestion.extensions import after_commit, extraction_options
-
-    options = (
-        extraction_options(get_session_factory())
-        if DerivativeKind.METADATA in needed
-        else {}
+    options = extraction_options(get_session_factory())
+    plan = (
+        FingerprintPlan(
+            ALGORITHM_VERSION, options.get("triangle_cap", MAX_ANALYSIS_FACES)
+        )
+        if options.get("include_fingerprint", False)
+        else None
     )
-    started = time.monotonic()
+    with get_session_factory().scoped_session() as session:
+        pending = mesh_continuations.resume(
+            session, file_row, plan, execution=execution
+        )
+        session.commit()
+    if not attempts and pending is None:
+        return Outcome(outcome)
+
+    def published(kind: DerivativeKind, state: DerivativeState) -> None:
+        outcome[kind] = state
+        # Output ownership is already durable. Realtime delivery remains best effort.
+        try:
+            _announce(file_row, Outcome({kind: state}))
+        except Exception:  # noqa: BLE001 - a delivery failure cannot undo READY
+            logger.warning(
+                "mesh output notice failed", extra={"file_id": file_id, "kind": kind}
+            )
+
+    def publish(frame: BasicOutput) -> None:
+        nonlocal pending
+        if isinstance(frame, GeometryOutput):
+            kind = DerivativeKind.METADATA
+            if kind not in attempts or kind in outcome:
+                raise ValueError("unexpected_mesh_geometry_output")
+            authority = attempts[kind]
+            with get_session_factory().scoped_session() as session:
+                if plan is not None:
+                    pending = mesh_continuations.create(session, authority, plan)
+                if isinstance(frame.outcome, GeometryReady):
+                    records.mark_ready(
+                        session,
+                        authority,
+                        now=utcnow(),
+                        output={"triangle_count": frame.geometry["triangle_count"]},
+                        duration_ms=frame.duration_ms,
+                        peak_rss_bytes=frame.peak_rss_bytes,
+                    )
+                    meta = _metadata_row(session, file_id)
+                    _apply_measurements(
+                        meta, MeshMeasurements(frame.geometry, frame.volume)
+                    )
+                    session.add(meta)
+                    state = DerivativeState.READY
+                else:
+                    reason = frame.outcome.reason
+                    records.mark_failed(
+                        session,
+                        authority,
+                        reason.value,
+                        now=utcnow(),
+                        deterministic=reason.value in _DETERMINISTIC,
+                        duration_ms=frame.duration_ms,
+                        peak_rss_bytes=frame.peak_rss_bytes,
+                    )
+                    if reason is ThumbnailFailureReason.UNSUPPORTED_CAPABILITY:
+                        meta = _metadata_row(session, file_id)
+                        _apply_measurements(meta, MeshMeasurements.unavailable())
+                        session.add(meta)
+                    state = DerivativeState.FAILED
+                session.commit()
+            published(kind, state)
+        elif isinstance(frame, ThumbnailOutput):
+            kind = DerivativeKind.THUMBNAIL
+            if kind not in attempts or kind in outcome:
+                raise ValueError("unexpected_mesh_thumbnail_output")
+            state = (
+                _thumbnail_failure(
+                    attempts[kind],
+                    frame.failure_reason.value if frame.failure_reason else None,
+                )
+                if frame.image is None
+                else _publish_thumbnail(
+                    file_row,
+                    frame.image,
+                    attempt=attempts[kind],
+                    normalize=True,
+                    strategy=frame.strategy.value,
+                    complete=frame.coverage.preview
+                    in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
+                    duration_ms=frame.duration_ms,
+                    peak_rss_bytes=frame.peak_rss_bytes,
+                    abort_on_failure=True,
+                )
+            )
+            published(kind, state)
+        else:
+            raise TypeError("unknown_mesh_basic_output")
+
     try:
         with ExitStack() as stack:
             claim = CapacityManager(get_session_factory()).reserve(
@@ -298,107 +399,77 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 ThumbnailRequest(
                     path=source,
                     file_type=file_row.file_type.value,
-                    include_geometry=DerivativeKind.METADATA in needed,
-                    include_thumbnail=DerivativeKind.THUMBNAIL in needed,
+                    include_geometry=DerivativeKind.METADATA in attempts,
+                    include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
                     reason="derivative",
                     output_format="WEBP",
-                    include_fingerprint=bool(options.get("include_fingerprint")),
-                    triangle_cap=int(options.get("triangle_cap") or MAX_ANALYSIS_FACES),
-                )
+                    include_fingerprint=plan is not None
+                    and (DerivativeKind.METADATA in attempts or pending is not None),
+                    triangle_cap=plan.triangle_cap
+                    if plan is not None
+                    else MAX_ANALYSIS_FACES,
+                ),
+                on_output=publish,
             )
-    except ArtifactContentError:
-        for kind in needed:
-            _fail(attempts[kind], "invalid_source", deterministic=False)
-            outcome[kind] = DerivativeState.FAILED
+            if result.fingerprint_result is not None:
+                if pending is None:
+                    raise RuntimeError("fingerprint_completion_without_pending_input")
+                try:
+                    with get_session_factory().scoped_session() as session:
+                        mesh_continuations.complete(
+                            session, pending, result.fingerprint_result
+                        )
+                        session.commit()
+                except records.AttemptSuperseded:
+                    raise
+                except Exception:  # noqa: BLE001 - basics are already durable
+                    logger.exception(
+                        "fingerprint publication failed", extra={"file_id": file_id}
+                    )
+                    with get_session_factory().scoped_session() as session:
+                        mesh_continuations.defer(
+                            session, pending, FingerprintFailureCode.WORKER_FAILED
+                        )
+                        session.commit()
+    except records.AttemptSuperseded:
         return Outcome(outcome)
-    except mesh_isolation.MeshWorkerError as exc:
-        # The child died or was killed for this Artifact's bytes; the API did not.
-        # A file over the memory budget is terminal (retrying repeats the kill);
-        # other worker failures keep the bounded retry.
-        reason = exc.reason.value
+    except (ArtifactContentError, MeshWorkerError) as exc:
+        reason = (
+            exc.reason.value if isinstance(exc, MeshWorkerError) else "invalid_source"
+        )
         logger.warning(
             "mesh derivation failed in its worker",
             extra={"file_id": file_id, "reason": reason},
         )
-        for kind in needed:
-            _fail(
-                attempts[kind],
-                reason,
-                deterministic=reason in _DETERMINISTIC,
-            )
-            outcome[kind] = DerivativeState.FAILED
-        return Outcome(outcome)
-    duration_ms = int((time.monotonic() - started) * 1000)
-
-    if DerivativeKind.METADATA in needed:
-        if isinstance(result.geometry_outcome, GeometryRefused):
-            reason = result.geometry_outcome.reason.value
-            _fail(
-                attempts[DerivativeKind.METADATA],
-                reason,
-                deterministic=reason in _DETERMINISTIC,
-                duration_ms=result.duration_ms,
-                peak_rss_bytes=result.peak_rss_bytes,
-                withdraw_geometry=result.geometry_outcome.reason
-                is ThumbnailFailureReason.UNSUPPORTED_CAPABILITY,
-            )
-            outcome[DerivativeKind.METADATA] = DerivativeState.FAILED
-        elif isinstance(result.geometry_outcome, GeometryReady):
-            with get_session_factory().scoped_session() as session:
-                records.mark_ready(
-                    session,
-                    attempts[DerivativeKind.METADATA],
-                    now=utcnow(),
-                    output={"triangle_count": result.geometry.get("triangle_count")},
-                    duration_ms=duration_ms,
-                    peak_rss_bytes=result.peak_rss_bytes,
-                )
-                meta = _metadata_row(session, file_id)
-                _apply_measurements(
-                    meta, MeshMeasurements(result.geometry, result.volume)
-                )
-                session.add(meta)
-                session.commit()
-            outcome[DerivativeKind.METADATA] = DerivativeState.READY
-        else:
-            raise RuntimeError("metadata requested without geometry outcome")
-        if result.fingerprint_result is not None:
+        for kind, authority in attempts.items():
+            if kind in outcome:
+                continue
             try:
-                after_commit(
-                    get_session_factory(),
-                    file_id,
-                    None,
-                    result.fingerprint_result,
-                    source_sha256=file_row.sha256,
-                    execution=execution,
+                _fail(
+                    authority,
+                    reason,
+                    deterministic=isinstance(exc, MeshWorkerError)
+                    and reason in _DETERMINISTIC,
                 )
-            except Exception:  # noqa: BLE001 - similarity evidence is re-derivable
-                logger.warning(
-                    "fingerprint publication failed", extra={"file_id": file_id}
-                )
-
-    try:
-        if DerivativeKind.THUMBNAIL in needed:
-            if result.image is None:
-                outcome[DerivativeKind.THUMBNAIL] = _thumbnail_failure(
-                    attempts[DerivativeKind.THUMBNAIL],
-                    result.failure_reason.value if result.failure_reason else None,
-                )
-            else:
-                outcome[DerivativeKind.THUMBNAIL] = _publish_thumbnail(
-                    file_row,
-                    result.image,
-                    attempt=attempts[DerivativeKind.THUMBNAIL],
-                    normalize=True,
-                    strategy=result.strategy.value,
-                    complete=result.coverage.preview
-                    in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
-                    duration_ms=duration_ms,
-                    peak_rss_bytes=result.peak_rss_bytes,
-                )
-    except records.AttemptSuperseded:
-        # Earlier kinds committed independently and still deserve their notice.
-        pass
+            except records.AttemptSuperseded:
+                break
+            published(kind, DerivativeState.FAILED)
+        if pending is not None:
+            failure_code = (
+                FingerprintFailureCode.TIMEOUT
+                if reason == ThumbnailFailureReason.TIMEOUT.value
+                else FingerprintFailureCode.RESOURCE_LIMIT
+                if reason == ThumbnailFailureReason.RESOURCE_LIMIT.value
+                else FingerprintFailureCode.SOURCE_UNAVAILABLE
+                if isinstance(exc, ArtifactContentError)
+                else FingerprintFailureCode.WORKER_FAILED
+            )
+            try:
+                with get_session_factory().scoped_session() as session:
+                    mesh_continuations.defer(session, pending, failure_code)
+                    session.commit()
+            except records.AttemptSuperseded:
+                pass
     return Outcome(outcome)
 
 
@@ -600,7 +671,13 @@ def _announced(produce):
     return run
 
 
-derive_mesh = _announced(_derive_mesh)
+def derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
+    try:
+        return _derive_mesh(file_id, execution=execution)
+    except records.AttemptSuperseded:
+        return Outcome({})
+
+
 derive_gcode = _announced(_derive_gcode)
 derive_toolpath = _announced(_derive_toolpath)
 

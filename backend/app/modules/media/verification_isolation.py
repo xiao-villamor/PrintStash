@@ -26,10 +26,9 @@ from app.modules.media.geometry_analysis import MAX_VERIFICATION_SECONDS
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import (
     MeshWorkerError,
-    pack_value,
     raise_reported_error,
-    unpack_value,
 )
+from app.modules.media.mesh_wire_values import pack_value, unpack_value
 
 EVIDENCE_MAGIC = b"VRF1"
 

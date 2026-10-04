@@ -157,7 +157,12 @@ class TestQuickGate:
 
     def test_keeps_required_check_present_on_every_pr(self) -> None:
         workflow = _workflow("ci.yml")
-        assert set(workflow[True]) == {"pull_request", "push", "merge_group", "workflow_dispatch"}
+        assert set(workflow[True]) == {
+            "pull_request",
+            "push",
+            "merge_group",
+            "workflow_dispatch",
+        }
         assert workflow[True]["pull_request"] is None
         assert workflow["env"]["OPENBLAS_NUM_THREADS"] == "1"
         assert "gate" in workflow["jobs"]
@@ -305,13 +310,8 @@ class TestDeepSuite:
             for step in steps
             if step.get("name") == "Coverage gate for the autonomous package"
         )
-        assert (
-            regular["if"] == "matrix.python != '3.11' || matrix.resolution != 'highest'"
-        )
-        assert (
-            coverage["if"]
-            == "matrix.python == '3.11' && matrix.resolution == 'highest'"
-        )
+        assert regular["if"] == "matrix.resolution != 'highest'"
+        assert coverage["if"] == "matrix.resolution == 'highest'"
 
 
 class TestPublicationGuards:

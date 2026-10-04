@@ -66,6 +66,10 @@ def _hooks(derivative_group: DerivativeGroup):
     def cancel(session: Session, subject_key: str) -> None:
         file_row = _file(session, subject_key)
         if file_row is not None:
+            if derivative_group.definition is JobKind.DERIVATIVES_MESH:
+                from .mesh_continuations import withdraw_current_job
+
+                withdraw_current_job(session, file_id_of(subject_key))
             records.cancel(session, file_row, derivative_group.kinds, now=utcnow())
 
     def on_failure(session: Session, subject_key: str, reason: str) -> None:

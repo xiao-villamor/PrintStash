@@ -14,7 +14,7 @@ import hashlib
 import json
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from sqlmodel import Session
@@ -70,6 +70,9 @@ from app.db.models import (
 )
 from app.modules.storage.storage_identity import StorageTargetIdentity
 from tests.factories._support import nth, reject_aliases, save, unique_hash
+
+if TYPE_CHECKING:
+    from app.db.models import MeshFingerprintContinuation
 
 
 def build_failure_domain_declaration(
@@ -736,3 +739,31 @@ def build_job_context(job_id: str):
         )
     _begin(job_id, attempt, context.execution_epoch)
     return context
+
+
+def build_mesh_continuation(
+    session: Session, file: File, *, job: Job | None = None, **overrides: Any
+) -> MeshFingerprintContinuation:
+    """Durable mesh analysis input, separate from completed basic outputs."""
+    from app.core.config import settings
+    from app.db.models import MeshFingerprintContinuation
+    from app.modules.derivatives.kinds import recipes_for
+    from app.modules.derivatives.mesh_continuation_values import encode_source
+    from app.modules.derivatives.records import ArtifactSource
+    from app.modules.media.fingerprints import ALGORITHM_VERSION
+
+    assert file.id is not None
+    reject_aliases(overrides, {"file_id": "file"})
+    overrides.setdefault("token", str(uuid4()))
+    overrides.setdefault("source_sha256", file.sha256)
+    overrides.setdefault("metadata_recipe", recipes_for(file)[DerivativeKind.METADATA])
+    overrides.setdefault("algorithm_version", ALGORITHM_VERSION)
+    overrides.setdefault("triangle_cap", settings.similarity_triangle_cap)
+    overrides.setdefault("source_identity_json", encode_source(ArtifactSource.of(file)))
+    overrides.setdefault("regenerated_at", None)
+    overrides.setdefault("job_id", None if job is None else job.id)
+    overrides.setdefault(
+        "execution_epoch", None if job is None else job.execution_epoch
+    )
+    overrides.setdefault("job_attempt", None if job is None else job.attempts)
+    return save(session, MeshFingerprintContinuation(file_id=file.id, **overrides))

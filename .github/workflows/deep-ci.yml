@@ -45,7 +45,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.8"
       - name: Install corpus factories
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -93,7 +93,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.8"
       - name: Install full native dependencies
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -126,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.13"]
+        python: ["3.14.8"]
         resolution: ["lowest-direct", "highest"]
     defaults:
       run:
@@ -153,7 +153,7 @@ jobs:
             --editable ".[dev,mesh,printers-all,testkit]"
 
       - name: Test autonomous package
-        if: matrix.python != '3.11' || matrix.resolution != 'highest'
+        if: matrix.resolution != 'highest'
         run: .venv/bin/pytest tests -q -m "not coverage_gate"
 
       # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
@@ -161,7 +161,7 @@ jobs:
       # that pass — hence two invocations rather than `--cov-fail-under`, which can
       # only check the aggregate.
       - name: Coverage gate for the autonomous package
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        if: matrix.resolution == 'highest'
         # `uv pip install --python .venv/...` rather than `.venv/bin/pip`: the
         # venv is created by `uv venv`, which does not install pip into it, so
         # calling it directly exits 127 and this gate never ran.
@@ -178,7 +178,7 @@ jobs:
         run: .venv/bin/pyright -p pyproject.toml
 
       - name: Verify generated frontend contract
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        if: matrix.resolution == 'highest'
         run: >-
           .venv/bin/python -m printstash_core.printers.codegen
           --output ../../../frontend/src/generated/printer-contracts.ts --check
@@ -201,7 +201,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
@@ -252,7 +252,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
@@ -266,8 +266,8 @@ jobs:
           -vv -s --durations=0 -o faulthandler_timeout=120
           -k "${{ matrix.test }} and ${{ matrix.reader }}"
 
-  backend-python313:
-    name: Backend compatibility (Python 3.13)
+  backend-python314:
+    name: Backend compatibility (Python 3.14.8)
     runs-on: ubuntu-latest
     # The full lane includes a serial container-contract pass after the ordinary
     # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
@@ -287,14 +287,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
 
       - name: Run backend compatibility suite
         run: ./scripts/test.sh full -q
-
   frontend-coverage:
     name: Frontend branch coverage
     runs-on: ubuntu-latest
@@ -359,7 +358,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -450,7 +449,7 @@ jobs:
       - name: Set up Python for capture boundary
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies for capture boundary
         working-directory: backend

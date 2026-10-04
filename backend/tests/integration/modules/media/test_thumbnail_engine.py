@@ -401,7 +401,7 @@ class TestThumbnailEngine:
         assert isinstance(result.geometry_outcome, GeometryReady)
 
     @pytest.mark.parametrize("sampled", [False, True])
-    def test_releases_analysis_buffers_before_streaming(
+    def test_releases_analysis_buffers_after_streaming(
         self, cube, monkeypatch, sampled
     ):
         references = []
@@ -434,8 +434,9 @@ class TestThumbnailEngine:
             return extract(prepared)
 
         def observe_stream(*args, **kwargs):
-            assert reclaims == [True]
-            lifetimes.append(tuple(reference() is None for reference in references))
+            assert reclaims == ([True] if not sampled else [])
+            assert references == []
+            lifetimes.append("streaming")
             return stream(*args, **kwargs)
 
         monkeypatch.setattr(thumbnail_engine, "extract", observe_extract)
@@ -461,8 +462,9 @@ class TestThumbnailEngine:
             FingerprintResultState.PARTIAL if sampled else FingerprintResultState.READY
         )
         assert references
-        assert lifetimes == [(True,) * len(references)]
-        assert reclaims == [True]
+        assert lifetimes == ["streaming"]
+        assert all(reference() is None for reference in references)
+        assert reclaims == ([True, True] if not sampled else [True])
 
     def test_analysis_budget_is_independent_of_scene_render_budget(
         self, tmp_path, monkeypatch
@@ -496,7 +498,7 @@ class TestThumbnailEngine:
         assert calls == [True]
 
     @pytest.mark.parametrize("error", [ValueError, MemoryError])
-    def test_releases_failed_sample_buffers_before_streaming(
+    def test_releases_failed_sample_buffers_after_streaming(
         self, cube, monkeypatch, error
     ):
         references = []
@@ -516,8 +518,9 @@ class TestThumbnailEngine:
             raise error("sample construction failed")
 
         def observe_stream(*args, **kwargs):
-            assert reclaims == [True]
-            lifetimes.append(tuple(reference() is None for reference in references))
+            assert reclaims == ([])
+            assert references == []
+            lifetimes.append("streaming")
             return stream(*args, **kwargs)
 
         monkeypatch.setattr(mesh_policy, "exceeds_cap", lambda *args, **kwargs: True)
@@ -536,10 +539,11 @@ class TestThumbnailEngine:
         assert result.strategy is ThumbnailStrategy.STREAMING
         assert result.fingerprint_result.failure_code == "analysis_failed"
         assert references
-        assert lifetimes == [(True, True)]
-        assert reclaims == [True]
+        assert lifetimes == ["streaming"]
+        assert all(reference() is None for reference in references)
+        assert reclaims == ([True])
 
-    def test_releases_failed_preparation_buffers_before_streaming(
+    def test_releases_failed_preparation_buffers_after_streaming(
         self, cube, monkeypatch
     ):
         references = []
@@ -566,8 +570,9 @@ class TestThumbnailEngine:
             raise ValueError("preparation failed")
 
         def observe_stream(*args, **kwargs):
-            assert reclaims == [True]
-            lifetimes.append(tuple(reference() is None for reference in references))
+            assert reclaims == ([True])
+            assert references == []
+            lifetimes.append("streaming")
             return stream(*args, **kwargs)
 
         monkeypatch.setattr(thumbnail_engine, "prepare_loaded_mesh", fail_preparation)
@@ -590,8 +595,9 @@ class TestThumbnailEngine:
         assert result.strategy is ThumbnailStrategy.STREAMING
         assert result.fingerprint_result.failure_code == "analysis_failed"
         assert references
-        assert lifetimes == [(True,) * len(references)]
-        assert reclaims == [True]
+        assert lifetimes == ["streaming"]
+        assert all(reference() is None for reference in references)
+        assert reclaims == ([True, True])
 
 
 class TestUnreferencedVertices:
@@ -1151,8 +1157,9 @@ class TestRetainedThreeMFScene:
         assert result.image is not None
 
     @pytest.mark.parametrize("fingerprint", [False, True])
+    @pytest.mark.parametrize("thumbnail", [False, True])
     def test_preserves_volume_when_halves_close_after_whole_scene_welding(
-        self, tmp_path, monkeypatch, fingerprint
+        self, tmp_path, monkeypatch, fingerprint, thumbnail
     ):
         tetra = tetrahedron()
         half_a = trimesh.Trimesh(
@@ -1166,19 +1173,65 @@ class TestRetainedThreeMFScene:
             three_mf(meshes={1: half_a, 2: half_b}, build=((1, None), (2, None)))
         )
 
+        baseline = ThumbnailEngine().generate(
+            ThumbnailRequest(
+                path, include_thumbnail=thumbnail, include_fingerprint=fingerprint
+            )
+        )
         calls = []
+        mesh_refs = []
+        detached_refs = []
         materialize = mesh_resources.materialize_scene
+        detach = getattr(mesh_resources, "detach_scene_mesh", None)
+        extract = thumbnail_engine.extract
+        render = thumbnail_engine.mesh_render.render_scene_thumbnail
+
+        def retain(prepared, **kwargs):
+            assert detach is not None
+            detached = detach(prepared, **kwargs)
+            detached_refs.extend(
+                (weakref.ref(detached.vertices), weakref.ref(detached.faces))
+            )
+            assert np.shares_memory(detached.vertices, prepared.whole_mesh.vertices)
+            assert np.shares_memory(detached.faces, prepared.whole_mesh.faces)
+            return detached
+
+        def preview(*args, **kwargs):
+            assert calls == [True]
+            assert all(reference() is None for reference in mesh_refs)
+            if fingerprint:
+                assert len(detached_refs) == 2
+                assert all(reference() is not None for reference in detached_refs)
+            else:
+                assert detached_refs == []
+            return render(*args, **kwargs)
+
+        def fingerprint_mesh(prepared):
+            if thumbnail:
+                assert len(detached_refs) == 2
+                assert np.shares_memory(
+                    prepared.whole_mesh.vertices, detached_refs[0]()
+                )
+                assert np.shares_memory(prepared.whole_mesh.faces, detached_refs[1]())
+            return extract(prepared)
 
         def construct(scene):
             calls.append(True)
-            return materialize(scene)
+            prepared = materialize(scene)
+            mesh_refs.append(weakref.ref(prepared.whole_mesh))
+            return prepared
 
         monkeypatch.setattr(mesh_resources, "materialize_scene", construct)
+        monkeypatch.setattr(mesh_resources, "detach_scene_mesh", retain, raising=False)
+        monkeypatch.setattr(
+            thumbnail_engine.mesh_render, "render_scene_thumbnail", preview
+        )
+        monkeypatch.setattr(thumbnail_engine, "extract", fingerprint_mesh)
         result = ThumbnailEngine().generate(
             ThumbnailRequest(
                 path,
                 include_geometry=True,
-                include_thumbnail=False,
+                include_thumbnail=thumbnail,
                 include_fingerprint=fingerprint,
             )
         )
@@ -1195,6 +1248,10 @@ class TestRetainedThreeMFScene:
         assert result.volume == VolumeMeasured(1000.0)
         assert isinstance(result.coverage.geometry, CompleteGeometry)
         assert calls == [True]
+        assert result.image == baseline.image
+        assert result.fingerprint_result == baseline.fingerprint_result
+        assert all(reference() is None for reference in mesh_refs)
+        assert all(reference() is None for reference in detached_refs)
         if fingerprint:
             assert result.fingerprint_result is not None
             assert result.fingerprint_result.state is FingerprintResultState.READY
@@ -1317,7 +1374,7 @@ class TestRetainedThreeMFScene:
             pytest.param(True, id="with-fingerprint"),
         ],
     )
-    def test_releases_materialized_fingerprint_before_scene_render(
+    def test_releases_analysis_buffers_in_stage_order(
         self, tmp_path, monkeypatch, include_fingerprint
     ):
         from app.modules.media import mesh_render
@@ -1325,6 +1382,8 @@ class TestRetainedThreeMFScene:
         path = tmp_path / "lifetime.3mf"
         path.write_bytes(three_mf())
         meshes = []
+        stages = []
+        extract = thumbnail_engine.extract
         constructor = trimesh.Trimesh.__init__
         render = mesh_render.render_scene_thumbnail
 
@@ -1333,12 +1392,19 @@ class TestRetainedThreeMFScene:
             meshes.append(weakref.ref(mesh))
 
         def check_scene(scene, *args, **kwargs):
-            assert len(meshes) >= 1 + int(include_fingerprint)
+            assert len(meshes) == 1
             assert all(reference() is None for reference in meshes)
+            stages.append("render")
             return render(scene, *args, **kwargs)
+
+        def check_fingerprint(prepared):
+            assert stages == ["render"]
+            stages.append("fingerprint")
+            return extract(prepared)
 
         monkeypatch.setattr(trimesh.Trimesh, "__init__", construct)
         monkeypatch.setattr(mesh_render, "render_scene_thumbnail", check_scene)
+        monkeypatch.setattr(thumbnail_engine, "extract", check_fingerprint)
         result = ThumbnailEngine().generate(
             ThumbnailRequest(
                 path,
@@ -1357,6 +1423,8 @@ class TestRetainedThreeMFScene:
         assert result.geometry["volume_mm3"] == 1000.0
         assert result.volume == VolumeMeasured(1000.0)
         assert result.image is not None
+        assert stages == ["render"] + (["fingerprint"] if include_fingerprint else [])
+        assert len(meshes) >= 1 + int(include_fingerprint)
         assert all(reference() is None for reference in meshes)
 
     @pytest.mark.parametrize("fingerprint", [False, True])

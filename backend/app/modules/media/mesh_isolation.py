@@ -7,8 +7,9 @@ it. In a child the same miss costs one process: the parent watches the child's
 resident memory and a deadline, kills its whole process group when either is
 exceeded, and records a failure for that one Artifact.
 
-The child is `mesh_worker`; it answers with one framed reply that this module
-also encodes and decodes, so the wire format lives in a single place. Nothing here
+The child is `mesh_worker`; it streams validated basic outputs before a terminal
+frame. The staged wire contract lives in `mesh_protocol`; the legacy one-reply
+codec remains here for compatibility. Nothing here
 imports trimesh or NumPy, so the parent stays as small as before.
 """
 
@@ -26,9 +27,9 @@ import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import tempfile
 import time
 from contextlib import ExitStack
-from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from threading import Event, Lock, Thread
+from typing import Any, Callable, Final
 
 from printstash_core.mesh.measurements import decode_volume, encode_volume
 from printstash_core.mesh.similarity import GeometryError
@@ -43,6 +44,8 @@ from app.modules.media.fingerprints import (
     FingerprintResultState,
 )
 from app.modules.media.mesh_contracts import (
+    GeometryNotRequested,
+    MeshMeasurements,
     ThumbnailFailureReason,
     ThumbnailRequest,
     ThumbnailResult,
@@ -54,6 +57,13 @@ from app.modules.media.mesh_contracts import (
 )
 from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.mesh_observability import record_phases, record_supervision
+from app.modules.media.mesh_protocol import (
+    FrameDecoder,
+    GeometryOutput,
+    MeshProtocolError,
+    OutputSink,
+    ThumbnailOutput,
+)
 from app.modules.media.mesh_telemetry import (
     SupervisedReply,
     SupervisionStats,
@@ -246,13 +256,104 @@ def decode_reply(payload: bytes) -> ThumbnailResult:
         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
 
 
+class _CallbackWatchdog:
+    """Bound native activity while a synchronous publication callback blocks.
+
+    The monitor has no cancellation probe or application/database context. Main
+    thread polling/reaping shares the lifecycle lock: the monitor cannot signal
+    a process group after its root PID has been reaped and reused. Cancellation
+    and publication callbacks remain cooperative on the calling thread.
+    """
+
+    def __init__(self, pid: int, deadline: float, memory_budget: int) -> None:
+        self.pid: Final[int] = pid
+        self.deadline: Final[float] = deadline
+        self.memory_budget: Final[int] = memory_budget
+        self.stopped = Event()
+        self.lifecycle = Lock()
+        self.failure: WorkerExitCause | None = None
+        self.peak_rss: int | None = None
+        self.thread = Thread(
+            target=self._monitor, name="mesh-output-watchdog", daemon=True
+        )
+
+    def _monitor(self) -> None:
+        while not self.stopped.is_set():
+            # Sampling outside the lifecycle lock lets cleanup withdraw the
+            # monitor even if a filesystem read is delayed. Check withdrawal
+            # again under the lock before recording a cause or signalling.
+            rss = mesh_policy.process_tree_rss_bytes(self.pid)
+            with self.lifecycle:
+                if self.stopped.is_set():
+                    return
+                if rss is not None:
+                    self.peak_rss = (
+                        rss if self.peak_rss is None else max(self.peak_rss, rss)
+                    )
+                cause = (
+                    WorkerExitCause.DEADLINE
+                    if time.monotonic() >= self.deadline
+                    else WorkerExitCause.MEMORY_LIMIT
+                    if rss is not None and rss > self.memory_budget
+                    else None
+                )
+                if cause is not None:
+                    self.failure = cause
+                    try:
+                        os.killpg(self.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except OSError:
+                        self.failure = WorkerExitCause.SUPERVISION_FAILED
+                    return
+            self.stopped.wait(_POLL_SECONDS)
+
+    def failure_cause(self) -> WorkerExitCause | None:
+        with self.lifecycle:
+            return self.failure
+
+    def poll(self, process: subprocess.Popen[bytes]) -> int | None:
+        with self.lifecycle:
+            code = process.poll()
+            if code is not None:
+                self.stopped.set()
+            return code
+
+    def close(self) -> None:
+        self.stopped.set()
+        # A signal already in progress finishes before the caller reaps/reuses
+        # the PID. A late sample observes withdrawal and never signals.
+        with self.lifecycle:
+            pass
+        # Startup may fail before launch or be interrupted immediately after
+        # launch. Withdrawal is always safe; joining a never-started thread is not.
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+
+
+def _watchdog_error(cause: WorkerExitCause) -> MeshWorkerError:
+    return MeshWorkerError(
+        ThumbnailFailureReason.TIMEOUT
+        if cause is WorkerExitCause.DEADLINE
+        else ThumbnailFailureReason.RESOURCE_LIMIT
+        if cause is WorkerExitCause.MEMORY_LIMIT
+        else ThumbnailFailureReason.WORKER_FAILED
+    )
+
+
 def supervise_result(
-    command: list[str], *, memory_budget: int, timeout_seconds: float
+    command: list[str],
+    *,
+    memory_budget: int,
+    timeout_seconds: float,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> SupervisedReply:
     """Own the process lifecycle and retain observed costs on every exit.
 
     Tree RSS is sampled, not a kernel high-water mark. None means no sample was
-    available. The one terminal frame provides no phase attribution on a kill.
+    available. Staged callbacks retain an independent deadline/RSS monitor;
+    callbacks themselves and cancellation remain cooperative on this thread.
+    No terminal frame can establish the active phase of a killed child.
     """
     started = time.monotonic_ns()
     execution_id = secrets.token_hex(16)
@@ -262,6 +363,7 @@ def supervise_result(
     error: MeshWorkerError | None = None
     cancelled: OperationCancelled | None = None
     process: subprocess.Popen[bytes] | None = None
+    watchdog: _CallbackWatchdog | None = None
     temporary = tempfile.TemporaryDirectory(prefix="printstash-mesh-")
     try:
         try:
@@ -285,11 +387,20 @@ def supervise_result(
         assert process.stdout is not None
         os.set_blocking(process.stdout.fileno(), False)
         deadline = time.monotonic() + timeout_seconds
+        if on_chunk is not None:
+            watchdog = _CallbackWatchdog(process.pid, deadline, memory_budget)
+            watchdog.thread.start()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             stdout_closed = False
             while True:
                 checkpoint()
+                monitored_cause = (
+                    watchdog.failure_cause() if watchdog is not None else None
+                )
+                if monitored_cause is not None:
+                    cause = monitored_cause
+                    raise _watchdog_error(cause)
                 if time.monotonic() >= deadline:
                     cause = WorkerExitCause.DEADLINE
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
@@ -309,10 +420,34 @@ def supervise_result(
                     if len(reply) > MAX_REPLY_BYTES:
                         cause = WorkerExitCause.REPLY_LIMIT
                         raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
-                if stdout_closed and process.poll() is not None:
-                    break
+                    if on_chunk is not None:
+                        on_chunk(chunk)
+                        checkpoint(force=True)
+                        monitored_cause = (
+                            watchdog.failure_cause() if watchdog is not None else None
+                        )
+                        if monitored_cause is not None:
+                            cause = monitored_cause
+                            raise _watchdog_error(cause)
+                        if time.monotonic() >= deadline:
+                            cause = WorkerExitCause.DEADLINE
+                            raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+                if stdout_closed:
+                    code = (
+                        watchdog.poll(process)
+                        if watchdog is not None
+                        else process.poll()
+                    )
+                    if code is not None:
+                        break
         # EOF only ends the reply: native work may continue after closing stdout.
         # Polling above keeps resource and cancellation checks active until exit.
+        if watchdog is not None:
+            watchdog.close()
+            monitored_cause = watchdog.failure_cause()
+            if monitored_cause is not None:
+                cause = monitored_cause
+                raise _watchdog_error(cause)
         code = process.wait()
         if code in (-signal.SIGKILL, RESOURCE_EXIT):
             # Preserve the existing refusal classification, without claiming
@@ -342,6 +477,21 @@ def supervise_result(
         error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
         error.__cause__ = exc
     finally:
+        if watchdog is not None:
+            watchdog.close()
+            monitored_cause = watchdog.failure_cause()
+            if (
+                monitored_cause is not None
+                and cause is WorkerExitCause.SUPERVISION_FAILED
+            ):
+                # A callback exception remains the exception propagated to its
+                # owner; observed native termination still keeps its true cost.
+                cause = monitored_cause
+            observed_rss = watchdog.peak_rss
+            if observed_rss is not None:
+                peak_rss = (
+                    observed_rss if peak_rss is None else max(peak_rss, observed_rss)
+                )
         try:
             if process is not None:
                 try:
@@ -433,7 +583,12 @@ def absolute(path: Path) -> str:
     return str(path.absolute())
 
 
-def _run_worker(module: str, spec: dict[str, Any]) -> SupervisedReply:
+def _run_worker(
+    module: str,
+    spec: dict[str, Any],
+    *,
+    on_chunk: Callable[[bytes], None] | None = None,
+) -> SupervisedReply:
     """Run `python -m module` on *spec* under supervision; return its reply.
 
     Every isolated worker starts the same way: it is handed the parent's runtime
@@ -451,6 +606,7 @@ def _run_worker(module: str, spec: dict[str, Any]) -> SupervisedReply:
             command,
             memory_budget=budget,
             timeout_seconds=float(settings.mesh_worker_timeout_seconds),
+            on_chunk=on_chunk,
         )
 
 
@@ -467,8 +623,35 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     return spec
 
 
-def generate(request: ThumbnailRequest) -> ThumbnailResult:
+def generate(
+    request: ThumbnailRequest,
+    *,
+    on_output: OutputSink | None = None,
+) -> ThumbnailResult:
     """`ThumbnailEngine.generate` for *request*, run in a supervised child."""
+    decoder = FrameDecoder(request)
+    geometry_output: GeometryOutput | None = None
+    thumbnail_output: ThumbnailOutput | None = None
+
+    def receive(chunk: bytes) -> None:
+        nonlocal geometry_output, thumbnail_output
+        outputs = iter(decoder.feed(chunk))
+        while True:
+            try:
+                output = next(outputs)
+            except StopIteration:
+                break
+            except MeshProtocolError as exc:
+                raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
+            if isinstance(output, GeometryOutput):
+                geometry_output = output
+            elif isinstance(output, ThumbnailOutput):
+                thumbnail_output = output
+            else:
+                continue
+            if on_output is not None:
+                on_output(output)
+
     spec = {
         "path": absolute(request.path),
         "file_type": request.file_type,
@@ -502,11 +685,46 @@ def generate(request: ThumbnailRequest) -> ThumbnailResult:
                 ],
             )
             resources.callback(reservation.release)
-        reply = _run_worker("app.modules.media.mesh_worker", spec)
+        reply = _run_worker("app.modules.media.mesh_worker", spec, on_chunk=receive)
         try:
-            result = decode_reply(reply.payload)
+            final = decoder.finish()
+            if geometry_output is None:
+                from printstash_core.mesh.measurements import (
+                    VolumeNotCalculated,
+                    VolumeNotCalculatedCause,
+                )
+
+                geometry = MeshMeasurements.unavailable().geometry
+                volume = VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED)
+                outcome = GeometryNotRequested()
+            else:
+                geometry = geometry_output.geometry
+                volume = geometry_output.volume
+                outcome = geometry_output.outcome
+            result = ThumbnailResult(
+                image=thumbnail_output.image if thumbnail_output is not None else None,
+                geometry=geometry,
+                geometry_outcome=outcome,
+                volume=volume,
+                strategy=thumbnail_output.strategy
+                if thumbnail_output is not None
+                else ThumbnailStrategy.NONE,
+                coverage=final.coverage,
+                failure_reason=thumbnail_output.failure_reason
+                if thumbnail_output is not None
+                else None,
+                duration_ms=final.duration_ms,
+                peak_rss_bytes=final.peak_rss_bytes,
+                fingerprint_result=final.fingerprint,
+                phase_stats=final.phase_stats,
+                supervision=reply.stats,
+            )
         except MeshWorkerError as exc:
             exc.supervision = reply.stats
             raise
+        except (ValueError, TypeError, AttributeError) as exc:
+            error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+            error.supervision = reply.stats
+            raise error from exc
         record_phases(result.phase_stats, reply.stats)
-        return replace(result, supervision=reply.stats)
+        return result

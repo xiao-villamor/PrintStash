@@ -893,3 +893,132 @@ class TestMeshFailureRecovery:
             next(row for row in derivatives if row["kind"] == "metadata")["state"]
             == "ready"
         )
+
+
+class TestStagedMeshOutputs:
+    @pytest.mark.asyncio
+    async def test_basic_outputs_are_available_before_fingerprint_finishes(
+        self,
+        api,
+        tmp_path,
+        e2e_db,
+        monkeypatch,
+    ):
+        import asyncio
+        import os
+        import threading
+        import time
+
+        from app.db.session import get_session_factory, override_session_factory
+        from app.modules.media import mesh_isolation
+
+        headers = await _setup_and_login(api, tmp_path)
+        configured = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=headers,
+            json={"enabled": True, "fingerprint_on_ingest": True},
+        )
+        assert configured.status_code == 200, configured.text
+        started = tmp_path / "fingerprint-started"
+        release = tmp_path / "fingerprint-release"
+        worker = tmp_path / "gated_mesh_worker.py"
+        worker.write_text(
+            "import sys,time\n"
+            "from pathlib import Path\n"
+            "from app.modules.media import thumbnail_engine,mesh_worker\n"
+            f"started=Path({str(started)!r}); release=Path({str(release)!r})\n"
+            "extract=thumbnail_engine.extract\n"
+            "def gated(prepared):\n"
+            "    started.write_text('started')\n"
+            "    deadline=time.monotonic()+15\n"
+            "    while not release.exists():\n"
+            "        if time.monotonic()>deadline: raise RuntimeError('test gate deadline')\n"
+            "        time.sleep(0.01)\n"
+            "    return extract(prepared)\n"
+            "thumbnail_engine.extract=gated\n"
+            "raise SystemExit(mesh_worker.main(sys.argv[1:]))\n"
+        )
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path), prepend=os.pathsep)
+        launch = mesh_isolation.worker_command
+
+        def gated_command(module, argv, budget):
+            if module == "app.modules.media.mesh_worker":
+                return launch("gated_mesh_worker", argv, budget)
+            return launch(module, argv, budget)
+
+        monkeypatch.setattr(mesh_isolation, "worker_command", gated_command)
+        payload = three_mf()
+        response = await api.post(
+            "/api/v1/ingest/model",
+            headers=headers,
+            files={"file": ("early.3mf", payload, "application/octet-stream")},
+            data={"model_name": "Early mesh outputs"},
+        )
+        assert response.status_code == 202, response.text
+        sessions = get_session_factory()
+        failures = []
+
+        def drain():
+            # A factory crosses this boundary; each operation opens its own Session.
+            override_session_factory(sessions)
+            try:
+                settle()
+            except BaseException as exc:
+                failures.append(exc)
+
+        thread = threading.Thread(target=drain, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 12
+            while not started.exists() and not failures and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert started.exists(), failures
+            job = await api.get(
+                f"/api/v1/jobs/{response.json()['job_id']}", headers=headers
+            )
+            assert job.status_code == 200, job.text
+            file_id = job.json()["file_id"]
+            publication_deadline = time.monotonic() + 5
+            while True:
+                assert thread.is_alive() and not release.exists()
+                derivatives = await api.get(
+                    f"/api/v1/files/{file_id}/derivatives", headers=headers
+                )
+                assert derivatives.status_code == 200, derivatives.text
+                states = {row["kind"]: row["state"] for row in derivatives.json()}
+                if states["metadata"] == states["thumbnail"] == "ready":
+                    break
+                assert time.monotonic() < publication_deadline, states
+                await asyncio.sleep(0.02)
+            assert states["metadata"] == states["thumbnail"] == "ready"
+            model = await api.get(
+                f"/api/v1/models/{job.json()['model_id']}", headers=headers
+            )
+            assert model.status_code == 200, model.text
+            assert any(file["id"] == file_id for file in model.json()["files"])
+            image = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+            assert image.status_code == 200 and image.content
+            original = await api.get(
+                f"/api/v1/files/{file_id}/download", headers=headers
+            )
+            assert original.status_code == 200 and original.content == payload
+            e2e_db.expire_all()
+            assert (
+                e2e_db.exec(
+                    select(GeometryFingerprint).where(
+                        GeometryFingerprint.file_id == file_id
+                    )
+                ).all()
+                == []
+            )
+            assert thread.is_alive() and not release.exists()
+        finally:
+            release.touch()
+            thread.join(timeout=20)
+        assert not thread.is_alive(), "gated child did not finish/reap"
+        assert failures == []
+        e2e_db.expire_all()
+        fingerprints = e2e_db.exec(
+            select(GeometryFingerprint).where(GeometryFingerprint.file_id == file_id)
+        ).all()
+        assert fingerprints and all(row.state == "ready" for row in fingerprints)

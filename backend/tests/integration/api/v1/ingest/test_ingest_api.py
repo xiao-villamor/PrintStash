@@ -697,34 +697,48 @@ class TestIngestModel:
             ThumbnailResult,
             ThumbnailStrategy,
         )
+        from app.modules.media.mesh_protocol import ThumbnailOutput
 
-        # Mesh derivatives run in a worker process that a patch here cannot
-        # reach, so the stand-in replaces the seam the producer calls.
-        monkeypatch.setattr(
-            producers.mesh_isolation,
-            "generate",
-            lambda _request: ThumbnailResult(
-                image=replacement,
-                geometry_outcome=GeometryNotRequested(),
-                volume=VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
-                geometry={
-                    "bbox_x_mm": None,
-                    "bbox_y_mm": None,
-                    "bbox_z_mm": None,
-                    "volume_mm3": None,
-                    "triangle_count": None,
-                },
-                strategy=ThumbnailStrategy.FULL,
-                coverage=MeshCoverage(
-                    SourceScanState.COMPLETE,
-                    GeometryNotLoaded(),
-                    PreviewCoverage.COMPLETE,
-                ),
-                failure_reason=None,
-                duration_ms=0,
-                peak_rss_bytes=None,
+        # Replace the native boundary while preserving its publication callback.
+        reply = ThumbnailResult(
+            image=replacement,
+            geometry_outcome=GeometryNotRequested(),
+            volume=VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+            geometry={
+                "bbox_x_mm": None,
+                "bbox_y_mm": None,
+                "bbox_z_mm": None,
+                "volume_mm3": None,
+                "triangle_count": None,
+            },
+            strategy=ThumbnailStrategy.FULL,
+            coverage=MeshCoverage(
+                SourceScanState.COMPLETE,
+                GeometryNotLoaded(),
+                PreviewCoverage.COMPLETE,
             ),
+            failure_reason=None,
+            duration_ms=0,
+            peak_rss_bytes=None,
         )
+        emitted = []
+
+        def replacement_thumbnail(request, *, on_output):
+            assert request.include_thumbnail
+            assert not request.include_geometry
+            frame = ThumbnailOutput(
+                reply.image,
+                reply.strategy,
+                reply.coverage,
+                reply.failure_reason,
+                reply.duration_ms,
+                reply.peak_rss_bytes,
+            )
+            on_output(frame)
+            emitted.append(frame)
+            return reply
+
+        monkeypatch.setattr(producers.mesh_isolation, "generate", replacement_thumbnail)
 
         response = client.post(
             "/api/v1/admin/work/derivatives/thumbnail/regenerate",
@@ -735,6 +749,8 @@ class TestIngestModel:
         assert response.status_code == 202, response.text
         drain_work()
         db_session.expire_all()
+        assert len(emitted) == 1
+        assert emitted[0].image == replacement
         assert db_session.get(Model, model_id).thumbnail_file_id == file_id
 
         thumbnail = client.get(

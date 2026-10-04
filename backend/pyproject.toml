@@ -2,7 +2,7 @@
 name = "printstash"
 version = "0.14.0"
 description = "PrintStash — self-hosted 3D printing asset manager"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "printstash-core[mesh,network,printers-all]",
     "cryptography>=50,<51",
@@ -20,11 +20,11 @@ dependencies = [
     # the async DB capability is present on every platform we support.
     "greenlet>=3.5,<4",
     "httpx>=0.28,<0.29",
-    "lxml>=6.1,<7",
+    "lxml>=6.1.3,<7",
     "networkx>=3.6,<4",
-    "numpy>=2,<3",
+    "numpy>=2.5.3,<3",
     "orjson>=3.11,<4",
-    "pillow>=12.3,<13",
+    "pillow>=12.3.0,<13",
     "prometheus-client>=0.26,<1",
     "pydantic>=2.13,<3",
     "pydantic-settings>=2.15,<3",
@@ -35,7 +35,7 @@ dependencies = [
     "SQLAlchemy>=2.0.52,<2.1",
     "sqlmodel>=0.0.39,<0.1",
     "starlette>=1.6,<2",
-    "trimesh>=5,<6",
+    "trimesh>=5.1.1,<6",
     "uvicorn[standard]>=0.52,<1",
     "watchfiles>=1.2,<2",
     "pycentauri==0.9.1",
@@ -130,6 +130,9 @@ markers = [
     # after the measured pass. See scripts/test.sh.
     "coverage_gate: asserts the coverage floors against coverage.json (lane: coverage)",
 ]
+
+[tool.ruff]
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]

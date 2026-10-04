@@ -65,7 +65,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - run: uv sync --extra dev --extra full --frozen
       - name: Verify optional dependency boundary
         if: matrix.suite == 'unit'
@@ -103,9 +103,9 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - run: |
-          uv venv --python 3.11
+          uv venv --python 3.14.8
           uv pip install --python .venv/bin/python --resolution highest --editable ".[dev,mesh,printers-all,testkit]"
       - run: .venv/bin/pytest tests -q -m "not coverage_gate"
       - run: .venv/bin/ruff check src tests
@@ -150,7 +150,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --frozen

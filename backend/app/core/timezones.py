@@ -8,6 +8,6 @@ def timezone_name(value: str) -> str:
         raise ValueError("timezone_invalid")
     try:
         ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         raise ValueError("timezone_invalid") from None
     return value

@@ -26,6 +26,8 @@ from .mesh_facts import (
 )
 
 if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
     from trimesh import Trimesh
 
 
@@ -112,6 +114,78 @@ class PreparedMesh:
         return (
             self.geometry.reason if isinstance(self.geometry, SampledGeometry) else None
         )
+
+
+@dataclass(frozen=True)
+class DetachedSceneMesh:
+    """Admitted placed buffers retained across preview without native caches.
+
+    The whole-scene arrays remain resident until optional analysis completes;
+    source resources and placement identity stay independent from that mesh.
+    """
+
+    vertices: NDArray[np.float64]
+    faces: NDArray[np.int64]
+    scene: ExpandedScene
+    geometry: CompleteGeometry
+    whole_resource_id: str | None
+
+    def __post_init__(self) -> None:
+        import numpy as np
+
+        if (
+            not isinstance(self.vertices, np.ndarray)
+            or not isinstance(self.faces, np.ndarray)
+            or self.vertices.dtype != np.dtype(np.float64)
+            or self.faces.dtype != np.dtype(np.int64)
+            or self.vertices.ndim != 2
+            or self.faces.ndim != 2
+            or self.vertices.shape[1] != 3
+            or self.faces.shape[1] != 3
+            or self.vertices.flags.writeable
+            or self.faces.flags.writeable
+        ):
+            raise ValueError("invalid_detached_scene_buffers")
+        if not isinstance(self.scene, ExpandedScene) or not isinstance(
+            self.geometry, CompleteGeometry
+        ):
+            raise TypeError("invalid_detached_scene_identity")
+
+
+def detach_scene_mesh(
+    prepared: PreparedMesh, *, triangle_cap: int
+) -> DetachedSceneMesh:
+    """Retain admitted arrays, never the Trimesh object or its topology caches."""
+    import numpy as np
+
+    if type(triangle_cap) is not int or not 100 <= triangle_cap <= MAX_ANALYSIS_FACES:
+        raise ValueError("invalid_triangle_cap")
+    if len(prepared.whole_mesh.faces) > triangle_cap:
+        raise GeometryError("geometry_work_limit")
+    if not isinstance(prepared.geometry, CompleteGeometry) or prepared.brep is not None:
+        raise ValueError("invalid_detached_scene_identity")
+    vertices = np.asarray(prepared.whole_mesh.vertices).view()
+    faces = np.asarray(prepared.whole_mesh.faces).view()
+    vertices.flags.writeable = False
+    faces.flags.writeable = False
+    return DetachedSceneMesh(
+        vertices, faces, prepared.scene, prepared.geometry, prepared.whole_resource_id
+    )
+
+
+def restore_scene_mesh(detached: DetachedSceneMesh) -> PreparedMesh:
+    """Wrap retained arrays for analysis without composing the scene again."""
+    import trimesh
+
+    mesh = trimesh.Trimesh(
+        vertices=detached.vertices, faces=detached.faces, process=False
+    )
+    return PreparedMesh(
+        mesh,
+        detached.scene,
+        geometry=detached.geometry,
+        whole_resource_id=detached.whole_resource_id,
+    )
 
 
 def prepare_loaded_mesh(mesh: Trimesh, *, file_type: str) -> PreparedMesh:

@@ -953,3 +953,50 @@ class TestPublicationTransactions:
                 DerivativeState.READY,
                 DerivativeState.READY,
             ]
+
+
+class TestCommittedContext:
+    def test_context_survives_basic_output_commit(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        db_session.commit()
+
+        assert records.require_context(db_session, context).id == mesh.id
+        with pytest.raises(records.AttemptSuperseded):
+            records.claim_running(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )
+
+    @pytest.mark.parametrize("changed", ["source", "generation"])
+    def test_committed_context_rejects_replaced_input(self, db_session, mesh, changed):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        if changed == "source":
+            mesh.source_etag = "new-source"
+            db_session.add(mesh)
+        else:
+            db_session.add(
+                DerivativeRegeneration(
+                    kind=DerivativeKind.METADATA, requested_at=utcnow()
+                )
+            )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.require_context(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )

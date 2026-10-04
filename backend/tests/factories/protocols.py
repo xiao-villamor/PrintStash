@@ -52,6 +52,7 @@ from app.db.models import (
     Job,
     JobKind,
     JobState,
+    MeshFingerprintContinuation,
     Metadata,
     Model,
     ModelProvenanceSource,
@@ -387,6 +388,12 @@ class MakeDerivative(Protocol):
         exhausted: bool = False,
         **overrides: Any,
     ) -> ArtifactDerivative: ...
+
+
+class MakeMeshContinuation(Protocol):
+    def __call__(
+        self, file: File, *, job: Job | None = None, **overrides: Any
+    ) -> MeshFingerprintContinuation: ...
 
 
 class MakeWorkFence(Protocol):

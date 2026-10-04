@@ -24,6 +24,8 @@ from app import __file__ as application_file
 from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.modules.media.stl_reader import STLMeasurements
+from app.modules.media.worker_bootstrap import WORKER_MARKER
 
 logger = get_logger(__name__)
 
@@ -269,8 +271,16 @@ def render_stl_preview_isolated(
     width: int = 640,
     height: int = 480,
     limits: STLStreamingLimits | None = None,
+    measurements: STLMeasurements | None = None,
 ) -> STLStreamingResult | None:
-    """Render *path* in a disposable worker with bounded memory and CPU."""
+    """Render *path* in a disposable worker with bounded memory and CPU.
+
+    An outer native worker may reuse its exact scan for the render pass. That
+    hint remains in-process; standalone callers retain the original two passes.
+    """
+    in_worker = os.environ.get(WORKER_MARKER) == str(os.getpid())
+    if measurements is not None and not in_worker:
+        raise ValueError("measurements require an owned worker")
 
     if not (1 <= int(width) <= _MAX_RENDER_DIMENSION) or not (
         1 <= int(height) <= _MAX_RENDER_DIMENSION
@@ -315,15 +325,13 @@ def render_stl_preview_isolated(
             str(int(height)),
             *worker_limits.as_worker_args(expected_parent_pid=os.getpid()),
         ]
-        from app.modules.media.worker_bootstrap import WORKER_MARKER
-
-        if os.environ.get(WORKER_MARKER) == str(os.getpid()):
+        if in_worker:
             # The outer worker already owns a hard ceiling and deadline.
             # Streaming consumes that allowance, rather than spawning a second
             # process with another full allowance.
             from app.modules.media.stl_preview_worker import main
 
-            if main(command[3:], apply_limits=False) != 0:
+            if main(command[3:], apply_limits=False, measurements=measurements) != 0:
                 return None
             return _decode_result(
                 output,

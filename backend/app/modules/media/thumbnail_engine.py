@@ -7,6 +7,7 @@ Artifacts.
 
 from __future__ import annotations
 
+import os
 import resource
 import time
 from dataclasses import dataclass, field
@@ -63,7 +64,14 @@ from app.modules.media.mesh_facts import (
     FingerprintFailureCode,
     SampledGeometry,
 )
+from app.modules.media.mesh_protocol import (
+    BasicOutput,
+    GeometryOutput,
+    OutputSink,
+    ThumbnailOutput,
+)
 from app.modules.media.mesh_resources import (
+    DetachedSceneMesh,
     ExpandedScene,
     PreparedMesh,
     PreparedScene,
@@ -75,8 +83,14 @@ from app.modules.media.mesh_telemetry import (
     PhaseRecorder,
 )
 from app.modules.media.scene_measurements import VolumeTopologyRequired, measure_scene
-from app.modules.media.stl_reader import InvalidSTL, STLReadFailure, scan_stl
+from app.modules.media.stl_reader import (
+    InvalidSTL,
+    STLMeasurements,
+    STLReadFailure,
+    scan_stl,
+)
 from app.modules.media.three_mf_scene import Unsupported3MFCapability, read_scene
+from app.modules.media.worker_bootstrap import WORKER_MARKER
 
 if TYPE_CHECKING:
     from trimesh import Trimesh
@@ -140,11 +154,21 @@ def _prepare_sampled_stl(
     )
 
 
+class _OutputDeliveryError(Exception):
+    """Keep publication failures separate from native resource refusals."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        super().__init__(str(error))
+
+
 @dataclass
 class ThumbnailEngine:
     metrics: ThumbnailMetricsSink = field(default_factory=NoopThumbnailMetrics)
 
-    def generate(self, request: ThumbnailRequest) -> ThumbnailResult:
+    def generate(
+        self, request: ThumbnailRequest, *, on_output: OutputSink | None = None
+    ) -> ThumbnailResult:
         started = time.monotonic()
         phases = PhaseRecorder()
         try:
@@ -173,10 +197,66 @@ class ThumbnailEngine:
         image: bytes | None = None
         mesh: Trimesh | None = None
         prepared: PreparedMesh | None = None
+        detached_prepared: DetachedSceneMesh | None = None
         source_scene: PreparedScene | None = None
         scene_cleanup_pending = False
         fingerprint_result: FingerprintResult | None = None
         sample_buffers_pending = False
+        geometry_emitted = False
+        thumbnail_emitted = False
+        reload_mesh_for_fingerprint = False
+        stl_measurements: STLMeasurements | None = None
+
+        def coverage() -> MeshCoverage:
+            return MeshCoverage(source_scan, geometry_representation, preview_coverage)
+
+        def deliver(output: BasicOutput) -> None:
+            if on_output is not None:
+                try:
+                    on_output(output)
+                except Exception as exc:
+                    raise _OutputDeliveryError(exc) from exc
+
+        def emit_geometry() -> None:
+            nonlocal geometry_emitted, geometry_outcome
+            if not request.include_geometry or geometry_emitted:
+                return
+            if geometry["triangle_count"] is not None:
+                geometry_outcome = GeometryReady()
+            if isinstance(geometry_outcome, GeometryNotRequested):
+                raise ValueError("requested geometry has no outcome")
+            geometry_emitted = True
+            if on_output is not None:
+                deliver(
+                    GeometryOutput(
+                        dict(geometry),
+                        geometry_outcome,
+                        volume,
+                        coverage(),
+                        max(round((time.monotonic() - started) * 1000), 0),
+                        _peak_rss_bytes(),
+                    )
+                )
+
+        def emit_thumbnail() -> None:
+            nonlocal thumbnail_emitted, failure
+            if not request.include_thumbnail or thumbnail_emitted:
+                return
+            emit_geometry()
+            if image is not None:
+                failure = None
+            thumbnail_emitted = True
+            if on_output is not None:
+                deliver(
+                    ThumbnailOutput(
+                        image,
+                        strategy,
+                        coverage(),
+                        failure,
+                        max(round((time.monotonic() - started) * 1000), 0),
+                        _peak_rss_bytes(),
+                    )
+                )
 
         def report(label: str) -> None:
             if request.report is not None:
@@ -340,11 +420,7 @@ class ThumbnailEngine:
                     report("extracting_geometry")
                     if request.include_geometry:
                         phases.start(MeshPhase.MEASUREMENTS)
-                        if (
-                            over_cap
-                            and suffix == ".stl"
-                            and not request.include_thumbnail
-                        ):
+                        if over_cap and suffix == ".stl":
                             try:
                                 measured = scan_stl(request.path)
                             except (InvalidSTL, OSError) as exc:
@@ -355,6 +431,7 @@ class ThumbnailEngine:
                                     else ThumbnailFailureReason.INVALID_SOURCE
                                 )
                             else:
+                                stl_measurements = measured
                                 source_scan = SourceScanState.COMPLETE
                                 volume = VolumeNotCalculated(
                                     VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
@@ -454,10 +531,218 @@ class ThumbnailEngine:
                                 ThumbnailFailureReason.RESOURCE_LIMIT
                             )
 
+                    emit_geometry()
+                    if request.include_thumbnail:
+                        phases.start(MeshPhase.RENDER)
+                        report("rendering_thumbnail")
+                        if embedded is not None:
+                            image = embedded
+                            strategy = ThumbnailStrategy.EMBEDDED
+                            preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+                        elif mesh is not None or source_scene is not None:
+                            if source_scene is not None:
+                                # Keep only already-admitted placed arrays for later
+                                # analysis; native mesh objects and topology caches
+                                # are released before retained-scene rendering.
+                                if (
+                                    prepared is not None
+                                    and request.include_fingerprint
+                                    and fingerprint_result is None
+                                    and len(prepared.whole_mesh.faces)
+                                    <= request.triangle_cap
+                                ):
+                                    detached_prepared = (
+                                        mesh_resources.detach_scene_mesh(
+                                            prepared, triangle_cap=request.triangle_cap
+                                        )
+                                    )
+                                prepared = None
+                                mesh = None
+                                if scene_cleanup_pending:
+                                    scene_cleanup_pending = False
+                                    mesh_policy.reclaim_memory()
+                            if source_scene is not None:
+                                render_triangles = source_scene.triangle_count
+                            else:
+                                assert mesh is not None
+                                render_triangles = len(mesh.faces)
+                            cap = int(settings.mesh_max_render_triangles)
+                            ram_cap = mesh_policy.ram_triangle_cap(suffix)
+                            if ram_cap is not None:
+                                cap = min(cap, ram_cap)
+                            if render_triangles > cap:
+                                failure = ThumbnailFailureReason.RESOURCE_LIMIT
+                                logger.warning(
+                                    "thumbnail_engine: post-load triangle budget exceeded",
+                                    extra={
+                                        "strategy": "full",
+                                        "triangles": render_triangles,
+                                    },
+                                )
+                            else:
+                                try:
+                                    image = (
+                                        mesh_render.render_scene_thumbnail(
+                                            source_scene.scene,
+                                            request.path.name,
+                                            width=width,
+                                            height=height,
+                                            output_format=request.output_format,
+                                        )
+                                        if source_scene is not None
+                                        else mesh_render.render_mesh_thumbnail(
+                                            mesh,
+                                            request.path.name,
+                                            width=width,
+                                            height=height,
+                                            output_format=request.output_format,
+                                        )
+                                    )
+                                except Exception:  # noqa: BLE001 - bounded fallbacks remain
+                                    logger.exception(
+                                        "thumbnail_engine: full renderer failed",
+                                        extra={"format": suffix},
+                                    )
+                                if image is not None:
+                                    strategy = ThumbnailStrategy.FULL
+                                    preview_coverage = PreviewCoverage.COMPLETE
+
+                        phases.finish(
+                            output_bytes=len(image) if image is not None else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if image is not None
+                            else PhaseOutcome.FAILED,
+                        )
+
+                        if (
+                            image is None
+                            and suffix == ".stl"
+                            and (over_cap or mesh is not None)
+                        ):
+                            release_buffers = mesh is not None or sample_buffers_pending
+                            reload_mesh_for_fingerprint = mesh is not None
+                            prepared = None
+                            mesh = None
+                            sample_buffers_pending = False
+                            if release_buffers:
+                                mesh_policy.reclaim_memory()
+                            phases.start(MeshPhase.STREAMING, input_bytes=source_bytes)
+                            streamed = (
+                                stl_streaming.render_stl_preview_isolated(
+                                    request.path,
+                                    width=width,
+                                    height=height,
+                                    measurements=stl_measurements,
+                                )
+                                if stl_measurements is not None
+                                and os.environ.get(WORKER_MARKER) == str(os.getpid())
+                                else stl_streaming.render_stl_preview_isolated(
+                                    request.path, width=width, height=height
+                                )
+                            )
+                            phases.finish(
+                                output_bytes=len(streamed.png)
+                                if streamed is not None
+                                else None,
+                                triangle_count=streamed.triangle_count
+                                if streamed is not None
+                                else None,
+                                outcome=PhaseOutcome.COMPLETED
+                                if streamed is not None
+                                else PhaseOutcome.FAILED,
+                            )
+                            if streamed is not None:
+                                image = streamed.png
+                                strategy = ThumbnailStrategy.STREAMING
+                                source_scan = SourceScanState.COMPLETE
+                                preview_coverage = PreviewCoverage.COMPLETE
+                                if (
+                                    request.include_geometry
+                                    and not geometry_emitted
+                                    and geometry["triangle_count"] is None
+                                ):
+                                    volume = VolumeNotCalculated(
+                                        VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
+                                    )
+                                    geometry.update(
+                                        {
+                                            "bbox_x_mm": streamed.bounds_max[0]
+                                            - streamed.bounds_min[0],
+                                            "bbox_y_mm": streamed.bounds_max[1]
+                                            - streamed.bounds_min[1],
+                                            "bbox_z_mm": streamed.bounds_max[2]
+                                            - streamed.bounds_min[2],
+                                            "triangle_count": streamed.triangle_count,
+                                        }
+                                    )
+
+                        if image is None and suffix == ".stl":
+                            phases.start(MeshPhase.FALLBACK, input_bytes=source_bytes)
+                            fallback = stl_fallback.render_stl_thumbnail(
+                                request.path, width=width, height=height
+                            )
+                            phases.finish(
+                                output_bytes=len(fallback.png)
+                                if fallback is not None
+                                else None,
+                                triangle_count=fallback.triangle_count
+                                if fallback is not None
+                                else None,
+                                outcome=PhaseOutcome.COMPLETED
+                                if fallback is not None
+                                else PhaseOutcome.FAILED,
+                            )
+                            if fallback is not None:
+                                image = fallback.png
+                                strategy = ThumbnailStrategy.FALLBACK
+                                preview_coverage = (
+                                    PreviewCoverage.COMPLETE
+                                    if fallback.complete
+                                    else PreviewCoverage.PARTIAL
+                                )
+                                if fallback.source_complete:
+                                    source_scan = SourceScanState.COMPLETE
+                                elif source_scan is SourceScanState.NOT_SCANNED:
+                                    source_scan = SourceScanState.PARTIAL
+                                if (
+                                    request.include_geometry
+                                    and not geometry_emitted
+                                    and fallback.source_complete
+                                    and geometry["triangle_count"] is None
+                                ):
+                                    volume = VolumeNotCalculated(
+                                        VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
+                                    )
+                                    geometry.update(
+                                        {
+                                            "bbox_x_mm": fallback.bounds_max[0]
+                                            - fallback.bounds_min[0],
+                                            "bbox_y_mm": fallback.bounds_max[1]
+                                            - fallback.bounds_min[1],
+                                            "bbox_z_mm": fallback.bounds_max[2]
+                                            - fallback.bounds_min[2],
+                                            "triangle_count": fallback.triangle_count,
+                                        }
+                                    )
+
+                        if image is None and failure is None:
+                            failure = (
+                                ThumbnailFailureReason.RESOURCE_LIMIT
+                                if over_cap
+                                else ThumbnailFailureReason.NO_GEOMETRY
+                                if mesh is None and source_scene is None
+                                else ThumbnailFailureReason.RENDERER_NO_OUTPUT
+                            )
+                    emit_thumbnail()
+
                     if request.include_fingerprint and fingerprint_result is None:
                         phases.start(MeshPhase.FINGERPRINT)
                         report("extracting_fingerprint")
                         try:
+                            if reload_mesh_for_fingerprint and mesh is None:
+                                mesh = mesh_loading.load_mesh(
+                                    request.path, file_type=suffix
+                                )
                             # Analysis admission cannot remove useful measurements
                             # or a preview from a mesh admitted by the load budget.
                             if (
@@ -467,6 +752,10 @@ class ThumbnailEngine:
                                 and len(mesh.faces) > request.triangle_cap
                             ):
                                 raise GeometryError("geometry_work_limit")
+                            if prepared is None and detached_prepared is not None:
+                                prepared = mesh_resources.restore_scene_mesh(
+                                    detached_prepared
+                                )
                             if prepared is None and source_scene is not None:
                                 scene_cleanup_pending = True
                                 prepared = mesh_resources.materialize_scene(
@@ -533,9 +822,10 @@ class ThumbnailEngine:
 
                         finally:
                             # Fingerprints contain serialized descriptors, never
-                            # mesh buffers. Render keeps only its loaded mesh;
-                            # fallback must not overlap with analysis allocations.
+                            # mesh buffers. Optional analysis runs after preview
+                            # delivery and releases its preparation immediately.
                             prepared = None
+                            detached_prepared = None
 
                         phases.finish(
                             outcome=PhaseOutcome.COMPLETED
@@ -543,203 +833,13 @@ class ThumbnailEngine:
                             else PhaseOutcome.FAILED
                         )
 
-                    if not request.include_thumbnail:
-                        return ThumbnailResult(
-                            image=None,
-                            geometry=geometry,
-                            geometry_outcome=geometry_outcome,
-                            volume=volume,
-                            strategy=ThumbnailStrategy.NONE,
-                            coverage=MeshCoverage(
-                                source_scan, geometry_representation, preview_coverage
-                            ),
-                            failure_reason=None,
-                            duration_ms=max(
-                                round((time.monotonic() - started) * 1000), 0
-                            ),
-                            peak_rss_bytes=_peak_rss_bytes(),
-                            fingerprint_result=fingerprint_result,
-                            phase_stats=phases.snapshot(),
-                        )
-
-                    phases.start(MeshPhase.RENDER)
-                    report("rendering_thumbnail")
-                    if embedded is not None:
-                        image = embedded
-                        strategy = ThumbnailStrategy.EMBEDDED
-                        preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
-                    elif mesh is not None or source_scene is not None:
-                        if source_scene is not None:
-                            # Topology/FP descriptors own no mesh buffers. Direct
-                            # scene rendering must not overlap their materialization.
-                            prepared = None
-                            mesh = None
-                            if scene_cleanup_pending:
-                                scene_cleanup_pending = False
-                                mesh_policy.reclaim_memory()
-                        if source_scene is not None:
-                            render_triangles = source_scene.triangle_count
-                        else:
-                            assert mesh is not None
-                            render_triangles = len(mesh.faces)
-                        cap = int(settings.mesh_max_render_triangles)
-                        ram_cap = mesh_policy.ram_triangle_cap(suffix)
-                        if ram_cap is not None:
-                            cap = min(cap, ram_cap)
-                        if render_triangles > cap:
-                            failure = ThumbnailFailureReason.RESOURCE_LIMIT
-                            logger.warning(
-                                "thumbnail_engine: post-load triangle budget exceeded",
-                                extra={
-                                    "strategy": "full",
-                                    "triangles": render_triangles,
-                                },
-                            )
-                        else:
-                            try:
-                                image = (
-                                    mesh_render.render_scene_thumbnail(
-                                        source_scene.scene,
-                                        request.path.name,
-                                        width=width,
-                                        height=height,
-                                        output_format=request.output_format,
-                                    )
-                                    if source_scene is not None
-                                    else mesh_render.render_mesh_thumbnail(
-                                        mesh,
-                                        request.path.name,
-                                        width=width,
-                                        height=height,
-                                        output_format=request.output_format,
-                                    )
-                                )
-                            except Exception:  # noqa: BLE001 - bounded fallbacks remain
-                                logger.exception(
-                                    "thumbnail_engine: full renderer failed",
-                                    extra={"format": suffix},
-                                )
-                            if image is not None:
-                                strategy = ThumbnailStrategy.FULL
-                                preview_coverage = PreviewCoverage.COMPLETE
-
-                    phases.finish(
-                        output_bytes=len(image) if image is not None else None,
-                        outcome=PhaseOutcome.COMPLETED
-                        if image is not None
-                        else PhaseOutcome.FAILED,
-                    )
-
-                    if (
-                        image is None
-                        and suffix == ".stl"
-                        and (over_cap or mesh is not None)
-                    ):
-                        release_buffers = mesh is not None or sample_buffers_pending
-                        prepared = None
-                        mesh = None
-                        sample_buffers_pending = False
-                        if release_buffers:
-                            mesh_policy.reclaim_memory()
-                        phases.start(MeshPhase.STREAMING, input_bytes=source_bytes)
-                        streamed = stl_streaming.render_stl_preview_isolated(
-                            request.path, width=width, height=height
-                        )
-                        phases.finish(
-                            output_bytes=len(streamed.png)
-                            if streamed is not None
-                            else None,
-                            triangle_count=streamed.triangle_count
-                            if streamed is not None
-                            else None,
-                            outcome=PhaseOutcome.COMPLETED
-                            if streamed is not None
-                            else PhaseOutcome.FAILED,
-                        )
-                        if streamed is not None:
-                            image = streamed.png
-                            strategy = ThumbnailStrategy.STREAMING
-                            source_scan = SourceScanState.COMPLETE
-                            preview_coverage = PreviewCoverage.COMPLETE
-                            if (
-                                request.include_geometry
-                                and geometry["triangle_count"] is None
-                            ):
-                                volume = VolumeNotCalculated(
-                                    VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
-                                )
-                                geometry.update(
-                                    {
-                                        "bbox_x_mm": streamed.bounds_max[0]
-                                        - streamed.bounds_min[0],
-                                        "bbox_y_mm": streamed.bounds_max[1]
-                                        - streamed.bounds_min[1],
-                                        "bbox_z_mm": streamed.bounds_max[2]
-                                        - streamed.bounds_min[2],
-                                        "triangle_count": streamed.triangle_count,
-                                    }
-                                )
-
-                    if image is None and suffix == ".stl":
-                        phases.start(MeshPhase.FALLBACK, input_bytes=source_bytes)
-                        fallback = stl_fallback.render_stl_thumbnail(
-                            request.path, width=width, height=height
-                        )
-                        phases.finish(
-                            output_bytes=len(fallback.png)
-                            if fallback is not None
-                            else None,
-                            triangle_count=fallback.triangle_count
-                            if fallback is not None
-                            else None,
-                            outcome=PhaseOutcome.COMPLETED
-                            if fallback is not None
-                            else PhaseOutcome.FAILED,
-                        )
-                        if fallback is not None:
-                            image = fallback.png
-                            strategy = ThumbnailStrategy.FALLBACK
-                            preview_coverage = (
-                                PreviewCoverage.COMPLETE
-                                if fallback.complete
-                                else PreviewCoverage.PARTIAL
-                            )
-                            if fallback.source_complete:
-                                source_scan = SourceScanState.COMPLETE
-                            elif source_scan is SourceScanState.NOT_SCANNED:
-                                source_scan = SourceScanState.PARTIAL
-                            if (
-                                request.include_geometry
-                                and fallback.source_complete
-                                and geometry["triangle_count"] is None
-                            ):
-                                volume = VolumeNotCalculated(
-                                    VolumeNotCalculatedCause.TOPOLOGY_NOT_EVALUATED
-                                )
-                                geometry.update(
-                                    {
-                                        "bbox_x_mm": fallback.bounds_max[0]
-                                        - fallback.bounds_min[0],
-                                        "bbox_y_mm": fallback.bounds_max[1]
-                                        - fallback.bounds_min[1],
-                                        "bbox_z_mm": fallback.bounds_max[2]
-                                        - fallback.bounds_min[2],
-                                        "triangle_count": fallback.triangle_count,
-                                    }
-                                )
-
-                    if image is None and failure is None:
-                        failure = (
-                            ThumbnailFailureReason.RESOURCE_LIMIT
-                            if over_cap
-                            else ThumbnailFailureReason.NO_GEOMETRY
-                            if mesh is None and source_scene is None
-                            else ThumbnailFailureReason.RENDERER_NO_OUTPUT
-                        )
+        except _OutputDeliveryError as exc:
+            raise exc.error from None
         except InvalidMeshMeasurements:
             phases.fail_active()
-            geometry = _empty_geometry()
-            if request.include_geometry:
+            if not geometry_emitted:
+                geometry = _empty_geometry()
+            if request.include_geometry and not geometry_emitted:
                 geometry_outcome = GeometryRefused(
                     ThumbnailFailureReason.INVALID_SOURCE
                 )
@@ -760,6 +860,7 @@ class ThumbnailEngine:
         except MemoryError:
             phases.fail_active()
             prepared = None
+            detached_prepared = None
             mesh = None
             source_scene = None
             sample_buffers_pending = False
@@ -785,6 +886,7 @@ class ThumbnailEngine:
         finally:
             phases.fail_active()
             prepared = None
+            detached_prepared = None
             release_buffers = (
                 mesh is not None
                 or source_scene is not None
@@ -796,6 +898,11 @@ class ThumbnailEngine:
             if release_buffers:
                 mesh_policy.reclaim_memory()
 
+        try:
+            emit_geometry()
+            emit_thumbnail()
+        except _OutputDeliveryError as exc:
+            raise exc.error from None
         if request.include_geometry and geometry["triangle_count"] is not None:
             geometry_outcome = GeometryReady()
         if image is not None:

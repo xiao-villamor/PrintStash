@@ -1,6 +1,6 @@
 # Build the checked-in provider testkit once; optional emulator services then
 # run without pip/npm downloads at container startup.
-FROM python:3.11-slim
+FROM python:3.14.8-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

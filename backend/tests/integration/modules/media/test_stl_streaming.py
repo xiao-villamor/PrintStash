@@ -204,3 +204,17 @@ endsolid oblique
         assert result.raster_candidates > 0
         with Image.open(io.BytesIO(result.png)) as image:
             assert image.getchannel("A").getbbox() is not None
+
+
+class TestReusableMeasurements:
+    def test_refuses_scan_hints_outside_an_owned_worker(self, tmp_path, monkeypatch):
+        from app.modules.media.stl_reader import scan_stl
+        from app.modules.media.worker_bootstrap import WORKER_MARKER
+
+        source = tmp_path / "part.stl"
+        source.write_bytes(content.binary_stl())
+        measurements = scan_stl(source)
+        monkeypatch.delenv(WORKER_MARKER, raising=False)
+
+        with pytest.raises(ValueError, match="measurements require an owned worker"):
+            stl_streaming.render_stl_preview_isolated(source, measurements=measurements)

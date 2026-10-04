@@ -88,7 +88,7 @@ def normalize_scope(
     return normalized
 
 
-def start(
+def start_in_transaction(
     session: Session,
     actor: User,
     *,
@@ -114,12 +114,31 @@ def start(
         settings_json=config.model_dump_json(),
         trigger=trigger,
     )
-    session.add(run)
     try:
-        session.commit()
+        with session.begin_nested():
+            session.add(run)
+            session.flush()
     except IntegrityError as exc:
-        session.rollback()
         raise OperationError("similarity_run_active", kind=ErrorKind.CONFLICT) from exc
+    return run
+
+
+def start(
+    session: Session,
+    actor: User,
+    *,
+    scope: Scope = "library",
+    ids: list[int] | None = None,
+    trigger: str = "manual",
+) -> SimilarityRun:
+    try:
+        run = start_in_transaction(
+            session, actor, scope=scope, ids=ids, trigger=trigger
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     session.refresh(run)
     return run
 

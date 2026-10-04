@@ -77,7 +77,7 @@ class VisualRecipe:
     def for_space(cls, space: EmbeddingSpace) -> VisualRecipe:
         try:
             recipe = cls(**json.loads(space.render_recipe))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise EmbeddingError("search_visual_recipe_invalid") from None
         if (
             space.profile != recipe.profile

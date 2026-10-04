@@ -41,6 +41,8 @@ OWNERS = {
 # Array, scene, render and transport data owners cannot acquire an orchestrator
 # dependency even for annotations. New data contracts belong in mesh_contracts.
 PRIMITIVE_OWNERS = {
+    "modules/media/mesh_protocol.py",
+    "modules/media/mesh_wire_values.py",
     "modules/media/mesh_loading.py",
     "modules/media/mesh_measurements.py",
     "modules/media/scene_measurements.py",

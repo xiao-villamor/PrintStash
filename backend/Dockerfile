@@ -33,7 +33,7 @@ RUN curl -fsSL \
 FROM scratch AS opendal-wheel
 COPY --from=opendal-builder /wheels /
 
-FROM python:3.11-slim AS bgcode-builder
+FROM python:3.14.8-slim-bookworm AS bgcode-builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost-dev libboost-nowide-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -43,7 +43,7 @@ RUN sh /tmp/build-bgcode.sh
 FROM scratch AS bgcode-binary
 COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /bgcode
 
-FROM python:3.11-slim AS base
+FROM python:3.14.8-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

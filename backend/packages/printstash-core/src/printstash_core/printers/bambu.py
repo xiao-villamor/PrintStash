@@ -301,7 +301,7 @@ class BambuClient:
         def on_message(_client: Any, _userdata: Any, message: Any) -> None:
             try:
                 body = json.loads(message.payload.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError):
+            except UnicodeDecodeError, ValueError:
                 return
             if isinstance(body, dict) and accepts(body):
                 response.update(body)
@@ -646,7 +646,7 @@ class BambuClient:
         if print_report.get("mc_percent") is not None:
             try:
                 progress = float(print_report["mc_percent"]) / 100.0
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
             else:
                 status["virtual_sdcard"] = {"progress": max(0.0, min(1.0, progress))}
@@ -679,7 +679,7 @@ class BambuClient:
         nozzle = print_report.get("nozzle_diameter")
         try:
             nozzle_diameter = float(nozzle) if nozzle is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             nozzle_diameter = None
         if nozzle_diameter is not None and nozzle_diameter > 0:
             status["material_tools"] = [
@@ -944,7 +944,7 @@ class BambuClient:
         def on_message(_client: Any, _userdata: Any, message: Any) -> None:
             try:
                 body = json.loads(message.payload.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError):
+            except UnicodeDecodeError, ValueError:
                 return
             if not isinstance(body.get("print"), dict):
                 return

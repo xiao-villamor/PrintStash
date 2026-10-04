@@ -1,4 +1,4 @@
-"""The mesh worker answers its parent with exactly one complete frame."""
+"""The mesh worker writes requested basic outputs before its terminal frame."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import json
 
 import pytest
 from PIL import Image
+from printstash_core.mesh.measurements import VolumeUnavailable, VolumeUnavailableCause
 
 from app.core.config import _overlay
 from app.modules.media import mesh_worker
-from app.modules.media.mesh_isolation import decode_reply
 from tests.factories import content
 
 
@@ -47,13 +47,35 @@ def run_worker(tmp_path, monkeypatch):
 
 
 class TestMain:
-    def test_writes_one_frame_the_parent_can_decode(self, run_worker):
+    def test_writes_requested_basics_before_terminal_frame(self, run_worker):
+        from pathlib import Path
+
+        from app.modules.media.mesh_contracts import ThumbnailRequest
+        from app.modules.media.mesh_protocol import (
+            FingerprintFinal,
+            FrameDecoder,
+            GeometryOutput,
+            ThumbnailOutput,
+        )
+
         status, reply = run_worker()
+        decoder = FrameDecoder(ThumbnailRequest(Path("source.stl")))
+        frames = list(decoder.feed(reply))
+        final = decoder.finish()
 
         assert status == 0
-        result = decode_reply(reply)
-        assert result.image is not None
-        assert result.geometry["triangle_count"] == 12
+        assert tuple(type(frame) for frame in frames) == (
+            GeometryOutput,
+            ThumbnailOutput,
+            FingerprintFinal,
+        )
+        assert frames[0].geometry["triangle_count"] == 12
+        assert frames[0].volume == VolumeUnavailable(
+            VolumeUnavailableCause.NOT_WATERTIGHT
+        )
+        assert frames[1].image is not None
+        assert final is frames[2]
+        assert final.fingerprint is None
 
     def test_adopts_the_parents_runtime_overrides_before_reading_a_setting(
         self, run_worker, monkeypatch
@@ -65,7 +87,17 @@ class TestMain:
         status, reply = run_worker(overrides={"model_thumbnail_width": 320})
 
         assert status == 0
-        image = decode_reply(reply).image
+        from pathlib import Path
+
+        from app.modules.media.mesh_contracts import ThumbnailRequest
+        from app.modules.media.mesh_protocol import FrameDecoder, ThumbnailOutput
+
+        decoder = FrameDecoder(ThumbnailRequest(Path("source.stl"), width=320))
+        frames = list(decoder.feed(reply))
+        decoder.finish()
+        image = next(
+            frame.image for frame in frames if isinstance(frame, ThumbnailOutput)
+        )
         assert image is not None
         with Image.open(io.BytesIO(image)) as decoded:
             assert decoded.size == (320, 240)

@@ -48,6 +48,7 @@ from tests.factories.protocols import (
     MakeInferenceEndpoint,
     MakeIngestRequest,
     MakeJob,
+    MakeMeshContinuation,
     MakeMetadata,
     MakeModel,
     MakeMultipartBuild,
@@ -507,6 +508,7 @@ __all__ = [
     "make_audit_finding",
     "make_audit_run",
     "make_derivative",
+    "make_mesh_continuation",
     "make_ingest_request",
     "make_job",
     "make_work_executor",
@@ -743,3 +745,9 @@ def make_search_projection_request(db_session: Session) -> MakeSearchProjectionR
 
 
 __all__ += ["make_search_projection_request"]
+
+
+@pytest.fixture
+def make_mesh_continuation(db_session: Session) -> MakeMeshContinuation:
+    """Pending optional mesh analysis with a canonical current source snapshot."""
+    return _bound(factories.build_mesh_continuation, db_session)

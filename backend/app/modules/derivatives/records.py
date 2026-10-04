@@ -238,10 +238,8 @@ def attempt(
     )
 
 
-def _claim(
-    session: Session, attempt: DerivativeAttempt
-) -> tuple[File, ArtifactDerivative]:
-    """Fence the entire output transaction, after byte publication, before SQL output.
+def require_context(session: Session, attempt: DerivativeAttempt) -> File:
+    """Fence current execution and source independently of a completed basic output.
 
     Lock order is Job -> generation -> Model -> File -> derivative. PostgreSQL shares
     the generation lock across publishers; regenerate-all takes it exclusively.
@@ -275,6 +273,15 @@ def _claim(
             or recipes_for(file).get(attempt.kind) != attempt.recipe
         ):
             raise AttemptSuperseded()
+    return file
+
+
+def claim_running(
+    session: Session, attempt: DerivativeAttempt
+) -> tuple[File, ArtifactDerivative]:
+    """Require current input authority and the exact RUNNING derivative token."""
+    file = require_context(session, attempt)
+    with session.no_autoflush:
         changed = affected(
             session,
             update(ArtifactDerivative)
@@ -312,7 +319,7 @@ def mark_ready(
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
 ) -> File:
-    file, row = _claim(session, attempt)
+    file, row = claim_running(session, attempt)
     row.attempt_token = None
     row.state = DerivativeState.READY
     row.storage_key = storage_key if storage_key is not None else row.storage_key
@@ -330,7 +337,7 @@ def mark_skipped(
     session: Session, attempt: DerivativeAttempt, reason: str, *, now: datetime
 ) -> None:
     """Nothing to produce for these bytes (G-code without an embedded image)."""
-    _, row = _claim(session, attempt)
+    _, row = claim_running(session, attempt)
     row.attempt_token = None
     row.state = DerivativeState.SKIPPED
     row.failure_reason = reason
@@ -349,7 +356,7 @@ def mark_failed(
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
 ) -> None:
-    _, row = _claim(session, attempt)
+    _, row = claim_running(session, attempt)
     _mark_failed(
         session,
         row,

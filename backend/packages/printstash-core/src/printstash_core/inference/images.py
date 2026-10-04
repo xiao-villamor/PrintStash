@@ -64,11 +64,11 @@ def decode_image(payload: bytes, content_type: str) -> EmbeddingInput:
                 return EmbeddingInput(
                     "image", rgb=rgb.tobytes(), width=rgb.width, height=rgb.height
                 )
-    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+    except Image.DecompressionBombError, Image.DecompressionBombWarning:
         raise EmbeddingError("embedding_image_too_large") from None
     except EmbeddingError:
         raise
-    except (UnidentifiedImageError, OSError, SyntaxError, EOFError):
+    except UnidentifiedImageError, OSError, SyntaxError, EOFError:
         raise EmbeddingError("embedding_image_invalid") from None
-    except (ValueError, TypeError, OverflowError):
+    except ValueError, TypeError, OverflowError:
         raise EmbeddingError("embedding_image_invalid") from None

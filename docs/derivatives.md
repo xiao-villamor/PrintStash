@@ -456,3 +456,5 @@ Fingerprint algorithm `geometry-v4-sh5f4577c4` separates new hull values and
 newly available descriptors from the former Python hull recipe. Existing
 fingerprints are recalculated without rewriting historical records or verifier
 calibration. Mesh measurements and thumbnail recipes are unchanged.
+
+Mesh metadata and thumbnails publish before optional fingerprints. Pending analysis remains durable after basic outputs commit; see [staged mesh outputs](staged-mesh-outputs.md) for framing, recovery and publication fences.

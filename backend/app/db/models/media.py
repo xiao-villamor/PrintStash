@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
 )
@@ -158,3 +159,62 @@ class DerivativeGroupRegeneration(SQLModel, table=True):
             Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
         ),
     )
+
+
+class MeshFingerprintContinuation(SQLModel, table=True):
+    """Pending mesh analysis after independently committed basic outputs.
+
+    Presence is durable intent. The derivative's READY row stays a terminal
+    output; this required source snapshot belongs to execution input instead.
+    Completion removes the exact token in the fingerprint cache transaction.
+    """
+
+    __tablename__ = "mesh_fingerprint_continuations"
+    __table_args__ = (
+        Index("ix_mesh_fingerprint_continuations_available", "available_at"),
+        CheckConstraint(
+            "(job_id IS NULL AND execution_epoch IS NULL AND job_attempt IS NULL) OR "
+            "(job_id IS NOT NULL AND execution_epoch IS NOT NULL AND job_attempt IS NOT NULL "
+            "AND length(execution_epoch) > 0 AND job_attempt > 0)",
+            name="execution_identity",
+        ),
+        CheckConstraint("length(token) = 36", name="continuation_token_length"),
+        CheckConstraint("length(source_sha256) = 64", name="continuation_source_hash"),
+        CheckConstraint("metadata_recipe > 0", name="continuation_recipe_positive"),
+        CheckConstraint("attempts > 0", name="attempts_positive"),
+        CheckConstraint(
+            "triangle_cap BETWEEN 100 AND 2000000", name="continuation_face_cap"
+        ),
+        CheckConstraint(
+            "length(algorithm_version) BETWEEN 1 AND 128", name="continuation_algorithm"
+        ),
+        CheckConstraint(
+            "length(source_identity_json) > 0", name="continuation_source_identity"
+        ),
+    )
+
+    file_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="CASCADE"),
+            primary_key=True,
+            nullable=False,
+        )
+    )
+    token: str = Field(max_length=36)
+    # Standalone invocations have no Job authority; all three fields are null.
+    # Historical execution snapshot, retained when terminal Jobs are pruned.
+    job_id: str | None = Field(sa_column=Column(String(64), nullable=True))
+    execution_epoch: str | None = Field(max_length=64)
+    job_attempt: int | None
+    attempts: int = Field(default=1)
+    available_at: datetime = Field(default_factory=utcnow)
+    source_sha256: str = Field(max_length=64)
+    metadata_recipe: int
+    algorithm_version: str = Field(max_length=128)
+    triangle_cap: int
+    source_identity_json: str = Field(sa_column=Column(Text, nullable=False))
+    # Nullable has one meaning: no regeneration request existed for this input.
+    regenerated_at: datetime | None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

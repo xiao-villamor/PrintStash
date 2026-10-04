@@ -459,3 +459,102 @@ class TestNondegenerateTriangles:
         view = np.array([[[0.0, 0.0, 0.0], [2.0, 0.0, value], [0.0, 2.0, 1.0]]])
 
         assert worker._nondegenerate_triangles(view).tolist() == [False]
+
+
+class TestReusableMeasurements:
+    def test_reuses_exact_scan_for_the_render_pass(self, stl, tmp_path, monkeypatch):
+        from app.modules.media.stl_reader import scan_stl
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        measurements = scan_stl(source)
+        argv = TestMain()._argv(source, tmp_path)
+        assert worker.main(argv, apply_limits=False) == 0
+        expected = (tmp_path / "out.png").read_bytes()
+        read_pass = worker._read_pass
+        calls = []
+
+        def observe(*args, **kwargs):
+            calls.append(True)
+            return read_pass(*args, **kwargs)
+
+        monkeypatch.setattr(worker, "_read_pass", observe)
+        assert worker.main(argv, apply_limits=False, measurements=measurements) == 0
+        assert calls == [True]
+        assert (tmp_path / "out.png").read_bytes() == expected
+
+    def test_refuses_stale_measurements_before_rendering(self, stl, tmp_path):
+        from app.modules.media.stl_reader import scan_stl
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        measurements = scan_stl(source)
+        source.write_bytes(_binary_stl([SECOND, TRIANGLE]))
+
+        code = worker.main(
+            TestMain()._argv(source, tmp_path),
+            apply_limits=False,
+            measurements=measurements,
+        )
+
+        assert code == 3
+        assert not (tmp_path / "out.png").exists()
+        assert not (tmp_path / "out.json").exists()
+
+    @pytest.mark.parametrize("bounds", ["nonfinite", "reversed", "short"])
+    def test_refuses_malformed_measurement_bounds(self, stl, tmp_path, bounds):
+        from dataclasses import replace
+
+        from app.modules.media.stl_reader import scan_stl
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        measurements = scan_stl(source)
+        lower = {
+            "nonfinite": (math.nan, 0.0, 0.0),
+            "reversed": (2.0, 0.0, 0.0),
+            "short": (0.0, 0.0),
+        }[bounds]
+        measurements = replace(measurements, bounds_min=lower)
+
+        code = worker.main(
+            TestMain()._argv(source, tmp_path),
+            apply_limits=False,
+            measurements=measurements,
+        )
+
+        assert code == 3
+        assert not (tmp_path / "out.png").exists()
+        assert not (tmp_path / "out.json").exists()
+
+    @pytest.mark.parametrize("cap", ["triangles", "source_bytes"])
+    def test_reused_measurements_obey_preview_limits(self, stl, tmp_path, cap):
+        from app.modules.media.stl_reader import scan_stl
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        measurements = scan_stl(source)
+        limits = (
+            {"max_triangles": 1}
+            if cap == "triangles"
+            else {"max_source_bytes": source.stat().st_size - 1}
+        )
+
+        code = worker.main(
+            TestMain()._argv(source, tmp_path, **limits),
+            apply_limits=False,
+            measurements=measurements,
+        )
+
+        assert code == 3
+        assert not (tmp_path / "out.png").exists()
+        assert not (tmp_path / "out.json").exists()
+
+    def test_refuses_hint_on_the_subprocess_entry_point(self, stl, tmp_path):
+        from app.modules.media.stl_reader import scan_stl
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+        measurements = scan_stl(source)
+
+        assert (
+            worker.main(TestMain()._argv(source, tmp_path), measurements=measurements)
+            == 2
+        )
+        assert not (tmp_path / "out.png").exists()
+        assert not (tmp_path / "out.json").exists()
