@@ -454,6 +454,18 @@ class TestDiscover:
 
 
 class TestPass:
+    @staticmethod
+    def _consume_discovered_work(engine: InlineJobEngine) -> None:
+        from dataclasses import replace
+
+        def consume(_ctx):
+            PROBE.items.clear()
+
+        engine.catalog.definitions[SOURCED] = replace(
+            engine.catalog.definitions[SOURCED],
+            steps=(Step(f"{SOURCED}.consume", consume),),
+        )
+
     def test_a_pass_already_claimed_elsewhere_does_nothing(
         self, engine: InlineJobEngine, db_session: Session
     ) -> None:
@@ -512,6 +524,106 @@ class TestPass:
         assert PROBE.calls == 2
         assert [job.subject_key for job in _jobs(db_session)] == ["late"]
 
+    def test_overlapping_loser_does_not_cover_the_next_nudge(
+        self, engine: InlineJobEngine, db_session: Session
+    ) -> None:
+        from app.modules.work.reconciler import PassNote
+
+        losers = []
+
+        def overlap_once():
+            if PROBE.calls == 1:
+                nudge(SOURCED)
+                # Execute the queued pass while the original still owns its
+                # claim. This is the actual durable-engine interleaving.
+                losers.append(run_pass(SOURCED, holder="competing-executor"))
+                engine.drain()
+
+        PROBE.on_pending = overlap_once
+        run_pass(SOURCED, holder="original-executor")
+
+        assert losers[0].outcomes == {PassNote.CLAIMED_ELSEWHERE: 1}
+        assert PROBE.calls == 2
+        assert all(
+            ex.status is EngineStatus.SUCCEEDED for ex in _passes(engine, SOURCED)
+        )
+        db_session.expire_all()
+        cursor = db_session.get(ReconcileCursor, SOURCED)
+        assert cursor is not None and cursor.holder is None
+        assert cursor.pass_queued_at is None
+        assert cursor.pass_priority is None
+
+        PROBE.on_pending = None
+        self._consume_discovered_work(engine)
+        PROBE.items = _items("next-upload")
+        before = len(_passes(engine, SOURCED))
+        nudge(SOURCED)
+        assert len(_passes(engine, SOURCED)) == before + 1
+        engine.drain()
+        assert [job.subject_key for job in _jobs(db_session)] == ["next-upload"]
+
+    @pytest.mark.parametrize(
+        ("holder", "stamp_delta", "cleared"),
+        [("original", -1, True), ("original", 1, False), ("replacement", -1, True)],
+    )
+    def test_losing_claim_acknowledges_only_its_elapsed_queue_stamp(
+        self, engine, db_session, holder, stamp_delta, cleared
+    ):
+        from app.modules.work.reconciler import _claim
+
+        run_pass(SOURCED)
+        db_session.expire_all()
+        cursor = db_session.get(ReconcileCursor, SOURCED)
+        assert cursor is not None
+        invocation = utcnow()
+        queued = invocation + timedelta(seconds=stamp_delta)
+        expiry = invocation + timedelta(minutes=1)
+        cursor.holder = holder
+        cursor.holder_expires_at = expiry
+        cursor.nudged_at = queued
+        cursor.pass_queued_at = queued
+        cursor.pass_priority = WorkPriority.INTERACTIVE
+        db_session.add(cursor)
+        db_session.commit()
+
+        assert _claim(SOURCED, "competing-executor", now=invocation) is False
+
+        db_session.expire_all()
+        cursor = db_session.get(ReconcileCursor, SOURCED)
+        assert cursor is not None
+        assert cursor.pass_queued_at == (
+            None if cleared else queued.replace(tzinfo=None)
+        )
+        assert cursor.pass_priority == (None if cleared else WorkPriority.INTERACTIVE)
+        assert cursor.holder == holder
+        assert cursor.holder_expires_at == expiry.replace(tzinfo=None)
+        assert cursor.nudged_at == queued.replace(tzinfo=None)
+
+    def test_bounded_handoff_queues_after_competing_passes_have_finished(
+        self, engine: InlineJobEngine, db_session: Session
+    ) -> None:
+        def overlap_every_iteration():
+            nudge(SOURCED)
+            engine.drain()
+
+        PROBE.on_pending = overlap_every_iteration
+        run_pass(SOURCED, holder="original-executor")
+
+        assert PROBE.calls == 20
+        pending = [
+            ex for ex in _passes(engine, SOURCED) if ex.status is EngineStatus.QUEUED
+        ]
+        assert len(pending) == 1
+        assert all(
+            ex.status in {EngineStatus.SUCCEEDED, EngineStatus.QUEUED}
+            for ex in _passes(engine, SOURCED)
+        )
+        PROBE.on_pending = None
+        self._consume_discovered_work(engine)
+        PROBE.items = _items("handoff-upload")
+        engine.drain()
+        assert [job.subject_key for job in _jobs(db_session)] == ["handoff-upload"]
+
     def test_a_pass_that_never_settles_hands_over(
         self, engine: InlineJobEngine, db_session: Session
     ) -> None:
@@ -565,7 +677,7 @@ class TestPass:
         assert cursor is not None and cursor.holder is None
 
 
-def _stranded_pass(engine: InlineJobEngine, source: str, executor: str) -> str:
+def _stranded_pass(engine: InlineJobEngine, source: JobKind, executor: str) -> str:
     """A reconcile pass a process was running when it died."""
     nudge(source)
     (stranded,) = _passes(engine, source)

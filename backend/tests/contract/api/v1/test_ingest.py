@@ -40,8 +40,16 @@ from sqlmodel import Session, select
 import app.core.http_client as http_client
 from app.core import url_safety
 from app.core.config import _overlay, settings
-from app.db.models import Collection, File, FileType, Model
-from app.modules.ingestion import import_resolvers, importer
+from app.db.models import (
+    CapacityReservation,
+    Collection,
+    File,
+    FileType,
+    IngestionScratchWindow,
+    Model,
+)
+from app.db.session import SessionFactory, get_session_factory
+from app.modules.ingestion import import_resolvers, importer, scratch_windows
 from tests._env import use_local_storage
 from tests.integration.api.v1._ingest_assertions import drain_work
 from tests.paths import TESTDATA_DIR, require_fixtures
@@ -92,14 +100,46 @@ def _stage_bytes(data: bytes, suffix: str) -> Path:
     return staged
 
 
+def _assert_download_window(
+    window: scratch_windows.ScratchWindow,
+    owner: scratch_windows.WindowOwner | None,
+    factory: SessionFactory | None,
+) -> None:
+    with (factory or get_session_factory()).scoped_session() as session:
+        receipt = session.get(IngestionScratchWindow, window.id)
+        assert receipt is not None
+        assert receipt.path == str(window.directory)
+        assert session.get(CapacityReservation, window.operation_id) is not None
+        if owner is not None:
+            assert isinstance(owner, scratch_windows.JobWindowOwner)
+            assert (receipt.origin_job_id, receipt.execution_epoch) == (
+                owner.job_id,
+                owner.execution_epoch,
+            )
+
+
 def _fake_download(staged: Path, original_filename: str) -> AsyncMock:
     """Mock for ``download_to_staging`` that yields an already-staged file."""
 
-    async def _dl(url: str, *, window_max_bytes: int | None = None):
+    async def _dl(
+        url: str,
+        *,
+        window_max_bytes: int | None = None,
+        window: scratch_windows.ScratchWindow | None = None,
+        owner: scratch_windows.WindowOwner | None = None,
+        session_factory: SessionFactory | None = None,
+    ):
+        assert window is not None
+        _assert_download_window(window, owner, session_factory)
         assert window_max_bytes is None or window_max_bytes > 0
+        data = staged.read_bytes()
+        assert len(data) <= window.max_bytes
         if window_max_bytes is not None and Path(original_filename).suffix != ".zip":
-            assert staged.stat().st_size <= window_max_bytes
-        return staged, original_filename
+            assert len(data) <= window_max_bytes
+        target = window.directory / staged.name
+        staged.replace(target)
+        window.seal(target)
+        return target, original_filename
 
     return AsyncMock(side_effect=_dl)
 
@@ -778,9 +818,22 @@ class TestImportFromUrl:
             "https://files.printables.test/a.stl",
             "https://files.printables.test/b.gcode",
         ]
-        assert [call.kwargs for call in download.await_args_list] == [
-            {"window_max_bytes": settings.ingestion_batch_max_mb * 1024 * 1024}
-        ] * 2
+        limit = settings.ingestion_batch_max_mb * 1024 * 1024
+        supplied_windows = []
+        for call in download.await_args_list:
+            assert set(call.kwargs) == {"window_max_bytes", "window"}
+            assert call.kwargs["window_max_bytes"] == limit
+            window = call.kwargs["window"]
+            assert isinstance(window, scratch_windows.ScratchWindow)
+            assert window.max_bytes == limit
+            assert window.directory.parent == settings.incoming_dir / "scratch-windows"
+            supplied_windows.append(window)
+        assert len({window.id for window in supplied_windows}) == 2
+        with get_session_factory().scoped_session() as session:
+            for window in supplied_windows:
+                assert session.get(IngestionScratchWindow, window.id) is None
+                assert session.get(CapacityReservation, window.operation_id) is None
+                assert not window.directory.exists()
         imported_files = db_session.exec(
             select(File)
             .join(Model, File.model_id == Model.id)
@@ -867,12 +920,26 @@ def _fake_download_seq(items: list[tuple[bytes, str]]) -> AsyncMock:
     """
     pending = list(items)
 
-    async def _dl(url: str, *, window_max_bytes: int | None = None):
+    async def _dl(
+        url: str,
+        *,
+        window_max_bytes: int | None = None,
+        window: scratch_windows.ScratchWindow | None = None,
+        owner: scratch_windows.WindowOwner | None = None,
+        session_factory: SessionFactory | None = None,
+    ):
+        assert window is not None
+        _assert_download_window(window, owner, session_factory)
         assert window_max_bytes is None or window_max_bytes > 0
         data, filename = pending.pop(0)
+        assert len(data) <= window.max_bytes
         if window_max_bytes is not None and Path(filename).suffix != ".zip":
             assert len(data) <= window_max_bytes
-        staged = _stage_bytes(data, Path(filename).suffix or ".bin")
+        staged = window.directory / (
+            uuid.uuid4().hex + (Path(filename).suffix or ".bin")
+        )
+        staged.write_bytes(data)
+        window.seal(staged)
         return staged, filename
 
     return AsyncMock(side_effect=_dl)
@@ -918,6 +985,33 @@ class TestIngestUrl:
 
 
 class TestDownloadToStaging:
+    @staticmethod
+    def _assert_owned_download_and_release(staged: Path) -> None:
+        with get_session_factory().scoped_session() as session:
+            receipt = session.exec(
+                select(IngestionScratchWindow).where(
+                    IngestionScratchWindow.path == str(staged.parent)
+                )
+            ).one()
+            info = staged.lstat()
+            assert (
+                receipt.output_name,
+                receipt.output_device,
+                receipt.output_inode,
+            ) == (
+                staged.name,
+                info.st_dev,
+                info.st_ino,
+            )
+            receipt_id, operation_id = receipt.id, receipt.capacity_operation_id
+            assert session.get(CapacityReservation, operation_id) is not None
+        importer.discard_staged_files((staged,), strict=True)
+        assert not staged.exists()
+        assert not staged.parent.exists()
+        with get_session_factory().scoped_session() as session:
+            assert session.get(IngestionScratchWindow, receipt_id) is None
+            assert session.get(CapacityReservation, operation_id) is None
+
     @_requires(BENCHY_STL)
     @pytest.mark.asyncio
     @pytest.mark.parametrize("hardlinks", [True, False], ids=["hardlinks", "unraid"])
@@ -956,8 +1050,9 @@ class TestDownloadToStaging:
         assert filename == "3dbenchy.stl"
         assert staged.exists()
         assert staged.read_bytes() == stl_bytes
-        assert staged.parent == settings.incoming_dir
+        assert staged.parent.parent == settings.incoming_dir / "scratch-windows"
         assert staged.suffix == ".stl"
+        self._assert_owned_download_and_release(staged)
 
     @pytest.mark.asyncio
     async def test_download_to_staging_follows_redirect(
@@ -977,6 +1072,7 @@ class TestDownloadToStaging:
         # Filename falls back to the final URL's path component.
         assert filename == "final.stl"
         assert staged.read_bytes() == b"solid x\nendsolid x\n"
+        self._assert_owned_download_and_release(staged)
 
     @pytest.mark.asyncio
     async def test_download_to_staging_enforces_size_limit(
@@ -987,14 +1083,28 @@ class TestDownloadToStaging:
         base, routes = http_server
         routes["/big.stl"] = {"body": b"\0" * (2 * 1024 * 1024)}  # 2 MiB
 
-        incoming_before = set(settings.incoming_dir.iterdir())
+        with get_session_factory().scoped_session() as session:
+            windows_before = {
+                row.id for row in session.exec(select(IngestionScratchWindow))
+            }
+            credits_before = {
+                row.operation_id for row in session.exec(select(CapacityReservation))
+            }
         with patch.object(url_safety, "is_public_ip", return_value=True):
             with pytest.raises(importer.ImportError_) as exc:
                 await importer.download_to_staging(f"{base}/big.stl")
 
         assert str(exc.value) == "download_too_large"
         # The oversized partial download was cleaned up, not left in staging.
-        assert set(settings.incoming_dir.iterdir()) == incoming_before
+        with get_session_factory().scoped_session() as session:
+            assert {
+                row.id for row in session.exec(select(IngestionScratchWindow))
+            } == windows_before
+            assert {
+                row.operation_id for row in session.exec(select(CapacityReservation))
+            } == credits_before
+        root = settings.incoming_dir / "scratch-windows"
+        assert not root.exists() or list(root.iterdir()) == []
 
     @pytest.mark.asyncio
     async def test_download_to_staging_rejects_private_host(

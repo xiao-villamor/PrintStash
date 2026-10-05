@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from printstash_core.imports import CaptureManifestV2, ResolvedAsset, StagedAsset
+from printstash_core.imports import CaptureManifestV2, ResolvedAsset
 from sqlmodel import select
 
-from app.core.config import settings
 from app.db.models import (
     ArtifactProvenanceLink,
     File,
@@ -21,9 +19,9 @@ from app.db.models import (
     Model,
     User,
 )
+from app.db.session import SessionFactory
 from app.modules.identity.auth import create_api_key
-from app.modules.ingestion import import_resolvers, inbox
-from app.modules.storage.hashing import sha256_file
+from app.modules.ingestion import import_resolvers, inbox, scratch_windows
 from app.modules.storage.storage_backend.runtime import get_backend
 from tests.e2e._jobs import settle
 from tests.paths import FIXTURES_DIR, TESTDATA_DIR
@@ -50,12 +48,8 @@ def _captured_manifest() -> CaptureManifestV2:
     )
 
 
-def _stage_fixture_asset(tmp_path: Path, manifest: CaptureManifestV2) -> StagedAsset:
-    source = FIXTURES_DIR / "sample.gcode"
-    staged = settings.incoming_dir / f"{tmp_path.name}-benchy.gcode"
-    staged.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, staged)
-    resolved = ResolvedAsset(
+def _fixture_resolved_asset(manifest: CaptureManifestV2) -> ResolvedAsset:
+    return ResolvedAsset(
         manifest=manifest,
         source_selection_id="stl-1",
         source_file_id="stl-1",
@@ -63,7 +57,6 @@ def _stage_fixture_asset(tmp_path: Path, manifest: CaptureManifestV2) -> StagedA
         download_url="https://fixture.invalid/benchy.gcode",
         source_item_id="3161",
     )
-    return StagedAsset(resolved, staged, "self", sha256_file(staged))
 
 
 class TestBrowserCapture:
@@ -236,7 +229,7 @@ class TestBrowserCapture:
 
     @pytest.mark.asyncio
     async def test_offline_capture_import_recapture_deduplicates_durable_artifact(
-        self, api, superuser_headers, e2e_db, monkeypatch, tmp_path
+        self, api, superuser_headers, e2e_db, monkeypatch
     ) -> None:
         """Offline URL capture follows the real Inbox/import/provenance transaction."""
         manifest = _captured_manifest()
@@ -248,7 +241,7 @@ class TestBrowserCapture:
                         "id": "stl-1",
                         "name": "benchy.gcode",
                         "file_type": "gcode",
-                        "size": 1,
+                        "size": (FIXTURES_DIR / "sample.gcode").stat().st_size,
                     }
                 ],
             }
@@ -268,11 +261,21 @@ class TestBrowserCapture:
             context: import_resolvers.ProviderResolutionContext,
         ):
             assert context.owner_user_id is not None
-            return [_stage_fixture_asset(tmp_path, manifest).resolved]
+            return [_fixture_resolved_asset(manifest)]
 
-        async def _fixture_download(url: str, *, window_max_bytes: int):
-            staged = _stage_fixture_asset(tmp_path, manifest)
-            return staged.staged_path, staged.resolved.source_filename
+        async def _fixture_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            window: scratch_windows.ScratchWindow,
+        ):
+            assert url == "https://fixture.invalid/benchy.gcode"
+            data = (FIXTURES_DIR / "sample.gcode").read_bytes()
+            assert len(data) <= min(window_max_bytes, window.max_bytes)
+            target = window.directory / "benchy.gcode"
+            target.write_bytes(data)
+            window.seal(target)
+            return target, "benchy.gcode"
 
         monkeypatch.setattr(
             inbox.import_resolvers, "resolve_capture_manifest", _fixture_capture
@@ -339,7 +342,7 @@ class TestBrowserCapture:
 
     @pytest.mark.asyncio
     async def test_offline_capture_partial_result_retries_only_failed_selection(
-        self, api, superuser_headers, e2e_db, monkeypatch, tmp_path
+        self, api, superuser_headers, e2e_db, monkeypatch
     ) -> None:
         """One child can fail while its sibling remains durable and is not retried."""
         manifest = CaptureManifestV2.from_dict(
@@ -350,9 +353,15 @@ class TestBrowserCapture:
                         "id": "good",
                         "name": "good.gcode",
                         "file_type": "gcode",
-                        "size": 1,
+                        "size": (FIXTURES_DIR / "sample.gcode").stat().st_size,
                     },
-                    {"id": "bad", "name": "bad.gcode", "file_type": "gcode", "size": 1},
+                    {
+                        "id": "bad",
+                        "name": "bad.gcode",
+                        "file_type": "gcode",
+                        "size": (FIXTURES_DIR / "sample.gcode").stat().st_size
+                        + len(b"\n; bad fixture\n"),
+                    },
                 ],
                 "selected_ids": ["good", "bad"],
             }
@@ -383,15 +392,20 @@ class TestBrowserCapture:
                 for file_id in selected_ids
             ]
 
-        async def _fixture_download(url: str, *, window_max_bytes: int):
+        async def _fixture_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            window: scratch_windows.ScratchWindow,
+        ):
             file_id = Path(urlsplit(url).path).stem
-            staged = _stage_fixture_asset(tmp_path, manifest)
-            staged_path = staged.staged_path.with_name(
-                f"{tmp_path.name}-{file_id}.gcode"
-            )
-            shutil.copyfile(staged.staged_path, staged_path)
+            data = (FIXTURES_DIR / "sample.gcode").read_bytes()
             if file_id == "bad":
-                staged_path.write_bytes(staged_path.read_bytes() + b"\n; bad fixture\n")
+                data += b"\n; bad fixture\n"
+            assert len(data) <= min(window_max_bytes, window.max_bytes)
+            staged_path = window.directory / f"{file_id}.gcode"
+            staged_path.write_bytes(data)
+            window.seal(staged_path)
             return staged_path, f"{file_id}.gcode"
 
         original_commit = inbox.importer.commit_staged_artifact
@@ -520,8 +534,16 @@ class TestBrowserCapture:
         # own real-egress E2E coverage and is deliberately deferred here.
         monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
 
-        async def _defer_resolution(_item_id: int) -> None:
-            return None
+        async def _defer_resolution(
+            _item_id: int,
+            *,
+            owner: scratch_windows.JobWindowOwner,
+            session_factory: SessionFactory,
+        ) -> None:
+            assert owner.job_id and owner.execution_epoch
+            with session_factory.scoped_session() as session:
+                row = session.get(InboxItem, _item_id)
+                assert row is not None and row.job_id == owner.job_id
 
         monkeypatch.setattr(inbox, "resolve", _defer_resolution)
 

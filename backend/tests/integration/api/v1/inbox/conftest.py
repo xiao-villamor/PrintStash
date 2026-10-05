@@ -31,8 +31,8 @@ from app.db.models import (
     StorageDeleteIntent,
     User,
 )
-from app.db.session import get_session_factory
-from app.modules.ingestion import inbox
+from app.db.session import SessionFactory, get_session_factory
+from app.modules.ingestion import inbox, scratch_windows
 from app.schemas.inbox import CaptureUploadSlotsCreate
 
 CANONICAL_URL = "https://makerworld.com/en/models/1234-widget"
@@ -58,9 +58,20 @@ def no_egress(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
     resolved: list[int] = []
 
-    async def fake_resolve(item_id: int) -> None:
-        resolved.append(item_id)
-        with get_session_factory().scoped_session() as session:
+    async def fake_resolve(
+        item_id: int,
+        *,
+        owner: scratch_windows.JobWindowOwner,
+        session_factory: SessionFactory,
+    ) -> None:
+        assert session_factory is get_session_factory()
+        with session_factory.scoped_session() as session:
+            job = session.get(Job, owner.job_id)
+            assert job is not None
+            assert job.subject_key == f"inbox_item/{item_id}"
+            assert job.execution_epoch == owner.execution_epoch
+            assert job.state == JobState.RUNNING
+            resolved.append(item_id)
             row = session.get(InboxItem, item_id)
             if row is not None and row.state == InboxItemState.CAPTURED:
                 row.state = InboxItemState.REVIEW

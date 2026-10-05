@@ -322,6 +322,9 @@ def seed_released_v0121_rows(connection) -> None:
         namespace="released-vault",
         key="models/released-model.gcode",
         object_kind="artifact",
+        # Later historical schemas remove the old committed server default.
+        # Use the actual persisted value rather than the generic column filler.
+        state="committed",
         token="released-token",
         size_bytes=200,
         etag="released-etag",

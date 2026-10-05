@@ -19,7 +19,7 @@ import trimesh
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.core.config import _overlay, settings
+from app.core.config import settings
 from app.db.models import Collection, File, FileType, Model
 from tests._env import use_local_storage
 from tests.integration.api.v1._ingest_assertions import drain_work
@@ -225,12 +225,33 @@ class TestImportFromUrl:
     ) -> None:
         use_local_storage(tmp_path)
 
-        async def _fake_download(url: str, *, window_max_bytes: int | None = None):
+        async def _fake_download(
+            url: str,
+            *,
+            window_max_bytes: int | None = None,
+            window=None,
+            owner=None,
+            session_factory=None,
+        ):
             assert window_max_bytes == settings.ingestion_batch_max_mb * 1024 * 1024
-            staging = Path(_overlay["staging_dir"])
-            staging.mkdir(parents=True, exist_ok=True)
-            staged = staging / "remote-cube.stl"
-            staged.write_bytes(_mesh_bytes("stl"))
+            from app.db.models import IngestionScratchWindow
+            from app.db.session import get_session_factory
+            from app.modules.ingestion.scratch_windows import JobWindowOwner
+
+            assert window is not None and isinstance(owner, JobWindowOwner)
+            assert session_factory is get_session_factory()
+            with session_factory.scoped_session() as session:
+                receipt = session.get(IngestionScratchWindow, window.id)
+                assert receipt is not None
+                assert (receipt.origin_job_id, receipt.execution_epoch) == (
+                    owner.job_id,
+                    owner.execution_epoch,
+                )
+            data = _mesh_bytes("stl")
+            assert len(data) <= window.max_bytes
+            staged = window.directory / "remote-cube.stl"
+            staged.write_bytes(data)
+            window.seal(staged)
             return staged, "remote-cube.stl"
 
         with (

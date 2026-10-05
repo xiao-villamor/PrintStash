@@ -156,7 +156,7 @@ class TestDownloadWithdrawal:
 
         from app.core.config import settings
         from app.core.url_safety import PinnedTarget
-        from app.db.models import CapacityReservation
+        from app.db.models import CapacityReservation, IngestionScratchWindow
 
         owner = make_user("download-withdrawal")
         request = make_ingest_request(owner)
@@ -185,17 +185,25 @@ class TestDownloadWithdrawal:
                 lambda request: httpx.Response(200, stream=Chunks())
             ),
         )
-        before = (
-            set(settings.incoming_dir.iterdir())
-            if settings.incoming_dir.exists()
-            else set()
-        )
+        with get_session_factory().scoped_session() as session:
+            windows_before = {
+                row.id for row in session.exec(select(IngestionScratchWindow))
+            }
+            credits_before = {
+                row.operation_id for row in session.exec(select(CapacityReservation))
+            }
         with cancellation_scope(context.cancelled), pytest.raises(OperationCancelled):
             await importer.download_to_staging(url)
         assert closed
-        assert set(settings.incoming_dir.iterdir()) == before
         with get_session_factory().scoped_session() as session:
-            assert session.exec(select(CapacityReservation)).all() == []
+            assert {
+                row.id for row in session.exec(select(IngestionScratchWindow))
+            } == windows_before
+            assert {
+                row.operation_id for row in session.exec(select(CapacityReservation))
+            } == credits_before
+        root = settings.incoming_dir / "scratch-windows"
+        assert not root.exists() or list(root.iterdir()) == []
 
 
 class TestExtractionWithdrawal:

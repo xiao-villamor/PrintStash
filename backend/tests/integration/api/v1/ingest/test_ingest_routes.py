@@ -363,9 +363,33 @@ class TestIngestUrl:
         staged.parent.mkdir(parents=True, exist_ok=True)
         staged.write_bytes(_cube_stl_bytes())
 
-        async def fake_download(url: str, *, window_max_bytes: int | None = None):
+        async def fake_download(
+            url: str,
+            *,
+            window_max_bytes: int | None = None,
+            window=None,
+            owner=None,
+            session_factory=None,
+        ):
             assert window_max_bytes == settings.ingestion_batch_max_mb * 1024 * 1024
-            return staged, "cube.stl"
+            from app.db.models import IngestionScratchWindow
+            from app.db.session import get_session_factory
+            from app.modules.ingestion.scratch_windows import JobWindowOwner
+
+            assert window is not None and isinstance(owner, JobWindowOwner)
+            assert session_factory is get_session_factory()
+            with session_factory.scoped_session() as session:
+                receipt = session.get(IngestionScratchWindow, window.id)
+                assert receipt is not None
+                assert (receipt.origin_job_id, receipt.execution_epoch) == (
+                    owner.job_id,
+                    owner.execution_epoch,
+                )
+            assert staged.stat().st_size <= window.max_bytes
+            target = window.directory / staged.name
+            staged.replace(target)
+            window.seal(target)
+            return target, "cube.stl"
 
         with (
             patch.object(importer, "validate_public_url", return_value=None),

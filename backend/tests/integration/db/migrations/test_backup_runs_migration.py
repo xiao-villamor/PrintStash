@@ -56,22 +56,30 @@ class TestBackupRunUpgrade:
                     key=str(archive),
                     object_kind="backup",
                     provider_ref="a" * 64,
-                    state="COMMITTED",
+                    state="committed",
                     size_bytes=archive.stat().st_size,
                     sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
                     token="historical-token",
                 )
-                before = connection.execute(
-                    text("SELECT * FROM owned_storage_objects WHERE id=1")
-                ).one()
-            command.upgrade(config, "head")
-            with engine.connect() as connection:
-                assert (
+                before = dict(
                     connection.execute(
                         text("SELECT * FROM owned_storage_objects WHERE id=1")
-                    ).one()
-                    == before
+                    )
+                    .mappings()
+                    .one()
                 )
+            command.upgrade(config, "head")
+            with engine.connect() as connection:
+                after = (
+                    connection.execute(
+                        text("SELECT * FROM owned_storage_objects WHERE id=1")
+                    )
+                    .mappings()
+                    .one()
+                )
+                assert {name: after[name] for name in before} == before
+                assert after["publication_generation"] == "legacy-1"
+                assert after["next_recovery_at"] is None
                 assert (
                     connection.execute(
                         text("SELECT count(*) FROM backup_runs")
@@ -97,12 +105,16 @@ class TestBackupRunUpgrade:
             command.downgrade(config, "5f0f887bdd0b")
             command.upgrade(config, "head")
             with engine.connect() as connection:
-                assert (
+                after = (
                     connection.execute(
                         text("SELECT * FROM owned_storage_objects WHERE id=1")
-                    ).one()
-                    == before
+                    )
+                    .mappings()
+                    .one()
                 )
+                assert {name: after[name] for name in before} == before
+                assert after["publication_generation"] == "legacy-1"
+                assert after["next_recovery_at"] is None
             assert archive.read_bytes() == b"historical owned archive bytes"
         finally:
             if dialect == "postgres":

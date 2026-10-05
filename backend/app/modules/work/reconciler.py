@@ -807,6 +807,18 @@ def _claim(source: JobKind, holder: str, *, now: datetime) -> bool:
                 last_pass_started_at=now,
             ),
         )
+        if not claimed:
+            # This queued execution has reached the owner and lost single-flight.
+            # Its marker must stop covering later nudges once it returns. Keep
+            # newer queued stamps, the live holder and the dirty nudge unchanged.
+            session.execute(
+                update(ReconcileCursor)
+                .where(
+                    col(ReconcileCursor.source) == source,
+                    col(ReconcileCursor.pass_queued_at) <= now,
+                )
+                .values(pass_queued_at=None, pass_priority=None)
+            )
         session.commit()
     return bool(claimed)
 

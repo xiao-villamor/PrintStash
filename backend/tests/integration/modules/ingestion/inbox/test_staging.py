@@ -26,11 +26,20 @@ from pathlib import Path
 import pytest
 from printstash_core.imports import StagedAsset
 from printstash_core.imports.contracts import CaptureManifestV2, ResolvedAsset
+from sqlmodel import select
 
 from app.core.config import _overlay
-from app.db.models import InboxItemState, JobKind
-from app.db.session import get_session_factory
-from app.modules.ingestion import inbox
+from app.db.models import (
+    CapacityReservation,
+    File,
+    InboxItem,
+    InboxItemState,
+    IngestionScratchWindow,
+    JobKind,
+    StagingLease,
+)
+from app.db.session import SessionFactory, get_session_factory
+from app.modules.ingestion import inbox, scratch_windows
 from tests.factories.ops import build_job_context
 
 STL = b"solid cube\nendsolid cube\n"
@@ -89,9 +98,31 @@ def downloads(monkeypatch: pytest.MonkeyPatch, staging: Path):
     """Stand in for the one egress boundary: fetching the bytes."""
 
     def serve(data: bytes, name: str) -> None:
-        async def download(_url: str, *, window_max_bytes=None) -> tuple[Path, str]:
-            path = staging / name
+        async def download(
+            _url: str,
+            *,
+            window_max_bytes: int | None = None,
+            window: scratch_windows.ScratchWindow | None = None,
+            owner: scratch_windows.WindowOwner | None = None,
+            session_factory: SessionFactory | None = None,
+        ) -> tuple[Path, str]:
+            assert window is not None
+            assert len(data) <= window.max_bytes
+            assert window_max_bytes is None or len(data) <= window_max_bytes
+            if owner is not None:
+                assert isinstance(owner, scratch_windows.JobWindowOwner)
+                with (
+                    session_factory or get_session_factory()
+                ).scoped_session() as session:
+                    receipt = session.get(IngestionScratchWindow, window.id)
+                    assert receipt is not None
+                    assert (receipt.origin_job_id, receipt.execution_epoch) == (
+                        owner.job_id,
+                        owner.execution_epoch,
+                    )
+            path = window.directory / name
             path.write_bytes(data)
+            window.seal(path)
             return path, name
 
         monkeypatch.setattr(inbox.importer, "download_to_staging", download)
@@ -493,41 +524,106 @@ class TestCopyImportSource:
 
 
 class TestStageCaptureUploadSlotAssets:
-    def test_stops_slot_copying_between_entries(self, local_storage, batch_flow):
+    def test_stops_slot_copying_between_entries(
+        self,
+        local_storage,
+        db_session,
+        make_user,
+        monkeypatch,
+    ):
+        from io import BytesIO
+
         from app.core.cancellation import OperationCancelled, cancellation_scope
         from app.modules.storage.storage_backend.runtime import get_backend
+        from app.schemas.inbox import CaptureUploadSlotsCreate
+        from tests.factories.capture import capture_source
 
-        # local_storage owns the current staging overlay; observe that same
-        # directory rather than an earlier fixture configuration.
-        staging = inbox.settings.incoming_dir
-        backend = get_backend()
-        first = local_storage / "slot-one.stl"
-        second = local_storage / "slot-two.stl"
-        first_receipt = backend.create_bytes(STL, str(first))
-        second_receipt = backend.create_bytes(STL + b"second", str(second))
-        manifest = _manifest([("one", "one.stl"), ("two", "two.stl")])
-
-        flow, _ = batch_flow(manifest)
-        context = dict(
-            flow.context,
-            manifest=manifest.to_dict(),
-            selected=["one", "two"],
-            staging_key=None,
-            slot_storage={"one": first_receipt.key, "two": second_receipt.key},
+        owner = make_user(superuser=True)
+        bodies = {"one": STL, "two": STL + b"second"}
+        source_url = "https://www.printables.com/model/42"
+        payload = CaptureUploadSlotsCreate.model_validate(
+            {
+                "source_url": source_url,
+                "capture_source": capture_source(
+                    provider="printables",
+                    canonical_url=source_url,
+                    source_item_id="42",
+                ),
+                "files": [
+                    {
+                        "id": file_id,
+                        "filename": file_id + ".stl",
+                        "media_type": "application/octet-stream",
+                        "size_bytes": len(body),
+                        "sha256": hashlib.sha256(body).hexdigest(),
+                    }
+                    for file_id, body in bodies.items()
+                ],
+            }
         )
+        item, slots = inbox.create_capture_upload_slots(db_session, owner, payload)
+        for slot in slots:
+            assert slot.source_file_id is not None
+            inbox.upload_capture_slot(
+                db_session,
+                slot,
+                stream=BytesIO(bodies[slot.source_file_id]),
+                media_type="application/octet-stream",
+            )
+        inbox.finalize_capture_upload(db_session, owner, item.id)
+        db_session.expire_all()
+        item = db_session.get(InboxItem, item.id)
+        assert item is not None
+        job_id = inbox.begin_import(db_session, item, ["one", "two"])
+        assert job_id is not None
+        context = build_job_context(job_id)
+        import_context = inbox._import_context(db_session, item, job_id)
+        backend = get_backend()
+        source_keys = {slot.source_file_id: slot.storage_key for slot in slots}
+        baseline_file_ids = set(db_session.exec(select(File.id)).all())
+        committed = []
+        consume = inbox._InboxBatchImport.consume
+
+        def commit_then_withdraw(flow, spec, staged, *args, **kwargs):
+            result = consume(flow, spec, staged, *args, **kwargs)
+            committed.append(spec.display_name)
+            return result
+
+        monkeypatch.setattr(inbox._InboxBatchImport, "consume", commit_then_withdraw)
         with (
-            cancellation_scope(lambda: bool(list(staging.glob("capture-import-*")))),
+            cancellation_scope(lambda: bool(committed)),
             pytest.raises(OperationCancelled),
         ):
             asyncio.run(
                 inbox._run_import(
-                    flow.item_id,
-                    context,
-                    flow.factory,
-                    job_context=build_job_context(flow.execution.job_id),
+                    item.id,
+                    import_context,
+                    get_session_factory(),
+                    job_context=context,
                 )
             )
 
-        assert backend.read_bytes(first_receipt.key) == STL
-        assert backend.read_bytes(second_receipt.key) == STL + b"second"
-        assert list(staging.iterdir()) == []
+        assert committed == ["one.stl"]
+        for file_id, key in source_keys.items():
+            assert key is not None
+            assert backend.read_bytes(key) == bodies[file_id]
+        with get_session_factory().scoped_session() as session:
+            files = [
+                file
+                for file in session.exec(select(File)).all()
+                if file.id not in baseline_file_ids
+            ]
+            assert len(files) == 1
+            assert backend.read_bytes(files[0].path) == bodies["one"]
+            assert (
+                len(
+                    session.exec(
+                        select(StagingLease).where(StagingLease.job_id == job_id)
+                    ).all()
+                )
+                == 2
+            )
+            assert session.exec(select(IngestionScratchWindow)).all() == []
+            assert session.exec(select(CapacityReservation)).all() == []
+        root = inbox.settings.incoming_dir / "scratch-windows"
+        assert not root.exists() or list(root.iterdir()) == []

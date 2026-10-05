@@ -2,7 +2,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
+import {
+  copyFile,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,14 +36,14 @@ async function arrange(t) {
   };
 }
 
-function runCli(fixture, extra = []) {
+function runCli(fixture, extra = [], runtimeDirectory = runtime) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
       [
         cli,
         "--runtime-dir",
-        runtime,
+        runtimeDirectory,
         "--manifest",
         fixture.manifest,
         "--output",
@@ -197,13 +206,50 @@ describe("viewer representation pilot CLI", { concurrency: false }, () => {
   test("preserves deadline failure while releasing its temporary bundle", async (t) => {
     const fixture = await arrange(t);
     await writeFile(fixture.manifest, JSON.stringify(await collinearCase(fixture)));
-    const result = await runCli(fixture, ["--timeout-ms", "1000"]);
+    // Rendering can legitimately finish within 1000 ms on a fast CI host.
+    // A real owned build process that never settles must hit the same CLI
+    // deadline regardless of browser startup/render speed.
+    const stalledRuntime = path.join(fixture.directory, "stalled-runtime");
+    const modules = path.join(stalledRuntime, "node_modules");
+    const vite = path.join(modules, "vite");
+    await mkdir(path.join(vite, "dist", "node"), { recursive: true });
+    await Promise.all([
+      symlink(path.join(runtime, "node_modules", "zod"), path.join(modules, "zod")),
+      symlink(path.join(runtime, "node_modules", "playwright"), path.join(modules, "playwright")),
+      symlink(path.join(runtime, "node_modules", "three"), path.join(modules, "three")),
+      copyFile(
+        path.join(runtime, "node_modules", "vite", "package.json"),
+        path.join(vite, "package.json"),
+      ),
+    ]);
+    const buildStarted = path.join(fixture.directory, "build-started.json");
+    await writeFile(
+      path.join(vite, "dist", "node", "index.js"),
+      `import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+export async function build({ build: { outDir } }) {
+  await mkdir(outDir, { recursive: true });
+  const partial = path.join(outDir, "partial-bundle.txt");
+  await writeFile(partial, "unfinished owned build");
+  await writeFile(${JSON.stringify(buildStarted)}, JSON.stringify({ partial }));
+  setInterval(() => {}, 1000);
+  await new Promise(() => {});
+}
+`,
+    );
+    const result = await runCli(fixture, ["--timeout-ms", "1000"], stalledRuntime);
     const diagnostics = JSON.stringify(result);
     assert.equal(result.code, 1, diagnostics);
     assert.equal(result.signal, null, diagnostics);
-    const encoded = await readFile(path.join(fixture.output, "report.json"), "utf8");
+    const encoded = await readFile(path.join(fixture.output, "report.json"), "utf8").catch(
+      (error) => assert.fail(`Report unavailable: ${error.message}; CLI: ${diagnostics}`),
+    );
     assert.ok(encoded.length > 0, diagnostics);
     const report = JSON.parse(encoded);
+    const started = JSON.parse(await readFile(buildStarted, "utf8"));
+    assert.equal(path.basename(started.partial), "partial-bundle.txt");
+    await assert.rejects(readFile(started.partial), { code: "ENOENT" });
+    assert.deepEqual(report.cases, []);
     assert.ok(
       report.failures.some((failure) => /timeout|deadline|closed/i.test(failure.reason)),
       JSON.stringify(report.failures),

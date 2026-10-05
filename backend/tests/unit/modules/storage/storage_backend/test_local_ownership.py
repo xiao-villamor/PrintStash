@@ -274,8 +274,43 @@ class TestLocalAdoption:
             expected_sha256=hashlib.sha256(payload).hexdigest(),
         )
 
-        assert receipt.token == hashlib.sha256(payload).hexdigest()
+        current = key.stat(follow_symlinks=False)
+        assert receipt.size == len(payload)
+        assert (receipt.device, receipt.inode, receipt.ctime_ns) == (
+            current.st_dev,
+            current.st_ino,
+            current.st_ctime_ns,
+        )
+        assert len(receipt.token) == 64
         assert configured_backend.creation_matches(receipt)
+        assert key.read_bytes() == payload
+
+    def test_adopts_equal_bytes_as_a_distinct_physical_generation(
+        self, configured_backend: LocalStorageBackend, tmp_path: Path
+    ) -> None:
+        payload = b"legacy artifact"
+        digest = hashlib.sha256(payload).hexdigest()
+        key = tmp_path / "files" / "legacy.stl"
+        key.write_bytes(payload)
+        original = configured_backend.adopt_existing(
+            str(key),
+            expected_size=len(payload),
+            expected_sha256=digest,
+        )
+        # Keep the old inode alive so the replacement cannot reuse it.
+        retired = key.with_name("retired.stl")
+        key.rename(retired)
+        key.write_bytes(payload)
+        replacement = configured_backend.adopt_existing(
+            str(key),
+            expected_size=len(payload),
+            expected_sha256=digest,
+        )
+        assert original.inode != replacement.inode
+        assert original.token != replacement.token
+        assert not configured_backend.creation_matches(original)
+        assert configured_backend.creation_matches(replacement)
+        assert key.read_bytes() == retired.read_bytes() == payload
 
     def test_rejects_a_legacy_object_with_wrong_digest(
         self, configured_backend: LocalStorageBackend, tmp_path: Path

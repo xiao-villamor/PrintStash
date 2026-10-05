@@ -54,7 +54,11 @@ from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
 from app.modules.library import part_options
-from app.modules.storage.storage_backend.contracts import CreationReceipt, StorageTier
+from app.modules.storage.storage_backend.contracts import (
+    CreationReceipt,
+    StorageBackend,
+    StorageTier,
+)
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import (
     PreparedOwnedDeletion,
@@ -183,6 +187,14 @@ def _claim_purge(session: Session, resource) -> str:
     return token
 
 
+def _verify_destructive_access(backend: StorageBackend, keys: list[str]) -> None:
+    """Keep provider probe failures inside the destructive-operation contract."""
+    try:
+        backend.verify_destructive_access(keys)
+    except Exception as exc:
+        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+
+
 def _preflight_primary_keys(
     session: Session, keys: Iterable[str], *, allow_unverified: bool = False
 ) -> None:
@@ -191,10 +203,7 @@ def _preflight_primary_keys(
     if not exact_keys:
         return
     # Abort read-only/permission failures before deleting the first byte.
-    try:
-        backend.verify_destructive_access(exact_keys)
-    except Exception as exc:
-        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+    _verify_destructive_access(backend, exact_keys)
     for key in exact_keys:
         if not allow_unverified:
             require_owned_key(session, backend, key)
@@ -208,10 +217,7 @@ def _preflight_primary_files(
     rows = [file_row for file_row in files if not file_row.is_external]
     if not rows:
         return
-    try:
-        backend.verify_destructive_access(list(dict.fromkeys(row.path for row in rows)))
-    except Exception as exc:
-        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+    _verify_destructive_access(backend, list(dict.fromkeys(row.path for row in rows)))
     for file_row in rows:
         if allow_unverified:
             continue
@@ -240,7 +246,7 @@ def _prepare_primary_artifact(
     session: Session, file_row: File, *, allow_unverified: bool
 ) -> PurgeDeletion:
     backend = get_backend()
-    backend.verify_destructive_access([file_row.path])
+    _verify_destructive_access(backend, [file_row.path])
     prepared = prepare_owned_key_deletion(
         session,
         backend,
@@ -404,7 +410,7 @@ def prepare_purge_deletions(
             continue
         seen.add(key)
         if required:
-            backend.verify_destructive_access([key])
+            _verify_destructive_access(backend, [key])
         value = prepare_owned_key_deletion(
             session,
             backend,
@@ -779,17 +785,6 @@ def hard_delete_model(
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
         return
-    own_deletions = prepared_deletions is None
-    deletions = (
-        prepare_purge_deletions(
-            session, [model], confirm_storage_risk=confirm_storage_risk
-        )
-        if own_deletions
-        else prepared_deletions
-    )
-    assert deletions is not None
-    _require_destructive_maintenance_safe(session)
-
     file_rows = session.exec(select(File).where(File.model_id == model.id)).all()
     has_cover = session.exec(
         select(ModelSourceCover.id)
@@ -802,6 +797,17 @@ def hard_delete_model(
         storage_backed=bool(file_rows) or has_cover is not None,
         confirmed=confirm_storage_risk,
     )
+
+    own_deletions = prepared_deletions is None
+    deletions = (
+        prepare_purge_deletions(
+            session, [model], confirm_storage_risk=confirm_storage_risk
+        )
+        if own_deletions
+        else prepared_deletions
+    )
+    assert deletions is not None
+    _require_destructive_maintenance_safe(session)
 
     _claim_purge(session, model)
     model.thumbnail_file_id = None
