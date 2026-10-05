@@ -9,6 +9,7 @@ import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-
 import { Drawer } from "@/components/ui/drawer";
 
 interface MobileFilterDrawerProps {
+  outlinerFilters: import("@/types/outliner").OutlinerFilters;
   open: boolean;
   onClose: () => void;
   tags: TagRead[];

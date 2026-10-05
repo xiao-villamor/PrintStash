@@ -37,6 +37,7 @@ export const queryClient = new QueryClient({
 // partial matching, so a single entry covers a resource's lists + details.
 // ---------------------------------------------------------------------------
 export const queryKeys = {
+  outliner: ["outliner"] as const,
   models: ["models"] as const,
   model: (id: number) => ["models", id] as const,
   multipartModels: ["multipart-models"] as const,
@@ -86,7 +87,10 @@ export async function refreshVaultAfterIngest(): Promise<void> {
     queryKeys.multipartModels,
   ];
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
-  await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  await Promise.all([
+    queryClient.resetQueries({ queryKey: queryKeys.outliner }),
+    ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  ]);
 }
 
 /**
@@ -121,6 +125,30 @@ export function invalidateQueriesForPath(path: string, method: ApiMethod = "POST
     invalidated.add(identity);
     void queryClient.invalidateQueries({ queryKey });
   };
+
+  if (
+    has(
+      "collections",
+      "models",
+      "multipart-models",
+      "tags",
+      "files",
+      "artifacts",
+      "ingest",
+      "gcode",
+      "gcode-revision",
+      "gcode-revisions",
+      "revisions",
+      "trash",
+      "restore",
+      "purge",
+      "gc",
+      "printers",
+      "print-jobs",
+    )
+  ) {
+    void queryClient.resetQueries({ queryKey: queryKeys.outliner });
+  }
 
   const multipartAffected = () => {
     // The root key is a prefix, so this refreshes list, detail, and candidate

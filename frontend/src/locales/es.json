@@ -4164,5 +4164,11 @@
   "This file cannot be converted to a 3D preview": "Este archivo no se puede convertir en una vista 3D",
   "3D preview processing is disabled": "El procesamiento de la vista 3D está desactivado",
   "3D preview preparation was cancelled": "Se canceló la preparación de la vista 3D",
-  "Preparing 3D preview…": "Preparando vista 3D…"
+  "Preparing 3D preview…": "Preparando vista 3D…",
+  "Could not load this list.": "No se pudo cargar esta lista.",
+  "Show more models": "Mostrar más modelos",
+  "Search results": "Resultados de búsqueda",
+  "Open location": "Abrir ubicación",
+  "Show more results": "Mostrar más resultados",
+  "All items loaded": "Todos los elementos cargados"
 }

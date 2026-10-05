@@ -41,3 +41,31 @@ class TestBrowseCollectionTree:
             "Brackets",
         ]
         assert [a["name"] for a in found.json()["ancestors"]] == ["Parts", "Brackets"]
+
+    @pytest.mark.asyncio
+    async def test_pages_every_root_entry(
+        self, api, superuser_headers: dict[str, str]
+    ) -> None:
+        created = []
+        for name in ["A outliner", "B outliner", "C outliner"]:
+            response = await api.post(
+                "/api/v1/multipart-models",
+                json={"name": name},
+                headers=superuser_headers,
+            )
+            assert response.status_code == 201, response.text
+            created.append(response.json()["id"])
+        found = []
+        cursor = None
+        for _ in created:
+            params = {"limit": 1}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = await api.get(
+                "/api/v1/outliner/entries", params=params, headers=superuser_headers
+            )
+            assert response.status_code == 200, response.text
+            found.extend(row["id"] for row in response.json()["items"])
+            cursor = response.json()["next_cursor"]
+        assert found == created
+        assert cursor is None

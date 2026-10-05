@@ -57,7 +57,9 @@ class TestLibraryReads:
         params: dict[str, Any],
     ) -> None:
         headers, root = reader
-        build_library_at_scale(db_session, under=root, **SMALL)
+        seeded = build_library_at_scale(db_session, under=root, **SMALL)
+        if path == "/api/v1/outliner/entries":
+            params = params | {"collection_id": seeded.collection_ids[0]}
         client.get(path, params=params, headers=headers)  # warm per-process caches
         small = _read(client, sql_statements, path, params, headers).count
         build_library_at_scale(db_session, under=root, **TEN_TIMES_MORE)
@@ -77,7 +79,9 @@ class TestLibraryReads:
         params: dict[str, Any],
     ) -> None:
         headers, root = reader
-        build_library_at_scale(db_session, under=root, **SMALL)
+        seeded = build_library_at_scale(db_session, under=root, **SMALL)
+        if path == "/api/v1/outliner/entries":
+            params = params | {"collection_id": seeded.collection_ids[0]}
         client.get(path, params=params, headers=headers)
         small = _read(client, sql_statements, path, params, headers)
         small_bound = small.max_bound_parameters

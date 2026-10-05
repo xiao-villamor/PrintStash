@@ -113,14 +113,14 @@ def _prefixes(path: str) -> list[str]:
 
 
 @dataclass(frozen=True)
-class _Subtree:
+class SubtreeCounts:
     models: int
     collections: int
 
 
 def _subtree_counts(
     session: Session, rows: Sequence[_Row], visible: SelectOfScalar[int]
-) -> dict[str, _Subtree]:
+) -> dict[str, SubtreeCounts]:
     """Live Models and collections below each row, keyed by path, counted in SQL.
 
     Walk indexed parent ids from the page rows, then group below each root.
@@ -155,7 +155,7 @@ def _subtree_counts(
         .subquery()
     )
     counts = {
-        path: _Subtree(models=int(models), collections=int(collections))
+        path: SubtreeCounts(models=int(models), collections=int(collections))
         for path, models, collections in session.execute(
             sa_select(
                 page.path,
@@ -274,9 +274,11 @@ def _nodes(
     user: User,
     rows: Sequence[_Row],
     visible: SelectOfScalar[int],
+    subtrees: dict[str, SubtreeCounts] | None = None,
 ) -> list[CollectionNodeRead]:
     ids = [row.id for row in rows]
-    subtrees = _subtree_counts(session, rows, visible)
+    if subtrees is None:
+        subtrees = _subtree_counts(session, rows, visible)
     children = _child_counts(session, ids) if ids else {}
     roles = rbac.effective_roles_for_paths(
         session, user, ((row.id, row.path) for row in rows)
@@ -400,4 +402,27 @@ def search(
     rows, next_cursor = _page(session, stmt, cursor, limit)
     return CollectionPage(
         items=_nodes(session, user, rows, visible), next_cursor=next_cursor
+    )
+
+
+def nodes_for_ids(
+    session: Session,
+    user: User,
+    ids: list[int],
+    subtrees: dict[int, SubtreeCounts],
+) -> list[CollectionNodeRead]:
+    """Project an already bounded page through the canonical collection read model."""
+    if not ids:
+        return []
+    visible = rbac.accessible_collection_ids_stmt(session, user)
+    rows = [
+        _Row(*row)
+        for row in session.execute(
+            sa_select(*_columns()).where(
+                Collection.id.in_(ids), Collection.id.in_(visible)
+            )
+        ).all()
+    ]
+    return _nodes(
+        session, user, rows, visible, {row.path: subtrees[row.id] for row in rows}
     )

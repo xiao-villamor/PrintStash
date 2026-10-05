@@ -297,13 +297,15 @@ if (isBrowser()) {
 }
 
 export interface GetJsonOptions {
+  signal?: AbortSignal;
   /** Bypass the in-memory cache (polling endpoints, explicit refresh). */
   fresh?: boolean;
 }
 
 export async function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {
-  if (!isBrowser() || options?.fresh) {
+  if (!isBrowser() || options?.fresh || options?.signal) {
     const res = await fetch(getUrl(path), {
+      signal: options?.signal,
       headers: authHeaders(),
       cache: "no-store",
     });

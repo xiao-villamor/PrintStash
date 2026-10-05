@@ -1,3 +1,4 @@
+import { outlinerRoutes } from "./outliner";
 /**
  * The collection tree endpoints, answered from a flat list of collections.
  *
@@ -52,6 +53,7 @@ export function collectionTreeRoutes(collections: CollectionRead[]): RouteTable 
   }
 
   return {
+    ...outlinerRoutes(collections),
     "GET /api/v1/collections/children": (url) => {
       const parent = new URL(url, "http://test").searchParams.get("parent_id");
       if (parent === null) return json(page(collections.filter((c) => !parentOf(c))));
