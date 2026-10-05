@@ -785,3 +785,109 @@ class TestCancellationControl:
         assert result["cancellation"]["qualification"] == "completed_before_cancel"
         assert result["cancellation"]["cancellation_proved"] is False
         assert result["cancellation"]["retry_proved"] is False
+
+
+class TestReuploadIdentity:
+    @pytest.mark.parametrize("change", [None, "model", "sha", "key", "file"])
+    def test_requires_a_new_version_of_the_same_source(self, change):
+        from scripts.qualify_ingestion import ArtifactIdentity, ReuploadEvidence
+
+        original = ArtifactIdentity(1, 10, "first-job", "a" * 64)
+        repeated = ArtifactIdentity(2, 10, "second-job", "a" * 64)
+        if change == "model":
+            repeated = replace(repeated, model_id=20)
+        elif change == "sha":
+            repeated = replace(repeated, sha256="b" * 64)
+        elif change == "key":
+            repeated = replace(repeated, ingestion_key=original.ingestion_key)
+        elif change == "file":
+            repeated = replace(repeated, file_id=original.file_id)
+        evidence = ReuploadEvidence(original, repeated, "a" * 64)
+        assert evidence.proves_new_version() is (change is None)
+
+    def test_excludes_reupload_from_fresh_credit(self, observation):
+        from scripts.qualify_ingestion import ObservationPurpose, summarize
+
+        repeated = replace(observation, file_id=2, purpose=ObservationPurpose.REUPLOAD)
+        result = summarize([observation, repeated], elapsed_seconds=7200)
+        assert result["distinct_usable_artifacts"] == 1
+        assert result["purposes"] == {"fresh": 1, "reupload": 1}
+
+
+class TestQualificationCheckpoint:
+    def test_records_failure_before_another_work_unit(self, tmp_path):
+        import json
+
+        from scripts.qualify_ingestion import qualification_checkpoint
+
+        report = {"decision": "pending"}
+        errors = ["mandatory_control_failed"]
+        path = tmp_path / "report.json"
+        assert qualification_checkpoint(path, report, errors) is False
+        assert json.loads(path.read_text())["errors"] == errors
+        errors.append("later_failure")
+        assert report["errors"] == ["mandatory_control_failed"]
+
+    def test_admits_more_work_after_a_clean_checkpoint(self, tmp_path):
+        import json
+
+        from scripts.qualify_ingestion import qualification_checkpoint
+
+        path = tmp_path / "report.json"
+        assert qualification_checkpoint(path, {"decision": "pending"}, []) is True
+        assert json.loads(path.read_text())["errors"] == []
+
+
+class TestReuploadControl:
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            {"outcome": SampleOutcome.FAILED},
+            {"outcome": SampleOutcome.REFUSED},
+            {"outcome": SampleOutcome.TIMEOUT},
+            {"original_verified": False},
+            {"thumbnail_decoded": False},
+            {"input_sha256": "b" * 64},
+            {"input_bytes": 999999},
+            {"source_preexisting": False},
+            {"artifact_reused": True},
+            {"file_id": None},
+        ],
+    )
+    def test_rejects_unverified_repeated_observation(self, observation, changed):
+        from scripts.qualify_ingestion import ObservationPurpose, reupload_control
+
+        repeated = replace(
+            observation,
+            **{
+                "file_id": 2,
+                "purpose": ObservationPurpose.REUPLOAD,
+                "source_preexisting": True,
+                **changed,
+            },
+        )
+        result = reupload_control(observation, repeated)
+        assert result["valid"] is False
+        assert "evidence" not in result
+
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            {"outcome": SampleOutcome.FAILED},
+            {"original_verified": False},
+            {"thumbnail_decoded": False},
+            {"file_id": None},
+        ],
+    )
+    def test_rejects_unverified_original_observation(self, observation, changed):
+        from scripts.qualify_ingestion import ObservationPurpose, reupload_control
+
+        repeated = replace(
+            observation,
+            file_id=2,
+            purpose=ObservationPurpose.REUPLOAD,
+            source_preexisting=True,
+        )
+        result = reupload_control(replace(observation, **changed), repeated)
+        assert result["valid"] is False
+        assert "evidence" not in result

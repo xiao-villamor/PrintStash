@@ -46,9 +46,6 @@ from scripts.benchmark_pipeline_contracts import IngestionObservation, SampleOut
 BACKEND = Path(__file__).resolve().parents[1]
 
 
-_MALFORMED_CONTROL_CADENCE = 50
-
-
 class ArchiveSource(TypedDict):
     name: str
     size: int
@@ -86,6 +83,7 @@ class Mode(StrEnum):
 class ObservationPurpose(StrEnum):
     FRESH = "fresh"
     REPLAY = "replay"
+    REUPLOAD = "reupload"
     WARMUP = "warmup"
 
 
@@ -93,6 +91,81 @@ class ObservationPurpose(StrEnum):
 class QualificationObservation(IngestionObservation):
     purpose: ObservationPurpose = ObservationPurpose.FRESH
     thumbnail_decoded: bool = False
+
+
+@dataclass(frozen=True)
+class ArtifactIdentity:
+    file_id: int
+    model_id: int
+    ingestion_key: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ReuploadEvidence:
+    original: ArtifactIdentity
+    repeated: ArtifactIdentity
+    expected_sha256: str
+
+    def proves_new_version(self) -> bool:
+        return (
+            self.original.file_id != self.repeated.file_id
+            and self.original.model_id == self.repeated.model_id
+            and self.original.ingestion_key != self.repeated.ingestion_key
+            and self.original.sha256 == self.repeated.sha256 == self.expected_sha256
+        )
+
+
+def artifact_identity(file_id: int) -> ArtifactIdentity:
+    """Observe a committed ingestion identity in a fresh, short SQL session."""
+    from app.db.models import File
+    from app.db.session import get_session_factory
+
+    with get_session_factory().scoped_session() as session:
+        artifact = session.get(File, file_id)
+        if artifact is None or artifact.id is None:
+            raise ValueError("qualification_artifact_identity_missing")
+        if artifact.ingestion_key is None:
+            raise ValueError("qualification_artifact_ingestion_key_missing")
+        return ArtifactIdentity(
+            artifact.id, artifact.model_id, artifact.ingestion_key, artifact.sha256
+        )
+
+
+def reupload_control(
+    original: QualificationObservation, repeated: QualificationObservation
+) -> dict[str, object]:
+    """A new POST creates a new version under the source's existing Model."""
+    verified = (
+        original.purpose == ObservationPurpose.FRESH
+        and repeated.purpose == ObservationPurpose.REUPLOAD
+        and original.outcome == repeated.outcome == SampleOutcome.COMPLETED
+        and original.original_verified is True
+        and repeated.original_verified is True
+        and original.thumbnail_decoded is True
+        and repeated.thumbnail_decoded is True
+        and original.input_sha256 == repeated.input_sha256
+        and original.input_bytes == repeated.input_bytes
+        and repeated.source_preexisting is True
+        and repeated.artifact_reused is False
+        and original.file_id is not None
+        and repeated.file_id is not None
+    )
+    result: dict[str, object] = {
+        "ordinal": original.sample_index,
+        "valid": False,
+        "purpose": ObservationPurpose.REUPLOAD.value,
+    }
+    if not verified:
+        return result
+    assert original.file_id is not None and repeated.file_id is not None
+    evidence = ReuploadEvidence(
+        artifact_identity(original.file_id),
+        artifact_identity(repeated.file_id),
+        original.input_sha256,
+    )
+    result.update(evidence=asdict(evidence), valid=evidence.proves_new_version())
+    return result
 
 
 def remaining_job_seconds(
@@ -296,6 +369,15 @@ def build_soak_corpus(root: Path) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def qualification_checkpoint(
+    path: Path, report: dict[str, object], errors: list[str]
+) -> bool:
+    """Publish current failures before deciding whether another unit may start."""
+    report["errors"] = list(errors)
+    atomic_report(path, report)
+    return not errors
+
+
 def variant(source: Path, destination: Path, ordinal: int) -> None:
     """Change only container metadata; preserve the canonical geometry payload."""
     if ordinal < 0 or destination.exists():
@@ -358,6 +440,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--duration-seconds", type=float, default=7200)
     parser.add_argument("--min-artifacts", type=int, default=1000)
+    parser.add_argument(
+        "--control-every-artifacts",
+        type=int,
+        default=50,
+        help="SOAK interval for malformed and repeated-upload controls (default: 50)",
+    )
     parser.add_argument("--deadline-seconds", type=float, default=9000)
     parser.add_argument("--job-deadline-seconds", type=float, default=180)
     parser.add_argument("--drain-seconds", type=float, default=300)
@@ -392,6 +480,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         or (args.mode == Mode.SOAK and args.duration_seconds >= args.deadline_seconds)
     ):
         parser.error("duration must be nonnegative and below finite deadline <=86400")
+    if not 1 <= args.control_every_artifacts <= 10000:
+        parser.error("control cadence must be between 1 and 10000")
     if args.job_deadline_seconds <= 0 or args.drain_seconds <= 0:
         parser.error("job and drain deadlines must be positive")
     if not 1 <= args.min_artifacts <= 10000 or not 1 <= args.samples <= 10000:
@@ -1163,7 +1253,7 @@ def run_worker(args: argparse.Namespace) -> int:
                                 (scratch / "corpus" / "soak-manifest.json").read_text()
                             )
                             report["malformed_control_every_artifacts"] = (
-                                _MALFORMED_CONTROL_CADENCE
+                                args.control_every_artifacts
                             )
                         if args.mode == Mode.SOAK and args.duration_seconds >= 7200:
                             controls = control_run(
@@ -1183,12 +1273,24 @@ def run_worker(args: argparse.Namespace) -> int:
                                 errors.append("malformed_control_not_proved")
                             if not controls["cancellation_valid"]:
                                 errors.append("cancellation_control_failed")
-                            atomic_report(output / "report.json", report)
+                            if not qualification_checkpoint(
+                                output / "report.json", report, errors
+                            ):
+                                raise RuntimeError("mandatory_initial_control_failed")
                         ordinal = 0
                         last_login = time.monotonic()
                         workload_started = time.monotonic()
 
-                        def submit(index: int, replay: bool = False):
+                        def checkpoint() -> bool:
+                            report["summary"] = summarize(
+                                samples,
+                                elapsed_seconds=time.monotonic() - workload_started,
+                            )
+                            return qualification_checkpoint(
+                                output / "report.json", report, errors
+                            )
+
+                        def submit(index: int, reupload: bool = False):
                             source = sources[index % len(sources)]
                             path = scratch / f"input-{index}{source.suffix}"
                             if not path.exists():
@@ -1211,8 +1313,8 @@ def run_worker(args: argparse.Namespace) -> int:
                             tagged = qualify_observation(
                                 client,
                                 observed,
-                                ObservationPurpose.REPLAY
-                                if replay
+                                ObservationPurpose.REUPLOAD
+                                if reupload
                                 else ObservationPurpose.FRESH,
                                 workload_deadline,
                             )
@@ -1320,9 +1422,11 @@ def run_worker(args: argparse.Namespace) -> int:
                                     errors.append(
                                         f"soak_sample_{ordinal}:{fresh.outcome.value}:{fresh.reason}"
                                     )
+                                if errors and not checkpoint():
+                                    break
                                 if (
                                     ordinal > 0
-                                    and ordinal % _MALFORMED_CONTROL_CADENCE == 0
+                                    and ordinal % args.control_every_artifacts == 0
                                 ):
                                     periodic_control = malformed_control(
                                         client,
@@ -1349,21 +1453,19 @@ def run_worker(args: argparse.Namespace) -> int:
                                         errors.append(
                                             f"periodic_malformed_control_not_proved:{ordinal}"
                                         )
-                                    replay = submit(ordinal, replay=True)
-                                    samples.append(replay)
-                                    if (
-                                        replay.artifact_reused is not True
-                                        or replay.outcome != SampleOutcome.COMPLETED
-                                    ):
+                                    if errors and not checkpoint():
+                                        break
+                                    repeated = submit(ordinal, reupload=True)
+                                    samples.append(repeated)
+                                    control = reupload_control(fresh, repeated)
+                                    journal(output / "reupload-controls.jsonl", control)
+                                    if control["valid"] is not True:
                                         errors.append(
-                                            f"replay_integrity_failed:{ordinal}"
+                                            f"reupload_integrity_failed:{ordinal}"
                                         )
                                 ordinal += 1
-                                report["summary"] = summarize(
-                                    samples,
-                                    elapsed_seconds=time.monotonic() - workload_started,
-                                )
-                                atomic_report(output / "report.json", report)
+                                if not checkpoint():
+                                    break
                                 target = (
                                     workload_started
                                     + ordinal

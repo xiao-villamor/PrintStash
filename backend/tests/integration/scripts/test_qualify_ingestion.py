@@ -17,6 +17,10 @@ class TestMain:
         "arguments",
         [
             pytest.param(["--min-artifacts", "0"], id="zero-artifacts"),
+            pytest.param(["--control-every-artifacts", "0"], id="zero-control-cadence"),
+            pytest.param(
+                ["--control-every-artifacts", "10001"], id="excessive-control-cadence"
+            ),
             pytest.param(["--samples", "0"], id="zero-samples"),
             pytest.param(["--duration-seconds", "nan"], id="nonfinite-duration"),
             pytest.param(["--deadline-seconds", "0"], id="zero-deadline"),
@@ -77,6 +81,8 @@ class TestMain:
                 "--duration-seconds",
                 "0",
                 "--min-artifacts",
+                "2",
+                "--control-every-artifacts",
                 "1",
                 # This cold real-app smoke includes imports, schema setup and
                 # DBOS launch. The observed cold start alone consumed ~40s;
@@ -124,7 +130,7 @@ class TestMain:
         assert report["elapsed_total_seconds"] < 180
         assert report["smoke_only"] is True
         assert report["summary"]["soak_thresholds_met"] is False
-        assert report["summary"]["distinct_usable_artifacts"] == 1
+        assert report["summary"]["distinct_usable_artifacts"] == 2
         assert samples[0]["original_verified"] is True
         assert samples[0]["metadata_state"] == "ready"
         assert samples[0]["thumbnail_state"] == "ready"
@@ -141,6 +147,22 @@ class TestMain:
         assert report["final_resources"]["temporary_file_count"] == 0
         assert report["final_resources"]["capacity_resources"] == []
         assert report["natural_drain_complete"] is True
+        assert report["errors"] == []
+        assert report["summary"]["purposes"] == {"warmup": 1, "fresh": 2, "reupload": 1}
+        controls = [
+            json.loads(line)
+            for line in (output / "reupload-controls.jsonl").read_text().splitlines()
+        ]
+        assert len(controls) == 1
+        assert controls[0]["valid"] is True
+        assert (
+            controls[0]["evidence"]["original"]["model_id"]
+            == controls[0]["evidence"]["repeated"]["model_id"]
+        )
+        assert (
+            controls[0]["evidence"]["original"]["ingestion_key"]
+            != controls[0]["evidence"]["repeated"]["ingestion_key"]
+        )
 
     def test_retains_deadline_evidence(self, tmp_path):
         output = tmp_path / "qualification"
@@ -743,3 +765,87 @@ class TestCancellationSourceEvidence:
         assert evidence.staging_lease_count == 1
         assert evidence.scratch_window_count == 1
         assert evidence.proves_reclaimed(job.id) is False
+
+
+class TestArtifactIdentity:
+    def test_reads_committed_ingestion_identity(self, make_model, make_file):
+        from scripts.qualify_ingestion import artifact_identity
+
+        model = make_model()
+        artifact = make_file(model, ingestion_key="control-job", sha256="a" * 64)
+        identity = artifact_identity(artifact.id)
+        assert identity.file_id == artifact.id
+        assert identity.model_id == model.id
+        assert identity.ingestion_key == "control-job"
+        assert identity.sha256 == "a" * 64
+
+    def test_refuses_missing_artifact(self):
+        from scripts.qualify_ingestion import artifact_identity
+
+        with pytest.raises(ValueError, match="qualification_artifact_identity_missing"):
+            artifact_identity(999999)
+
+    def test_refuses_artifact_without_ingestion_identity(self, make_model, make_file):
+        from scripts.qualify_ingestion import artifact_identity
+
+        artifact = make_file(make_model())
+        with pytest.raises(
+            ValueError, match="qualification_artifact_ingestion_key_missing"
+        ):
+            artifact_identity(artifact.id)
+
+
+class TestMandatoryControlFailure:
+    def test_stops_before_another_fresh_ingestion(self, tmp_path):
+        output = tmp_path / "failed-control"
+        output.mkdir(mode=0o700)
+        arguments = [
+            "--output-dir",
+            str(output),
+            "--worker",
+            "--duration-seconds",
+            "0",
+            "--min-artifacts",
+            "10",
+            "--control-every-artifacts",
+            "1",
+            "--deadline-seconds",
+            "180",
+            "--job-deadline-seconds",
+            "60",
+            "--drain-seconds",
+            "30",
+        ]
+        # The real SQL/HTTP/native control runs; inject only its final verdict.
+        # This operational observer fault cannot occur in a healthy fixture.
+        program = (
+            "from scripts import qualify_ingestion as q; "
+            "control = q.reupload_control; "
+            "q.reupload_control = lambda a, b: {**control(a, b), 'valid': False}; "
+            f"raise SystemExit(q.main({arguments!r}))"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", program],
+            cwd=tmp_path,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(BACKEND_DIR),
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=200,
+            check=False,
+        )
+        assert completed.returncode == 1, completed.stderr
+        report = json.loads((output / "report.json").read_text())
+        assert report["decision"] == "failed"
+        assert report["errors"] == [
+            "reupload_integrity_failed:1",
+            "requested_soak_thresholds_not_met",
+        ]
+        assert report["summary"]["distinct_usable_artifacts"] == 2
+        assert report["summary"]["purposes"] == {"warmup": 1, "fresh": 2, "reupload": 1}
+        assert report["natural_drain_complete"] is True
+        assert report["cleanup"]["quiescent"] is True

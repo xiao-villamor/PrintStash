@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Distinguish repeated uploads from same-Job retries in sustained ingestion
+  qualification, verify versioned Artifact identities, and stop after the first
+  failed mandatory control while preserving failure evidence.
+
 - Defer parent-only metrics and database URL parsing in disposable mesh workers,
   reducing measured small-model startup costs while preserving CPU outputs,
   parent telemetry and guarded process cleanup.
