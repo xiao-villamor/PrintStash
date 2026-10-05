@@ -6,7 +6,7 @@ The CPU control uses current shared preparation and the same camera, material, s
 
 ## Contract matrix
 
-The matrix was written before tests. Root executed 66 focused core cases in 1.36 seconds and 34 backend adapter/comparator cases in 3.37 seconds. The 48 measurement and CLI cases passed in 8.46 seconds; the CPU CLI used a fresh process with an external optional-library refusal. The final materialized multiview/cancellation/hygiene selection passed 27 cases in 5.34 seconds. The final adapter selection passed 43 cases in 3.41 seconds, including an independently reproduced then fixed foreign-thread poisoning regression (two failing cases before the fix). Actual hardware qualification is recorded separately below.
+The matrix was written before tests. Python runtime/dependency policy passed 16 cases in 7.88 seconds; the real application dependency audit passes with the pilot classified as development tooling. Root executed 66 focused core cases in 1.36 seconds and 34 backend adapter/comparator cases in 3.37 seconds. The 48 measurement and CLI cases passed in 8.46 seconds; the CPU CLI used a fresh process with an external optional-library refusal. The final materialized multiview/cancellation/hygiene selection passed 27 cases in 5.34 seconds. The final adapter selection passed 43 cases in 3.41 seconds, including an independently reproduced then fixed foreign-thread poisoning regression (two failing cases before the fix). Actual hardware qualification is recorded separately below.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
@@ -60,6 +60,7 @@ The matrix was written before tests. Root executed 66 focused core cases in 1.36
 | 48 | refuses missing required GPU identity | Error | Each required GL identity key absent | Typed context failure retains original KeyError; created native context released | Integration | ✅ `integration/scripts/test_gpu_render_backend.py::TestGpuContext::test_refuses_missing_required_identity` |
 | 49 | refuses invalid required GPU identity | Error | Empty, null or integer value for each required GL key | Typed context failure retains ValueError; native context released | Integration | ✅ `integration/scripts/test_gpu_render_backend.py::TestGpuContext::test_refuses_invalid_required_identity` |
 | 50 | refuses foreign thread before native access | Error | Foreign allocation/close/draw/finish | No native mutation; original owner can still draw and finalize its frame | Integration | ✅ `integration/scripts/test_gpu_render_backend.py::TestGpuContext::test_refuses_foreign_thread_before_native_access` |
+| 51 | keeps GPU research dependencies optional | Edge | Default/full/dev application dependency sets | Neither GPU library becomes an application requirement; audit classifies the separate research group as development | Unit | ✅ `repo/test_python_runtime.py::TestPythonRuntime::test_keeps_gpu_research_dependencies_optional` |
 
 ## Hardware qualification
 

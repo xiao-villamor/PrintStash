@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
 
 from tests.paths import REPO_ROOT
 
@@ -138,3 +139,25 @@ class TestPythonRuntime:
         assert [package["version"] for package in packages] == [
             MESH_VERSIONS[package_name]
         ]
+
+    @pytest.mark.parametrize("scope", ["default", "full", "dev"], ids=str)
+    def test_keeps_gpu_research_dependencies_optional(self, scope: str) -> None:
+        metadata = _toml(PROJECT_PATHS[0])
+        requirements = {
+            "default": metadata["project"]["dependencies"],
+            "full": metadata["project"]["optional-dependencies"]["full"],
+            "dev": metadata["project"]["optional-dependencies"]["dev"],
+        }
+        research = {"moderngl", "glcontext"}
+
+        assert not research.intersection(
+            Requirement(value).name.lower() for value in requirements[scope]
+        )
+        assert {
+            Requirement(value).name.lower()
+            for value in metadata["project"]["optional-dependencies"]["gpu-pilot"]
+        } == research
+        assert (
+            "gpu-pilot"
+            in metadata["tool"]["deptry"]["optional_dependencies_dev_groups"]
+        )

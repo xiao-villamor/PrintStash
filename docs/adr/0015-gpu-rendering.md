@@ -1,6 +1,6 @@
 # GPU rendering qualification
 
-Status: accepted; measured pilot completed; no application GPU adoption.
+Status: accepted; ModernGL pilot completed; this candidate is not adopted.
 
 GPU execution can reduce triangle raster work, but complete visual cost includes source loading and preparation, context creation, shader compilation, bounded transfers, completed drawing, readback, final processing and encoding. A reused GPU context is compared against reused CPU geometry preparation. Neither a driver being installed nor a faster draw call qualifies an application backend.
 
@@ -18,6 +18,8 @@ Primary API references: [ModernGL contexts](https://moderngl.readthedocs.io/en/l
 
 ## Decision
 
-Keep the application on the existing CPU renderer. The optional candidate demonstrates useful acceleration on a simple solid, but it does not satisfy the declared visual gate across the intended STL/3MF family. Corrected complete-source estimates also remain below the 1.5× cost gate: 1.418991× with fresh contexts and 1.498073× with reused contexts, thirty samples per method. Canonical 640×480 controls reject a sheared placement and a curved sphere on colour; three private 3MF controls also have one foreground-mask mismatch each. Cold and reused contexts reproduce the same failures. Do not reinterpret these as wholesale missing models, silently widen the tolerance, or automatically enable this backend merely because a GPU is present.
+Keep the application on the existing CPU renderer. The optional ModernGL candidate demonstrates useful acceleration on a simple solid, but it does not satisfy the declared visual gate across the intended STL/3MF family. Corrected complete-source estimates also remain below the 1.5× cost gate: 1.418991× with fresh contexts and 1.498073× with reused contexts, thirty samples per method. Canonical 640×480 controls reject a sheared placement and a curved sphere on colour; three private 3MF controls also have one foreground-mask mismatch each. Cold and reused contexts reproduce the same failures. Do not reinterpret these as wholesale missing models, silently widen the tolerance, or automatically enable this backend merely because a GPU is present.
 
 Context reuse and one final readback are retained in the research tool. Adoption would require resolving the image discrepancies against independent controls, qualifying an explicit hardware/driver allocation strategy, and measuring recovery from real device reset/OOM. Current successful cancellation and deadline containment prove process and credit recovery only. The existing CPU path, derivative recipe and installation requirements remain unchanged. A later candidate can reuse the narrow deferred-frame protocol and canonical encoder without duplicating geometry preparation or application orchestration.
+
+This decision qualifies the ModernGL candidate only. A native WebGPU adapter using wgpu-py has not been qualified for rendering quality, complete-flow performance or failure recovery; its migration is deferred. API availability alone cannot supply those measurements. See the [official wgpu-py guide](https://wgpu-py.readthedocs.io/en/stable/guide.html) for the separate native API.

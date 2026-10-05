@@ -146,7 +146,8 @@ ignore = ["B008"]  # FastAPI Depends() in argument defaults is the standard patt
 [tool.deptry]
 extend_exclude = ["tests"]
 known_first_party = ["app"]
-optional_dependencies_dev_groups = ["dev"]
+# The GPU experiment is tooling, not an application backend.
+optional_dependencies_dev_groups = ["dev", "gpu-pilot"]
 
 [tool.deptry.per_rule_ignores]
 # Runtime plugins/drivers are imported by their owning frameworks rather than
