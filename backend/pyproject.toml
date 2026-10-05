@@ -89,7 +89,7 @@ dev = [
     # nobody runs.
     "psutil>=6",
     "pyright>=1.1.403",
-    "ruff>=0.8",
+    "ruff>=0.16.10",
     # Provides the real PostgreSQL and SeaweedFS the `postgres`- and `s3`-marked
     # tests run against. There is no second path: see `tests/containers.py`.
     # Without a Docker daemon those tests skip, naming the prerequisite.

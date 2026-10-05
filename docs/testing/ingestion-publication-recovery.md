@@ -440,9 +440,16 @@ fingerprint continuations. Staging, prepared and native temporary payloads were
 empty after shutdown. The sampled process-tree RSS peak was 1,270,263,808 bytes
 (107 samples); this is a sampled observation, not an instantaneous upper bound.
 
-The 100-sample-per-cell LOAD comparison, two-hour/1000-Artifact soak and supported
-amd64/arm64 CI qualification remain pending. Neither the archive run nor the
-small harness controls substitute for those gates.
+LOAD completed 100/100 useful Artifacts at concurrency 1, 2 and 4 in 536.92,
+400.21 and 424.14 seconds. The concurrency-8 cell failed: 8 completed and 92
+received HTTP 507 because the private installation retained its default limit of
+four active staging leases for one user. Payload bytes and physical reservations
+remained within budget. That failed evidence is retained. A repeat of only cell 8
+uses an explicit private eight-lease profile, with byte, free-space, global and
+native limits unchanged. The repeat and two-hour/1000-Artifact soak remain pending.
+The host budget admits only three one-GiB workers, so the four-worker throughput
+gate is not qualified on this host. Supported amd64/arm64 resource CI checks pass;
+the complete Deep CI gate is still pending.
 
 ## Reproduction
 
@@ -507,6 +514,11 @@ uv run python -m scripts.qualify_ingestion \
   --deadline-seconds 9000 --drain-seconds 300 \
   --output-dir /tmp/printstash-soak-qualification
 ```
+
+LOAD defaults to cells 1/2/4/8. Use `--load-concurrency 8` to repeat only that
+cell; `--load-concurrency 4 1` retains the requested measurement order. The report
+records the effective private admission profile. A subset lacking cell 1 or 4
+reports scaling as unassessed, rather than substituting rates from another run.
 
 Archive acceptance requires a completed batch, unchanged source archive,
 verified original downloads and both expected derivative outcomes. A completed
@@ -781,3 +793,97 @@ is recorded in the PR; a row names its assertion rather than implying a CI resul
 | 328 | discovers new work after an overlapping pass loses its claim | Edge | Actual queued Inline pass overlaps its holder | Next nudge queues immediately and discovers the new subject | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestPass::test_overlapping_loser_does_not_cover_the_next_nudge` |
 | 329 | acknowledges only elapsed queue stamps | Edge | Older/newer stamps and replacement holder | Paired marker cleared only when elapsed; holder, expiry and dirty stamp preserved | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestPass::test_losing_claim_acknowledges_only_its_elapsed_queue_stamp` |
 | 330 | queues continuation after bounded handoff | Edge | Competing passes during 20 iterations | One fresh continuation queued; subsequent upload discovered | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestPass::test_bounded_handoff_queues_after_competing_passes_have_finished` |
+
+
+## Core measurement and rendering qualification
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 331 | scalar factory keeps measurement unassessed | Happy | None, zero, negative legacy scalar, positive finite scalar (4) | Scalar retained; state remains legacy_unassessed and method absent | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestVolumeLegacyUnassessed::test_scalar_factory_keeps_measurement_unassessed` |
+| 332 | scalar factory rejects nonfinite legacy input | Error | Boolean, numeric string, NaN, integer beyond float64 range (4) | ValueError for an invalid finite scalar | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestVolumeLegacyUnassessed::test_scalar_factory_rejects_nonfinite_legacy_input` |
+| 333 | rejects inconsistent unavailable evidence | Error | Unavailable wire with scalar, missing method or untyped cause (3) | ValueError rejects contradictory unavailable evidence | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestVolumeWire::test_rejects_inconsistent_unavailable_evidence` |
+| 334 | rejects inconsistent not calculated evidence | Error | Not-calculated wire with scalar, invented method or untyped cause (3) | ValueError rejects evidence that was not calculated | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestVolumeWire::test_rejects_inconsistent_not_calculated_evidence` |
+| 335 | rejects legacy scalar with measurement evidence | Error | Legacy scalar wire claims method or topology cause (2) | ValueError prevents promotion into assessed evidence | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestVolumeWire::test_rejects_legacy_scalar_with_measurement_evidence` |
+| 336 | accepts partial finite dimensions | Happy | Absent/unassessed axes, zero/tiny-positive/finite dimensions, unrelated metadata (4) | Accepted without mutating metadata | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestGeometryExtents::test_accepts_partial_finite_dimensions` |
+| 337 | rejects unrepresentable dimension | Error | Each of three axes with negative, +/-infinity, NaN, boolean, string, mapping or overflowing integer (24) | InvalidMeshMeasurements with the finite/nonnegative contract error | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_measurements.py::TestGeometryExtents::test_rejects_unrepresentable_dimension` |
+| 338 | reports a missing numpy or pillow as an error | Error | Actual import boundary refuses NumPy or Pillow; logger present/absent (4, expanded existing test) | No thumbnail; provided logger records dependency error and no warning | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderMeshThumbnail::test_reports_a_missing_numpy_or_pillow_as_an_error` |
+| 339 | reports malformed mesh preparation | Error | Two-coordinate vertices with a three-corner face (1) | No thumbnail; warning identifies the source file; no dependency error | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderMeshThumbnail::test_reports_malformed_mesh_preparation` |
+| 340 | leaves frame unchanged for subpixel triangle | Edge | Positive-area on-screen triangle containing no pixel centre (1) | Positive candidate work but RGB frame remains unchanged | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRasteriseTriangles::test_leaves_frame_unchanged_for_subpixel_triangle` |
+| 341 | refuses missing pixel dependency | Error | Valid prepared geometry; NumPy/Pillow import refusal; logger present/absent (4) | No frame; provided logger records dependency error and no warning | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedPixels::test_refuses_missing_pixel_dependency` |
+| 342 | large preview preserves native pixel dimensions | Happy | 641x48 preview; resize boundary rejects any unintended downsampling (1) | Exact requested dimensions; nonempty foreground; transparent background | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedPixels::test_large_preview_preserves_native_pixel_dimensions` |
+| 343 | refuses failed image encoding | Error | Real image encoder save boundary raises OSError; logger present/absent (2) | No partial thumbnail; provided logger reports source-specific warning, no dependency error | Unit | ✅ `backend/packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderPreparedThumbnail::test_refuses_failed_image_encoding` |
+
+## Nearest-neighbor numerical failure qualification
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 344 | reports native index build failure | Error | Valid finite target; native KDTree raises ValueError or FloatingPointError | Public GeometryError numeric_range preserves original native exception as its cause | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_point_neighbors.py::TestPointNeighbors::test_reports_native_index_build_failure` |
+| 345 | rejects native distance overflow | Error | Zero target; finite source coordinate 1e200 whose native squared distance overflows | Public GeometryError numeric_range refuses an invalid nearest-distance result | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_point_neighbors.py::TestPointNeighbors::test_rejects_native_distance_overflow` |
+| 346 | rejects unrepresentable physical norm | Error | Finite target components 1.3e308 on two axes; zero query; real native index | Public GeometryError numeric_range refuses a physical Euclidean norm beyond float64 | Unit | ✅ `backend/packages/printstash-core/tests/mesh/similarity/test_point_neighbors.py::TestPointNeighbors::test_rejects_unrepresentable_physical_norm` |
+
+Fresh core qualification: the three affected files pass 308 cases; measurements
+and rasterizer each reach 100% combined statement/branch coverage and nearest
+neighbors reach 97.96%. The package audit passes 2,382 cases, then all five floor
+checks at 99.22% aggregate coverage. No floors or exclusions changed. Ruff 0.16.10
+accepts the Python 3.14 target and passes backend/core source and tests.
+
+## Selective load qualification
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 347 | selects requested LOAD cells | Happy | Default all; eight only; reordered four/one | Parsed selection retains intended cells and order | Unit | ✅ `backend/tests/unit/scripts/test_qualify_ingestion.py::TestParseArgs::test_selects_requested_load_cells` |
+| 348 | rejects invalid LOAD selection | Error | Duplicates; unsupported three; empty list; outside LOAD | CLI exits2 without creating output | Unit | ✅ `backend/tests/unit/scripts/test_qualify_ingestion.py::TestParseArgs::test_rejects_invalid_load_selection` |
+| 349 | changes only requested user lease count | Edge | All cells; eight only; four/one | Environment override contains only logical per-user staging limit8/8/4 | Unit | ✅ `backend/tests/unit/scripts/test_qualify_ingestion.py::TestLoadAdmissionEnvironment::test_changes_only_the_requested_user_lease_count` |
+| 350 | reports scaling as unassessed | Edge | Serial or four baseline absent, including eight-only | Ratio null; assessed false; gate null; explicit missing-baseline reason | Unit | ✅ `backend/tests/unit/scripts/test_qualify_ingestion.py::TestMissingLoadBaselines::test_reports_scaling_as_unassessed` |
+| 351 | records every default LOAD cell | Happy | Fresh real app, all four cells | Default selection complete; report actual per-user8, global32,4GiB bytes,1GiB free floor; native1 unchanged | Integration | ✅ `backend/tests/integration/scripts/test_qualify_ingestion.py::TestMain::test_records_every_load_cell` |
+| 352 | records selected LOAD cells | Edge | Eight-only/eight real samples; reordered four/one baselines | Only selected cells run; all accepted artifacts usable; profile matches largest cell; scaling assessment truthful; natural drain complete | Integration | ✅ `backend/tests/integration/scripts/test_qualify_ingestion.py::TestMain::test_records_selected_load_cells` |
+
+## Paired-browser publication transaction
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 353 | publishes paired-browser upload on disk SQLite | Happy | Real paired-device create/PUT with durable SQLite | Uploaded slot, exact bytes, committed receipt authority, no spool and review finalization | Integration | ✅ `backend/tests/integration/api/v1/inbox/test_capture_upload.py::TestPutCaptureUploadSlot::test_publishes_paired_browser_upload_on_disk_sqlite` |
+
+Paired-device authentication updates its last-used audit time. Capture publication
+commits that authentication metadata before preparing storage on an independent
+connection, then validates slot ownership in the publication transaction. The
+clean-transaction guard and revocation checks remain enforced. The disk-backed
+HTTP regression reproduced the original guard failure before this fix.
+
+## Browser cancellation and worker cleanup
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 354 | recognizes explicit cancellation before/after browser failure | Edge | same GET/URL; AbortError proof arrives on either side of ERR_ABORTED | no problem remains; one cancellation consumes one failed request | Frontend unit | ✅ `frontend/tests/repo/page-problems.test.ts > page request problems > recognizes explicit cancellation before the browser failure; recognizes explicit cancellation after the browser failure` |
+| 355 | reports an uncorrelated abort on the same endpoint | Error | two identical aborted GETs, one explicit cancellation | second ERR_ABORTED remains visible | Frontend unit | ✅ `frontend/tests/repo/page-problems.test.ts > page request problems > reports an uncorrelated abort on the same endpoint` |
+| 356 | preserves connection reset / ERR_FAILED despite cancellation | Error | explicit cancellation plus a distinct error | original network error remains visible | Frontend unit | ✅ `frontend/tests/repo/page-problems.test.ts > page request problems > preserves net::ERR_CONNECTION_RESET despite cancellation; preserves net::ERR_FAILED despite cancellation` |
+| 357 | does not confuse URL / HTTP method | Edge | GET proof with POST or changed query failure | both failures remain visible | Frontend unit | ✅ `frontend/tests/repo/page-problems.test.ts > page request problems > does not confuse another URL or HTTP method with the canceled request` |
+| 358 | accepts explicit AbortSignal cancellation of pending fetch | Edge | real Chromium fetch remains pending, then controller.abort | fetch AbortError; actual requestfailed; collector eventually empty | Playwright | ✅ `frontend/tests/e2e/page-problems.spec.ts > page problem collection > accepts an explicit AbortSignal cancellation of a pending fetch` |
+| 359 | reports browser abort without app cancellation | Error | route.abort(aborted), no canceled signal | actual ERR_ABORTED retained | Playwright | ✅ `frontend/tests/e2e/page-problems.spec.ts > page problem collection > reports a browser abort without an app cancellation` |
+| 360 | preserves server errors in collector | Error | real fetch receives 500 | bad response 500 retained | Playwright | ✅ `frontend/tests/e2e/page-problems.spec.ts > page problem collection > preserves server errors in the collector` |
+| 361 | reports terminal preview failure without retrying | Error | timeout, invalid_source, disabled, cancelled, unknown provider failure | expected failed reason; one fetch; no object URL | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts > useStlPreview > reports terminal timeout without retrying or creating a preview; reports terminal invalid_source without retrying or creating a preview; reports terminal derivative_group_disabled without retrying or creating a preview; reports terminal cancelled without retrying or creating a preview; reports terminal unexpected_provider_failure without retrying or creating a preview` |
+| 362 | does not request absent preview source | Edge | source null | pending state; zero fetches | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts > useStlPreview > does not request an absent preview source` |
+| 363 | discards late bytes from obsolete source | Edge | switch File 1→2, old response resolves after new | old signal aborted; exactly one URL generated; new preview retained | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts > useStlPreview > discards late bytes from an obsolete source` |
+| 364 | does not surface canceled rejection after unmount | Edge | pending request rejected AbortError after unmount | one fetch; no preview URL / unhandled rejection | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts > useStlPreview > does not surface a canceled load rejection after unmount` |
+| 365 | explains preview failures to user | Error | all six public failure variants | exact useful message for each variant | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts > stlPreviewMessage > explains resource_limit to the user; explains timeout to the user; explains invalid_source to the user; explains derivative_group_disabled to the user; explains cancelled to the user; explains worker_failed to the user` |
+| 366 | returns invalid-input error and releases worker | Error | worker returns typed invalid reply | invalid code; terminate once | Frontend unit | ✅ `frontend/src/lib/__tests__/gcode-worker-client.test.ts > Cancelable toolpath parsing > reports invalid input after worker cleanup` |
+| 367 | releases crashed worker and removes cancellation listener | Error | ErrorEvent followed by abort | worker_failed rejection; terminate once | Frontend unit | ✅ `frontend/src/lib/__tests__/gcode-worker-client.test.ts > Cancelable toolpath parsing > retires a crashed worker` |
+| 368 | preserves dispatch failure and releases worker | Error | postMessage throws DataCloneError followed by abort | same error object; terminate once | Frontend unit | ✅ `frontend/src/lib/__tests__/gcode-worker-client.test.ts > Cancelable toolpath parsing > retires the worker after dispatch failure` |
+
+The paired-browser fix passes all 44 capture-route cases and the actual extension
+capture boundary against a fresh backend. Qualification argument/admission checks
+pass 63 unit cases. The browser collector and viewer/worker failure contracts pass
+32 focused frontend cases. Configured backend Pyright reports zero errors or
+warnings. These results do not replace the pending final load, soak or Deep CI.
+
+The private eight-only LOAD control completes all eight useful Artifacts with
+one native worker, then drains naturally; its serial-worker sample deadline is
+120 seconds. The initial 60-second fixture bound accepted all eight uploads but
+expired three previews behind queued work; that failed run is retained. The
+reordered four/one control also completed with truthful keyed baseline reporting.
+
+The affected browser selection passed 19 cases and timed out once during initial
+navigation before collector setup. The same responsive-navigation case passed
+once in isolation (5.5 seconds) without a code change; this records the transient
+failure rather than claiming a diagnosed fix. All three actual cancellation/HTTP
+failure contracts passed. Frontend suite hygiene passes its four checks.

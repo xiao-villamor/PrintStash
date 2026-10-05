@@ -20,6 +20,13 @@ import { expect, test, type Page } from "@playwright/test";
 import type { Server } from "node:http";
 
 import { resetMockApiState, startMockApi } from "./mock-api";
+import { RequestFailures } from "./_request-failures";
+
+declare global {
+  interface Window {
+    __printstashExplicitFetchAbort: (method: string, url: string) => Promise<void>;
+  }
+}
 
 export const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
 
@@ -62,6 +69,29 @@ export function useMockApi(): void {
  */
 export async function collectPageProblems(page: Page): Promise<string[]> {
   const problems: string[] = [];
+  const requests = new RequestFailures(problems);
+  await page.exposeBinding(
+    "__printstashExplicitFetchAbort",
+    (_source, method: string, url: string) => requests.cancel(method, url),
+  );
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      if (!signal || signal.aborted) return originalFetch(input, init);
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : "GET")
+      ).toUpperCase();
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href).href;
+      // A canceled signal alone is insufficient: completed fetches are also
+      // canceled during cleanup. Require this fetch to reject with AbortError.
+      return originalFetch(input, init).catch(async (error: Error) => {
+        if (signal.aborted && error instanceof DOMException && error.name === "AbortError")
+          await window.__printstashExplicitFetchAbort(method, url).catch(() => {});
+        throw error;
+      });
+    };
+  });
   page.on("console", (message) => {
     if (message.type() === "error") {
       if (message.text().includes("/api/v1/printers/3/ws")) return;
@@ -74,7 +104,7 @@ export async function collectPageProblems(page: Page): Promise<string[]> {
   page.on("requestfailed", (request) => {
     const url = request.url();
     if (url.includes("_rsc=")) return;
-    problems.push(`request failed: ${url} ${request.failure()?.errorText ?? ""}`);
+    requests.failed(request.method(), url, request.failure()?.errorText ?? "");
   });
   page.on("response", (response) => {
     const url = response.url();

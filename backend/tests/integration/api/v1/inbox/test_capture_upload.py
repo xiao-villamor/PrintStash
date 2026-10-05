@@ -313,6 +313,88 @@ class TestPutCaptureUploadSlot:
 
         assert response.status_code == 200, response.text
 
+    def test_publishes_paired_browser_upload_on_disk_sqlite(
+        self, client: TestClient, staging, tmp_path
+    ) -> None:
+        from sqlmodel import SQLModel, create_engine
+
+        from app.db.models import OwnedStorageObject, StorageObjectState
+        from app.db.session import SQLiteSessionFactory, _set_sqlite_pragmas
+        from app.modules.identity.auth import create_access_token
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories import build_system_config, build_user
+
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'capture-publication.sqlite'}",
+            connect_args={"check_same_thread": False},
+        )
+        event.listen(engine, "connect", _set_sqlite_pragmas)
+        SQLModel.metadata.create_all(engine)
+        previous = get_session_factory()
+        factory = SQLiteSessionFactory(engine)
+        override_session_factory(factory)
+        try:
+            with factory.scoped_session() as session:
+                build_system_config(session)
+                user = build_user(session, username="capture-disk-browser")
+                token = create_access_token(user.id, user.username, scope="write")
+            paired = client.post(
+                "/api/v1/browser-pairings",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert paired.status_code == 201
+            claimed = client.post(
+                "/api/v1/browser-pairings/claim",
+                json={"code": paired.json()["code"], "name": "Disk capture browser"},
+            )
+            assert claimed.status_code == 200
+            headers = {"Authorization": f"Bearer {claimed.json()['credential']}"}
+            created = client.post(
+                "/api/v1/inbox/capture-upload-slots",
+                headers=headers,
+                json=_create_payload(),
+            )
+            assert created.status_code == 201
+            opened = created.json()
+            slot_id = opened["slots"][0]["id"]
+
+            uploaded = client.put(
+                f"/api/v1/inbox/capture-upload-slots/{slot_id}",
+                headers={**headers, **OCTET},
+                content=BODY,
+            )
+
+            assert uploaded.status_code == 200, uploaded.text
+            with factory.scoped_session() as session:
+                slot = session.get(CaptureUploadSlot, slot_id)
+                assert slot is not None
+                assert slot.state == CaptureUploadSlotState.UPLOADED
+                assert get_backend().read_bytes(slot.storage_key) == BODY
+                lease = session.exec(
+                    select(StagingLease).where(
+                        StagingLease.capture_upload_slot_id == slot_id
+                    )
+                ).one()
+                assert lease.receipt_json is not None
+                ownership = session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == slot.storage_key
+                    )
+                ).one()
+                assert ownership.state == StorageObjectState.COMMITTED
+                assert not inbox.staging_leases.capture_slot_staging_path(
+                    slot_id
+                ).exists()
+            finalized = client.post(
+                f"/api/v1/inbox/{opened['item']['id']}/capture-upload-finalize",
+                headers=headers,
+            )
+            assert finalized.status_code == 200, finalized.text
+            assert finalized.json()["state"] == InboxItemState.REVIEW.value
+        finally:
+            override_session_factory(previous)
+            engine.dispose()
+
     def test_marks_the_slot_uploaded(
         self, client: TestClient, db_session: Session, user_headers, slots
     ) -> None:

@@ -479,6 +479,15 @@ jobs:
       - name: Run real backend extension capture boundary
         run: pnpm test:real-backend-capture
 
+      - name: Upload extension capture backend log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-extension-capture-backend-log
+          path: ${{ runner.temp }}/printstash-capture-backend.log
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Tear down ephemeral capture backend
         if: always()
         shell: bash

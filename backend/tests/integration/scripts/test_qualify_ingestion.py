@@ -312,6 +312,14 @@ class TestMain:
         assert report["throughput_gate"]["qualification"] == "not_qualified_N/A"
         assert report["throughput_gate"]["gate_passed"] is None
         assert report["physical_budget"]["native_slots"] == 1
+        assert report["load_admission_profile"] == {
+            "requested_concurrency": [1, 2, 4, 8],
+            "staging_max_active_per_user": 8,
+            "staging_max_pending": 32,
+            "staging_max_bytes": 4 * 1024**3,
+            "staging_min_free_bytes": 1024**3,
+            "scope": "private throughput admission; only per-user lease count follows selected cells; global, byte, free-space and native budgets unchanged",
+        }
         assert all(cell["heartbeat"]["samples"] > 0 for cell in report["load_cells"])
         assert all(
             cell["usable_artifacts_per_second"] > 0 for cell in report["load_cells"]
@@ -319,6 +327,90 @@ class TestMain:
         assert (
             "excludes socket latency" in report["load_cells"][0]["heartbeat"]["scope"]
         )
+
+    @pytest.mark.parametrize(
+        "selection,samples,lease_limit,assessed,qualification",
+        [
+            pytest.param(
+                [8],
+                8,
+                8,
+                False,
+                "not_assessed_missing_baseline_cells",
+                id="retry-eight-only",
+            ),
+            pytest.param(
+                [4, 1], 1, 4, True, "not_qualified_N/A", id="reordered-baselines"
+            ),
+        ],
+    )
+    def test_records_selected_load_cells(
+        self, tmp_path, selection, samples, lease_limit, assessed, qualification
+    ):
+        output = tmp_path / "selected-load"
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "scripts.qualify_ingestion",
+                "--mode",
+                "load",
+                "--native-slots",
+                "1",
+                "--samples",
+                str(samples),
+                "--load-concurrency",
+                *map(str, selection),
+                "--output-dir",
+                str(output),
+                "--deadline-seconds",
+                "240",
+                "--job-deadline-seconds",
+                "120",
+                "--drain-seconds",
+                "30",
+            ],
+            cwd=BACKEND_DIR,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(BACKEND_DIR),
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+
+        assert completed.returncode == 0, (
+            completed.stderr + (output / "child.stderr.log").read_text()
+        )
+        report = json.loads((output / "report.json").read_text())
+        assert [cell["concurrency"] for cell in report["load_cells"]] == selection
+        assert report["summary"]["distinct_usable_artifacts"] == samples * len(
+            selection
+        )
+        assert {
+            sample["outcome"]
+            for cell in report["load_cells"]
+            for sample in cell["samples"]
+        } == {"completed"}
+        assert report["throughput_gate"]["assessed"] is assessed
+        assert (report["throughput_gate"]["four_to_one_ratio"] is not None) is assessed
+        assert report["throughput_gate"]["qualification"] == qualification
+        assert report["throughput_gate"]["gate_passed"] is None
+        assert (
+            report["load_admission_profile"]["staging_max_active_per_user"]
+            == lease_limit
+        )
+        assert report["load_admission_profile"]["staging_max_pending"] == 32
+        assert report["load_admission_profile"]["staging_max_bytes"] == 4 * 1024**3
+        assert report["load_admission_profile"]["staging_min_free_bytes"] == 1024**3
+        assert report["physical_budget"]["native_slots"] == 1
+        assert report["natural_drain_complete"] is True
+        assert report["workspace_retained"] is False
 
 
 @pytest.fixture

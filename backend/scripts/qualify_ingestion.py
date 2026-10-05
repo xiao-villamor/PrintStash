@@ -140,22 +140,36 @@ def effective_cpu_capacity(
 
 
 def throughput_summary(
-    one_rate: float,
-    four_rate: float,
+    one_rate: float | None,
+    four_rate: float | None,
     *,
     effective_cpus: float | None,
     native_slots: int,
     native_memory_bytes: int,
     worker_envelope_bytes: int,
 ) -> dict[str, object]:
-    if any(not math.isfinite(rate) or rate < 0 for rate in (one_rate, four_rate)):
+    if any(
+        not math.isfinite(rate) or rate < 0
+        for rate in (one_rate, four_rate)
+        if rate is not None
+    ):
         raise ValueError("throughput rates must be finite and nonnegative")
-    ratio = four_rate / one_rate if one_rate > 0 else None
+    assessed = one_rate is not None and four_rate is not None
+    ratio = (
+        four_rate / one_rate
+        if one_rate is not None and one_rate > 0 and four_rate is not None
+        else None
+    )
     budget_workers = min(native_slots, native_memory_bytes // worker_envelope_bytes)
     eligible = (
-        effective_cpus is not None and effective_cpus >= 4 and budget_workers >= 4
+        assessed
+        and effective_cpus is not None
+        and effective_cpus >= 4
+        and budget_workers >= 4
     )
-    if effective_cpus is None:
+    if not assessed:
+        reason = "missing_load_baseline_cells"
+    elif effective_cpus is None:
         reason = "effective_cpu_capacity_unknown"
     elif effective_cpus < 4:
         reason = "fewer_than_four_effective_cpus"
@@ -174,9 +188,12 @@ def throughput_summary(
         "effective_cpus": effective_cpus,
         "budget_workers": budget_workers,
         "worker_envelope_bytes": worker_envelope_bytes,
+        "assessed": assessed,
         "eligible": eligible,
         "gate_passed": passed,
-        "qualification": "not_qualified_N/A"
+        "qualification": "not_assessed_missing_baseline_cells"
+        if not assessed
+        else "not_qualified_N/A"
         if not eligible
         else "passed"
         if passed
@@ -184,6 +201,15 @@ def throughput_summary(
         "reason": reason,
         "scope": "actual import through original download, terminal derivatives and thumbnail decode; includes qualification checks",
     }
+
+
+def load_admission_environment(concurrencies: list[int]) -> dict[str, str]:
+    """Match private throughput admission to its largest requested cell.
+
+    Only the logical per-user lease count changes. Byte, global, disk headroom
+    and native budgets retain the private installation's ordinary settings.
+    """
+    return {"VAULT_STAGING_MAX_ACTIVE_PER_USER": str(max(concurrencies))}
 
 
 async def heartbeat(stop: threading.Event, lags: list[float]) -> None:
@@ -340,6 +366,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         help="private LOAD native slot ceiling, CPU and physical budget constrained",
     )
+    parser.add_argument(
+        "--load-concurrency",
+        type=int,
+        choices=(1, 2, 4, 8),
+        nargs="+",
+        help="LOAD cells to measure, in requested order (default: 1 2 4 8)",
+    )
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if not all(
@@ -366,6 +399,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.mode != Mode.LOAD or not 1 <= args.native_slots <= 8
     ):
         parser.error("native-slots requires load mode and must be between 1 and 8")
+    if args.load_concurrency is not None:
+        if args.mode != Mode.LOAD:
+            parser.error("load-concurrency requires load mode")
+        if len(set(args.load_concurrency)) != len(args.load_concurrency):
+            parser.error("load-concurrency must not contain duplicates")
+    elif args.mode == Mode.LOAD:
+        args.load_concurrency = [1, 2, 4, 8]
     if args.mode == Mode.ARCHIVE and (
         args.archive is None or not args.archive.is_file()
     ):
@@ -843,6 +883,7 @@ def run_worker(args: argparse.Namespace) -> int:
         environment.affinity_cpu_count, environment.cgroup
     )
     if args.mode == Mode.LOAD:
+        os.environ.update(load_admission_environment(args.load_concurrency))
         requested_slots = args.native_slots if args.native_slots is not None else 4
         cpu_slots = (
             max(1, math.floor(effective_cpus)) if effective_cpus is not None else 1
@@ -913,6 +954,15 @@ def run_worker(args: argparse.Namespace) -> int:
                     capacity.slots, capacity.bytes // MIN_ANALYSIS_MEMORY
                 ),
             }
+            if args.mode == Mode.LOAD:
+                report["load_admission_profile"] = {
+                    "requested_concurrency": args.load_concurrency,
+                    "staging_max_active_per_user": settings.staging_max_active_per_user,
+                    "staging_max_pending": settings.staging_max_pending,
+                    "staging_max_bytes": settings.staging_max_gb * 1024**3,
+                    "staging_min_free_bytes": settings.staging_min_free_gb * 1024**3,
+                    "scope": "private throughput admission; only per-user lease count follows selected cells; global, byte, free-space and native budgets unchanged",
+                }
             migrate()
             epoch = generations.current_epoch()
             with TestClient(app) as client:
@@ -1050,7 +1100,7 @@ def run_worker(args: argparse.Namespace) -> int:
 
                         if args.mode == Mode.LOAD:
                             cells = []
-                            for concurrency in (1, 2, 4, 8):
+                            for concurrency in args.load_concurrency:
                                 cell_started = time.monotonic()
                                 heartbeat_stop = threading.Event()
                                 lags: list[float] = []
@@ -1106,9 +1156,13 @@ def run_worker(args: argparse.Namespace) -> int:
                                     {**report, "load_cells": cells},
                                 )
                             report["load_cells"] = cells
+                            rates = {
+                                cell["concurrency"]: cell["usable_artifacts_per_second"]
+                                for cell in cells
+                            }
                             scaling = throughput_summary(
-                                cells[0]["usable_artifacts_per_second"],
-                                cells[2]["usable_artifacts_per_second"],
+                                rates.get(1),
+                                rates.get(4),
                                 effective_cpus=effective_cpus,
                                 native_slots=capacity.slots,
                                 native_memory_bytes=capacity.bytes,

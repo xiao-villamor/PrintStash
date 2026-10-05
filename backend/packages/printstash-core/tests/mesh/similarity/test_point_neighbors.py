@@ -164,3 +164,37 @@ class TestPointNeighbors:
 
         with pytest.raises(GeometryError, match="numeric_range"):
             index.query(np.array([[-1e308, 0, 0]]))
+
+    @pytest.mark.parametrize(
+        "failure_type",
+        [ValueError, FloatingPointError],
+        ids=["invalid-native-index", "native-floating-point-error"],
+    )
+    def test_reports_native_index_build_failure(self, monkeypatch, failure_type):
+        import scipy.spatial
+
+        failure = failure_type("native index cannot represent the target")
+
+        def reject_index(*args, **kwargs):
+            raise failure
+
+        monkeypatch.setattr(scipy.spatial, "KDTree", reject_index)
+
+        with pytest.raises(GeometryError, match="^numeric_range$") as caught:
+            PointNeighbors(np.zeros((1, 3)))
+
+        assert caught.value.__cause__ is failure
+
+    def test_rejects_native_distance_overflow(self):
+        index = PointNeighbors(np.zeros((1, 3)))
+        source = np.array([[1e200, 0.0, 0.0]])
+
+        with pytest.raises(GeometryError, match="^numeric_range$"):
+            index.query(source)
+
+    def test_rejects_unrepresentable_physical_norm(self):
+        target = np.array([[1.3e308, 1.3e308, 0.0]])
+        index = PointNeighbors(target)
+
+        with pytest.raises(GeometryError, match="^numeric_range$"):
+            index.query(np.zeros((1, 3)))

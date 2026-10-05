@@ -210,6 +210,10 @@ def _publish_capture_slot(
     staged_path: Path,
 ) -> CaptureUploadSlotRead:
     with command_session(actor) as (session, user), BytesIO() as empty_stream:
+        # Browser authentication flushes last_used_at. Finish that audit write
+        # before the durable storage reservation needs its own SQLite connection;
+        # slot ownership is then checked in the publication command's transaction.
+        session.commit()
         slot = inbox.require_capture_slot(session, user, slot_id)
         uploaded = inbox.upload_capture_slot(
             session,

@@ -512,22 +512,40 @@ class TestRenderMeshThumbnail:
         # an upload fail because a thumbnail could not be produced.
         assert render_mesh_thumbnail(None, "gone.stl") is None
 
+    @pytest.mark.parametrize("dependency", ["numpy", "PIL"], ids=["numpy", "pillow"])
+    @pytest.mark.parametrize("with_logger", [True, False], ids=["logger", "no-logger"])
     def test_reports_a_missing_numpy_or_pillow_as_an_error(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, dependency: str, with_logger: bool
     ) -> None:
-        log = RecordingLogger()
+        log = RecordingLogger() if with_logger else None
+        mesh = box_mesh()
         real_import = builtins.__import__
 
-        def without_numpy(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "numpy":
-                raise ImportError("no numpy in this environment")
+        def without_dependency(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == dependency:
+                raise ImportError(f"no {dependency} in this environment")
             return real_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(builtins, "__import__", without_numpy)
+        monkeypatch.setattr(builtins, "__import__", without_dependency)
 
-        assert render_mesh_thumbnail(box_mesh(), "box.stl", logger=log) is None
-        assert log.errors == [
-            "mesh_render: numpy/Pillow unavailable; cannot render thumbnail"
+        assert render_mesh_thumbnail(mesh, "box.stl", logger=log) is None
+        if log is not None:
+            assert log.errors == [
+                "mesh_render: numpy/Pillow unavailable; cannot render thumbnail"
+            ]
+            assert log.warnings == []
+
+    def test_reports_malformed_mesh_preparation(self) -> None:
+        log = RecordingLogger()
+        mesh = SimpleNamespace(
+            vertices=np.zeros((3, 2), dtype=np.float64),
+            faces=np.array([[0, 1, 2]], dtype=np.int64),
+        )
+
+        assert render_mesh_thumbnail(mesh, "malformed.stl", logger=log) is None
+        assert log.errors == []
+        assert log.warnings == [
+            "mesh_render: render_thumbnail failed for malformed.stl"
         ]
 
     def test_returns_nothing_when_the_rasterizer_raises(self) -> None:
@@ -792,6 +810,16 @@ class TestRasteriseTriangles:
 
         assert painted == 0
         assert img.max() == 0
+
+    def test_leaves_frame_unchanged_for_subpixel_triangle(self) -> None:
+        # This has positive area and an on-screen bounding box, but none of
+        # the candidate pixel centres lies inside its tiny silhouette.
+        tri = np.array([[[0.1, 0.1, 0.0], [0.2, 0.1, 0.0], [0.1, 0.2, 0.0]]])
+
+        candidates, image = self.paint(tri, size=8)
+
+        assert candidates > 0
+        np.testing.assert_array_equal(image, np.zeros((8, 8, 3), dtype=np.uint8))
 
     def test_keeps_the_nearer_of_two_overlapping_triangles(self) -> None:
         near = [[2.0, 2.0, -1.0], [12.0, 2.0, -1.0], [2.0, 12.0, -1.0]]
@@ -1276,6 +1304,44 @@ class TestRenderPreparedPixels:
             is None
         )
 
+    @pytest.mark.parametrize("dependency", ["numpy", "PIL"], ids=["numpy", "pillow"])
+    @pytest.mark.parametrize("with_logger", [True, False], ids=["logger", "no-logger"])
+    def test_refuses_missing_pixel_dependency(
+        self, prepared_box, monkeypatch, dependency, with_logger
+    ):
+        log = RecordingLogger() if with_logger else None
+        real_import = builtins.__import__
+
+        def without_dependency(name, *args, **kwargs):
+            if name == dependency:
+                raise ImportError(f"no {dependency} in this environment")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", without_dependency)
+
+        assert render_prepared_pixels(prepared_box, "prepared.stl", logger=log) is None
+        if log is not None:
+            assert log.errors == [
+                "mesh_render: numpy/Pillow unavailable; cannot render thumbnail"
+            ]
+            assert log.warnings == []
+
+    def test_large_preview_preserves_native_pixel_dimensions(
+        self, prepared_box, monkeypatch
+    ):
+        def unexpected_resize(*_args, **_kwargs):
+            raise AssertionError("large previews must not be downsampled")
+
+        monkeypatch.setattr(Image.Image, "resize", unexpected_resize)
+
+        frame = render_prepared_pixels(prepared_box, "large.stl", width=641, height=48)
+
+        assert frame is not None
+        assert (frame.width, frame.height) == (641, 48)
+        rgba = np.frombuffer(frame.rgba, dtype=np.uint8).reshape(48, 641, 4)
+        assert np.any(rgba[:, :, 3] > 0)
+        assert rgba[0, 0, 3] == 0
+
     def test_preserves_renderer_failure_result(self, prepared_box):
         def broken(*args, **kwargs):
             raise ArithmeticError("raster_failed")
@@ -1460,6 +1526,28 @@ class TestRenderPreparedThumbnail:
         )
         assert reference is not None
         assert actual == reference
+
+    @pytest.mark.parametrize("with_logger", [True, False], ids=["logger", "no-logger"])
+    def test_refuses_failed_image_encoding(
+        self, prepared_box, monkeypatch, with_logger
+    ):
+        log = RecordingLogger() if with_logger else None
+
+        def failed_save(*_args, **_kwargs):
+            raise OSError("image encoder refused its output stream")
+
+        monkeypatch.setattr(Image.Image, "save", failed_save)
+
+        result = render_prepared_thumbnail(
+            prepared_box, "encoder.stl", width=32, height=32, logger=log
+        )
+
+        assert result is None
+        if log is not None:
+            assert log.errors == []
+            assert log.warnings == [
+                "mesh_render: render_thumbnail failed for encoder.stl"
+            ]
 
 
 class TestFrozenPreparedRender:

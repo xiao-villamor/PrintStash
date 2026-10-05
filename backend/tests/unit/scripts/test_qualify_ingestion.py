@@ -509,3 +509,94 @@ class TestRemainingJobSeconds:
         from scripts.qualify_ingestion import remaining_job_seconds
 
         assert remaining_job_seconds(12.0, maximum, clock=lambda: 5.0) == expected
+
+
+class TestParseArgs:
+    @pytest.mark.parametrize(
+        "selection,expected",
+        [
+            pytest.param([], [1, 2, 4, 8], id="default-all"),
+            pytest.param(["--load-concurrency", "8"], [8], id="retry-eight-only"),
+            pytest.param(
+                ["--load-concurrency", "4", "1"], [4, 1], id="requested-order"
+            ),
+        ],
+    )
+    def test_selects_requested_load_cells(self, tmp_path, selection, expected):
+        from scripts.qualify_ingestion import parse_args
+
+        result = parse_args(
+            ["--mode", "load", "--output-dir", str(tmp_path / "new"), *selection]
+        )
+
+        assert result.load_concurrency == expected
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            pytest.param(
+                ["--mode", "load", "--load-concurrency", "8", "8"], id="duplicates"
+            ),
+            pytest.param(
+                ["--mode", "load", "--load-concurrency", "3"], id="unsupported"
+            ),
+            pytest.param(
+                ["--mode", "load", "--load-concurrency"], id="empty-selection"
+            ),
+            pytest.param(["--load-concurrency", "8"], id="outside-load"),
+        ],
+    )
+    def test_rejects_invalid_load_selection(self, tmp_path, arguments):
+        from scripts.qualify_ingestion import parse_args
+
+        with pytest.raises(SystemExit) as caught:
+            parse_args(["--output-dir", str(tmp_path / "new"), *arguments])
+
+        assert caught.value.code == 2
+        assert not (tmp_path / "new").exists()
+
+
+class TestLoadAdmissionEnvironment:
+    @pytest.mark.parametrize(
+        "concurrencies,expected",
+        [
+            pytest.param([1, 2, 4, 8], "8", id="default-all"),
+            pytest.param([8], "8", id="eight-only"),
+            pytest.param([4, 1], "4", id="smaller-selection"),
+        ],
+    )
+    def test_changes_only_the_requested_user_lease_count(self, concurrencies, expected):
+        from scripts.qualify_ingestion import load_admission_environment
+
+        result = load_admission_environment(concurrencies)
+
+        assert result == {"VAULT_STAGING_MAX_ACTIVE_PER_USER": expected}
+
+
+class TestMissingLoadBaselines:
+    @pytest.mark.parametrize(
+        "one,four",
+        [
+            pytest.param(None, None, id="eight-only"),
+            pytest.param(1.0, None, id="serial-only"),
+            pytest.param(None, 4.0, id="four-only"),
+        ],
+    )
+    def test_reports_scaling_as_unassessed(self, one, four):
+        from scripts.qualify_ingestion import throughput_summary
+
+        result = throughput_summary(
+            one,
+            four,
+            effective_cpus=8,
+            native_slots=4,
+            native_memory_bytes=4 * 1024**3,
+            worker_envelope_bytes=1024**3,
+        )
+
+        assert result["assessed"] is False
+        assert result["four_to_one_ratio"] is None
+        assert result["eligible"] is False
+        assert result["gate_passed"] is None
+        assert result["qualification"] == "not_assessed_missing_baseline_cells"
+        assert result["reason"] == "missing_load_baseline_cells"
