@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import struct
@@ -13,7 +14,7 @@ from app.core.config import _overlay
 from app.modules.media import stl_worker
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
-from app.modules.media.stl_isolation import decode_reply
+from app.modules.media.stl_isolation import decode_manifest
 from tests.factories.geometry import tetrahedron, three_mf
 from tests.factories.three_mf_pilot import load_case
 
@@ -28,7 +29,8 @@ def run_worker(tmp_path, monkeypatch):
             "overrides": {},
             "path": str(source),
             "file_type": file_type,
-            "output": str(output),
+            "output_directory": str(tmp_path),
+            "expected_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         }
         # An owned descriptor stands in for stdout; main still duplicates and
         # redirects it itself, exactly as in the actual child process.
@@ -36,7 +38,7 @@ def run_worker(tmp_path, monkeypatch):
             with monkeypatch.context() as patch:
                 patch.setattr(stl_worker.sys, "stdout", sink)
                 status = stl_worker.main([json.dumps(spec)])
-        return status, decode_reply(destination.read_bytes()), output
+        return status, decode_manifest(destination.read_bytes()), output
 
     return execute
 
@@ -46,22 +48,24 @@ class TestMain:
         source = tmp_path / "cube.obj"
         trimesh.creation.box(extents=[4, 4, 4]).export(source, file_type="obj")
 
-        status, size, output = run_worker(source, file_type="obj")
+        status, manifest, output = run_worker(source, file_type="obj")
 
         assert status == 0
-        assert size == output.stat().st_size and size > 84
+        assert manifest.size == output.stat().st_size and manifest.size > 84
+        assert manifest.sha256 == hashlib.sha256(output.read_bytes()).hexdigest()
 
     def test_writes_the_complete_binary_stl_for_a_3mf(self, tmp_path, run_worker):
         source = tmp_path / "tetrahedron.3mf"
         payload = three_mf()
         source.write_bytes(payload)
 
-        status, size, output = run_worker(source, file_type="3mf")
+        status, manifest, output = run_worker(source, file_type="3mf")
 
         converted = output.read_bytes()
         expected = tetrahedron().export(file_type="stl")
         assert status == 0
-        assert size == len(converted) == 84 + 4 * 50
+        assert manifest.size == len(converted) == 84 + 4 * 50
+        assert manifest.sha256 == hashlib.sha256(converted).hexdigest()
         assert struct.unpack_from("<I", converted, 80)[0] == 4
         assert converted == expected
         restored = trimesh.load_mesh(io.BytesIO(converted), file_type="stl")
@@ -69,15 +73,83 @@ class TestMain:
         assert restored.bounds.tolist() == [[0, 0, 0], [10, 20, 30]]
         assert source.read_bytes() == payload
 
-    def test_reports_a_mesh_it_cannot_convert_as_nothing(self, tmp_path, run_worker):
+    def test_refuses_translated_facets_that_collapse_in_float32(
+        self, tmp_path, run_worker
+    ):
+        payload = three_mf(build=((1, "1 0 0 0 1 0 0 0 1 1e12 1e12 1e12"),))
+        source = tmp_path / "translated.3mf"
+        source.write_bytes(payload)
+
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="3mf")
+
+        assert raised.value.reason is ThumbnailFailureReason.INVALID_SOURCE
+        assert not (tmp_path / "mesh.stl").exists()
+        assert source.read_bytes() == payload
+
+    def test_refuses_finite_coordinates_outside_float32_range(
+        self, tmp_path, run_worker
+    ):
+        payload = three_mf(build=((1, "1e35 0 0 0 1e35 0 0 0 1e35 1e40 1e40 1e40"),))
+        source = tmp_path / "overflow.3mf"
+        source.write_bytes(payload)
+
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="3mf")
+
+        assert raised.value.reason is ThumbnailFailureReason.INVALID_SOURCE
+        assert not (tmp_path / "mesh.stl").exists()
+        assert source.read_bytes() == payload
+
+    def test_preserves_modest_transformed_geometry(self, tmp_path, run_worker):
+        payload = three_mf(build=((1, "1 0 0 0 1 0 0 0 1 7 11 13"),))
+        source = tmp_path / "translated.3mf"
+        source.write_bytes(payload)
+
+        status, manifest, output = run_worker(source, file_type="3mf")
+
+        converted = output.read_bytes()
+        expected = tetrahedron()
+        expected.apply_translation([7, 11, 13])
+        assert status == 0
+        assert converted == expected.export(file_type="stl")
+        assert manifest.size == len(converted) == 84 + 4 * 50
+        assert manifest.sha256 == hashlib.sha256(converted).hexdigest()
+        restored = trimesh.load_mesh(io.BytesIO(converted), file_type="stl")
+        assert len(restored.faces) == 4
+        assert restored.bounds.tolist() == [[7, 11, 13], [17, 31, 43]]
+        assert source.read_bytes() == payload
+
+    def test_preserves_tiny_representable_facets(self, tmp_path, run_worker):
+        import numpy as np
+
+        payload = three_mf(build=((1, "1e-18 0 0 0 1e-18 0 0 0 1e-18 0 0 0"),))
+        source = tmp_path / "tiny.3mf"
+        source.write_bytes(payload)
+
+        status, manifest, output = run_worker(source, file_type="3mf")
+
+        converted = output.read_bytes()
+        expected = tetrahedron()
+        expected.apply_scale(1e-18)
+        assert status == 0
+        assert manifest.size == len(converted) == 284
+        assert converted == expected.export(file_type="stl")
+        restored = trimesh.load_mesh(
+            io.BytesIO(converted), file_type="stl", process=False
+        )
+        np.testing.assert_allclose(restored.bounds, expected.bounds, rtol=1e-6, atol=0)
+        assert source.read_bytes() == payload
+
+    def test_reports_a_mesh_it_cannot_convert_as_invalid(self, tmp_path, run_worker):
         source = tmp_path / "garbage.obj"
         source.write_bytes(b"not a mesh \x00\x01")
 
-        status, size, output = run_worker(source, file_type="obj")
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="obj")
 
-        assert status == 0
-        assert size is None
-        assert not output.exists()
+        assert raised.value.reason is ThumbnailFailureReason.INVALID_SOURCE
+        assert not (tmp_path / "mesh.stl").exists()
 
     def test_reports_required_extension_refusal_without_writing_stl(
         self, tmp_path, run_worker
@@ -117,3 +189,36 @@ class TestMain:
 
         assert raised.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
         assert calls == []
+
+
+class TestConvert:
+    def test_exports_directly_to_staging(self, tmp_path, monkeypatch):
+        source = tmp_path / "cube.obj"
+        destination = tmp_path / "mesh.stl"
+        trimesh.creation.box().export(source, file_type="obj")
+        export = trimesh.Trimesh.export
+
+        def file_export(mesh, *, file_obj, file_type):
+            assert isinstance(file_obj, io.IOBase), (
+                "export requested an STL bytes buffer"
+            )
+            return export(mesh, file_obj=file_obj, file_type=file_type)
+
+        monkeypatch.setattr(trimesh.Trimesh, "export", file_export)
+
+        manifest = stl_worker.convert(source, "obj", destination)
+
+        assert destination.stat().st_size == manifest.size == 684
+        assert manifest.sha256 == hashlib.sha256(destination.read_bytes()).hexdigest()
+
+    def test_refuses_output_expansion_before_export(self, tmp_path, monkeypatch):
+        source = tmp_path / "cube.obj"
+        destination = tmp_path / "mesh.stl"
+        trimesh.creation.box().export(source, file_type="obj")
+        monkeypatch.setattr(stl_worker, "MAX_STL_BYTES", 683)
+
+        with pytest.raises(MeshWorkerError) as error:
+            stl_worker.convert(source, "obj", destination)
+
+        assert error.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert not destination.exists()

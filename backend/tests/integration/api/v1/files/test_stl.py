@@ -193,6 +193,7 @@ class TestFileAsStl:
             ftype="3mf",
             path="refused.3mf",
             size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
         )
         client.get(f"/api/v1/files/{file.id}/stl", headers=auth_headers)
         drain_work()
@@ -398,7 +399,7 @@ class TestFileAsStl:
         def timeout(*args, **kwargs):
             raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
 
-        monkeypatch.setattr("app.modules.media.stl_isolation.to_stl_bytes", timeout)
+        monkeypatch.setattr("app.modules.media.stl_isolation.prepare_stl", timeout)
         client.get(f"/api/v1/files/{project.id}/stl", headers=auth_headers)
         drain_work()
 
@@ -413,7 +414,7 @@ class TestFileAsStl:
             raise OSError("publication unavailable")
 
         monkeypatch.setattr(
-            "app.modules.derivatives.producers.publish_bytes", unavailable
+            "app.modules.derivatives.producers.publish_stream", unavailable
         )
         client.get(f"/api/v1/files/{project.id}/stl", headers=auth_headers)
         drain_work()

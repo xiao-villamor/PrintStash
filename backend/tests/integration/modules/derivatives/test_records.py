@@ -29,7 +29,7 @@ from app.db.models import (
     JobKind,
 )
 from app.modules.derivatives import records
-from app.modules.derivatives.kinds import group, recipes_for
+from app.modules.derivatives.kinds import VIEWER_STL_RECIPE, group, recipes_for
 from app.modules.derivatives.source import DerivativeSource, subject_key
 
 
@@ -127,7 +127,7 @@ class TestNeeded:
             next_attempt_at=None,
         )
         viewer = group(JobKind.DERIVATIVES_VIEWER_STL)
-        assert viewer.kinds == {DerivativeKind.VIEWER_STL: 2}
+        assert viewer.kinds == {DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE}
 
         assert DerivativeKind.VIEWER_STL not in records.rows_for(db_session, artifact)
         assert records.needed(db_session, artifact, viewer.kinds, now=now) == {
@@ -136,11 +136,11 @@ class TestNeeded:
         offered = DerivativeSource(viewer).pending(db_session, now=now, limit=1)
         assert [item.subject_key for item in offered] == [subject_key(artifact.id)]
         fresh = records.begin(
-            db_session, artifact, DerivativeKind.VIEWER_STL, 2, now=now
+            db_session, artifact, DerivativeKind.VIEWER_STL, VIEWER_STL_RECIPE, now=now
         )
         db_session.commit()
 
-        assert fresh.recipe_version == 2
+        assert fresh.recipe_version == VIEWER_STL_RECIPE
         assert fresh.state is DerivativeState.RUNNING
         assert fresh.attempts == 1
         assert (

@@ -47,6 +47,7 @@ class ThumbnailStrategy(str, Enum):
 
 class ThumbnailFailureReason(str, Enum):
     INVALID_SOURCE = "invalid_source"
+    SOURCE_CHANGED = "source_changed"
     UNSUPPORTED_FORMAT = "unsupported_format"
     UNSUPPORTED_CAPABILITY = "unsupported_capability"
     NO_GEOMETRY = "no_geometry"

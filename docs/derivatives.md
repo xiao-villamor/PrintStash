@@ -256,7 +256,8 @@ Fingerprint interpretation version `geometry-v6-sh5f4577c4` invalidates eligibil
 receipts from the former partial sampling policy. Historical descriptor evidence
 and human review decisions remain retained; descriptor math, the SH basis and
 verifier calibration are unchanged. Metadata recipe 11 and thumbnail recipe 10
-refresh affected outputs; viewer STL remains recipe 2. The earlier 3MF capability
+refresh affected outputs; this sampling change leaves the viewer STL recipe
+unchanged. Viewer conversion uses recipe 3 as documented below. The earlier 3MF capability
 policy and independent embedded previews remain in force. The
 [STL reader contract](stl-reader.md) specifies completion, sampling and refusals.
 
@@ -350,12 +351,32 @@ historical rather than actionable as a current interpretation.
 
 ## On-demand 3D viewer STL
 
-`viewer_stl` recipe 2 is produced by `derivatives.viewer_stl` in `derive.native`.
+`viewer_stl` recipe 3 is produced by `derivatives.viewer_stl` in `derive.native`.
 Only 3MF, OBJ and STEP Artifacts with `files.viewer_requested_at` set are eligible;
 uploads, scans and card hover do not request conversion. The first authorized
 `GET /api/v1/files/{id}/stl` (or the scoped share endpoint) persists this demand
 and nudges the source. Reconciliation recovers it after a lost nudge or restart.
 The active-Subject constraint shares work across requests.
+
+The caller's request Session owns demand; its queries finish before commit and
+before the work hint. Viewer requests do not open a nested SQL Session.
+
+Conversion writes a staged file in the admitted preparation workspace. A fixed
+44-byte manifest reports its size and SHA256; the parent verifies an open regular
+file descriptor and publishes that same stream through `StorageBackend`.
+It does not load the whole STL into a parent byte buffer. Source preparation and
+disk reservations include the 256 MiB output ceiling independently of compressed
+input size, and remain held through publication. Deployments with a preparation
+quota below that bound must raise it to admit viewer conversion. The native
+permit is released after supervised exit and descendant cleanup, before storage
+publication; prepared bytes and disk reservations retain their separate lifetime. Source/output
+identity, execution authority and the published size are checked before READY;
+a rejected output retains pending ownership for existing orphan recovery.
+Converted output must have a nonzero binary STL facet count and exact framing.
+The worker checks face batches before export, refusing nonfinite float32
+coordinates or a nondegenerate face that would collapse after packing. Recipe 3
+rebuilds earlier viewer outputs on demand under these stricter checks; valid
+conversions and original STL bytes retain their coordinate and byte semantics.
 
 Original STL is served directly. Other formats return 202 with `DerivativeRead`
 and `Retry-After: 1` until publication, 200 with the stored representation when

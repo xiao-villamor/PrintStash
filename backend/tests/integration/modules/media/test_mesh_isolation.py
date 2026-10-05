@@ -631,3 +631,105 @@ class TestSuperviseResult:
                 timeout_seconds=5,
                 accepted_exit_codes=codes,
             )
+
+
+class TestPreparedWorkerResult:
+    def test_releases_native_permit_before_publication(self, tmp_path, monkeypatch):
+        import hashlib
+        import os
+
+        from app.modules.media import stl_isolation
+        from app.runtime.native_runtime import current_permit
+
+        source = tmp_path / "cube.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+        supervise = mesh_isolation.supervise_result
+        permits = []
+
+        def observed(command, **kwargs):
+            permit = kwargs["permit"]
+            assert current_permit() is permit
+            permits.append(permit)
+            assert os.fstat(permit.fileno).st_size > 0
+            return supervise(command, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", observed)
+        with stl_isolation.prepare_stl(
+            source, file_type="obj", expected_sha256=source_sha, workspace=tmp_path
+        ) as prepared:
+            assert current_permit() is None
+            assert len(permits) == 1
+            with pytest.raises(ValueError, match="closed"):
+                _ = permits[0].fileno
+            assert len(prepared.stream.read()) == prepared.size
+            prepared.verify()
+            assert prepared.path.exists()
+        assert current_permit() is None
+        assert not prepared.path.exists()
+
+    def test_does_not_release_a_borrowed_native_permit(self, tmp_path):
+        import hashlib
+        import os
+
+        from app.modules.media import stl_isolation
+        from app.modules.media.native_execution import admission
+        from app.runtime.native_admission import Resources
+        from app.runtime.native_runtime import current_permit
+
+        source = tmp_path / "borrowed.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+        capacity = Resources(1, mesh_isolation.memory_budget_bytes())
+        with admission(capacity, capacity, checkpoint=lambda: None) as parent:
+            descriptor = parent.fileno
+            with stl_isolation.prepare_stl(
+                source, file_type="obj", expected_sha256=source_sha, workspace=tmp_path
+            ) as prepared:
+                assert current_permit() is parent
+                assert os.fstat(descriptor).st_size > 0
+                assert len(prepared.stream.read()) == prepared.size
+                prepared.verify()
+            assert current_permit() is parent
+            assert os.fstat(descriptor).st_size > 0
+        assert current_permit() is None
+        with pytest.raises(ValueError, match="closed"):
+            _ = parent.fileno
+
+    def test_refuses_directory_replacement(self, tmp_path, monkeypatch):
+        import hashlib
+        import shutil
+
+        from app.modules.media.native_budget import GeometryWork, MeshSource
+
+        source = tmp_path / "cube.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        supervise = mesh_isolation.supervise_result
+
+        def replaced(command, **kwargs):
+            reply = supervise(command, **kwargs)
+            directory = kwargs["temporary_directory"]
+            retained = directory.with_name(directory.name + "-retained")
+            directory.rename(retained)
+            directory.mkdir()
+            shutil.copyfile(retained / "mesh.stl", directory / "mesh.stl")
+            return reply
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", replaced)
+        spec = {
+            "path": str(source),
+            "file_type": "obj",
+            "expected_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        }
+
+        with pytest.raises(mesh_isolation.MeshWorkerError) as error:
+            with mesh_isolation.prepared_worker_result(
+                "app.modules.media.stl_worker",
+                spec,
+                workspace=tmp_path,
+                sources=(MeshSource(source, "obj"),),
+                work=GeometryWork(),
+            ):
+                pytest.fail("replacement directory yielded")
+
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED

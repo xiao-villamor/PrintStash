@@ -23,7 +23,7 @@ from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
 from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
-from app.db.session import get_session, get_session_factory
+from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
@@ -309,11 +309,14 @@ def file_as_stl(
     session: Session = Depends(get_session),
 ):
     f = _accessible_file(session, file_id, current_user)
-    return stl_response(f, request)
+    return stl_response(session, f, request)
 
 
 def stl_response(
-    f: File, request: Request, purpose: DeliveryPurpose = DeliveryPurpose.TRANSFORMED
+    session: Session,
+    f: File,
+    request: Request,
+    purpose: DeliveryPurpose = DeliveryPurpose.TRANSFORMED,
 ):
     """Serve a mesh File as binary STL (cached). No access checks — callers
     are responsible for authorising access to *f* first."""
@@ -331,9 +334,7 @@ def stl_response(
 
     from app.api.stl_response import derived_stl_response
 
-    with get_session_factory().scoped_session() as session:
-        file = _live_file(session, f.id)
-        return derived_stl_response(session, file, request, purpose)
+    return derived_stl_response(session, f, request, purpose)
 
 
 @router.get(

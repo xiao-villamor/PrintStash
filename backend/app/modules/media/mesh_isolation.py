@@ -21,14 +21,16 @@ import json
 import os
 import secrets
 import selectors
+import shutil
 import signal
+import stat
 import struct
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import sys
 import tempfile
 import time
-from collections.abc import Callable
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, Final
@@ -687,6 +689,88 @@ def _run_worker(
             lifecycle=WorkerLifecycle.GUARDED,
             on_chunk=on_chunk,
         )
+
+
+@contextmanager
+def worker_output_directory(workspace: Path) -> Iterator[Path]:
+    """Own a staged output directory without deleting a replaced name."""
+    directory = Path(tempfile.mkdtemp(prefix="printstash-mesh-", dir=workspace))
+    owned = directory.lstat()
+    identity = (owned.st_dev, owned.st_ino)
+    try:
+        yield directory
+    finally:
+        try:
+            current = directory.lstat()
+        except FileNotFoundError:
+            current = None
+        if (
+            current is not None
+            and stat.S_ISDIR(current.st_mode)
+            and (current.st_dev, current.st_ino) == identity
+        ):
+            shutil.rmtree(directory)
+
+
+@contextmanager
+def prepared_worker_result(
+    module: str,
+    spec: dict[str, Any],
+    *,
+    workspace: Path,
+    sources: tuple[MeshSource, ...],
+    work: WorkProfile,
+    reply_limit: int = MAX_REPLY_BYTES,
+) -> Iterator[tuple[SupervisedReply, Path]]:
+    """Supervise native work, then retain staged custody through publication.
+
+    Output bytes and disk capacity are reserved by the caller before this
+    workspace is used. Native credits are released after supervised exit and
+    descendant cleanup; the caller retains output bytes and disk reservations.
+    """
+    existing = current_permit()
+    capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
+    amount = (
+        existing.resources
+        if existing is not None
+        else estimate_sources(capacity, sources, work=work)
+    )
+    with worker_output_directory(workspace) as directory:
+        owned = directory.lstat()
+        identity = (owned.st_dev, owned.st_ino)
+        with admission(amount, capacity, checkpoint=checkpoint) as permit:
+            command = worker_command(
+                module,
+                [
+                    json.dumps(
+                        {
+                            "overrides": runtime_overrides(),
+                            **spec,
+                            "output_directory": str(directory),
+                        }
+                    )
+                ],
+                permit.resources.bytes,
+            )
+            reply = supervise_result(
+                command,
+                memory_budget=permit.resources.bytes,
+                timeout_seconds=float(settings.mesh_worker_timeout_seconds),
+                permit=permit,
+                lifecycle=WorkerLifecycle.GUARDED,
+                temporary_directory=directory,
+                reply_limit=reply_limit,
+            )
+        try:
+            current = directory.lstat()
+        except OSError as exc:
+            raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or (current.st_dev, current.st_ino) != identity
+        ):
+            raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+        yield reply, directory
 
 
 def run_worker(

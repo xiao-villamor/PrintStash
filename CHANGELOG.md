@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Publish viewer STL conversions from verified staged streams without buffering
+  whole outputs in the API/worker parent. Reserve expanded output space before
+  conversion, reject changed or incomplete publications, and release request
+  database connections before work hints so concurrent viewer misses share one
+  durable conversion without pool timeouts. Release native compute credits before
+  storage publication; viewer recipe 3 rejects malformed STL and float32 overflow
+  or collapsed faces, rebuilding older viewer outputs on demand.
+
 - Bound file acceptance commands independently of ordinary API workers. Keep SQL
   sessions on their creating thread, release them while streamed bodies wait,
   revalidate credentials before publication, and finish admitted writes before

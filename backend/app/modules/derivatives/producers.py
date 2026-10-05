@@ -24,6 +24,7 @@ from printstash_core.mesh.measurements import (
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from sqlmodel import Session, delete, select
 
+from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.errors import OperationError
 from app.core.logging import get_logger
@@ -59,7 +60,10 @@ from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.capacity_estimates import vault_allocation
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_ownership import publish_bytes, publish_file
+from app.modules.storage.storage_ownership import (
+    publish_file,
+    publish_stream,
+)
 from app.modules.work.contracts import JobExecution
 from app.runtime.native_admission import AdmissionTooLarge
 
@@ -711,50 +715,66 @@ def _derive_viewer_stl(
         )
         return Outcome({DerivativeKind.VIEWER_STL: DerivativeState.FAILED})
 
-    estimate = max(file.size_bytes * 3, 16 * 1024**2)
+    def require_current_execution() -> None:
+        checkpoint(force=True)
+        if execution is not None:
+            with get_session_factory().scoped_session() as session:
+                records.require_execution(session, execution)
+
+    output_limit = stl_isolation.MAX_STL_BYTES
     try:
         with (
-            reserve_sources((resolve(file),)) as prepared,
+            reserve_sources((resolve(file),), output_bytes=output_limit) as prepared,
             CapacityManager(get_session_factory()).hold(
                 f"derive:viewer-stl:{file_id}:{time.monotonic_ns()}",
                 [
                     CapacityResource.for_path(
                         prepared.directory,
-                        file.size_bytes * 2,
-                        role="mesh source preparation",
+                        file.size_bytes * 2 + output_limit,
+                        role="mesh source preparation and conversion",
                     ),
-                    CapacityResource.for_path(
-                        Path(tempfile.gettempdir()), estimate, role="mesh conversion"
-                    ),
-                    vault_allocation(estimate, role="derived STL publication"),
+                    vault_allocation(output_limit, role="derived STL publication"),
                 ],
             ),
+            prepared.materialize(capacity_claimed=True) as sources,
         ):
-            with prepared.materialize(capacity_claimed=True) as (source,):
-                data = stl_isolation.to_stl_bytes(
-                    source, file_type=file.file_type.value
+            (source,) = sources
+            require_current_execution()
+            with stl_isolation.prepare_stl(
+                source,
+                file_type=file.file_type.value,
+                expected_sha256=file.sha256,
+                workspace=prepared.directory,
+            ) as output:
+                require_current_execution()
+                backend = get_backend()
+                key = backend.blob_key(
+                    "_derivatives",
+                    0,
+                    f"{file.sha256}-viewer-stl-r{attempt.recipe}-{attempt.token}.stl",
                 )
-            if data is None:
-                return failed(ThumbnailFailureReason.INVALID_SOURCE, deterministic=True)
-            backend = get_backend()
-            key = backend.blob_key(
-                "_derivatives",
-                0,
-                f"{file.sha256}-viewer-stl-r{attempt.recipe}-{attempt.token}.stl",
-            )
-            with get_session_factory().scoped_session() as session:
-                receipt = publish_bytes(
-                    session, backend, key, data, object_kind="viewer_stl"
-                )
-                records.mark_ready(
-                    session,
-                    attempt,
-                    now=utcnow(),
-                    storage_key=receipt.key,
-                    output={"size": receipt.size},
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                )
-                session.commit()
+                with get_session_factory().scoped_session() as session:
+                    receipt = publish_stream(
+                        session,
+                        backend,
+                        key,
+                        output.stream,
+                        expected_size=output.size,
+                        sha256=output.sha256,
+                        object_kind="viewer_stl",
+                    )
+                    output.verify()
+                    if receipt.size != output.size:
+                        raise MeshWorkerError(ThumbnailFailureReason.STORAGE)
+                    records.mark_ready(
+                        session,
+                        attempt,
+                        now=utcnow(),
+                        storage_key=receipt.key,
+                        output={"size": receipt.size},
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    session.commit()
     except (MeshWorkerError, AdmissionTooLarge) as exc:
         reason = (
             ThumbnailFailureReason.RESOURCE_LIMIT

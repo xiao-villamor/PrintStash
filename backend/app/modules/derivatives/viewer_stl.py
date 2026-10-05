@@ -21,8 +21,11 @@ def request(session: Session, file: File) -> None:
     if file.viewer_requested_at is None:
         file.viewer_requested_at = utcnow()
         session.add(file)
-    session.commit()
-    if records.needed(
+    needed = records.needed(
         session, file, {DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE}, now=utcnow()
-    ):
+    )
+    # Release the request connection before the hint opens its own Session.
+    # The persisted demand remains authoritative if the hint is lost.
+    session.commit()
+    if needed:
         nudge(JobKind.DERIVATIVES_VIEWER_STL)
