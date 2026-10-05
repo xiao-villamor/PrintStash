@@ -32,7 +32,7 @@ contract correction. Ruff and the configured backend type check are green. No lo
 full suite, global coverage or Deep CI was run. Final framing/float32/recipe
 selection passed 73 cases; one numeric FD observer assertion was corrected
 for descriptor reuse. Final native-authority/producer/concurrency verification
-passed 11 cases in 141.125s. All 71 behavior rows below are verified.
+passed 11 cases in 141.125s. All 72 behavior rows below are verified.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
@@ -98,7 +98,6 @@ passed 11 cases in 141.125s. All 71 behavior rows below are verified.
 | 60 | reports worker timeout | Error | Staged converter raises the typed timeout failure | Viewer retains exact 422 timeout and one attempt | Integration | ✅ `tests/integration/api/v1/files/test_stl.py::TestFileAsStl::test_reports_worker_timeout` |
 | 61 | reports storage failure | Error | Streaming publication raises OSError | Viewer retains exact 422 storage failure | Integration | ✅ `tests/integration/api/v1/files/test_stl.py::TestFileAsStl::test_reports_storage_failure` |
 | 62 | retains resource refusal | Error | Exact source hash; conversion exceeds the configured face cap | Repeated requests retain 422 resource_limit and one Job attempt | Integration | ✅ `tests/integration/api/v1/files/test_stl.py::TestFileAsStl::test_retains_resource_refusal` |
-
 | 63 | Refuses translated facets that collapse in float32 | Error | Real tetrahedron 3MF; 10/20/30 dimensions translated by 1e12 | Typed INVALID_SOURCE; no STL output; original source bytes unchanged | Integration | ✅ `tests/integration/modules/media/test_stl_worker.py::TestMain::test_refuses_translated_facets_that_collapse_in_float32` (authored; root RED recorded / GREEN pending) |
 | 64 | Refuses finite source coordinates outside float32 range | Error | Real tetrahedron 3MF; scale 1e35 and translation 1e40 | Typed INVALID_SOURCE; no STL output; original source bytes unchanged | Integration | ✅ `tests/integration/modules/media/test_stl_worker.py::TestMain::test_refuses_finite_coordinates_outside_float32_range` (authored; root RED recorded / GREEN pending) |
 | 65 | Preserves modest transformed geometry | Happy | Real tetrahedron 3MF translated by 7/11/13 | Four binary facets, exact bounds and legacy STL bytes; manifest matches output; original unchanged | Integration | ✅ `tests/integration/modules/media/test_stl_worker.py::TestMain::test_preserves_modest_transformed_geometry` (authored; root RED recorded / GREEN pending) |
@@ -108,3 +107,4 @@ passed 11 cases in 141.125s. All 71 behavior rows below are verified.
 | 69 | Preserves tiny representable faces | Edge | 3MF tetra scaled1e-18 | Exact library STL bytes and original source; restored nonzero bounds within float32 rounding | Integration | ✅ `tests/integration/modules/media/test_stl_worker.py::TestMain::test_preserves_tiny_representable_facets` |
 | 70 | Retains borrowed native authority | Edge | Conversion inside a caller-owned native admission | Same live parent permit through publication; closed only after caller exits | Integration | ✅ `tests/integration/modules/media/test_mesh_isolation.py::TestPreparedWorkerResult::test_does_not_release_a_borrowed_native_permit` |
 | 71 | Reopens historical viewer receipts at the current recipe | Edge | Historical recipe1 READY/FAILED/CANCELLED exhausted receipts | Current recipe3 absent and needed; source offers work; new attempt RUNNING with count1 while old receipt retained | Integration | ✅ `tests/integration/modules/derivatives/test_records.py::TestNeeded::test_reopens_viewer_receipts_from_the_previous_scene_recipe` |
+| 72 | Native conversion forwards its explicit work profile | Happy | Embedding, verification and staged STL conversion at their native supervision seam | Exact RasterWork/AnalysisWork/GeometryWork retained; conversion also forwards source identity, caller workspace and fixed44B reply limit | Integration | ✅ `tests/integration/modules/media/test_native_budget.py::TestCallerProfiles::test_other_native_callers_forward_explicit_work` |

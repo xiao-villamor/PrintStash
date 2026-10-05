@@ -1,5 +1,6 @@
 """Source preflight stays bounded and cannot guess unknown geometry complexity."""
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -172,11 +173,20 @@ class TestCallerProfiles:
         source.write_bytes(b"PK")
         captured = []
 
-        def observe(module, spec, *, sources, work):
+        def observe(module, spec, *, sources, work, workspace=None, reply_limit=None):
             captured.append(work)
+            if consumer == "conversion":
+                assert workspace == tmp_path
+                assert reply_limit == 44
+                assert sources == (native_budget.MeshSource(source, "3mf"),)
+                assert (
+                    spec["expected_sha256"]
+                    == hashlib.sha256(source.read_bytes()).hexdigest()
+                )
             raise _CapturedWork
 
         monkeypatch.setattr(mesh_isolation, "run_worker", observe)
+        monkeypatch.setattr(mesh_isolation, "prepared_worker_result", observe)
         with pytest.raises(_CapturedWork):
             if consumer == "embedding":
                 embedding_isolation.embedding_views(
@@ -191,7 +201,13 @@ class TestCallerProfiles:
                     source, source, first_type="3mf", second_type="3mf"
                 )
             else:
-                stl_isolation.to_stl_bytes(source, file_type="3mf")
+                with stl_isolation.prepare_stl(
+                    source,
+                    file_type="3mf",
+                    expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                    workspace=tmp_path,
+                ):
+                    pytest.fail("conversion bypassed native supervision")
         (work,) = captured
         if consumer == "embedding":
             assert work == native_budget.RasterWork(
