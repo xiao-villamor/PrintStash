@@ -11,7 +11,7 @@ from enum import StrEnum
 
 
 class WorkPriority(StrEnum):
-    """Scheduling tier of a submission; children may only lower its priority."""
+    """Scheduling tier of a submission; children inherit it and may only lower it."""
 
     INTERACTIVE = "interactive"
     BACKFILL = "backfill"

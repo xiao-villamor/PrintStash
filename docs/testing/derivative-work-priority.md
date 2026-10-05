@@ -45,7 +45,10 @@ ownership/roundtrip cases then passed after comparing reflected index predicates
 as SQL text instead of object identity. A four-case final selection passed both
 SQLite cases, real simultaneous PostgreSQL backfill admission and the updated
 headline flow. Ruff lint, all 37 changed Python files, the 171-file CI formatting
-scope and configured Pyright passed. Final relevant test-hygiene and schema-metadata checks passed 62 cases.
+scope and configured Pyright passed. Final relevant test-hygiene and schema-metadata checks passed 62 cases. Initial
+PR CI detected a priority-enum description difference in the OpenAPI snapshot;
+restoring its original text passed the snapshot plus all priority-scope cases
+(9 tests). The public API shape and description remain unchanged.
 
 No full local backend suite, coverage lane, scale lane or Deep CI was run.
 These are per-command case counts; overlapping checks are not added together.
@@ -170,3 +173,9 @@ separately identifies checks that actually executed successfully.
 | 1 | Two definitions share one interactive queue slot during simultaneous discovery | Edge | Real PostgreSQL transactions, existing `_race` explicit SessionFactory injection, real catalog/Inline engine; two prioritized sources meet Barrier before lane admission, concurrency 1 | Both calls return normally; one QUEUED INTERACTIVE Job, one QUEUED engine submission and one recorded attempt across both definitions | Integration | ✅ `integration/postgres/test_work.py::TestPriorityAdmission::test_concurrent_sources_share_one_interactive_queue_slot` |
 | 2 | Running backfill retains its single quota while interactive queue capacity remains available | Edge | Canonical `f.build_job` RUNNING BACKFILL attempt 1; same two-definition lane, real `_discovery_budget` and `_discover` | Initial budget I1/B0/total1; one interactive Job queued; resulting budget I0/B0/total0; original backfill stays RUNNING attempt1 | Integration | ✅ `integration/postgres/test_work.py::TestPriorityAdmission::test_running_backfill_preserves_interactive_queue_capacity` |
 | 3 | Concurrent definitions share one durable backfill execution slot | Edge | Real PostgreSQL transactions, two BACKFILL prioritized sources synchronized before the common lane fence, actual `_discover` and Inline submission | Exactly one queued backfill Job; admission_epoch/submitted_epoch equal execution_epoch, attempts1; backfill quota0 across both definitions; exactly one QUEUED JobSubmission with matching Job/epoch/priority | Integration | ✅ `integration/postgres/test_work.py::TestPriorityAdmission::test_concurrent_sources_share_one_backfill_execution_slot` |
+
+## Public contract
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 1 | moving the canonical priority owner preserves the public contract | Edge | Canonical application OpenAPI document after enum extraction | Complete normalized document equals the existing snapshot, including priority values and description | Repo | ✅ `repo/test_openapi_contract.py::TestOpenapi::test_openapi_contract` |
