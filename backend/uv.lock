@@ -746,6 +746,12 @@ wheels = [
 ]
 
 [[package]]
+name = "glcontext"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/80/8238a0e6e972292061176141c1028b5e670aa8c94cf4c2f819bd730d314e/glcontext-3.0.0.tar.gz", hash = "sha256:57168edcd38df2fc0d70c318edf6f7e59091fba1cd3dadb289d0aa50449211ef", size = 16422, upload-time = "2024-08-10T20:01:20.004Z" }
+
+[[package]]
 name = "greenlet"
 version = "3.5.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1201,6 +1207,15 @@ wheels = [
 ]
 
 [[package]]
+name = "moderngl"
+version = "5.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "glcontext" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/52/540e2f8c45060bb2709f56eb5a44ae828dfcc97ccecb342c1a7deb467889/moderngl-5.12.0.tar.gz", hash = "sha256:52936a98ccb2f2e1d6e3cb18528b2919f6831e7e3f924e788b5873badce5129b", size = 193232, upload-time = "2024-10-17T12:36:28.002Z" }
+
+[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1651,6 +1666,10 @@ full = [
     { name = "sqlite-vec" },
     { name = "tokenizers" },
 ]
+gpu-pilot = [
+    { name = "glcontext" },
+    { name = "moderngl" },
+]
 step = [
     { name = "cadquery-ocp-novtk" },
     { name = "cascadio" },
@@ -1683,11 +1702,13 @@ requires-dist = [
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.23,<1" },
     { name = "fast-simplification", marker = "extra == 'dev'", specifier = ">=0.2.0,<0.3" },
     { name = "fastapi", specifier = ">=0.141,<1" },
+    { name = "glcontext", marker = "extra == 'gpu-pilot'", specifier = ">=3.0.0,<4" },
     { name = "greenlet", specifier = ">=3.5,<4" },
     { name = "httpx", specifier = ">=0.28,<0.29" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.10,<3" },
     { name = "jsonschema", specifier = ">=4.26,<5" },
     { name = "lxml", specifier = ">=6.1.3,<7" },
+    { name = "moderngl", marker = "extra == 'gpu-pilot'", specifier = ">=5.12.0,<6" },
     { name = "networkx", specifier = ">=3.6,<4" },
     { name = "numpy", specifier = ">=2.5.3,<3" },
     { name = "onnx", marker = "extra == 'ai'", specifier = ">=1.22,<2" },
@@ -1733,7 +1754,7 @@ requires-dist = [
     { name = "wsgidav", marker = "extra == 'dev'", specifier = ">=4.3,<5" },
     { name = "wsproto", marker = "extra == 'dev'", specifier = ">=1.3,<2" },
 ]
-provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai"]
+provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai", "gpu-pilot"]
 
 [[package]]
 name = "printstash-core"

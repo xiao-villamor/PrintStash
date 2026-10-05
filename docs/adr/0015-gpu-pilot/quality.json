@@ -1,0 +1,627 @@
+{
+  "policy": {
+    "foreground_alpha_threshold": 128,
+    "foreground_mask_differing_pixels": 0,
+    "rgba_max_difference": 8,
+    "rgb_max_difference": 8
+  },
+  "scope": "One canonical 640x480 WEBP observation per method/context mode; quality controls, not latency qualification. Anonymous private sources are a four-file subset of an 85-model archive.",
+  "controls": [
+    {
+      "case": "hole-torus",
+      "returncode": 1,
+      "wall_ms": 6830.488642997807,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 32,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 32,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 1,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 32,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 1,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "open-cube",
+      "returncode": 1,
+      "wall_ms": 6629.870806995314,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 10,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 10,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 10,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "thin-solid",
+      "returncode": 1,
+      "wall_ms": 6982.6335230027325,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "remote-component",
+      "returncode": 1,
+      "wall_ms": 4578.811829996994,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "reversed-winding",
+      "returncode": 1,
+      "wall_ms": 6979.658145006397,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "reflection",
+      "returncode": 1,
+      "wall_ms": 5575.891183994827,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 24,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "sheared-placement",
+      "returncode": 1,
+      "wall_ms": 6650.932490010746,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 23,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 23,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "high-translation",
+      "returncode": 1,
+      "wall_ms": 6379.7590769972885,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 12,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "sphere-5120",
+      "returncode": 1,
+      "wall_ms": 8383.38483699772,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 5120,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 5120,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 228,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 5120,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 228,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "grid-200000",
+      "returncode": 1,
+      "wall_ms": 13398.709158995189,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 200000,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "completed",
+          "triangles": 200000,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "completed",
+          "triangles": 200000,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 0,
+          "maximum_rgba_error": 0,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "private-01",
+      "returncode": 1,
+      "wall_ms": 8036.845812006504,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 3532,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 3532,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 236,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 3532,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 236,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "private-03",
+      "returncode": 1,
+      "wall_ms": 9135.947338989354,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 92636,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 92636,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 254,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 92636,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 254,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "private-04",
+      "returncode": 1,
+      "wall_ms": 13749.639208006556,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 329264,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 329264,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 247,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 329264,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 247,
+          "maximum_mask_error": 1,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    },
+    {
+      "case": "private-05",
+      "returncode": 1,
+      "wall_ms": 8333.977915011928,
+      "decision": "declined",
+      "cells": [
+        {
+          "mode": "cpu",
+          "status": "completed",
+          "triangles": 2094,
+          "source_unchanged": true,
+          "quality_observations": 0,
+          "quality_failures": 0,
+          "maximum_rgba_error": null,
+          "maximum_mask_error": null,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "cold",
+          "status": "failed",
+          "triangles": 2094,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 21,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        },
+        {
+          "mode": "reused",
+          "status": "failed",
+          "triangles": 2094,
+          "source_unchanged": true,
+          "quality_observations": 1,
+          "quality_failures": 1,
+          "maximum_rgba_error": 21,
+          "maximum_mask_error": 0,
+          "reasons": [],
+          "supervisor_reason": null
+        }
+      ]
+    }
+  ]
+}

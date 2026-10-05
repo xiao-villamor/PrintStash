@@ -1,0 +1,15 @@
+{
+  "timing_and_canonical_quality_code": {
+    "backend/scripts/gpu_render_backend.py": "27e39713c873ac76b3ae4f5ea0fe8df170966c95fb5ef1713701362bc3a79469",
+    "backend/scripts/gpu_render_measurement.py": "f9d1748a251569871dee6a11ef6465cf1cf620f00417c26e1a5f4487e19955ab",
+    "backend/scripts/gpu_render_pilot.py": "8ab28fb52c199a0ed147fdef9e3757b04952c7a4b571c08c2929820772d753b3",
+    "backend/packages/printstash-core/src/printstash_core/mesh/rasterizer.py": "6a6e6eb6340b15be43b3bb815787ec385089c52f18dc0b641cf378812225c682"
+  },
+  "final_frozen_quality_code": {
+    "backend/scripts/gpu_render_backend.py": "376f2b101e57cf805af64d534490d41344b35c12a2c947f13396fd06983ceccb",
+    "backend/scripts/gpu_render_measurement.py": "f9d1748a251569871dee6a11ef6465cf1cf620f00417c26e1a5f4487e19955ab",
+    "backend/scripts/gpu_render_pilot.py": "8ab28fb52c199a0ed147fdef9e3757b04952c7a4b571c08c2929820772d753b3",
+    "backend/packages/printstash-core/src/printstash_core/mesh/rasterizer.py": "6a6e6eb6340b15be43b3bb815787ec385089c52f18dc0b641cf378812225c682"
+  },
+  "change_after_timing": "Foreign-thread refusal moved before frame error retention; single-thread shader, preparation and encoder unchanged."
+}

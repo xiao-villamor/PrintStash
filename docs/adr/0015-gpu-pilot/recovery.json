@@ -1,0 +1,203 @@
+{
+  "scope": "Real physical GPU frames. Released-context recovery, cancellation and deadline containment; not physical reset or real device-OOM qualification.",
+  "controls": [
+    {
+      "mode": "lifecycle",
+      "result": {
+        "status": "completed",
+        "mode": "lifecycle",
+        "closed_reason": "closed",
+        "frames": [
+          {
+            "case": "tetra",
+            "hash": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "oracle": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "stats": {
+              "requested_allocation_bytes": 4739072,
+              "upload_bytes": 72,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 5.386856,
+              "draw_ms": 42.117953,
+              "readback_ms": 3.21203
+            }
+          },
+          {
+            "case": "box",
+            "hash": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "oracle": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.857969,
+              "draw_ms": 4.081424,
+              "readback_ms": 3.218156
+            }
+          },
+          {
+            "case": "thin",
+            "hash": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "oracle": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.087844,
+              "draw_ms": 3.065951,
+              "readback_ms": 1.71658
+            }
+          },
+          {
+            "case": "tetra",
+            "hash": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "oracle": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "stats": {
+              "requested_allocation_bytes": 4739072,
+              "upload_bytes": 72,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.060849,
+              "draw_ms": 3.107974,
+              "readback_ms": 1.145854
+            }
+          },
+          {
+            "case": "box",
+            "hash": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "oracle": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.105266,
+              "draw_ms": 3.365577,
+              "readback_ms": 1.586582
+            }
+          },
+          {
+            "case": "thin",
+            "hash": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "oracle": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 0.545645,
+              "draw_ms": 3.186949,
+              "readback_ms": 1.766262
+            }
+          },
+          {
+            "case": "tetra",
+            "hash": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "oracle": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "stats": {
+              "requested_allocation_bytes": 4739072,
+              "upload_bytes": 72,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.02744,
+              "draw_ms": 3.333891,
+              "readback_ms": 1.189985
+            }
+          },
+          {
+            "case": "box",
+            "hash": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "oracle": "80889ada95f4094752f5ff9028d861ef91bf041ceea754ca115c24f22111b168",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 1.119721,
+              "draw_ms": 3.133151,
+              "readback_ms": 1.340085
+            }
+          },
+          {
+            "case": "thin",
+            "hash": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "oracle": "32eee4e6a1fa35d16424184fc21ad8734a2ac36e7368f6953ab835824537c9d8",
+            "stats": {
+              "requested_allocation_bytes": 5001216,
+              "upload_bytes": 288,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 0.425508,
+              "draw_ms": 3.325754,
+              "readback_ms": 1.593379
+            }
+          },
+          {
+            "case": "tetra",
+            "hash": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "oracle": "3fa11f96cf66b1c128de29540cb4360b80c9f753c3683bbc72d194f48f1b46e8",
+            "stats": {
+              "requested_allocation_bytes": 4739072,
+              "upload_bytes": 72,
+              "draw_calls": 1,
+              "readback_count": 1,
+              "upload_ms": 0.714604,
+              "draw_ms": 22.664848,
+              "readback_ms": 1.060275
+            }
+          }
+        ],
+        "all_exact": true,
+        "device": {
+          "GL_VENDOR": "Microsoft Corporation",
+          "GL_RENDERER": "D3D12 (NVIDIA GeForce RTX 5060)",
+          "GL_VERSION": "4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2",
+          "version_code": 460
+        }
+      },
+      "supervision": {
+        "elapsed_ns": 1045476362,
+        "peak_tree_rss_bytes": 222695424,
+        "reply_bytes": 3785,
+        "exit_cause": "exited_zero",
+        "active_phase": null
+      },
+      "supervised_ms": 1048.592760998872,
+      "full_capacity_readmission": true,
+      "recovery_ms": 0.6263429968385026,
+      "owned_group_reaped": true
+    },
+    {
+      "mode": "cancel",
+      "outcome": "cancelled",
+      "supervision": {
+        "elapsed_ns": 803516510,
+        "peak_tree_rss_bytes": 217067520,
+        "reply_bytes": 0,
+        "exit_cause": "cancelled",
+        "active_phase": null
+      },
+      "supervised_ms": 804.3651309999404,
+      "full_capacity_readmission": true,
+      "recovery_ms": 0.6892359961057082,
+      "owned_group_reaped": true
+    },
+    {
+      "mode": "deadline",
+      "outcome": "timeout",
+      "supervision": {
+        "elapsed_ns": 5092357324,
+        "peak_tree_rss_bytes": 216936448,
+        "reply_bytes": 0,
+        "exit_cause": "deadline",
+        "active_phase": null
+      },
+      "supervised_ms": 5093.362291008816,
+      "full_capacity_readmission": true,
+      "recovery_ms": 0.899492995813489,
+      "owned_group_reaped": true
+    }
+  ]
+}

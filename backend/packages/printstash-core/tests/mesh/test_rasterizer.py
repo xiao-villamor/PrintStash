@@ -1288,6 +1288,157 @@ class TestRenderPreparedPixels:
         )
 
 
+class _DeferredFrame:
+    """Private frame stays invisible until the rasterizer publishes it once."""
+
+    def __init__(self):
+        self.buffers = None
+        self.finished = False
+
+    def __call__(self, img, zbuf, tri, vert_nrm, shade, base_color, width, height):
+        if self.finished:
+            raise RuntimeError("frame_already_published")
+        if self.buffers is None:
+            self.buffers = np.zeros_like(img), np.full_like(zbuf, np.inf)
+        return rasterizer._rasterise_triangles(
+            *self.buffers, tri, vert_nrm, shade, base_color, width, height
+        )
+
+    def finish(self, img, zbuf):
+        if self.finished or self.buffers is None:
+            raise RuntimeError("invalid_frame_publication")
+        img[:] = self.buffers[0]
+        zbuf[:] = self.buffers[1]
+        self.buffers = None
+        self.finished = True
+
+
+class TestDeferredRasteriser:
+    @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
+    @pytest.mark.parametrize("size", [1, 5, 64000], ids=["one", "split", "whole"])
+    def test_preserves_frozen_pixels(self, case, view, frozen_frame, size):
+        mesh, options = frozen_frame
+        prepared = prepare_mesh_render(mesh)
+        assert prepared is not None
+
+        actual = render_prepared_pixels(
+            prepared,
+            case["name"],
+            face_chunk_size=size,
+            rasterise_triangles=_DeferredFrame(),
+            **options,
+        )
+
+        assert actual is not None
+        assert hashlib.sha256(actual.rgba).hexdigest() == view["rgba_sha256"]
+
+    def test_preserves_silhouette_recovery(self):
+        prepared = prepare_mesh_render(inverted_plate())
+        assert prepared is not None
+        expected = render_prepared_pixels(
+            prepared, "cpu-silhouette", width=80, height=60, face_chunk_size=1
+        )
+
+        actual = render_prepared_pixels(
+            prepared,
+            "deferred-silhouette",
+            width=80,
+            height=60,
+            face_chunk_size=1,
+            rasterise_triangles=_DeferredFrame(),
+        )
+
+        assert expected is not None
+        assert actual == expected
+
+    def test_preserves_reflected_scene_pixels(self):
+        mesh = box_mesh()
+        reflected = np.diag([-2.0, 2, 2, 1])
+        reflected[:3, 3] = [4, 2, 0]
+        scene = ExpandedScene(
+            (MeshResource("part", mesh.vertices, mesh.faces),),
+            (Instance("part", np.eye(4)), Instance("part", reflected)),
+        )
+        prepared = prepare_scene_render(scene, face_chunk_size=5)
+        expected = render_prepared_pixels(
+            prepared, "cpu-scene", width=80, height=60, face_chunk_size=5
+        )
+
+        actual = render_prepared_pixels(
+            prepared,
+            "deferred-scene",
+            width=80,
+            height=60,
+            face_chunk_size=5,
+            rasterise_triangles=_DeferredFrame(),
+        )
+
+        assert expected is not None
+        assert actual == expected
+
+    def test_reports_finalization_failure(self, prepared_box, caplog):
+        import logging
+
+        class FailedPublication(_DeferredFrame):
+            def finish(self, img, zbuf):
+                raise RuntimeError("native_readback_failed")
+
+        actual = render_prepared_pixels(
+            prepared_box,
+            "failed-publication",
+            width=48,
+            height=48,
+            rasterise_triangles=FailedPublication(),
+            logger=logging.getLogger(__name__),
+        )
+
+        assert actual is None
+        assert "native_readback_failed" in caplog.text
+
+    def test_does_not_publish_partial_frame(self, prepared_box, caplog):
+        import logging
+
+        class FailedChunk(_DeferredFrame):
+            def __call__(self, *args, **kwargs):
+                raise RuntimeError("native_draw_failed")
+
+            def finish(self, img, zbuf):
+                raise RuntimeError("partial_frame_published")
+
+        actual = render_prepared_pixels(
+            prepared_box,
+            "failed-chunk",
+            width=48,
+            height=48,
+            rasterise_triangles=FailedChunk(),
+            logger=logging.getLogger(__name__),
+        )
+
+        assert actual is None
+        assert "native_draw_failed" in caplog.text
+        assert "partial_frame_published" not in caplog.text
+
+
+class TestEncodeRenderedPixels:
+    @pytest.mark.parametrize("format", ["PNG", "WEBP"], ids=["png", "webp"])
+    def test_preserves_exact_decoded_rgba(self, format):
+        rgba = bytes([10, 20, 30, 255, 255, 0, 0, 0, 194, 207, 220, 18])
+        frame = RenderedPixels(3, 1, rgba)
+
+        encoded = rasterizer.encode_rendered_pixels(frame, output_format=format)
+
+        with Image.open(io.BytesIO(encoded)) as decoded:
+            assert decoded.format == format
+            assert decoded.size == (3, 1)
+            assert decoded.convert("RGBA").tobytes() == rgba
+
+    def test_refuses_unknown_encoder_format(self):
+        frame = RenderedPixels(1, 1, bytes([10, 20, 30, 255]))
+
+        with pytest.raises(ValueError, match="invalid_thumbnail_format"):
+            rasterizer.encode_rendered_pixels(frame, output_format="JPEG")
+
+
 class TestRenderPreparedThumbnail:
     @pytest.mark.parametrize("format", ["PNG", "WEBP"], ids=["png", "webp"])
     def test_preserves_existing_encoded_bytes(self, prepared_box, format):

@@ -1,0 +1,145 @@
+{
+  "source": "sharp-cube (12 triangles)",
+  "flow": "canonical 640x480 WEBP thumbnail + six canonical 224x224 matte WHITE-RGB inputs",
+  "trials_per_method_per_cell": 30,
+  "scope": "private_gpu_pilot_no_production_adoption",
+  "timing_scope": "Retained geometry was loaded once per cell. Derived full-cold-source estimates add measured shared import/load/materialization/preparation time to each observation. Context-cold means a fresh context in the same worker, not a fresh process or physical GPU. The first observation and outliers are retained. No p95 SLA or whole-Job latency qualification.",
+  "policy": {
+    "foreground_alpha_threshold": 128,
+    "foreground_mask_differing_pixels": 0,
+    "rgba_max_difference": 8,
+    "reason": "half-opacity foreground excludes LANCZOS fringes; RGBA bound is 8/255, fixed before candidate images"
+  },
+  "decision": "declined",
+  "cost_quality_hardware_gates": [
+    {
+      "mode": "cold",
+      "hardware_renderer": true,
+      "full_cold_source_median_speedup": 1.4189912527078499,
+      "accepted": false
+    },
+    {
+      "mode": "reused",
+      "hardware_renderer": true,
+      "full_cold_source_median_speedup": 1.4980731751289549,
+      "accepted": false
+    }
+  ],
+  "cells": [
+    {
+      "mode": "cpu",
+      "status": "completed",
+      "shared_stages_ms": {
+        "imports": 73.72861000476405,
+        "load": 673.491566994926,
+        "prepare": 0.6539409951074049,
+        "optional_gpu_import": 0.0
+      },
+      "supervised_wall_ms": 34391.30192800076,
+      "sampled_peak_tree_rss_bytes": 261718016,
+      "paired_frame_checks": 0,
+      "quality_failures": 0,
+      "determinism_failures": [],
+      "methods": {
+        "cpu": {
+          "n": 30,
+          "derived_full_ms_median": 1803.789601995959,
+          "derived_full_ms_min": 1780.5882370012114,
+          "derived_full_ms_max": 2043.8065249909414,
+          "retained_ms_median": 1055.9154840011615,
+          "first_derived_full_ms": 2043.8065249909414
+        }
+      },
+      "versions": {
+        "numpy": "2.5.3",
+        "trimesh": "5.1.1",
+        "scipy": "1.18.1",
+        "Pillow": "12.3.0",
+        "moderngl": "5.12.0",
+        "glcontext": "3.0.0"
+      }
+    },
+    {
+      "mode": "cold",
+      "status": "completed",
+      "shared_stages_ms": {
+        "imports": 69.48067799385171,
+        "load": 624.7980180050945,
+        "prepare": 0.6240469956537709,
+        "optional_gpu_import": 2.267410993226804
+      },
+      "supervised_wall_ms": 48458.84694799315,
+      "sampled_peak_tree_rss_bytes": 433217536,
+      "paired_frame_checks": 210,
+      "quality_failures": 0,
+      "determinism_failures": [],
+      "methods": {
+        "cpu": {
+          "n": 30,
+          "derived_full_ms_median": 1710.0851594950655,
+          "derived_full_ms_min": 1677.879007998854,
+          "derived_full_ms_max": 1807.5396390049718,
+          "retained_ms_median": 1015.1824165004655,
+          "first_derived_full_ms": 1801.5396099945065
+        },
+        "gpu": {
+          "n": 30,
+          "derived_full_ms_median": 1205.1414384914096,
+          "derived_full_ms_min": 1190.7263579923892,
+          "derived_full_ms_max": 1487.3931170004653,
+          "retained_ms_median": 507.97128450358286,
+          "first_derived_full_ms": 1487.3931170004653
+        }
+      },
+      "versions": {
+        "numpy": "2.5.3",
+        "trimesh": "5.1.1",
+        "scipy": "1.18.1",
+        "Pillow": "12.3.0",
+        "moderngl": "5.12.0",
+        "glcontext": "3.0.0"
+      }
+    },
+    {
+      "mode": "reused",
+      "status": "completed",
+      "shared_stages_ms": {
+        "imports": 73.2813439972233,
+        "load": 647.5567919987952,
+        "prepare": 0.725377001799643,
+        "optional_gpu_import": 2.448424987960607
+      },
+      "supervised_wall_ms": 45946.57670099696,
+      "sampled_peak_tree_rss_bytes": 431300608,
+      "paired_frame_checks": 210,
+      "quality_failures": 0,
+      "determinism_failures": [],
+      "methods": {
+        "cpu": {
+          "n": 30,
+          "derived_full_ms_median": 1727.7189370070118,
+          "derived_full_ms_min": 1702.322073004325,
+          "derived_full_ms_max": 1940.4970289906487,
+          "retained_ms_median": 1006.1554240091937,
+          "first_derived_full_ms": 1940.4970289906487
+        },
+        "gpu": {
+          "n": 30,
+          "derived_full_ms_median": 1153.294088493567,
+          "derived_full_ms_min": 1142.3121199914021,
+          "derived_full_ms_max": 1532.6306099887006,
+          "retained_ms_median": 429.2821505077882,
+          "first_derived_full_ms": 1532.6306099887006
+        }
+      },
+      "versions": {
+        "numpy": "2.5.3",
+        "trimesh": "5.1.1",
+        "scipy": "1.18.1",
+        "Pillow": "12.3.0",
+        "moderngl": "5.12.0",
+        "glcontext": "3.0.0"
+      }
+    }
+  ]
+}

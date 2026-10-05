@@ -41,7 +41,7 @@ import io
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
 from .preview_profile import PREVIEW_PROFILE
 from .render_geometry import (
@@ -109,6 +109,20 @@ class Rasteriser(Protocol):
     ) -> int | None: ...
 
 
+@runtime_checkable
+class DeferredRasteriser(Rasteriser, Protocol):
+    """Publish a private frame once, after all chunks and silhouette recovery.
+
+    Deferred implementations keep drawing state outside the CPU image arrays.
+    ``finish`` must complete pending drawing and populate both arrays before
+    common alpha, downsampling and vignette processing. The caller owns backend
+    resources; a failed chunk never publishes a partial frame. Plain rasterizer
+    callbacks retain their existing immediate-write contract.
+    """
+
+    def finish(self, img: UInt8Array, zbuf: FloatArray) -> None: ...
+
+
 class RGBBackground(str, Enum):
     IGNORE_ALPHA = "ignore_alpha"
     WHITE = "white"
@@ -142,6 +156,29 @@ class RenderedPixels:
                 Image.new("RGBA", image.size, (255, 255, 255, 255)), image
             )
         return image.convert("RGB").tobytes()
+
+
+def encode_rendered_pixels(
+    pixels: RenderedPixels, *, output_format: Literal["PNG", "WEBP"] = "PNG"
+) -> bytes:
+    """Encode a completed frame with the canonical lossless thumbnail policy."""
+    if output_format not in ("PNG", "WEBP"):
+        raise ValueError("invalid_thumbnail_format")
+    from PIL import Image
+
+    image = Image.frombytes("RGBA", (pixels.width, pixels.height), pixels.rgba)
+    buffer = io.BytesIO()
+    if output_format == "WEBP":
+        image.save(
+            buffer,
+            format="WEBP",
+            lossless=True,
+            exact=True,
+            method=PREVIEW_PROFILE.encoding_method,
+        )
+    else:
+        image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
 
 
 def _render_thumbnail(
@@ -224,21 +261,7 @@ def render_prepared_thumbnail(
     if pixels is None:
         return None
     try:
-        from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
-
-        image = Image.frombytes("RGBA", (pixels.width, pixels.height), pixels.rgba)
-        buffer = io.BytesIO()
-        if output_format == "WEBP":
-            image.save(
-                buffer,
-                format="WEBP",
-                lossless=True,
-                exact=True,
-                method=PREVIEW_PROFILE.encoding_method,
-            )
-        else:
-            image.save(buffer, format="PNG", optimize=True)
-        return buffer.getvalue()
+        return encode_rendered_pixels(pixels, output_format=output_format)
     except Exception:
         if logger is not None:
             logger.warning(
@@ -574,6 +597,9 @@ def render_prepared_pixels(
                     img, zbuf, tri, nrm, _flat_shade, base_color, ss_width, ss_height
                 )
                 del tri, nrm
+
+        if isinstance(rasterise, DeferredRasteriser):
+            rasterise.finish(img, zbuf)
 
         # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
         alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
