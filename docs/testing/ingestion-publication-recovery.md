@@ -929,7 +929,7 @@ The affected reconciler/bootstrap selection passed **128 cases in 13.61s**. The 
 | 380 | parent death releases warm residency | Edge | actual warm ONNX worker; retain source pipe writer after parent death | parent report received within 10s; warm child's pidfd readable within 5s; full residency reservation reacquired | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestInferenceResidency::test_parent_death_releases_warm_residency[True]` |
 | 381 | first frame precedes retirement | Edge | actual native retirement probe with queued pressure before first request | ready stderr within 5s; stdout remains unready 0.3s; first frame produces expected vectors; worker exits 73 | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestResidencyRetirementRace::test_new_worker_handles_its_first_frame_before_retirement` |
 
-The high-FD class and two original CI failures passed **4 cases in 7.22s** after a valid RED reproduced FD1024 rejection by select. The test readiness helper uses a context-managed DefaultSelector; production exchange already used that owner. The fixture raises only its current process soft RLIMIT_NOFILE when necessary and restores it after closing its own descriptors. POSIX absence or an insufficient hard limit is explicitly reported as platform-unavailable, never counted as a high-FD proof. Original readiness and quiet-period deadlines remain unchanged.
+The high-FD class and two original CI failures passed **4 cases in 7.22s** after a valid RED reproduced FD1024 rejection by select. The test readiness helper uses a context-managed DefaultSelector; production exchange already used that owner. The fixture raises only its current process soft RLIMIT_NOFILE when necessary and restores it after closing its own descriptors. The two high-FD cases are generated only on POSIX; a hard limit below the required descriptor fails explicitly. Linux CI executes both actual high-descriptor cases. Original readiness and quiet-period deadlines remain unchanged.
 
 ## Scoped CI PID namespace preparation
 
@@ -941,3 +941,13 @@ The high-FD class and two original CI failures passed **4 cases in 7.22s** after
 | 385 | shared ledger retains credit across a PID namespace | Happy | Real child process enters distinct user/PID namespace with a held native credit | Namespace identity differs from parent; live child retains the shared credit; process death permits exact reclaim | Integration | ✅ `backend/tests/integration/runtime/test_native_admission.py::TestNamespace::test_shared_ledger_retains_credit_across_pid_namespace` |
 
 Deep full-suite jobs prepare an isolated runner-local unshare executable and, when required by the runner, a dedicated per-executable AppArmor userns profile. A successful real user/PID namespace probe is required before exporting the executable directory; an always-run cleanup unloads only that profile. Host-wide restrictions and the real shared-ledger assertion remain unchanged. The focused namespace repository selection passed **5 cases in 13.61s** (19.61s wall time); the actual remote namespace/profile probe remains pending exact-head CI. The previous failing namespace report is retained.
+
+## Compatibility suite cleanup contract
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 386 | keeps the current Python full suite before scoped cleanup | Edge | Deep compatibility job has a namespace cleanup step after its test suite | Exactly one named compatibility suite runs full -q; exactly one later cleanup runs with always() and the scoped script | Repo | ✅ `backend/tests/repo/test_python_runtime.py::TestPythonRuntime::test_runs_ci_with_current_python` |
+
+Final validation follows the requested order: ordinary PR CI, merge to main, then Deep CI on GitHub for the merged revision. The sustained resource qualification remains a separate P28 closure requirement.
+
+The final high-FD, original inference regression, skip-hygiene and current-Python compatibility selection passes 6 cases in 14.53s. This checks the unchanged real descriptor behavior plus the repository contracts exposed by PR CI.

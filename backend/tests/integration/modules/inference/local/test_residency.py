@@ -31,18 +31,14 @@ def _readable(stream: int | BinaryIO, timeout: float) -> bool:
 
 @pytest.fixture
 def high_pipe():
-    fcntl = pytest.importorskip(
-        "fcntl", reason="High pipe descriptors require POSIX F_DUPFD"
-    )
-    resource = pytest.importorskip(
-        "resource", reason="High pipe descriptors require POSIX RLIMIT_NOFILE"
-    )
+    import fcntl
+    import resource
+
     limits = resource.getrlimit(resource.RLIMIT_NOFILE)
     soft, hard = limits
-    if hard != resource.RLIM_INFINITY and hard <= 1024:
-        pytest.skip(
-            "Host hard RLIMIT_NOFILE cannot allocate a descriptor above FD_SETSIZE"
-        )
+    assert hard == resource.RLIM_INFINITY or hard > 1024, (
+        "High-FD qualification requires a hard RLIMIT_NOFILE above 1024"
+    )
     raised = soft != resource.RLIM_INFINITY and soft <= 1024
     if raised:
         resource.setrlimit(resource.RLIMIT_NOFILE, (1025, hard))
@@ -60,15 +56,16 @@ def high_pipe():
             resource.setrlimit(resource.RLIMIT_NOFILE, limits)
 
 
+@pytest.mark.parametrize("_posix", [True] if os.name == "posix" else [])
 class TestDescriptorReadiness:
-    def test_observes_ready_bytes_above_fd_setsize(self, high_pipe):
+    def test_observes_ready_bytes_above_fd_setsize(self, high_pipe, _posix):
         reader, writer = high_pipe
         os.write(writer, b"x")
 
         assert _readable(reader, 0)
         assert os.read(reader, 1) == b"x"
 
-    def test_bounds_an_unready_high_descriptor(self, high_pipe):
+    def test_bounds_an_unready_high_descriptor(self, high_pipe, _posix):
         reader, _writer = high_pipe
 
         assert not _readable(reader, 0)

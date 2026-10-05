@@ -93,9 +93,24 @@ class TestPythonRuntime:
             CURRENT_PYTHON
         ]
         assert f"uv venv --python {CURRENT_PYTHON}" in normal_source
-        assert deep["jobs"]["backend-python314"]["steps"][-1]["run"] == (
-            "./scripts/test.sh full -q"
-        )
+        compatibility_steps = deep["jobs"]["backend-python314"]["steps"]
+        suites = [
+            (index, step)
+            for index, step in enumerate(compatibility_steps)
+            if step.get("name") == "Run backend compatibility suite"
+        ]
+        cleanups = [
+            (index, step)
+            for index, step in enumerate(compatibility_steps)
+            if step.get("name") == "Remove PID namespace qualification"
+        ]
+        assert len(suites) == len(cleanups) == 1
+        suite_index, suite = suites[0]
+        cleanup_index, cleanup = cleanups[0]
+        assert suite["run"] == "./scripts/test.sh full -q"
+        assert cleanup_index > suite_index
+        assert cleanup["if"] == "always()"
+        assert cleanup["run"] == "bash ../scripts/prepare-ci-pid-namespace.sh cleanup"
 
     def test_keeps_normal_check_topology(self) -> None:
         jobs = _workflow(REPO_ROOT / ".github/workflows/ci.yml")["jobs"]
