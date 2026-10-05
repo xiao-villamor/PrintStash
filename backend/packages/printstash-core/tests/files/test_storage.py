@@ -587,3 +587,46 @@ class TestPublishStagedFile:
             publish_staged_file(
                 source, tmp_path / "destination", strategy=PublicationStrategy.COPY
             )
+
+
+class TestStreamCancellation:
+    def test_cancels_a_copy_between_source_blocks(self, tmp_path):
+        source = BytesIO(b"a" * (1024 * 1024 + 1))
+        destination = tmp_path / "staged.stl"
+        cancellation = KeyboardInterrupt("cancelled copy")
+        checkpoints = 0
+
+        def checkpoint():
+            nonlocal checkpoints
+            checkpoints += 1
+            if checkpoints == 2:
+                raise cancellation
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            stream_to_path(source, destination, on_chunk=checkpoint)
+
+        assert raised.value is cancellation
+        assert source.tell() == 1024 * 1024
+        assert source.read() == b"a"
+        assert not destination.exists()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []
+
+    def test_refuses_publication_after_cancellation(self, tmp_path):
+        source = BytesIO(b"finished bytes")
+        destination = tmp_path / "staged.stl"
+        cancellation = KeyboardInterrupt("cancelled publication")
+        checkpoints = 0
+
+        def checkpoint():
+            nonlocal checkpoints
+            checkpoints += 1
+            if checkpoints == 3:
+                raise cancellation
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            stream_to_path(source, destination, on_chunk=checkpoint)
+
+        assert raised.value is cancellation
+        assert source.tell() == len(b"finished bytes")
+        assert not destination.exists()
+        assert list(tmp_path.glob(STAGING_GLOB)) == []

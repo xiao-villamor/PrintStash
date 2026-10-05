@@ -238,3 +238,106 @@ class TestUploadJob:
         job = db_session.get(Job, request.job_id)
         assert job is not None and job.state == JobState.FAILED
         assert "staging_expired" in json.loads(job.status_json).get("error", "")
+
+
+class TestDbosBatchWithdrawal:
+    def test_cancellation_stops_the_batch_after_a_committed_artifact(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import threading
+        from dataclasses import replace
+
+        from app.db.models import File
+        from app.db.session import get_session_factory
+        from app.modules.ingestion import importer
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.work import catalog as catalog_module
+        from app.modules.work import service
+        from app.modules.work.catalog import WorkCatalog
+        from app.modules.work.contracts import Step
+        from tests.contract.modules.work._harness import DbosHarness, shared_app_db
+        from tests.factories import build_ingest_request, build_user
+        from tests.factories.content import gcode
+
+        previous_engine = catalog_module.get_engine()
+        previous_catalog = catalog_module.get_catalog()
+        first = tmp_path / "first.gcode"
+        second = tmp_path / "second.gcode"
+        body = gcode(marker="dbos-committed-first")
+        first.write_bytes(body)
+        second.write_bytes(gcode(marker="dbos-not-imported"))
+        finished = threading.Event()
+        committed = []
+        original = importer._ingest_one_file
+
+        with shared_app_db(tmp_path / "application.sqlite"):
+            with get_session_factory().scoped_session() as session:
+                owner = build_user(session, "dbos-import-owner")
+                request = build_ingest_request(
+                    session, owner, kind=IngestRequestKind.COLLECTION
+                )
+                session.commit()
+                owner_id, job_id = owner.id, request.job_id
+
+            def ingest_step(context):
+                try:
+                    importer.import_assets(
+                        job_context=context,
+                        staged_files=[(first, first.name), (second, second.name)],
+                        collection=None,
+                        tags=None,
+                        source_url=None,
+                        actor_user_id=owner_id,
+                        session_factory=get_session_factory(),
+                    )
+                finally:
+                    finished.set()
+
+            def commit_then_cancel(*args, **kwargs):
+                outcome = original(*args, **kwargs)
+                assert outcome is not None and "file_id" in outcome, outcome
+                committed.append(outcome["file_id"])
+                with get_session_factory().scoped_session() as session:
+                    file = session.get(File, outcome["file_id"])
+                    assert file is not None
+                    assert get_backend().read_bytes(file.path) == body
+                service.cancel(job_id, actor=owner)
+                return outcome
+
+            monkeypatch.setattr(importer, "_ingest_one_file", commit_then_cancel)
+            definition = previous_catalog.definition(JobKind.INGESTION_COLLECTION)
+            scoped_catalog = WorkCatalog(
+                [
+                    replace(
+                        candidate,
+                        steps=(Step("ingest.collection.cancel-probe", ingest_step),),
+                    )
+                    if candidate.name is definition.name
+                    else candidate
+                    for candidate in previous_catalog.definitions.values()
+                ],
+                lanes=previous_catalog.lanes,
+            )
+            system_db_path = tmp_path / "engine.sqlite"
+            harness = DbosHarness(
+                scoped_catalog,
+                f"sqlite:///{system_db_path}",
+                app_version="integration-batch-cancellation",
+                listen_lanes=[definition.lane],
+            )
+            catalog_module.bind(harness.engine, scoped_catalog)
+            try:
+                submit(job_id)
+                harness.wait_for(finished.is_set, timeout=10)
+                with get_session_factory().scoped_session() as session:
+                    job = session.get(Job, job_id)
+                    assert job is not None and job.state is JobState.CANCELLED
+                    files = session.exec(select(File)).all()
+                    assert len(committed) == 1
+                    assert [file.id for file in files] == committed
+                    assert get_backend().read_bytes(files[0].path) == body
+                assert not first.exists()
+                assert not second.exists()
+            finally:
+                harness.close()
+                catalog_module.bind(previous_engine, previous_catalog)

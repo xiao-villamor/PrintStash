@@ -177,7 +177,11 @@ class TestVerifyArchiveContents:
     def test_decompresses_supported_files_before_review(self, tmp_path: Path) -> None:
         path = _archive(
             tmp_path / "bundle.zip",
-            {"parts/a.stl": b"solid", "parts/b.gcode": b"G1 X1", "notes.txt": b"ignored"},
+            {
+                "parts/a.stl": b"solid",
+                "parts/b.gcode": b"G1 X1",
+                "notes.txt": b"ignored",
+            },
         )
         progress: list[tuple[int, int]] = []
 
@@ -199,7 +203,10 @@ class TestVerifyArchiveContents:
 
         with pytest.raises(ArchivePolicyError, match="archive_invalid"):
             verify_archive_contents(
-                path, entries, max_entry_bytes=1024, on_chunk=lambda: None,
+                path,
+                entries,
+                max_entry_bytes=1024,
+                on_chunk=lambda: None,
                 on_entry=lambda _processed, _total: None,
             )
 
@@ -208,7 +215,10 @@ class TestVerifyArchiveContents:
 
         with pytest.raises(ArchivePolicyError, match="archive_entry_too_large"):
             verify_archive_contents(
-                path, _inspect(path), max_entry_bytes=4, on_chunk=lambda: None,
+                path,
+                _inspect(path),
+                max_entry_bytes=4,
+                on_chunk=lambda: None,
                 on_entry=lambda _processed, _total: None,
             )
 
@@ -482,3 +492,165 @@ class TestExtractSelectedFailures:
         staged = [path.name for path, _name in extracted]
         assert len(set(staged)) == 2
         assert all(name.endswith(".stl") for name in staged)
+
+
+class TestExtractionCancellation:
+    def test_removes_completed_entries_after_boundary_cancellation(self, tmp_path):
+        archive = _archive(
+            tmp_path / "bundle.zip", {"a.stl": b"first", "b.stl": b"second"}
+        )
+        original = archive.read_bytes()
+        staging = tmp_path / "staging"
+        names = iter(("first.stl", "second.stl"))
+        cancellation = KeyboardInterrupt("cancelled entry")
+        entries = 0
+
+        def checkpoint():
+            nonlocal entries
+            entries += 1
+            if entries == 2:
+                assert (staging / "first.stl").read_bytes() == b"first"
+                raise cancellation
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            extract_selected(
+                archive,
+                ["a.stl", "b.stl"],
+                staging_dir=staging,
+                max_entry_bytes=1024,
+                importable_suffixes={".stl"},
+                name_factory=lambda _suffix: next(names),
+                on_entry=checkpoint,
+            )
+
+        assert raised.value is cancellation
+        assert list(staging.iterdir()) == []
+        assert archive.read_bytes() == original
+
+    def test_cancels_an_archive_entry_between_blocks(self, tmp_path):
+        archive = _archive(
+            tmp_path / "bundle.zip", {"large.stl": b"x" * (1024 * 1024 + 1)}
+        )
+        original = archive.read_bytes()
+        staging = tmp_path / "staging"
+        cancellation = KeyboardInterrupt("cancelled block")
+        chunks = 0
+
+        def checkpoint():
+            nonlocal chunks
+            chunks += 1
+            if chunks == 2:
+                raise cancellation
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            extract_selected(
+                archive,
+                ["large.stl"],
+                staging_dir=staging,
+                max_entry_bytes=2 * 1024 * 1024,
+                importable_suffixes={".stl"},
+                on_chunk=checkpoint,
+            )
+
+        assert raised.value is cancellation
+        assert list(staging.iterdir()) == []
+        assert archive.read_bytes() == original
+
+    def test_preserves_a_replacement_during_cancellation_cleanup(self, tmp_path):
+        archive = _archive(
+            tmp_path / "bundle.zip", {"a.stl": b"first", "b.stl": b"second"}
+        )
+        original = archive.read_bytes()
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        replacement = staging / "replacement"
+        replacement.write_bytes(b"another writer")
+        names = iter(("first.stl", "second.stl"))
+        cancellation = KeyboardInterrupt("cancelled entry")
+        entries = 0
+
+        def checkpoint():
+            nonlocal entries
+            entries += 1
+            if entries == 2:
+                replacement.replace(staging / "first.stl")
+                raise cancellation
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            extract_selected(
+                archive,
+                ["a.stl", "b.stl"],
+                staging_dir=staging,
+                max_entry_bytes=1024,
+                importable_suffixes={".stl"},
+                name_factory=lambda _suffix: next(names),
+                on_entry=checkpoint,
+            )
+
+        assert raised.value is cancellation
+        assert (staging / "first.stl").read_bytes() == b"another writer"
+        assert sorted(item.name for item in staging.iterdir()) == ["first.stl"]
+        assert archive.read_bytes() == original
+
+    def test_preserves_cancellation_when_cleanup_fails(self, tmp_path, monkeypatch):
+        archive = _archive(
+            tmp_path / "bundle.zip", {"a.stl": b"first", "b.stl": b"second"}
+        )
+        original = archive.read_bytes()
+        staging = tmp_path / "staging"
+        names = iter(("first.stl", "second.stl"))
+        cancellation = KeyboardInterrupt("cancelled entry")
+        entries = 0
+        unlink = Path.unlink
+
+        def fail_owned_cleanup(path, *args, **kwargs):
+            if path == staging / "first.stl":
+                raise PermissionError("cleanup refused")
+            return unlink(path, *args, **kwargs)
+
+        def checkpoint():
+            nonlocal entries
+            entries += 1
+            if entries == 2:
+                raise cancellation
+
+        monkeypatch.setattr(Path, "unlink", fail_owned_cleanup)
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            extract_selected(
+                archive,
+                ["a.stl", "b.stl"],
+                staging_dir=staging,
+                max_entry_bytes=1024,
+                importable_suffixes={".stl"},
+                name_factory=lambda _suffix: next(names),
+                on_entry=checkpoint,
+            )
+
+        assert raised.value is cancellation
+        assert (staging / "first.stl").read_bytes() == b"first"
+        assert archive.read_bytes() == original
+
+    def test_preserves_a_collided_destination(self, tmp_path):
+        archive = _archive(
+            tmp_path / "bundle.zip", {"a.stl": b"first", "b.stl": b"second"}
+        )
+        original = archive.read_bytes()
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "second.stl").write_bytes(b"already owned")
+        names = iter(("first.stl", "second.stl"))
+
+        with pytest.raises(FileExistsError):
+            extract_selected(
+                archive,
+                ["a.stl", "b.stl"],
+                staging_dir=staging,
+                max_entry_bytes=1024,
+                importable_suffixes={".stl"},
+                name_factory=lambda _suffix: next(names),
+            )
+
+        assert (staging / "second.stl").read_bytes() == b"already owned"
+        assert sorted(item.name for item in staging.iterdir()) == ["second.stl"]
+        assert archive.read_bytes() == original

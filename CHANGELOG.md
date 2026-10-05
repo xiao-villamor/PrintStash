@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Stop withdrawn batch imports between entries and source blocks, preserving
+  committed Artifacts and durable upload sources while cleaning owned staging.
+  Copy and hash browser upload bytes in one pass, and preserve cancellation when
+  receipt cleanup fails.
+
 - Add an isolated prepared-geometry cache benchmark with bounded, checksummed
   arrays, current-loader STL equivalence checks and supervised worker timings.
   Keep production preparation unchanged pending demonstrated reuse and recovery

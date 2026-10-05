@@ -534,6 +534,108 @@ class TestMetadata:
         ).first()
         assert md is not None and md.estimated_time_s == 120
 
+    def test_rolls_back_precommit_bytes_on_cooperative_cancellation(
+        self, db_session, storage, model, tmp_path, monkeypatch
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        cancellation = OperationCancelled()
+        published = []
+        metadata_file_ids = []
+        original_publish = ingestion.publish_file
+
+        def observe_publication(*args, **kwargs):
+            receipt = original_publish(*args, **kwargs)
+            published.append(receipt)
+            assert Path(receipt.key).read_bytes() == b"solid bracket\nendsolid\n"
+            return receipt
+
+        monkeypatch.setattr(ingestion, "publish_file", observe_publication)
+
+        def withdrawn_metadata(*_args, **kwargs):
+            metadata_file_ids.append(kwargs["file_id"])
+            raise cancellation
+
+        withdrawn_metadata.model_fields = ingestion.Metadata.model_fields
+        monkeypatch.setattr(ingestion, "Metadata", withdrawn_metadata)
+
+        with pytest.raises(OperationCancelled) as raised:
+            _persist(db_session, model, _staged(tmp_path))
+
+        db_session.rollback()
+        assert raised.value is cancellation
+        assert (
+            db_session.exec(select(File).where(File.model_id == model.id)).all() == []
+        )
+        assert len(metadata_file_ids) == 1
+        assert db_session.exec(
+            select(Metadata).where(Metadata.file_id == metadata_file_ids[0])
+        ).all() == []
+        assert len(published) == 1
+        assert not Path(published[0].key).exists()
+
+    def test_preserves_cancellation_when_receipt_cleanup_fails(
+        self, db_session, storage, model, tmp_path, monkeypatch
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        cancellation = OperationCancelled()
+        receipts = []
+
+        def withdrawn_metadata(*_args, **_kwargs):
+            raise cancellation
+
+        def failed_cleanup(_backend, receipt):
+            receipts.append(receipt)
+            raise OSError("receipt cleanup unavailable")
+
+        withdrawn_metadata.model_fields = ingestion.Metadata.model_fields
+        monkeypatch.setattr(ingestion, "Metadata", withdrawn_metadata)
+        monkeypatch.setattr(LocalStorageBackend, "rollback_create", failed_cleanup)
+
+        with pytest.raises(OperationCancelled) as raised:
+            _persist(db_session, model, _staged(tmp_path))
+
+        assert raised.value is cancellation
+        assert any("receipt cleanup" in note for note in cancellation.__notes__)
+        assert (
+            db_session.exec(select(File).where(File.model_id == model.id)).all() == []
+        )
+        assert len(receipts) == 1
+        assert Path(receipts[0].key).read_bytes() == b"solid bracket\nendsolid\n"
+
+    def test_preserves_committed_artifact_after_cooperative_cancellation(
+        self, db_session, storage, model, tmp_path, monkeypatch
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        cancellation = OperationCancelled()
+        original_commit = db_session.commit
+        commit_calls = 0
+        model_id = model.id
+        staged = _staged(tmp_path)
+        original_bytes = staged.read_bytes()
+
+        def commit_then_cancel():
+            nonlocal commit_calls
+            commit_calls += 1
+            original_commit()
+            if commit_calls == 2:
+                raise cancellation
+
+        monkeypatch.setattr(db_session, "commit", commit_then_cancel)
+        with pytest.raises(OperationCancelled) as raised:
+            _persist(db_session, model, staged)
+
+        assert raised.value is cancellation
+        with get_session_factory().session() as fresh:
+            durable = fresh.exec(select(File).where(File.model_id == model_id)).one()
+            assert Path(durable.path).read_bytes() == original_bytes
+            metadata = fresh.exec(
+                select(Metadata).where(Metadata.file_id == durable.id)
+            ).one()
+            assert metadata.estimated_time_s == 120
+
     def test_failed_metadata_does_not_leave_orphan_file_row(
         self,
         db_session: Session,

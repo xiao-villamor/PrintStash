@@ -77,6 +77,7 @@ def stream_to_path(
     *,
     max_bytes: int | None = None,
     digest: _Digest | None = None,
+    on_chunk: Callable[[], None] | None = None,
 ) -> int:
     """Stream ``src`` to a new private staging path and return bytes written.
 
@@ -86,6 +87,8 @@ def stream_to_path(
     until this function returns. A failed copy leaves an uncertain destination
     for operator review; it never unlinks a possible raced replacement.
     When supplied, ``digest`` observes the input stream exactly once.
+    ``on_chunk`` runs before each source read and once before publication.
+    Its exceptions propagate unchanged; the private temp is cleaned on unwind.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     bytes_written = 0
@@ -94,6 +97,8 @@ def stream_to_path(
     try:
         with os.fdopen(fd, "wb") as out:
             while True:
+                if on_chunk is not None:
+                    on_chunk()
                 chunk = src.read(_CHUNK_SIZE)
                 if not chunk:
                     break
@@ -105,6 +110,8 @@ def stream_to_path(
                     digest.update(chunk)
             out.flush()
             os.fsync(out.fileno())
+        if on_chunk is not None:
+            on_chunk()
         publish_staged_file(temp, dest)
         return bytes_written
     finally:

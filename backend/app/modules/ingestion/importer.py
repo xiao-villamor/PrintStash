@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import tempfile
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Optional
@@ -45,6 +45,7 @@ from printstash_core.files import (
 )
 from printstash_core.imports import StagedAsset
 
+from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.url_safety import (
@@ -114,6 +115,7 @@ async def download_to_staging(url: str) -> tuple[Path, str]:
     """
     current = url
     for _ in range(settings.url_import_max_redirects + 1):
+        checkpoint(force=True)
         # Resolve once and dial exactly that address: validating the hostname and
         # then letting httpx resolve it again would let a hostile DNS server
         # answer 127.0.0.1 the second time. Each redirect hop is a fresh URL, so
@@ -155,12 +157,14 @@ async def download_to_staging(url: str) -> tuple[Path, str]:
                     try:
                         with os.fdopen(fd, "wb") as out:
                             async for chunk in resp.aiter_bytes(1024 * 1024):
+                                checkpoint()
                                 written += len(chunk)
                                 if written > limit:
                                     raise ImportError_("download_too_large")
                                 out.write(chunk)
                             out.flush()
                             os.fsync(out.fileno())
+                        checkpoint(force=True)
                         publish_staged_file(temp, staged)
                         return staged, original_filename
                     finally:
@@ -251,6 +255,7 @@ def extract_selected(path: Path, names: list[str]) -> list[tuple[Path, str]]:
     sub-collections; entries at the archive root have no separator and behave
     exactly as a bare filename did before.
     """
+    checkpoint(force=True)
     max_entry = settings.max_archive_entry_mb * 1024 * 1024
     selected_names = set(names)
     peak_bytes = sum(
@@ -273,9 +278,26 @@ def extract_selected(path: Path, names: list[str]) -> list[tuple[Path, str]]:
                 staging_dir=settings.incoming_dir,
                 max_entry_bytes=max_entry,
                 importable_suffixes=_IMPORTABLE_SUFFIXES,
+                on_chunk=checkpoint,
+                on_entry=lambda: checkpoint(force=True),
             )
     except ArchivePolicyError as exc:
         raise ImportError_(exc.code) from exc
+
+
+def discard_staged_files(paths: Iterable[Path]) -> None:
+    """Release exact temporary sources transferred to an import operation.
+
+    Archive/slot inputs with their own durable leases are never included. Failure
+    to unlink one temporary must not hide the cancellation or primary exception.
+    """
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(
+                "import staging cleanup failed: %s", path.name, exc_info=True
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +388,7 @@ def item_ingestion_key(job_id: str, name: str) -> str:
 def import_assets(
     *,
     job_context: JobContext,
-    staged_files: list[tuple[Path, str] | StagedAsset],
+    staged_files: Sequence[tuple[Path, str] | StagedAsset],
     collection: Optional[str],
     tags: Optional[str],
     source_url: Optional[str],
@@ -389,99 +411,109 @@ def import_assets(
     appended to ``collection`` so a zipped folder tree is mirrored into nested
     sub-collections; otherwise every file lands directly in ``collection``.
     """
-    job_id = job_context.job_id
-    total = len(staged_files)
-    if total == 0:
-        job_context.finish(JobOutcome.FAILED, error="no_importable_files")
-        return
-    override = model_name.strip() if model_name and total == 1 else None
-    job_context.update(total_steps=total, total=total, stage="ingesting")
-    results: list[dict] = []
-    succeeded = 0
-    failed = 0
-    skipped = 0
-    for index, staged_file in enumerate(staged_files):
-        if isinstance(staged_file, StagedAsset):
-            staged, rel_name = (
-                staged_file.staged_path,
-                staged_file.resolved.source_filename,
-            )
-            file_source_url = staged_file.resolved.member_url or source_url
-            provenance_context = _provenance_context(
-                staged=staged_file,
-                inbox_item_id=inbox_item_id,
-                actor_user_id=actor_user_id,
-            )
-        else:
-            staged, rel_name = staged_file
-            file_source_url = source_url
-            provenance_context = None
-        file_collection = collection
-        if nest_subdirs:
-            subdir = _safe_subdir(rel_name)
-            if subdir:
-                base = (collection or "").rstrip("/")
-                file_collection = f"{base}/{subdir}" if base else subdir
-        res = _ingest_one_file(
-            staged,
-            rel_name,
-            collection=file_collection,
-            tags=tags,
-            source_url=file_source_url,
-            model_name=override,
-            actor_user_id=actor_user_id,
-            session_factory=session_factory,
-            ingestion_key=item_ingestion_key(job_id, f"{index}:{rel_name}"),
-            provenance_context=provenance_context,
-        )
-        if res is None:
-            skipped += 1
-        else:
+    try:
+        checkpoint(force=True)
+        job_id = job_context.job_id
+        total = len(staged_files)
+        if total == 0:
+            job_context.finish(JobOutcome.FAILED, error="no_importable_files")
+            return
+        override = model_name.strip() if model_name and total == 1 else None
+        job_context.update(total_steps=total, total=total, stage="ingesting")
+        results: list[dict] = []
+        succeeded = 0
+        failed = 0
+        skipped = 0
+        for index, staged_file in enumerate(staged_files):
+            checkpoint(force=True)
             if isinstance(staged_file, StagedAsset):
-                res = {
-                    **res,
-                    "source_selection_id": staged_file.source_selection_id,
-                    "result_key": staged_file.result_key,
+                staged, rel_name = (
+                    staged_file.staged_path,
+                    staged_file.resolved.source_filename,
+                )
+                file_source_url = staged_file.resolved.member_url or source_url
+                provenance_context = _provenance_context(
+                    staged=staged_file,
+                    inbox_item_id=inbox_item_id,
+                    actor_user_id=actor_user_id,
+                )
+            else:
+                staged, rel_name = staged_file
+                file_source_url = source_url
+                provenance_context = None
+            file_collection = collection
+            if nest_subdirs:
+                subdir = _safe_subdir(rel_name)
+                if subdir:
+                    base = (collection or "").rstrip("/")
+                    file_collection = f"{base}/{subdir}" if base else subdir
+            res = _ingest_one_file(
+                staged,
+                rel_name,
+                collection=file_collection,
+                tags=tags,
+                source_url=file_source_url,
+                model_name=override,
+                actor_user_id=actor_user_id,
+                session_factory=session_factory,
+                ingestion_key=item_ingestion_key(job_id, f"{index}:{rel_name}"),
+                provenance_context=provenance_context,
+            )
+            if res is None:
+                skipped += 1
+            else:
+                if isinstance(staged_file, StagedAsset):
+                    res = {
+                        **res,
+                        "source_selection_id": staged_file.source_selection_id,
+                        "result_key": staged_file.result_key,
+                    }
+                results.append(res)
+                if res.get("model_id"):
+                    succeeded += 1
+                elif res.get("error"):
+                    failed += 1
+            processed = index + 1
+            job_context.update(
+                step=processed,
+                processed=processed,
+                succeeded=succeeded,
+                failed=failed,
+                skipped=skipped,
+                progress=processed / total * 100,
+            )
+
+        imported = [r for r in results if r.get("model_id")]
+        failures = [r for r in results if r.get("error")]
+        deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
+        checkpoint(force=True)
+        job_context.finish(
+            JobOutcome.COMPLETED if imported else JobOutcome.FAILED,
+            model_id=imported[0]["model_id"] if imported else None,
+            result={"imported": len(imported), "total": total, "items": results},
+            processed=total,
+            total=total,
+            succeeded=len(imported),
+            deduplicated=deduplicated,
+            skipped=max(0, total - len(results)),
+            failed=len(failures),
+            error="import_failed" if not imported else None,
+            retryable=bool(failures),
+            failed_items=[
+                {
+                    "name": r.get("name", "item"),
+                    "reason": r.get("error", "import_failed"),
+                    "retryable": True,
                 }
-            results.append(res)
-            if res.get("model_id"):
-                succeeded += 1
-            elif res.get("error"):
-                failed += 1
-        processed = index + 1
-        job_context.update(
-            step=processed,
-            processed=processed,
-            succeeded=succeeded,
-            failed=failed,
-            skipped=skipped,
-            progress=processed / total * 100,
+                for r in failures
+            ],
         )
 
-    imported = [r for r in results if r.get("model_id")]
-    failures = [r for r in results if r.get("error")]
-    deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
-    job_context.finish(
-        JobOutcome.COMPLETED if imported else JobOutcome.FAILED,
-        model_id=imported[0]["model_id"] if imported else None,
-        result={"imported": len(imported), "total": total, "items": results},
-        processed=total,
-        total=total,
-        succeeded=len(imported),
-        deduplicated=deduplicated,
-        skipped=max(0, total - len(results)),
-        failed=len(failures),
-        error="import_failed" if not imported else None,
-        retryable=bool(failures),
-        failed_items=[
-            {
-                "name": r.get("name", "item"),
-                "reason": r.get("error", "import_failed"),
-                "retryable": True,
-            }
-            for r in failures
-        ],
-    )
+    finally:
+        discard_staged_files(
+            staged.staged_path if isinstance(staged, StagedAsset) else staged[0]
+            for staged in staged_files
+        )
 
 
 def _provenance_context(
@@ -534,100 +566,111 @@ def import_resolved_groups(
 ) -> None:
     """Ingest many already-staged groups (e.g. collection members) into one
     collection, recording each group's own ``source_url`` on its models."""
-    job_id = job_context.job_id
-    total = sum(len(g.staged_files) for g in groups)
-    job_context.update(
-        total_steps=max(total, 1),
-        total=total,
-        stage="ingesting",
-    )
-    results: list[dict] = []
-    done = 0
-    for group_index, group in enumerate(groups):
-        if not group.staged_files:
-            results.append(
-                {"name": group.title, "error": group.error or "no_importable_files"}
-            )
-            continue
-        for file_index, (staged, original_filename) in enumerate(group.staged_files):
-            res = _ingest_one_file(
-                staged,
-                original_filename,
-                collection=collection,
-                tags=tags,
-                source_url=group.source_url,
-                model_name=None,
-                actor_user_id=actor_user_id,
-                session_factory=session_factory,
-                ingestion_key=item_ingestion_key(
-                    job_id, f"{group_index}:{file_index}:{original_filename}"
-                ),
-            )
-            if res is None:
-                continue
-            results.append({**res, "member": group.title})
-            done += 1
-            job_context.update(step=done, progress=done / max(total, 1) * 100)
-
-    imported = [r for r in results if r.get("model_id")]
-    failures = [r for r in results if r.get("error")]
-    deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
-    result = {
-        "kind": "collection_import",
-        "collection": collection,
-        "imported": len(imported),
-        "total": total,
-        "items": results,
-    }
-
-    # Nothing imported means the whole collection failed — every member errored
-    # (commonly all ``makerworld_login_required``) or none had importable files.
-    # Reporting "completed" here is the bug that made a failed import look OK; so
-    # fail the job, and when the members agree on one error code surface it (so
-    # the UI shows e.g. the MakerWorld login message rather than a generic one).
-    if not imported:
-        member_errors = {r["error"] for r in results if r.get("error")}
-        error = (
-            member_errors.pop()
-            if len(member_errors) == 1
-            else "collection_import_failed"
+    try:
+        checkpoint(force=True)
+        job_id = job_context.job_id
+        total = sum(len(g.staged_files) for g in groups)
+        job_context.update(
+            total_steps=max(total, 1),
+            total=total,
+            stage="ingesting",
         )
+        results: list[dict] = []
+        done = 0
+        for group_index, group in enumerate(groups):
+            checkpoint(force=True)
+            if not group.staged_files:
+                results.append(
+                    {"name": group.title, "error": group.error or "no_importable_files"}
+                )
+                continue
+            for file_index, (staged, original_filename) in enumerate(
+                group.staged_files
+            ):
+                checkpoint(force=True)
+                res = _ingest_one_file(
+                    staged,
+                    original_filename,
+                    collection=collection,
+                    tags=tags,
+                    source_url=group.source_url,
+                    model_name=None,
+                    actor_user_id=actor_user_id,
+                    session_factory=session_factory,
+                    ingestion_key=item_ingestion_key(
+                        job_id, f"{group_index}:{file_index}:{original_filename}"
+                    ),
+                )
+                if res is None:
+                    continue
+                results.append({**res, "member": group.title})
+                done += 1
+                job_context.update(step=done, progress=done / max(total, 1) * 100)
+
+        imported = [r for r in results if r.get("model_id")]
+        failures = [r for r in results if r.get("error")]
+        deduplicated = sum(bool(r.get("deduplicated")) for r in imported)
+        result = {
+            "kind": "collection_import",
+            "collection": collection,
+            "imported": len(imported),
+            "total": total,
+            "items": results,
+        }
+
+        # Nothing imported means the whole collection failed — every member errored
+        # (commonly all ``makerworld_login_required``) or none had importable files.
+        # Reporting "completed" here is the bug that made a failed import look OK; so
+        # fail the job, and when the members agree on one error code surface it (so
+        # the UI shows e.g. the MakerWorld login message rather than a generic one).
+        if not imported:
+            member_errors = {r["error"] for r in results if r.get("error")}
+            error = (
+                member_errors.pop()
+                if len(member_errors) == 1
+                else "collection_import_failed"
+            )
+            checkpoint(force=True)
+            job_context.finish(
+                JobOutcome.FAILED,
+                error=error,
+                result=result,
+                processed=len(results),
+                total=total,
+                failed=len(failures),
+                retryable=True,
+                failed_items=[
+                    {
+                        "name": r.get("name", "item"),
+                        "reason": r.get("error", error),
+                        "retryable": True,
+                    }
+                    for r in failures
+                ],
+            )
+            return
+
+        checkpoint(force=True)
         job_context.finish(
-            JobOutcome.FAILED,
-            error=error,
+            JobOutcome.COMPLETED,
+            model_id=imported[0]["model_id"],
             result=result,
             processed=len(results),
             total=total,
+            succeeded=len(imported),
+            deduplicated=deduplicated,
+            skipped=max(0, total - len(results)),
             failed=len(failures),
-            retryable=True,
+            retryable=bool(failures),
             failed_items=[
                 {
                     "name": r.get("name", "item"),
-                    "reason": r.get("error", error),
+                    "reason": r.get("error", "import_failed"),
                     "retryable": True,
                 }
                 for r in failures
             ],
         )
-        return
 
-    job_context.finish(
-        JobOutcome.COMPLETED,
-        model_id=imported[0]["model_id"],
-        result=result,
-        processed=len(results),
-        total=total,
-        succeeded=len(imported),
-        deduplicated=deduplicated,
-        skipped=max(0, total - len(results)),
-        failed=len(failures),
-        retryable=bool(failures),
-        failed_items=[
-            {
-                "name": r.get("name", "item"),
-                "reason": r.get("error", "import_failed"),
-                "retryable": True,
-            }
-            for r in failures
-        ],
-    )
+    finally:
+        discard_staged_files(path for group in groups for path, _ in group.staged_files)

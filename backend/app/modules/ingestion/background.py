@@ -18,6 +18,7 @@ from typing import Optional
 from printstash_core.files import ArchiveEntry
 from starlette.concurrency import run_in_threadpool
 
+from app.core.cancellation import OperationCancelled, cancellation_scope, checkpoint
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.modules.ingestion import import_resolvers, importer, requests
@@ -34,10 +35,6 @@ from app.schemas.ingest import (
 )
 
 logger = get_logger(__name__)
-
-
-class ArchivePreparationCancelled(Exception):
-    """The owning Job was withdrawn while its ZIP was being read."""
 
 
 GCODE_SUFFIXES = {".gcode", ".g", ".gco", ".bgcode"}
@@ -58,26 +55,28 @@ async def _download_and_collect(download_url: str) -> list[tuple[Path, str]]:
     Returns the staged ``(path, filename)`` tuples ready for ingestion (empty if
     the link is neither a model file nor an archive with importable entries).
     """
+    checkpoint(force=True)
     staged, original_filename = await importer.download_to_staging(download_url)
-    suffix = Path(original_filename).suffix.lower()
-    if suffix == ".zip" or (
-        zipfile.is_zipfile(staged)
-        and suffix not in MESH_SUFFIXES
-        and suffix not in GCODE_SUFFIXES
-    ):
-        try:
+    transferred = False
+    try:
+        checkpoint(force=True)
+        suffix = Path(original_filename).suffix.lower()
+        if suffix == ".zip" or (
+            zipfile.is_zipfile(staged)
+            and suffix not in MESH_SUFFIXES
+            and suffix not in GCODE_SUFFIXES
+        ):
             entries = await run_in_threadpool(importer.inspect_archive, staged)
-            names = [e.name for e in entries if e.file_type]
-            extracted = await run_in_threadpool(
-                importer.extract_selected, staged, names
-            )
-        finally:
-            staged.unlink(missing_ok=True)
-        return extracted
-    if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
-        staged.unlink(missing_ok=True)
-        return []
-    return [(staged, original_filename)]
+            checkpoint(force=True)
+            names = [entry.name for entry in entries if entry.file_type]
+            return await run_in_threadpool(importer.extract_selected, staged, names)
+        if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
+            return []
+        transferred = True
+        return [(staged, original_filename)]
+    finally:
+        if not transferred:
+            importer.discard_staged_files((staged,))
 
 
 async def _stage_members(
@@ -85,22 +84,33 @@ async def _stage_members(
 ) -> list[importer.ResolvedGroup]:
     """Resolve + download every collection member, isolating per-member failures."""
     groups: list[importer.ResolvedGroup] = []
-    for member in members:
-        group = importer.ResolvedGroup(source_url=member.page_url, title=member.title)
-        try:
-            link = await import_resolvers.resolve_page_url(member.page_url) or (
-                member.page_url
+    try:
+        for member in members:
+            checkpoint(force=True)
+            group = importer.ResolvedGroup(
+                source_url=member.page_url, title=member.title
             )
-            group.staged_files = await _download_and_collect(link)
-            if not group.staged_files:
-                group.error = "no_importable_files"
-        except importer.ImportError_ as exc:
-            group.error = str(exc)
-        except Exception as exc:  # noqa: BLE001 — per-member boundary; continue
-            logger.exception("collection member failed: %s", member.page_url)
-            group.error = str(exc)
-        groups.append(group)
-    return groups
+            try:
+                link = await import_resolvers.resolve_page_url(member.page_url) or (
+                    member.page_url
+                )
+                checkpoint(force=True)
+                group.staged_files = await _download_and_collect(link)
+                if not group.staged_files:
+                    group.error = "no_importable_files"
+            except importer.ImportError_ as exc:
+                group.error = str(exc)
+            except Exception as exc:  # noqa: BLE001 — per-member boundary; continue
+                logger.exception("collection member failed: %s", member.page_url)
+                group.error = str(exc)
+            groups.append(group)
+        return groups
+
+    except BaseException:
+        importer.discard_staged_files(
+            path for group in groups for path, _ in group.staged_files
+        )
+        raise
 
 
 def archive_manifest(
@@ -188,6 +198,7 @@ async def _handle_collection_url(
     """Resolve a collection URL; either record a review manifest or import all."""
     job_id = job_context.job_id
     job_context.update(stage="resolving")
+    checkpoint(force=True)
     resolved = await import_resolvers.resolve_collection_url(req.url)
     if not resolved:
         job_context.finish(JobOutcome.FAILED, error="collection_resolve_failed")
@@ -224,15 +235,20 @@ async def _handle_collection_url(
 
     job_context.update(stage="downloading", total=len(members))
     groups = await _stage_members(members)
-    await run_in_threadpool(
-        importer.import_resolved_groups,
-        job_context=job_context,
-        groups=groups,
-        collection=target,
-        tags=req.tags,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+    try:
+        await run_in_threadpool(
+            importer.import_resolved_groups,
+            job_context=job_context,
+            groups=groups,
+            collection=target,
+            tags=req.tags,
+            actor_user_id=actor_user_id,
+            session_factory=session_factory,
+        )
+    finally:
+        importer.discard_staged_files(
+            path for group in groups for path, _ in group.staged_files
+        )
 
 
 def _lease_archive(job_id: str, staged: Path, actor_user_id: int) -> None:
@@ -270,6 +286,7 @@ async def import_from_url(
     """
     job_id = job_context.job_id
     try:
+        checkpoint(force=True)
         job_context.update(stage="resolving")
         if import_resolvers.classify_collection(req.url):
             await _handle_collection_url(
@@ -284,6 +301,7 @@ async def import_from_url(
         if listing is not None and len(listing[1]) > 1:
             _stage_model_files_manifest(job_context, req, listing)
             return
+        checkpoint(force=True)
         download_url = (
             await import_resolvers.resolve_page_url(
                 req.url, thingiverse_cookie=req.thingiverse_cookie
@@ -291,6 +309,7 @@ async def import_from_url(
             or req.url
         )
         job_context.update(stage="downloading")
+        checkpoint(force=True)
         staged, original_filename = await importer.download_to_staging(download_url)
     except importer.ImportError_ as exc:
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
@@ -300,54 +319,63 @@ async def import_from_url(
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
         return
 
-    suffix = Path(original_filename).suffix.lower()
-    # Treat anything that is actually a zip as an archive (handles missing/odd
-    # extensions on direct download links). A .3mf is itself a zip container but
-    # is a single model, so route it (and other known mesh/g-code suffixes) to
-    # direct ingestion rather than the archive-manifest flow.
-    if suffix == ".zip" or (
-        zipfile.is_zipfile(staged)
-        and suffix not in MESH_SUFFIXES
-        and suffix not in GCODE_SUFFIXES
-    ):
-        try:
-            job_context.update(stage="inspecting", current_item=original_filename)
-            entries = await run_in_threadpool(importer.inspect_archive, staged)
-        except importer.ImportError_ as exc:
-            staged.unlink(missing_ok=True)
-            job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
+    leased = False
+    try:
+        checkpoint(force=True)
+        suffix = Path(original_filename).suffix.lower()
+        # Treat anything that is actually a zip as an archive (handles missing/odd
+        # extensions on direct download links). A .3mf is itself a zip container but
+        # is a single model, so route it (and other known mesh/g-code suffixes) to
+        # direct ingestion rather than the archive-manifest flow.
+        if suffix == ".zip" or (
+            zipfile.is_zipfile(staged)
+            and suffix not in MESH_SUFFIXES
+            and suffix not in GCODE_SUFFIXES
+        ):
+            try:
+                job_context.update(stage="inspecting", current_item=original_filename)
+                entries = await run_in_threadpool(importer.inspect_archive, staged)
+            except importer.ImportError_ as exc:
+                staged.unlink(missing_ok=True)
+                job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
+                return
+            checkpoint(force=True)
+            await run_in_threadpool(_lease_archive, job_id, staged, actor_user_id)
+            leased = True
+            manifest = _record_archive(
+                job_id,
+                archive_name=original_filename,
+                entries=entries,
+                source_url=req.url,
+            )
+            job_context.finish(
+                JobOutcome.COMPLETED,
+                result={"kind": "archive_manifest", **manifest.model_dump()},
+            )
             return
-        await run_in_threadpool(_lease_archive, job_id, staged, actor_user_id)
-        manifest = _record_archive(
-            job_id,
-            archive_name=original_filename,
-            entries=entries,
+
+        if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
+            # The URL resolved to something that isn't a model file or a .zip —
+            # almost always a model *page* (HTML) rather than a direct download
+            # link. Use a dedicated code so the UI can tell the user what to paste.
+            staged.unlink(missing_ok=True)
+            job_context.finish(JobOutcome.FAILED, error="url_not_a_direct_file")
+            return
+
+        await run_in_threadpool(
+            importer.import_assets,
+            job_context=job_context,
+            staged_files=[(staged, original_filename)],
+            collection=req.collection,
+            tags=req.tags,
             source_url=req.url,
+            actor_user_id=actor_user_id,
+            session_factory=session_factory,
         )
-        job_context.finish(
-            JobOutcome.COMPLETED,
-            result={"kind": "archive_manifest", **manifest.model_dump()},
-        )
-        return
 
-    if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
-        # The URL resolved to something that isn't a model file or a .zip —
-        # almost always a model *page* (HTML) rather than a direct download
-        # link. Use a dedicated code so the UI can tell the user what to paste.
-        staged.unlink(missing_ok=True)
-        job_context.finish(JobOutcome.FAILED, error="url_not_a_direct_file")
-        return
-
-    await run_in_threadpool(
-        importer.import_assets,
-        job_context=job_context,
-        staged_files=[(staged, original_filename)],
-        collection=req.collection,
-        tags=req.tags,
-        source_url=req.url,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+    finally:
+        if not leased:
+            importer.discard_staged_files((staged,))
 
 
 def inspect_uploaded_archive(
@@ -360,34 +388,32 @@ def inspect_uploaded_archive(
     """Decompress an owned ZIP for validation, then record its review manifest."""
     job_id = job_context.job_id
     try:
-        job_context.update(stage="extracting", current_item=original_filename)
+        with cancellation_scope(cancelled):
+            checkpoint(force=True)
+            job_context.update(stage="extracting", current_item=original_filename)
 
-        def check_cancelled() -> None:
-            if cancelled():
-                raise ArchivePreparationCancelled()
+            def report_entry(processed: int, total: int) -> None:
+                checkpoint(force=True)
+                job_context.update(stage="extracting", processed=processed, total=total)
 
-        entries = importer.prepare_archive_for_review(
-            staged,
-            on_chunk=check_cancelled,
-            on_entry=lambda processed, total: job_context.update(
-                stage="extracting", processed=processed, total=total
-            ),
-        )
-        check_cancelled()
-        importable_count = sum(entry.file_type is not None for entry in entries)
-        if importable_count == 0:
-            raise importer.ImportError_("no_importable_files")
-        manifest = _record_archive(
-            job_id, archive_name=original_filename, entries=entries, source_url=None
-        )
-        job_context.finish(
-            JobOutcome.COMPLETED,
-            processed=importable_count,
-            total=importable_count,
-            succeeded=importable_count,
-            result={"kind": "archive_manifest", **manifest.model_dump()},
-        )
-    except ArchivePreparationCancelled:
+            entries = importer.prepare_archive_for_review(
+                staged, on_chunk=checkpoint, on_entry=report_entry
+            )
+            checkpoint(force=True)
+            importable_count = sum(entry.file_type is not None for entry in entries)
+            if importable_count == 0:
+                raise importer.ImportError_("no_importable_files")
+            manifest = _record_archive(
+                job_id, archive_name=original_filename, entries=entries, source_url=None
+            )
+            job_context.finish(
+                JobOutcome.COMPLETED,
+                processed=importable_count,
+                total=importable_count,
+                succeeded=importable_count,
+                result={"kind": "archive_manifest", **manifest.model_dump()},
+            )
+    except OperationCancelled:
         return
     except importer.ImportError_ as exc:
         # Retain uncommitted input until lease expiry or explicit discard.
@@ -408,6 +434,7 @@ def run_archive_selection(
     session_factory: SessionFactory,
 ) -> None:
     """Extract the chosen entries of an owned archive and import each one."""
+    checkpoint(force=True)
     job_context.update(stage="extracting", current_item=archive_name)
     try:
         staged_files = importer.extract_selected(archive, names)
@@ -440,33 +467,39 @@ async def run_file_selection_import(
     session_factory: SessionFactory,
 ) -> None:
     """Download a chosen subset of a page's files and ingest them."""
+    staged_files: list[tuple[Path, str]] = []
     try:
-        job_context.update(stage="resolving")
-        links = await import_resolvers.resolve_selected_download(page_url, files)
-        job_context.update(stage="downloading", total=len(links))
-        staged_files: list[tuple[Path, str]] = []
-        for link in links:
-            staged_files.extend(await _download_and_collect(link))
-    except importer.ImportError_ as exc:
-        job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
-        return
-    except Exception as exc:  # noqa: BLE001 — network/IO boundary
-        logger.exception("file selection import failed: %s", page_url)
-        job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
-        return
-    if not staged_files:
-        job_context.finish(JobOutcome.FAILED, error="no_importable_files")
-        return
-    await run_in_threadpool(
-        importer.import_assets,
-        job_context=job_context,
-        staged_files=staged_files,
-        collection=collection,
-        tags=tags,
-        source_url=page_url,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+        try:
+            checkpoint(force=True)
+            job_context.update(stage="resolving")
+            links = await import_resolvers.resolve_selected_download(page_url, files)
+            job_context.update(stage="downloading", total=len(links))
+            for link in links:
+                checkpoint(force=True)
+                staged_files.extend(await _download_and_collect(link))
+        except importer.ImportError_ as exc:
+            job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 — network/IO boundary
+            logger.exception("file selection import failed: %s", page_url)
+            job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
+            return
+        if not staged_files:
+            job_context.finish(JobOutcome.FAILED, error="no_importable_files")
+            return
+        await run_in_threadpool(
+            importer.import_assets,
+            job_context=job_context,
+            staged_files=staged_files,
+            collection=collection,
+            tags=tags,
+            source_url=page_url,
+            actor_user_id=actor_user_id,
+            session_factory=session_factory,
+        )
+
+    finally:
+        importer.discard_staged_files(path for path, _ in staged_files)
 
 
 async def run_collection_member_import(
@@ -486,12 +519,18 @@ async def run_collection_member_import(
         logger.exception("collection member import failed")
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
         return
-    await run_in_threadpool(
-        importer.import_resolved_groups,
-        job_context=job_context,
-        groups=groups,
-        collection=target_collection,
-        tags=tags,
-        actor_user_id=actor_user_id,
-        session_factory=session_factory,
-    )
+    try:
+        await run_in_threadpool(
+            importer.import_resolved_groups,
+            job_context=job_context,
+            groups=groups,
+            collection=target_collection,
+            tags=tags,
+            actor_user_id=actor_user_id,
+            session_factory=session_factory,
+        )
+
+    finally:
+        importer.discard_staged_files(
+            path for group in groups for path, _ in group.staged_files
+        )

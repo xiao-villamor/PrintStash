@@ -328,3 +328,80 @@ class TestStageLocalCaptureAssets:
 
         # A stale selection should import the capture, not nothing at all.
         assert len(assets) == 1
+
+    def test_refuses_browser_copy_for_withdrawn_attempt(self, staging, tmp_path):
+        import asyncio
+
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+
+        source = tmp_path / "withdrawn-browser.stl"
+        source.write_bytes(STL)
+        manifest = _manifest([("42:cube", "cube.stl")])
+
+        with cancellation_scope(lambda: True), pytest.raises(OperationCancelled):
+            asyncio.run(
+                inbox._stage_local_capture_assets(source, manifest, ["42:cube"])
+            )
+
+        assert source.read_bytes() == STL
+        assert list(staging.iterdir()) == []
+
+    def test_preserves_the_digest_of_a_browser_copy(self, staging, tmp_path):
+        import asyncio
+        import hashlib
+
+        source = tmp_path / "hash-browser.stl"
+        source.write_bytes(STL)
+        manifest = _manifest([("42:cube", "cube.stl")])
+
+        assets = asyncio.run(
+            inbox._stage_local_capture_assets(source, manifest, ["42:cube"])
+        )
+
+        assert assets[0].blob_sha256 == hashlib.sha256(STL).hexdigest()
+        assert assets[0].staged_path.read_bytes() == source.read_bytes() == STL
+
+
+class TestCopyImportSource:
+    def test_preserves_a_collided_destination(self, staging, tmp_path):
+        source = tmp_path / "durable-browser.stl"
+        source.write_bytes(STL)
+        target = staging / "already-owned.stl"
+        target.write_bytes(b"other copy")
+
+        with pytest.raises(FileExistsError):
+            inbox._copy_import_source(source, target)
+
+        assert source.read_bytes() == STL
+        assert target.read_bytes() == b"other copy"
+        assert list(staging.iterdir()) == [target]
+
+
+class TestStageCaptureUploadSlotAssets:
+    def test_stops_slot_copying_between_entries(self, local_storage):
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        # local_storage owns the current staging overlay; observe that same
+        # directory rather than an earlier fixture configuration.
+        staging = inbox.settings.incoming_dir
+        backend = get_backend()
+        first = local_storage / "slot-one.stl"
+        second = local_storage / "slot-two.stl"
+        first_receipt = backend.create_bytes(STL, str(first))
+        second_receipt = backend.create_bytes(STL + b"second", str(second))
+        manifest = _manifest([("one", "one.stl"), ("two", "two.stl")])
+
+        with (
+            cancellation_scope(lambda: bool(list(staging.glob("capture-import-*")))),
+            pytest.raises(OperationCancelled),
+        ):
+            inbox._stage_capture_upload_slot_assets(
+                manifest,
+                ["one", "two"],
+                {"one": first_receipt.key, "two": second_receipt.key},
+            )
+
+        assert backend.read_bytes(first_receipt.key) == STL
+        assert backend.read_bytes(second_receipt.key) == STL + b"second"
+        assert list(staging.iterdir()) == []

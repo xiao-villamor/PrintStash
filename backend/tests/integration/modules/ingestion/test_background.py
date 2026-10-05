@@ -582,6 +582,47 @@ class TestInspectUploadedArchive:
         assert (status.state, status.error) == ("failed", "no_importable_files")
         assert staged.exists()
 
+    def test_bounds_cancel_probes_during_archive_review(
+        self, db_session, owner, tmp_path, job_id, monkeypatch
+    ):
+        from app.core.cancellation import time as probe_time
+        from app.core.config import settings
+        from app.modules.ingestion import staging_leases
+        from app.modules.storage.hashing import sha256_file
+
+        use_local_storage(tmp_path)
+        staged = settings.incoming_dir / "probe-budget.zip"
+        with zipfile.ZipFile(staged, "w", compression=zipfile.ZIP_STORED) as bundle:
+            bundle.writestr("mesh.stl", b"x" * (8 * 1024 * 1024))
+        staging_leases.create_job_lease(
+            db_session,
+            job_id=job_id,
+            owner_user_id=owner.id,
+            path=staged,
+            size_bytes=staged.stat().st_size,
+            sha256=sha256_file(staged),
+            check_capacity=False,
+        )
+        db_session.commit()
+        probes = []
+        # Assert throttling independently of disk speed or contention on the host.
+        monkeypatch.setattr(probe_time, "monotonic", lambda: 0.0)
+
+        def withdrawn():
+            probes.append(True)
+            return False
+
+        ingest_background.inspect_uploaded_archive(
+            job_context=build_job_context(job_id),
+            staged=staged,
+            original_filename="probe-budget.zip",
+            cancelled=withdrawn,
+        )
+
+        assert len(probes) < 8
+        assert jobs.get(job_id).state == "completed"
+        assert staged.exists()
+
     def test_reports_prepared_file_count_on_the_job(
         self, db_session: Session, owner: User, tmp_path: Path, job_id: str
     ) -> None:
@@ -846,3 +887,88 @@ def _zip_bytes(*, entry: str = "cube.stl", content: bytes | None = None) -> byte
     with zipfile.ZipFile(buf, "w") as bundle:
         bundle.writestr(entry, content or _cube_stl_bytes())
     return buf.getvalue()
+
+
+class TestBatchWithdrawal:
+    @pytest.mark.asyncio
+    async def test_stops_before_resolving_the_next_member(
+        self, make_user, make_ingest_request, tmp_path, monkeypatch
+    ) -> None:
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+        from app.db.models import IngestRequestKind
+        from app.modules.work import service
+        from tests.factories.content import gcode
+
+        owner = make_user("member-withdrawal")
+        request = make_ingest_request(owner, kind=IngestRequestKind.COLLECTION)
+        context = build_job_context(request.job_id)
+        staged = tmp_path / "first.gcode"
+        staged.write_bytes(gcode(marker="first-member"))
+        resolved = []
+        downloaded = []
+
+        async def resolve(url):
+            resolved.append(url)
+            return url + "/download"
+
+        async def download(url):
+            downloaded.append(url)
+            service.cancel(request.job_id, actor=owner)
+            return [(staged, staged.name)]
+
+        monkeypatch.setattr(import_resolvers, "resolve_page_url", resolve)
+        monkeypatch.setattr(ingest_background, "_download_and_collect", download)
+        members = [
+            import_resolvers.CollectionMember(
+                page_url="https://example.com/first", title="First", source_id="first"
+            ),
+            import_resolvers.CollectionMember(
+                page_url="https://example.com/second",
+                title="Second",
+                source_id="second",
+            ),
+        ]
+        with cancellation_scope(context.cancelled), pytest.raises(OperationCancelled):
+            await ingest_background._stage_members(members)
+        assert resolved == [members[0].page_url]
+        assert downloaded == [members[0].page_url + "/download"]
+        assert not staged.exists()
+
+    @pytest.mark.asyncio
+    async def test_stops_before_downloading_the_next_selection(
+        self, make_user, make_ingest_request, tmp_path, monkeypatch
+    ) -> None:
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+        from app.modules.work import service
+        from tests.factories.content import gcode
+
+        owner = make_user("selection-withdrawal")
+        request = make_ingest_request(owner)
+        context = build_job_context(request.job_id)
+        staged = tmp_path / "first.gcode"
+        staged.write_bytes(gcode(marker="first-selection"))
+        links = ["https://example.com/first.gcode", "https://example.com/second.gcode"]
+        downloaded = []
+
+        async def resolve(page_url, files):
+            return links
+
+        async def download(url):
+            downloaded.append(url)
+            service.cancel(request.job_id, actor=owner)
+            return [(staged, staged.name)]
+
+        monkeypatch.setattr(import_resolvers, "resolve_selected_download", resolve)
+        monkeypatch.setattr(ingest_background, "_download_and_collect", download)
+        with cancellation_scope(context.cancelled), pytest.raises(OperationCancelled):
+            await ingest_background.run_file_selection_import(
+                job_context=context,
+                page_url="https://example.com/model",
+                files=[],
+                collection=None,
+                tags=None,
+                actor_user_id=owner.id,
+                session_factory=get_session_factory(),
+            )
+        assert downloaded == [links[0]]
+        assert not staged.exists()

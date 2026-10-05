@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 import unicodedata
 import uuid
 import zipfile
@@ -163,10 +164,20 @@ def extract_selected(
     max_entry_bytes: int,
     importable_suffixes: Set[str],
     name_factory: Callable[[str], str] | None = None,
+    on_chunk: Callable[[], None] | None = None,
+    on_entry: Callable[[], None] | None = None,
 ) -> list[tuple[Path, str]]:
-    """Safely extract selected supported entries into a staging directory."""
+    """Extract selected entries into caller-exclusive private staging paths.
+
+    Entry callbacks run before opening each selected supported entry; chunk
+    callbacks are forwarded to the bounded copy. On any unwind, remove only
+    completed regular files whose recorded device/inode still matches. Cleanup
+    is best effort and preserves the primary failure. This is not an atomic
+    conditional delete contract for paths under active replacement.
+    """
     wanted = set(names)
     extracted: list[tuple[Path, str]] = []
+    owned: list[tuple[Path, int, int]] = []
 
     def default_name(suffix: str) -> str:
         return f"{uuid.uuid4().hex}{suffix}"
@@ -184,14 +195,33 @@ def extract_selected(
                 suffix = Path(info.filename).suffix.lower()
                 if suffix not in importable_suffixes:
                     continue
+                if on_entry is not None:
+                    on_entry()
                 staged = staging_dir / make_name(suffix)
                 with archive.open(info) as source:
                     stream_to_path(
-                        cast(BinaryIO, source), staged, max_bytes=max_entry_bytes
+                        cast(BinaryIO, source),
+                        staged,
+                        max_bytes=max_entry_bytes,
+                        on_chunk=on_chunk,
                     )
+                identity = staged.lstat()
+                owned.append((staged, identity.st_dev, identity.st_ino))
                 extracted.append((staged, info.filename.replace("\\", "/")))
-    except Exception:
-        for staged, _name in extracted:
-            staged.unlink(missing_ok=True)
+    except BaseException as failure:
+        for staged, device, inode in owned:
+            try:
+                current = staged.lstat()
+                if stat.S_ISREG(current.st_mode) and (
+                    current.st_dev,
+                    current.st_ino,
+                ) == (device, inode):
+                    staged.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_error:
+                failure.add_note(
+                    f"staging cleanup failed: {cleanup_error.__class__.__name__}"
+                )
         raise
     return extracted

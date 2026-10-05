@@ -22,6 +22,7 @@ from sqlalchemy import case, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
@@ -614,8 +615,12 @@ def persist_artifact(
         # blob must be preserved until a fresh session resolves the outcome.
         commit_started = True
         session.commit()
-    except Exception as exc:
+    except BaseException as exc:
         session.rollback()
+        if commit_started and isinstance(exc, OperationCancelled):
+            # A cooperative stop cannot determine whether COMMIT was acknowledged.
+            # Keep authoritative bytes and ownership; retry finds any committed File.
+            raise
         if commit_started and blob_receipt is not None and not is_external:
             try:
                 resolved = _resolve_committed_artifact(
@@ -646,7 +651,10 @@ def persist_artifact(
             # Before the domain commit boundary, exact receipt rollback is safe.
             # External-library bytes remain user-owned for the next scan.
             if blob_receipt is not None and not is_external:
-                backend.rollback_create(blob_receipt)
+                try:
+                    backend.rollback_create(blob_receipt)
+                except OSError as cleanup_exc:
+                    exc.add_note(f"receipt cleanup failed: {cleanup_exc}")
             raise
 
     finally:
@@ -868,7 +876,7 @@ def commit_staged_artifact(
             )
 
     report(stage="hashing", label="hashing", step=1, total_steps=2, progress=0)
-    blob_hash = sha256_file(artifact.staged_path)
+    blob_hash = sha256_file(artifact.staged_path, on_chunk=checkpoint)
 
     if provenance_context is not None:
         provenance_context = replace(provenance_context, blob_sha256=blob_hash)
@@ -1091,7 +1099,7 @@ def add_gcode_revision_to_model(
     returns as soon as the bytes are durable.
     """
     assert model.id is not None
-    blob_hash = sha256_file(staged_path)
+    blob_hash = sha256_file(staged_path, on_chunk=checkpoint)
 
     # Revisions follow the model: if it lives in a NAS library, write back there.
     dest = resolve_write_target(

@@ -23,6 +23,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import update as sql_update
 from sqlmodel import Session, col, select
 
+from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.metrics import record_capture_operation
@@ -122,7 +123,7 @@ def _canonical_capture_source_url(
 def _json_dict(value: str) -> dict:
     try:
         result = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return result if isinstance(result, dict) else {}
 
@@ -130,7 +131,7 @@ def _json_dict(value: str) -> dict:
 def requested_tags(value: str) -> list[str]:
     try:
         result = json.loads(value or "[]")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return []
     return [str(item) for item in result] if isinstance(result, list) else []
 
@@ -711,7 +712,7 @@ def _receipt_json(receipt: CreationReceipt) -> str:
 def _receipt_from_json(value: str | None) -> CreationReceipt | None:
     try:
         return CreationReceipt(**json.loads(value or ""))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -1396,55 +1397,107 @@ async def resolve(item_id: int) -> None:
         await asyncio.to_thread(_fail_item, item_id, exc, "resolve_failed")
 
 
+def _copy_import_source(source: Path, target: Path) -> str:
+    """Copy a durable source into private staging while hashing its single read."""
+    checkpoint(force=True)
+    digest = hashlib.sha256()
+    published = False
+    try:
+        with source.open("rb") as incoming:
+            storage.stream_to_path(
+                incoming,
+                target,
+                max_bytes=settings.max_upload_bytes,
+                digest=digest,
+                on_chunk=checkpoint,
+            )
+        published = True
+        checkpoint(force=True)
+        return digest.hexdigest()
+    except BaseException:
+        if published:
+            importer.discard_staged_files([target])
+        raise
+
+
 async def _download_assets(url: str) -> list[tuple[Path, str]]:
+    checkpoint(force=True)
     download_url = await import_resolvers.resolve_page_url(url) or url
+    checkpoint(force=True)
     staged, name = await importer.download_to_staging(download_url)
-    suffix = Path(name).suffix.lower()
-    if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-        entries = await asyncio.to_thread(importer.inspect_archive, staged)
-        selected = [entry.name for entry in entries if entry.file_type]
-        extracted = await asyncio.to_thread(importer.extract_selected, staged, selected)
-        staged.unlink(missing_ok=True)
-        return extracted
-    return [(staged, name)]
+    owned = [staged]
+    try:
+        checkpoint(force=True)
+        suffix = Path(name).suffix.lower()
+        if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
+            entries = await asyncio.to_thread(importer.inspect_archive, staged)
+            selected = [entry.name for entry in entries if entry.file_type]
+            extracted = await asyncio.to_thread(
+                importer.extract_selected, staged, selected
+            )
+            owned.extend(path for path, _name in extracted)
+            checkpoint(force=True)
+            importer.discard_staged_files([staged])
+            return extracted
+        return [(staged, name)]
+    except BaseException:
+        importer.discard_staged_files(owned)
+        raise
 
 
 async def _download_resolved_asset(resolved: ResolvedAsset) -> list[StagedAsset]:
     """Stage one V2 selection while retaining its identity through ZIP expansion."""
+    checkpoint(force=True)
     staged, name = await importer.download_to_staging(resolved.download_url)
-    suffix = Path(name).suffix.lower()
-    if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-        entries = await asyncio.to_thread(importer.inspect_archive, staged)
-        extracted = await asyncio.to_thread(
-            importer.extract_selected,
-            staged,
-            [entry.name for entry in entries if entry.file_type],
-        )
-        staged.unlink(missing_ok=True)
+    owned = [staged]
+    try:
+        checkpoint(force=True)
+        suffix = Path(name).suffix.lower()
+        if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
+            entries = await asyncio.to_thread(importer.inspect_archive, staged)
+            extracted = await asyncio.to_thread(
+                importer.extract_selected,
+                staged,
+                [entry.name for entry in entries if entry.file_type],
+            )
+            owned.extend(path for path, _name in extracted)
+            assets: list[StagedAsset] = []
+            for entry_path, entry_name in extracted:
+                checkpoint(force=True)
+                assets.append(
+                    StagedAsset(
+                        resolved=resolved,
+                        staged_path=entry_path,
+                        result_key=_zip_result_key(
+                            resolved.source_selection_id, entry_name
+                        ),
+                        blob_sha256=sha256_file(entry_path, on_chunk=checkpoint),
+                        container_entry_path=entry_name,
+                    )
+                )
+            checkpoint(force=True)
+            importer.discard_staged_files([staged])
+            return assets
+        digest = sha256_file(staged, on_chunk=checkpoint)
+        checkpoint(force=True)
         return [
             StagedAsset(
                 resolved=resolved,
-                staged_path=entry_path,
-                result_key=_zip_result_key(resolved.source_selection_id, entry_name),
-                blob_sha256=sha256_file(entry_path),
-                container_entry_path=entry_name,
+                staged_path=staged,
+                result_key="self",
+                blob_sha256=digest,
             )
-            for entry_path, entry_name in extracted
         ]
-    return [
-        StagedAsset(
-            resolved=resolved,
-            staged_path=staged,
-            result_key="self",
-            blob_sha256=sha256_file(staged),
-        )
-    ]
+    except BaseException:
+        importer.discard_staged_files(owned)
+        raise
 
 
 async def _stage_local_capture_assets(
     source: Path, manifest: CaptureManifestV2, wanted: list[str]
 ) -> list[StagedAsset]:
-    """Turn browser-owned staging into V2 assets; never perform a server download."""
+    """Copy browser-owned staging; never transfer ownership of the durable source."""
+    checkpoint(force=True)
     files = {file.id: file for file in manifest.files}
     selected = [item for item in wanted if item in files] or list(files)
 
@@ -1455,7 +1508,6 @@ async def _stage_local_capture_assets(
             source_selection_id=file.id,
             source_file_id=file.id,
             source_filename=file.name,
-            # This descriptor is transport-free in this local path and is never fetched.
             download_url=manifest.source.canonical_url,
             source_item_id=manifest.source.source_item_id
             or manifest.source.canonical_url,
@@ -1463,34 +1515,37 @@ async def _stage_local_capture_assets(
 
     if source.suffix.lower() == ".zip":
         extracted = await asyncio.to_thread(importer.extract_selected, source, selected)
-        assets: list[StagedAsset] = []
-        for path, entry_name in extracted:
-            if entry_name not in files:
-                path.unlink(missing_ok=True)
-                continue
-            item = resolved(entry_name)
-            assets.append(
-                StagedAsset(
-                    resolved=item,
-                    staged_path=path,
-                    result_key=_zip_result_key(item.source_selection_id, entry_name),
-                    blob_sha256=sha256_file(path),
-                    container_entry_path=entry_name,
+        try:
+            assets: list[StagedAsset] = []
+            for path, entry_name in extracted:
+                checkpoint(force=True)
+                if entry_name not in files:
+                    importer.discard_staged_files([path])
+                    continue
+                item = resolved(entry_name)
+                assets.append(
+                    StagedAsset(
+                        resolved=item,
+                        staged_path=path,
+                        result_key=_zip_result_key(
+                            item.source_selection_id, entry_name
+                        ),
+                        blob_sha256=sha256_file(path, on_chunk=checkpoint),
+                        container_entry_path=entry_name,
+                    )
                 )
-            )
-        return assets
+            checkpoint(force=True)
+            return assets
+        except BaseException:
+            importer.discard_staged_files([path for path, _name in extracted])
+            raise
 
-    # Browser staging stays owned by the inbox item until a successful import.
     item = resolved(selected[0])
     copy = settings.incoming_dir / f"browser-{uuid.uuid4().hex}{source.suffix}"
-    with source.open("rb") as incoming:
-        storage.stream_to_path(incoming, copy, max_bytes=settings.max_upload_bytes)
+    digest = await asyncio.to_thread(_copy_import_source, source, copy)
     return [
         StagedAsset(
-            resolved=item,
-            staged_path=copy,
-            result_key="self",
-            blob_sha256=sha256_file(copy),
+            resolved=item, staged_path=copy, result_key="self", blob_sha256=digest
         )
     ]
 
@@ -1498,42 +1553,48 @@ async def _stage_local_capture_assets(
 def _stage_capture_upload_slot_assets(
     manifest: CaptureManifestV2, wanted: list[str], slot_keys: dict[str, str]
 ) -> list[StagedAsset]:
-    """Copy durable slot objects to disposable ingestion staging through StorageBackend."""
+    """Copy durable slot objects into disposable staging through StorageBackend."""
     files = {file.id: file for file in manifest.files}
     selected = [item for item in wanted if item in files] or list(files)
     backend = get_backend()
     output: list[StagedAsset] = []
-    for file_id in selected:
-        key = slot_keys.get(file_id)
-        if key is None:
-            raise importer.ImportError_("capture_upload_slots_incomplete")
-        file = files[file_id]
-        target = (
-            settings.incoming_dir
-            / f"capture-import-{uuid.uuid4().hex}{Path(file.name).suffix}"
-        )
-        with backend.local_path(key) as source, source.open("rb") as incoming:
-            storage.stream_to_path(
-                incoming, target, max_bytes=settings.max_upload_bytes
+    owned: list[Path] = []
+    try:
+        for file_id in selected:
+            checkpoint(force=True)
+            key = slot_keys.get(file_id)
+            if key is None:
+                raise importer.ImportError_("capture_upload_slots_incomplete")
+            file = files[file_id]
+            target = (
+                settings.incoming_dir
+                / f"capture-import-{uuid.uuid4().hex}{Path(file.name).suffix}"
             )
-        resolved = ResolvedAsset(
-            manifest=manifest,
-            source_selection_id=file.id,
-            source_file_id=file.id,
-            source_filename=file.name,
-            download_url=manifest.source.canonical_url,
-            source_item_id=manifest.source.source_item_id
-            or manifest.source.canonical_url,
-        )
-        output.append(
-            StagedAsset(
-                resolved=resolved,
-                staged_path=target,
-                result_key="self",
-                blob_sha256=sha256_file(target),
+            with backend.local_path(key) as source:
+                digest = _copy_import_source(source, target)
+            owned.append(target)
+            resolved = ResolvedAsset(
+                manifest=manifest,
+                source_selection_id=file.id,
+                source_file_id=file.id,
+                source_filename=file.name,
+                download_url=manifest.source.canonical_url,
+                source_item_id=manifest.source.source_item_id
+                or manifest.source.canonical_url,
             )
-        )
-    return output
+            output.append(
+                StagedAsset(
+                    resolved=resolved,
+                    staged_path=target,
+                    result_key="self",
+                    blob_sha256=digest,
+                )
+            )
+        checkpoint(force=True)
+        return output
+    except BaseException:
+        importer.discard_staged_files(owned)
+        raise
 
 
 def _zip_result_key(source_selection_id: str, entry_name: str) -> str:
@@ -1574,8 +1635,9 @@ async def _run_import(
     source_url = context["source_url"]
     staging_key = context["staging_key"]
 
+    assets: list[tuple[Path, str] | StagedAsset] = []
     try:
-        assets: list[tuple[Path, str] | StagedAsset] = []
+        checkpoint(force=True)
         v2_manifest: CaptureManifestV2 | None = None
         kind = manifest.get("kind")
         if manifest.get("schema_version") == 2 and context.get("slot_storage"):
@@ -1625,10 +1687,7 @@ async def _run_import(
                 settings.incoming_dir
                 / f"browser-{item_id}-{uuid.uuid4().hex}{source.suffix}"
             )
-            with source.open("rb") as incoming:
-                storage.stream_to_path(
-                    incoming, copy, max_bytes=settings.max_upload_bytes
-                )
+            await asyncio.to_thread(_copy_import_source, source, copy)
             assets = [(copy, filename)]
         elif kind == "model_files":
             files_by_id = {item["id"]: item for item in manifest.get("files", [])}
@@ -1659,17 +1718,20 @@ async def _run_import(
                     ),
                 )
                 for resolved in resolved_assets:
+                    checkpoint(force=True)
                     assets.extend(await _download_resolved_asset(resolved))
             else:
                 links = await import_resolvers.resolve_selected_download(
                     source_url, chosen
                 )
                 for link in links:
+                    checkpoint(force=True)
                     assets.extend(await _download_assets(link))
         elif kind == "collection":
             members = {item["id"]: item for item in manifest.get("members", [])}
             wanted = [item for item in selected if item in members] or list(members)
             for member_id in wanted:
+                checkpoint(force=True)
                 assets.extend(await _download_assets(members[member_id]["page_url"]))
         else:
             assets.extend(await _download_assets(source_url))
@@ -1684,6 +1746,7 @@ async def _run_import(
             session_factory=session_factory,
             inbox_item_id=item_id if v2_manifest is not None else None,
         )
+        checkpoint(force=True)
         await asyncio.to_thread(
             _finish_import,
             item_id,
@@ -1696,6 +1759,14 @@ async def _run_import(
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
         await asyncio.to_thread(
             _fail_import, item_id, exc, session_factory, job_context
+        )
+
+    finally:
+        importer.discard_staged_files(
+            [
+                asset.staged_path if isinstance(asset, StagedAsset) else asset[0]
+                for asset in assets
+            ]
         )
 
 
