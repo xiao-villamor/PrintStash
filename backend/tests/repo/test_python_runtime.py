@@ -79,6 +79,17 @@ class TestPythonRuntime:
         assert backend_types["pythonVersion"] == "3.14"
         assert core["tool"]["pyright"]["pythonVersion"] == "3.14"
 
+    @pytest.mark.parametrize("project_path", PROJECT_PATHS, ids=("backend", "core"))
+    def test_excludes_retired_numpy_type_checker(self, project_path: str) -> None:
+        requirements = (
+            Requirement(value)
+            for value in _toml(project_path)["project"]["optional-dependencies"]["dev"]
+        )
+        checker = next(value for value in requirements if value.name == "pyright")
+
+        assert not checker.specifier.contains("1.1.403")
+        assert checker.specifier.contains("1.1.414")
+
     def test_runs_ci_with_current_python(self) -> None:
         steps = _python_steps()
         deep = _workflow(REPO_ROOT / ".github/workflows/deep-ci.yml")

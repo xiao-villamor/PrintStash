@@ -88,7 +88,7 @@ dev = [
     # memory test that silently skips on the maintainer's machine is a memory test
     # nobody runs.
     "psutil>=6",
-    "pyright>=1.1.403",
+    "pyright>=1.1.414",
     "ruff>=0.16.10",
     # Provides the real PostgreSQL and SeaweedFS the `postgres`- and `s3`-marked
     # tests run against. There is no second path: see `tests/containers.py`.
