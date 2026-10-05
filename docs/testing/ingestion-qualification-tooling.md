@@ -17,3 +17,13 @@ The delivery browser lane also lost its execution context during a cold-start dy
 | 3 | Native S3 delivery retains its prepared document | Edge | Cold delivery harness with statically imported actual helper | Exactly one document navigation; real 307/provider200, expected bytes and filename, no forwarded provider credentials or proxied body | E2E | ✅ `frontend/tests/e2e-real/delivery/native-download.spec.ts` |
 
 The changed browser fixture is formatted and targeted lint passes. Its actual execution remains pending remote post-merge Deep CI; the original failed trace is preserved.
+
+
+A static harness entry alone did not prevent a second cold-start reload in GitHub: the actual request was interrupted and the original 120-second deadline failed. The dedicated runner now explicitly prepares the helper's `@tanstack/react-query` dependency and keeps dependency discovery closed during this immutable proof. React dependencies remain prepared by the base configuration. This does not change the product's development runner or disable its normal reload behavior. The browser proof preserves reload messages on failure before propagating the error; no failure is ignored.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 4 | Delivery helper dependencies are prepared | Edge | Actual resolved delivery Vite configuration | Query dependency and React are included before interaction | Repo | ✅ `frontend/tests/repo/delivery-config.test.ts::prepares the authenticated helper's query dependency` |
+| 5 | Prepared delivery dependency graph remains fixed | Edge | Actual resolved delivery Vite configuration | Discovery is closed while downloads run | Repo | ✅ `frontend/tests/repo/delivery-config.test.ts::keeps its prepared graph fixed during downloads` |
+
+Resolved configuration assertions passed by direct invocation; that is not a Vitest-suite result. The real browser proof remains required in remote Deep CI after merge. Both failed traces remain preserved.

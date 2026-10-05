@@ -26,6 +26,13 @@ test.describe("native artifact delivery", () => {
         sameSite: "Strict",
       },
     ]);
+    const reloadMessages: string[] = [];
+    page.on("websocket", (socket) => {
+      socket.on("framereceived", (event) => {
+        const payload = event.payload.toString();
+        if (payload.includes('"full-reload"')) reloadMessages.push(payload);
+      });
+    });
     let documentNavigations = 0;
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) documentNavigations += 1;
@@ -48,7 +55,13 @@ test.describe("native artifact delivery", () => {
       redirectResponse,
       providerResponse,
       downloaded,
-    ]);
+    ]).catch(async (error) => {
+      await test.info().attach("delivery-reload-evidence", {
+        body: JSON.stringify({ documentNavigations, reloadMessages }),
+        contentType: "application/json",
+      });
+      throw error;
+    });
     expect(documentNavigations).toBe(1);
     expect(await redirect.headerValue("cache-control")).toBe("private, no-store");
     expect(await redirect.headerValue("referrer-policy")).toBe("no-referrer");
