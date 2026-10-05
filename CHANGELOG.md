@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add an isolated prepared-geometry cache benchmark with bounded, checksummed
+  arrays, current-loader STL equivalence checks and supervised worker timings.
+  Keep production preparation unchanged pending demonstrated reuse and recovery
+  guarantees.
+
 - Publish viewer STL conversions from verified staged streams without buffering
   whole outputs in the API/worker parent. Reserve expanded output space before
   conversion, reject changed or incomplete publications, and release request

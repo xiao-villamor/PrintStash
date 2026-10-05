@@ -28,6 +28,7 @@ is worth as much as the one that replaced it.
 | [0010](0010-native-convex-hull.md) | Normalized native convex hull volume | Accepted; integrated rollout validation pending |
 | [0011](0011-reusable-point-neighbors.md) | Reusable exact sample-point lookup | Accepted; integrated rollout validation pending |
 | [0012](0012-local-native-resource-admission.md) | Process-shared native and prepared-source resource budgets | Implementation in progress; integrated qualification pending |
+| [0013](0013-prepared-geometry-cache.md) | Evaluate a disposable prepared-geometry cache before adoption | Provisional; no production adoption; current-flow measurements pending |
 
 ADR-0001 and ADR-0002 are cited from code comments but were never written down.
 Numbering starts at 0003 so those citations keep pointing at the decisions they
