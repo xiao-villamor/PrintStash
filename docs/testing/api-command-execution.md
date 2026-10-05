@@ -31,6 +31,14 @@ superseded by the real library-import responsiveness and Session tests. The
 affected consumer selection passed 6 cases with unchanged error and cleanup
 assertions. Unchanged hygiene module variants run in ordinary CI.
 
+The durable-engine E2E observer previously loaded the Artifact before querying
+its derivative rows. A publication between those SELECTs could report READY
+beside an older cached thumbnail pointer. It now reads both in one SQL statement.
+Two real SQLite WAL regressions first reproduced the inconsistent absent/old
+pointer and then passed with the joined observation. The originally failing real DBOS
+recipe-upgrade E2E plus affected test hygiene passed (5 cases, 52.93s). The publication transaction
+and the old-thumbnail visibility assertion remain intact.
+
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
 | 1 | closes authentication before receiving chunk body | Happy | Real SQLite and ThreadBoundSessionFactory; async request body | Authentication Sessions are closed before receive; all SQL/commit/close stay on their creating thread; exact receipt persists | Integration | ✅ `tests/integration/api/v1/test_artifact_uploads.py::TestCommandOwnership::test_closes_authentication_before_receiving_chunk_body` |
@@ -112,3 +120,4 @@ assertions. Unchanged hygiene module variants run in ordinary CI.
 | 77 | invalid capture selection creates no import work | Error | Unknown selection ID, alone or alongside a valid v2 manifest ID | Exact OperationError kind/detail; Job set unchanged | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestImportItem::test_import_route_rejects_invalid_v2_selection_before_scheduling` |
 | 78 | invalid capture retry selection creates no work | Error | Stored v2 manifest retry contains an unknown selection ID | Exact OperationError kind/detail; Job set unchanged | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestRetry::test_retry_route_rejects_invalid_v2_selection_before_scheduling` |
 | 79 | capture stream disconnect removes its owned temporary file | Error | Real slot and owned Session factory; stream raises disconnect after partial bytes | Original disconnect error propagates; owned temporary path is removed | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestUploadCaptureSlot::test_capture_slot_upload_cleans_temp_file_after_stream_disconnect` |
+| 80 | settled background-work observation includes the published thumbnail | Edge | Real SQLite WAL, independent connections; thumbnail initially absent / previous path; writer commits READY while observer loads File | Exact ready states carry the newly published path from the same observation | Repo | ✅ `tests/repo/test_job_engine_process.py::TestSettledObservation::test_returns_the_published_thumbnail_when_completion_races_the_observer` |

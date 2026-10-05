@@ -229,17 +229,21 @@ def _settle(file_id: int) -> dict:
     deadline = time.monotonic() + _DEADLINE_S
     while True:
         with get_session_factory().scoped_session() as session:
-            file = session.get(File, file_id)
-            assert file is not None
+            # READY and the thumbnail pointer commit together. Read them in
+            # one statement: a writer can commit between two SELECTs, leaving
+            # an earlier ORM File instance beside newer derivative rows.
+            observed = session.exec(
+                select(File, ArtifactDerivative)
+                .outerjoin(ArtifactDerivative, ArtifactDerivative.file_id == File.id)
+                .where(File.id == file_id)
+            ).all()
+            assert observed, f"Artifact {file_id} disappeared while settling"
+            file = observed[0][0]
             current = kinds.recipes_for(file)
             rows = [
                 row
-                for row in session.exec(
-                    select(ArtifactDerivative).where(
-                        ArtifactDerivative.file_id == file_id
-                    )
-                ).all()
-                if current.get(row.kind) == row.recipe_version
+                for _, row in observed
+                if row is not None and current.get(row.kind) == row.recipe_version
             ]
             states = {row.kind: DerivativeState(row.state).value for row in rows}
             outcome = {
