@@ -24,7 +24,12 @@ after verifying inode identity before truncation. The structured command run
 passed 42 cases, including both native cancellation cases and the whole-app
 slow-hint headline. The native capture acquisition cancellation probe passed
 on its first run (1 case); it verifies the existing shield and structured join,
-without a further production fix. Unchanged hygiene module variants run in ordinary CI.
+without a further production fix. Ordinary CI exposed five stale test
+consumers: four direct route calls and one syntax-only offloading assertion. The
+callers now await the owned command with detached authority; the syntax check is
+superseded by the real library-import responsiveness and Session tests. The
+affected consumer selection passed 6 cases with unchanged error and cleanup
+assertions. Unchanged hygiene module variants run in ordinary CI.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
@@ -104,3 +109,6 @@ without a further production fix. Unchanged hygiene module variants run in ordin
 | 74 | native task cancellation waits for owned writes | Error | Limit 1; native asyncio Task.cancel during held synchronous write; successor queued | Caller stays unfinished and successor cannot start until write finishes; exact cancellation then returns | Unit | ✅ `tests/unit/api/test_command_execution.py::TestCommandExecution::test_native_cancellation_waits_for_owned_write` |
 | 75 | native task cancellation removes queued commands | Error | Limit 1 occupied; cancel queued request task before command admission | Cancelled callable never executes; successor acquires released capacity | Unit | ✅ `tests/unit/api/test_command_execution.py::TestCommandExecution::test_native_cancellation_removes_queued_command` |
 | 76 | native acquisition cancellation closes the capture spool | Error | Actual ASGI request cancelled after an observed spool open, before the opening worker returns | Cancelled request joins the worker; actual descriptor closes; Sessions 0, owned spool removed and pending lease retained | Integration | ✅ `tests/integration/api/v1/inbox/test_capture_upload.py::TestCaptureCommandOwnership::test_closes_spool_after_native_acquisition_cancellation` |
+| 77 | invalid capture selection creates no import work | Error | Unknown selection ID, alone or alongside a valid v2 manifest ID | Exact OperationError detail; Job set unchanged and no staged input | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestImportItem::test_import_route_rejects_invalid_v2_selection_before_scheduling` |
+| 78 | invalid capture retry selection creates no work | Error | Stored v2 manifest retry contains an unknown selection ID | Exact OperationError detail; Job set unchanged and no staged input | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestRetry::test_retry_route_rejects_invalid_v2_selection_before_scheduling` |
+| 79 | capture stream disconnect removes its owned temporary file | Error | Real slot and owned Session factory; stream raises disconnect after partial bytes | Original disconnect error propagates; owned temporary path is removed | Integration | ✅ `tests/integration/modules/ingestion/inbox/test_capture_slots.py::TestUploadCaptureSlot::test_capture_slot_upload_cleans_temp_file_after_stream_disconnect` |

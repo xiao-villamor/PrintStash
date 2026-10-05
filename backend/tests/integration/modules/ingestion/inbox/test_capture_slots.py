@@ -31,6 +31,7 @@ from sqlalchemy import delete
 from sqlmodel import Session, select
 from starlette.requests import ClientDisconnect, Request
 
+from app.api.command_actor import CommandActor
 from app.api.v1 import inbox as inbox_api
 from app.core.config import _overlay
 from app.core.errors import ErrorKind, OperationError
@@ -318,7 +319,7 @@ class TestUploadCaptureSlot:
 
     @pytest.mark.anyio
     async def test_capture_slot_upload_cleans_temp_file_after_stream_disconnect(
-        self, db_session: Session, tmp_path, monkeypatch: pytest.MonkeyPatch
+        self, db_session: Session, db_factory, tmp_path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
         incoming_dir = inbox.settings.incoming_dir
@@ -362,7 +363,7 @@ class TestUploadCaptureSlot:
 
         with pytest.raises(ClientDisconnect):
             await inbox_api.put_capture_upload_slot(
-                slot.id, request, current_user=owner, session=db_session
+                slot.id, request, actor=CommandActor.from_user(owner)
             )
 
         assert list(incoming_dir.iterdir()) == []
@@ -914,9 +915,10 @@ def _make_item(db_session: Session, owner: User, **overrides) -> InboxItem:
 
 
 class TestImportItem:
+    @pytest.mark.anyio
     @pytest.mark.parametrize("requested", [["missing"], ["ok", "missing"]])
-    def test_import_route_rejects_invalid_v2_selection_before_scheduling(
-        self, db_session: Session, requested: list[str]
+    async def test_import_route_rejects_invalid_v2_selection_before_scheduling(
+        self, db_session: Session, db_factory, requested: list[str]
     ) -> None:
         owner = build_user(
             db_session, f"import-selection-route-{len(requested)}", superuser=True
@@ -943,11 +945,10 @@ class TestImportItem:
         jobs_before = db_session.exec(select(Job)).all()
 
         with pytest.raises(OperationError) as exc_info:
-            inbox_api.import_item(
+            await inbox_api.import_item(
                 row.id,
                 InboxImportRequest(selected_ids=requested),
-                current_user=owner,
-                session=db_session,
+                actor=CommandActor.from_user(owner),
             )
 
         assert exc_info.value.kind is ErrorKind.UNPROCESSABLE
@@ -1033,9 +1034,11 @@ class TestRetry:
             ["bad"],
         )
 
-    def test_retry_route_rejects_invalid_v2_selection_before_scheduling(
+    @pytest.mark.anyio
+    async def test_retry_route_rejects_invalid_v2_selection_before_scheduling(
         self,
         db_session: Session,
+        db_factory,
     ) -> None:
         owner = build_user(db_session, "retry-selection-route", superuser=True)
         row = _make_item(
@@ -1061,7 +1064,7 @@ class TestRetry:
         jobs_before = db_session.exec(select(Job)).all()
 
         with pytest.raises(OperationError) as exc_info:
-            inbox_api.retry_item(row.id, current_user=owner, session=db_session)
+            await inbox_api.retry_item(row.id, actor=CommandActor.from_user(owner))
 
         assert exc_info.value.kind is ErrorKind.UNPROCESSABLE
         assert exc_info.value.detail == "file_selection_invalid"

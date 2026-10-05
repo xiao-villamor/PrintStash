@@ -24,7 +24,6 @@ so a tampered archive cannot swap an image for something else.
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import zipfile
 from pathlib import Path
@@ -899,11 +898,6 @@ class TestImportArchive:
             assert file_names == {"Painted", "Retrofitted"}
         finally:
             archive_path.unlink(missing_ok=True)
-
-    def test_library_import_api_runs_blocking_work_in_fastapi_threadpool(self) -> None:
-        from app.api.v1 import models as models_api
-
-        assert not inspect.iscoroutinefunction(models_api.import_library_archive)
 
     def test_library_import_rejects_corrupt_blob(
         self, db_session: Session, auth_headers: dict[str, str], tmp_path: Path
