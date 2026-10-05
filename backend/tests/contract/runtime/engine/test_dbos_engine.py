@@ -1,7 +1,9 @@
-"""Persistent tick scheduling and real DBOS 2.31.1 system-state upgrades."""
+"""Actual engine queue ordering, persistent ticks and DBOS system-state upgrades."""
 
 import sqlite3
+import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,9 +11,11 @@ from dbos import DBOS
 from sqlalchemy import create_engine
 from sqlmodel import select
 
-from app.db.models import Job, JobState, WorkPriority
+from app.db.models import Job, JobState, LaneName, WorkPriority
 from app.db.session import get_session_factory
 from app.modules.work import catalog as catalog_module
+from app.modules.work import submission
+from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import Deduplicated, JobSubmission, SubmitOutcome
 from app.runtime.engine.dbos_engine import TICK_WORKFLOW, system_database_url
 from tests.containers import fresh_postgres_database
@@ -19,7 +23,9 @@ from tests.contract.modules.work._harness import (
     PLAIN,
     RECORD,
     DbosHarness,
+    InlineHarness,
     contract_catalog,
+    gated,
     shared_app_db,
 )
 from tests.factories.ops import build_job
@@ -193,3 +199,177 @@ class TestSdkUpgrade:
 
         assert upgraded.state("dbos-231-job") == JobState.COMPLETED
         assert RECORD.firsts() == ["upgrade/queued"]
+
+
+@contextmanager
+def ordered_engine(kind, tmp_path, lane_name, order):
+    original = contract_catalog()
+    lanes = dict(original.lanes)
+    lanes[lane_name] = replace(lanes[lane_name], concurrency=1, queue_order=order)
+    definitions = [
+        replace(definition, lane=lane_name) if definition.name == PLAIN else definition
+        for definition in original.definitions.values()
+    ]
+    catalog = WorkCatalog(definitions, lanes=lanes)
+    RECORD.steps.clear()
+    RECORD.behaviour.clear()
+    RECORD.discover.clear()
+    RECORD.running = RECORD.peak = 0
+    with shared_app_db(tmp_path / "application.sqlite"):
+        harness = (
+            InlineHarness(catalog)
+            if kind == "inline"
+            else DbosHarness(catalog, f"sqlite:///{tmp_path / 'engine.sqlite'}")
+        )
+        catalog_module.bind(harness.engine, catalog)
+        try:
+            yield harness
+        finally:
+            for behaviour in RECORD.behaviour.values():
+                gate = getattr(behaviour, "gate", None)
+                if gate is not None:
+                    gate.set()
+            harness.close()
+            catalog_module.bind(None, None)
+
+
+class TestQueueOrder:
+    @pytest.mark.parametrize("kind", ["inline", "dbos"])
+    @pytest.mark.parametrize("lane", [LaneName.DERIVE_NATIVE, LaneName.DERIVE_LIGHT])
+    def test_fifo_derivation_dispatches_backfill_before_later_interactive(
+        self, kind, lane, tmp_path
+    ):
+        from app.modules.work.contracts import LaneOrder
+
+        with ordered_engine(kind, tmp_path, lane, LaneOrder.FIFO) as harness:
+            gate = threading.Event()
+            blocker = harness.job(PLAIN, "fifo/blocker", behaviour=gated(gate))
+            submission.submit(blocker)
+            harness.started("fifo/blocker")
+            backfill = harness.job(
+                PLAIN, "fifo/backfill", priority=WorkPriority.BACKFILL
+            )
+            submission.submit(backfill)
+            interactive = harness.job(PLAIN, "fifo/interactive")
+            submission.submit(interactive)
+            depth = harness.engine.lane_depth(lane)
+            assert depth.queued + depth.running == 3
+            gate.set()
+            harness.settle()
+
+            order = RECORD.firsts()
+            assert order.index("fifo/backfill") < order.index("fifo/interactive")
+            assert RECORD.peak == 1
+            depth = harness.engine.lane_depth(lane)
+            assert (depth.queued, depth.running) == (0, 0)
+            with get_session_factory().scoped_session() as session:
+                rows = session.exec(
+                    select(Job).where(Job.id.in_([backfill, interactive]))
+                ).all()
+                assert {row.id: row.priority for row in rows} == {
+                    backfill: WorkPriority.BACKFILL,
+                    interactive: WorkPriority.INTERACTIVE,
+                }
+                assert all(row.state == JobState.COMPLETED for row in rows)
+                assert all(row.attempts == 1 for row in rows)
+
+    @pytest.mark.parametrize("kind", ["inline", "dbos"])
+    def test_priority_lane_dispatches_interactive_before_queued_backfill(
+        self, kind, tmp_path
+    ):
+        from app.modules.work.contracts import LaneOrder
+
+        with ordered_engine(
+            kind, tmp_path, LaneName.MAINTENANCE, LaneOrder.PRIORITY
+        ) as harness:
+            gate = threading.Event()
+            blocker = harness.job(PLAIN, "priority/blocker", behaviour=gated(gate))
+            submission.submit(blocker)
+            harness.started("priority/blocker")
+            backfill = harness.job(
+                PLAIN, "priority/backfill", priority=WorkPriority.BACKFILL
+            )
+            submission.submit(backfill)
+            interactive = harness.job(PLAIN, "priority/interactive")
+            submission.submit(interactive)
+            gate.set()
+            harness.settle()
+
+            order = RECORD.firsts()
+            assert order.index("priority/interactive") < order.index(
+                "priority/backfill"
+            )
+            assert RECORD.peak == 1
+
+
+class TestQueueTransition:
+    @pytest.mark.parametrize("lane", [LaneName.DERIVE_NATIVE, LaneName.DERIVE_LIGHT])
+    def test_refuses_legacy_backfill_before_consumption(self, lane, tmp_path):
+        from dbos import DBOSClient
+
+        from app.modules.work.contracts import LaneOrder
+
+        original = contract_catalog()
+        lanes = dict(original.lanes)
+        lanes[lane] = replace(
+            lanes[lane], concurrency=1, queue_order=LaneOrder.PRIORITY
+        )
+        catalog = WorkCatalog(
+            [
+                replace(definition, lane=lane)
+                if definition.name == PLAIN
+                else definition
+                for definition in original.definitions.values()
+            ],
+            lanes=lanes,
+        )
+        RECORD.steps.clear()
+        RECORD.behaviour.clear()
+        RECORD.discover.clear()
+        RECORD.running = RECORD.peak = 0
+        url = f"sqlite:///{tmp_path / 'legacy.sqlite'}"
+        with shared_app_db(tmp_path / "application.sqlite"):
+            harness = DbosHarness(catalog, url, listen_lanes=[])
+            catalog_module.bind(harness.engine, catalog)
+            client = DBOSClient(
+                system_database_url=url,
+                dbos_system_schema=None,
+                lazy=True,
+                retry_connection_errors=False,
+                observability_query_timeout_sec=5,
+            )
+            try:
+                job_id = harness.job(
+                    PLAIN, "transition/backfill", priority=WorkPriority.BACKFILL
+                )
+                submission.submit(job_id)
+                saved = client.list_workflows(queue_name=lane.value, status="ENQUEUED")
+                assert len(saved) == 1
+                assert saved[0].priority == 1000
+                harness.engine.shutdown()
+                catalog.lanes[lane] = replace(
+                    catalog.lanes[lane], queue_order=LaneOrder.FIFO
+                )
+
+                with pytest.raises(
+                    RuntimeError, match="derivation_queue_requires_drain"
+                ):
+                    harness.engine.launch(listen_lanes=[lane])
+
+                assert RECORD.steps == []
+                remaining = client.list_workflows(
+                    queue_name=lane.value, status="ENQUEUED"
+                )
+                assert [(row.workflow_id, row.priority) for row in remaining] == [
+                    (saved[0].workflow_id, 1000)
+                ]
+                with get_session_factory().scoped_session() as session:
+                    job = session.get(Job, job_id)
+                    assert job is not None
+                    assert job.state == JobState.QUEUED
+                    assert job.priority == WorkPriority.BACKFILL
+                    assert job.attempts == 1
+            finally:
+                client.destroy()
+                harness.close()
+                catalog_module.bind(None, None)

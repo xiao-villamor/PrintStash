@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.core.work_priority import current_priority
 from app.runtime.native_admission import (
     AdmissionTooLarge,
     LocalResourcePool,
@@ -66,7 +67,9 @@ def admit(
     pool = _pool
     if pool is None:
         raise RuntimeError("native resource pool is not bound by process bootstrap")
-    with pool.reserve(request, capacity, checkpoint=checkpoint) as permit:
+    with pool.reserve(
+        request, capacity, checkpoint=checkpoint, priority=current_priority()
+    ) as permit:
         _local.permit = permit
         try:
             yield permit

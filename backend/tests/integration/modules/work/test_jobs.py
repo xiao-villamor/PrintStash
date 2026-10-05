@@ -1038,3 +1038,125 @@ class TestExecutionEpochInvariant:
                 {"value": value, "job_id": row.id},
             )
             db_session.commit()
+
+
+@pytest.fixture
+def active_history_plan(db_session, make_model, make_file, make_job, request):
+    from app.db.models import FileType
+    from tests.factories.ops import build_job_history
+
+    available = make_file(make_model(), file_type=FileType.STL)
+    claimed = make_file(make_model(), file_type=FileType.STL)
+    build_job_history(
+        db_session,
+        count=request.param,
+        kind=JobKind.DERIVATIVES_MESH,
+        subject=f"file/{available.id}",
+    )
+    backfill = make_job(
+        kind=JobKind.DERIVATIVES_MESH,
+        state=JobState.RUNNING,
+        subject=f"file/{claimed.id}",
+        priority=WorkPriority.BACKFILL,
+    )
+    interactive = make_job(
+        kind=JobKind.DERIVATIVES_VIEWER_STL, priority=WorkPriority.INTERACTIVE
+    )
+    db_session.connection().exec_driver_sql("ANALYZE")
+    return available, claimed, backfill, interactive
+
+
+@pytest.fixture
+def emitted_job_queries(db_session):
+    from contextlib import contextmanager
+
+    from sqlalchemy import event
+
+    @contextmanager
+    def capture():
+        queries = []
+
+        def before_cursor(_connection, _cursor, statement, parameters, _context, _many):
+            normalized = statement.lstrip().lower()
+            if normalized.startswith("select") and "from jobs" in normalized:
+                queries.append((statement, parameters))
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", before_cursor)
+        try:
+            yield queries
+        finally:
+            event.remove(engine, "before_cursor_execute", before_cursor)
+
+    return capture
+
+
+def _captured_plans(session, queries, prefix):
+    selected = [
+        query for query in queries if query[0].lstrip().lower().startswith(prefix)
+    ]
+    assert selected, "production did not emit the expected Job query"
+    connection = session.connection()
+    return [
+        [
+            row[3]
+            for row in connection.exec_driver_sql(
+                "EXPLAIN QUERY PLAN " + statement, parameters
+            ).all()
+        ]
+        for statement, parameters in selected
+    ]
+
+
+class TestActiveJobQueryPlans:
+    @pytest.mark.parametrize("active_history_plan", [1000, 10000], indirect=True)
+    def test_source_anti_join_uses_active_history_boundary(
+        self, db_session, active_history_plan, emitted_job_queries
+    ):
+        from app.modules.derivatives.kinds import group
+        from app.modules.derivatives.source import DerivativeSource, subject_key
+        from app.modules.work.contracts import DiscoveryBudget
+
+        available, claimed, _backfill, _interactive = active_history_plan
+        with emitted_job_queries() as queries:
+            pending = DerivativeSource(
+                group(JobKind.DERIVATIVES_MESH)
+            ).pending_prioritized(
+                db_session,
+                now=utcnow(),
+                budget=DiscoveryBudget(total=2, interactive=2, backfill=2),
+            )
+        assert [item.subject_key for item in pending] == [subject_key(available.id)]
+        assert subject_key(claimed.id) not in [item.subject_key for item in pending]
+        plans = _captured_plans(db_session, queries, "select files.id")
+        assert all(
+            any("uq_jobs_active_subject" in detail for detail in plan) for plan in plans
+        ), plans
+        assert all(
+            not any("SCAN jobs" in detail for detail in plan) for plan in plans
+        ), plans
+
+    @pytest.mark.parametrize("active_history_plan", [1000, 10000], indirect=True)
+    def test_discovery_quota_uses_active_history_boundary(
+        self, db_session, active_history_plan, emitted_job_queries, work_catalog
+    ):
+        from app.modules.work.contracts import DiscoveryBudget
+        from app.modules.work.reconciler import _discovery_budget
+
+        definition = work_catalog.definition(JobKind.DERIVATIVES_MESH)
+        lane = work_catalog.lanes[definition.lane]
+        interactive = max(0, lane.concurrency - 1)
+        with emitted_job_queries() as queries:
+            budget = _discovery_budget(db_session, definition)
+        assert budget == DiscoveryBudget(
+            total=min(settings.jobs_reconcile_batch, interactive),
+            interactive=interactive,
+            backfill=0,
+        )
+        plans = _captured_plans(db_session, queries, "select jobs.priority")
+        assert all(
+            any("uq_jobs_active_subject" in detail for detail in plan) for plan in plans
+        ), plans
+        assert all(
+            not any("SCAN jobs" in detail for detail in plan) for plan in plans
+        ), plans

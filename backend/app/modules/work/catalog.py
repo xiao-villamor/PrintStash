@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.db.models import JobKind, LaneName, WorkLaneOverride
 
-from .contracts import JobDefinition, JobEngine, Lane
+from .contracts import JobDefinition, JobEngine, Lane, LaneOrder
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -32,8 +32,12 @@ def default_lanes() -> dict[LaneName, Lane]:
     """Every lane with its configured (environment) concurrency."""
     lanes = (
         Lane(LaneName.INGEST, settings.jobs_ingest_concurrency),
-        Lane(LaneName.DERIVE_NATIVE, _native_default()),
-        Lane(LaneName.DERIVE_LIGHT, settings.jobs_derive_light_concurrency),
+        Lane(LaneName.DERIVE_NATIVE, _native_default(), queue_order=LaneOrder.FIFO),
+        Lane(
+            LaneName.DERIVE_LIGHT,
+            settings.jobs_derive_light_concurrency,
+            queue_order=LaneOrder.FIFO,
+        ),
         Lane(LaneName.SIMILARITY, settings.jobs_similarity_concurrency, scope="global"),
         Lane(LaneName.NETWORK, settings.jobs_network_concurrency),
         Lane(

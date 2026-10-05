@@ -21,11 +21,13 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import SQLModel
+from sqlalchemy import event
+from sqlmodel import SQLModel, create_engine
 
 from app.db import session as db_session_module
 from app.db.models import Job, JobKind, JobState, LaneName, WorkPriority
@@ -334,17 +336,42 @@ class DbosHarness(Harness):
 
 
 @contextmanager
-def shared_app_db() -> Iterator[None]:
-    """The application schema on the default database, used by every thread."""
-    default = db_session_module._default_factory
-    engine = db_session_module.get_engine()
-    SQLModel.metadata.create_all(engine)
-    _empty(engine)
-    override_session_factory(default)
+def shared_app_db(path: Path | None = None) -> Iterator[None]:
+    """One application database shared by callers and DBOS-created threads.
+
+    A supplied path creates an isolated current schema. Replacing the ContextVar
+    itself gives threads created by DBOS the same default factory as the test;
+    restoring the original object preserves the caller's previous override.
+    """
+    if path is None:
+        default = db_session_module._default_factory
+        engine = db_session_module.get_engine()
+        SQLModel.metadata.create_all(engine)
+        _empty(engine)
+        override_session_factory(default)
+        try:
+            yield
+        finally:
+            _empty(engine)
+        return
+
+    engine = create_engine(
+        f"sqlite:///{path}", connect_args={"check_same_thread": False}
+    )
+    event.listen(engine, "connect", db_session_module._set_sqlite_pragmas)
+    factory = db_session_module.SQLiteSessionFactory(engine)
+    previous_factory = db_session_module._default_factory
+    previous_context = db_session_module._factory_ctx
+    db_session_module._default_factory = factory
+    db_session_module._factory_ctx = ContextVar("session_factory", default=factory)
+    override_session_factory(factory)
     try:
+        SQLModel.metadata.create_all(engine)
         yield
     finally:
-        _empty(engine)
+        db_session_module._factory_ctx = previous_context
+        db_session_module._default_factory = previous_factory
+        factory.dispose()
 
 
 def _empty(engine) -> None:

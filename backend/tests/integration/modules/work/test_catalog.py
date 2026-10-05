@@ -136,3 +136,36 @@ class TestBinding:
 
         assert catalog_module.bound() is True
         assert catalog_module.get_engine() is work_engine
+
+
+class TestQueueOrder:
+    def test_only_derivation_defaults_to_fifo(self):
+        from app.modules.work.contracts import LaneOrder
+
+        lanes = default_lanes()
+        assert {
+            name for name, lane in lanes.items() if lane.queue_order is LaneOrder.FIFO
+        } == {
+            LaneName.DERIVE_NATIVE,
+            LaneName.DERIVE_LIGHT,
+        }
+        assert all(
+            lane.queue_order is LaneOrder.PRIORITY
+            for name, lane in lanes.items()
+            if name not in {LaneName.DERIVE_NATIVE, LaneName.DERIVE_LIGHT}
+        )
+
+    def test_runtime_concurrency_override_preserves_lane_policy(self, db_session):
+        from dataclasses import replace
+
+        from app.modules.work.contracts import LaneOrder
+
+        catalog = WorkCatalog()
+        original = catalog.lanes[LaneName.DERIVE_NATIVE]
+        assert original.queue_order is LaneOrder.FIFO
+        db_session.add(WorkLaneOverride(lane=LaneName.DERIVE_NATIVE, concurrency=7))
+        db_session.commit()
+
+        catalog.apply_overrides(db_session)
+
+        assert catalog.lanes[LaneName.DERIVE_NATIVE] == replace(original, concurrency=7)

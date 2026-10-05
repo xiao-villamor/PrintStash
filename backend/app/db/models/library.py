@@ -172,6 +172,8 @@ class File(SQLModel, table=True):
     __table_args__ = (
         Index("uq_files_model_version", "model_id", "version", unique=True),
         Index("ix_files_model_deleted_type", "model_id", "deleted_at", "file_type"),
+        Index("ix_files_uploaded_id", "uploaded_at", "id"),
+        Index("ix_files_viewer_requested_id", "viewer_requested_at", "id"),
         Index(
             "uq_files_live_recommended_gcode_text",
             "model_id",

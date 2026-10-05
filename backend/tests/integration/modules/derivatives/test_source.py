@@ -519,3 +519,155 @@ class TestMeshContinuationSource:
         assert current is not None and current.token == pending.token
         assert current.job_id == historical_id
         assert _subjects(db_session) == [subject_key(artifact.id)]
+
+
+class TestPriorityDiscovery:
+    @staticmethod
+    def pending(session, *, total=1, interactive=1, backfill=1):
+        from app.modules.work.contracts import DiscoveryBudget
+
+        # Reconstructing the source must preserve the durable scan and turn.
+        source = DerivativeSource(group(JobKind.DERIVATIVES_MESH))
+        return source.pending_prioritized(
+            session,
+            now=utcnow(),
+            budget=DiscoveryBudget(
+                total=total, interactive=interactive, backfill=backfill
+            ),
+        )
+
+    def test_recent_upload_bypasses_an_old_unscanned_prefix(
+        self, db_session, mesh, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        for _ in range(5):
+            mesh(uploaded_at=utcnow() - timedelta(days=30))
+        recent = mesh()
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(recent.id)
+        assert item.priority is WorkPriority.INTERACTIVE
+
+    def test_recent_upload_below_the_scan_cursor_remains_interactive(
+        self, db_session, mesh
+    ):
+        from app.db.models import ReconcileCursor
+
+        recent = mesh()
+        db_session.add(
+            ReconcileCursor(
+                source=JobKind.DERIVATIVES_MESH,
+                scan_high_water=recent.id,
+                scan_position=recent.id,
+            )
+        )
+        db_session.commit()
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(recent.id)
+        assert item.priority is WorkPriority.INTERACTIVE
+
+    @pytest.mark.parametrize("state", ["QUEUED", "RUNNING", "INTERRUPTED"])
+    def test_active_subjects_cannot_consume_the_result_limit(
+        self, db_session, mesh, make_job, monkeypatch, state
+    ):
+        from app.db.models import JobState
+
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        pending = mesh()
+        active = mesh()
+        make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(active.id),
+            state=JobState[state],
+        )
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(pending.id)
+
+    def test_recent_pagination_passes_a_ready_candidate_prefix(
+        self, db_session, mesh, make_derivative, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        pending = mesh()
+        for _ in range(5):
+            ready = mesh()
+            make_derivative(ready, DerivativeKind.METADATA)
+            make_derivative(ready, DerivativeKind.THUMBNAIL)
+        found = []
+        for _ in range(4):
+            items = self.pending(db_session, backfill=0)
+            assert len(items) <= 1
+            found.extend(items)
+        assert subject_key(pending.id) in {item.subject_key for item in found}
+        assert all(item.priority is WorkPriority.INTERACTIVE for item in found)
+
+    def test_one_item_budget_gives_backfill_a_durable_turn(
+        self, db_session, mesh, make_derivative
+    ):
+        old = mesh(uploaded_at=utcnow() - timedelta(days=30))
+        priorities = []
+        subjects = []
+        for _ in range(2):
+            mesh()
+            (item,) = self.pending(db_session)
+            priorities.append(item.priority)
+            subjects.append(item.subject_key)
+            artifact_id = file_id_of(item.subject_key)
+            from app.db.models import File
+
+            artifact = db_session.get(File, artifact_id)
+            make_derivative(artifact, DerivativeKind.METADATA)
+            make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        assert set(priorities) == {WorkPriority.INTERACTIVE, WorkPriority.BACKFILL}
+        assert subject_key(old.id) in subjects
+
+    def test_new_uploads_cannot_extend_an_old_rotation_forever(
+        self, db_session, mesh, make_derivative, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        old = [mesh(uploaded_at=utcnow() - timedelta(days=30)) for _ in range(5)]
+        discovered = set()
+        for _ in range(12):
+            for _ in range(3):
+                mesh()
+            items = self.pending(db_session, interactive=0)
+            assert len(items) <= 1
+            for item in items:
+                assert item.priority is WorkPriority.BACKFILL
+                discovered.add(item.subject_key)
+                artifact = next(
+                    row for row in old if subject_key(row.id) == item.subject_key
+                )
+                make_derivative(artifact, DerivativeKind.METADATA)
+                make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        assert discovered == {subject_key(item.id) for item in old}
+
+    def test_full_backfill_quota_preserves_the_old_scan_round(
+        self, db_session, mesh, monkeypatch
+    ):
+        from app.db.models import ReconcileCursor
+
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        old = [mesh(uploaded_at=utcnow() - timedelta(days=30)) for _ in range(3)]
+        frozen_upper = old[-1].id
+        db_session.add(
+            ReconcileCursor(
+                source=JobKind.DERIVATIVES_MESH,
+                scan_high_water=frozen_upper,
+                scan_position=0,
+            )
+        )
+        db_session.commit()
+        for _ in range(3):
+            mesh()
+            items = self.pending(db_session, backfill=0)
+            assert len(items) == 1
+            assert items[0].priority is WorkPriority.INTERACTIVE
+            cursor = db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH)
+            assert cursor is not None
+            assert cursor.scan_position == 0
+            assert cursor.scan_high_water == frozen_upper
+        (item,) = self.pending(db_session, interactive=0)
+        assert item.subject_key == subject_key(old[0].id)
+        assert item.priority is WorkPriority.BACKFILL
+        cursor = db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH)
+        assert cursor is not None
+        assert cursor.scan_high_water == frozen_upper

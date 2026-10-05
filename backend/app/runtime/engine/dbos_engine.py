@@ -26,17 +26,19 @@ from typing import Any, Callable
 
 from dbos import (
     DBOS,
+    DBOSClient,
     DBOSConfig,
     Queue,
     SetEnqueueOptions,
     SetWorkflowID,
 )
 from dbos import error as dbos_error
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import JobKind, LaneName
+from app.db.models import JobKind, LaneName, WorkPriority
 from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import (
     ActiveExecution,
@@ -48,6 +50,7 @@ from app.modules.work.contracts import (
     JobSubmission,
     Lane,
     LaneDepth,
+    LaneOrder,
     PassSubmission,
     RetryPolicy,
     Submission,
@@ -74,6 +77,12 @@ _STATUS = {
 _ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
+_FIFO_INSPECTION_PAGE = 100
+_FIFO_INSPECTION_LIMIT = 500
+_FIFO_DRAIN_REQUIRED = (
+    "derivation_queue_requires_drain: stop all work processes, drain legacy "
+    "derivation queues and restart together before enabling FIFO scheduling"
+)
 
 
 _client_pool: ThreadPoolExecutor | None = None
@@ -241,6 +250,7 @@ class DbosJobEngine(JobEngine):
         with self._lock:
             if self._launched:
                 return
+            self._require_fifo_queues_drained()
             DBOS.destroy(destroy_registry=True)
             DBOS(config=self._config())
             self._register_workflows()
@@ -262,6 +272,77 @@ class DbosJobEngine(JobEngine):
                 ]
             )
             self._launched = True
+
+    def _fresh_system_database(self) -> bool:
+        url = make_url(self.url)
+        if url.get_backend_name() == "sqlite":
+            if url.database is None:
+                raise ValueError("engine_requires_file_backed_sqlite")
+            try:
+                return Path(url.database).stat().st_size == 0
+            except FileNotFoundError:
+                return True
+        if self.schema is None:
+            raise ValueError("engine_requires_system_schema")
+        database = create_engine(self.url, connect_args={"connect_timeout": 5})
+        try:
+            return not inspect(database).has_schema(self.schema)
+        finally:
+            database.dispose()
+
+    def _require_fifo_queues_drained(self) -> None:
+        """Refuse a mixed scheduling rollout before registering consumers.
+
+        Operators must stop every old producer before this bounded snapshot;
+        it cannot fence a process still submitting work under the old policy.
+        Only the public client reads persisted queue state, without payloads.
+        """
+        lanes = [
+            lane.name.value
+            for lane in self.catalog.lanes.values()
+            if lane.queue_order is LaneOrder.FIFO
+        ]
+        if not lanes:
+            return
+        try:
+            if self._fresh_system_database():
+                return
+            client = DBOSClient(
+                system_database_url=self.url,
+                dbos_system_schema=self.schema,
+                lazy=True,
+                retry_connection_errors=False,
+                observability_query_timeout_sec=5,
+            )
+            try:
+                inspected = 0
+                neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
+                for lane in lanes:
+                    offset = 0
+                    while True:
+                        limit = min(
+                            _FIFO_INSPECTION_PAGE, _FIFO_INSPECTION_LIMIT - inspected
+                        )
+                        if limit == 0:
+                            raise RuntimeError("fifo_queue_inspection_limit")
+                        rows = client.list_workflows(
+                            queue_name=lane,
+                            status=_ACTIVE,
+                            limit=limit,
+                            offset=offset,
+                            load_input=False,
+                            load_output=False,
+                        )
+                        if any(row.priority != neutral_rank for row in rows):
+                            raise RuntimeError("fifo_queue_legacy_rank")
+                        inspected += len(rows)
+                        if len(rows) < limit:
+                            break
+                        offset += len(rows)
+            finally:
+                client.destroy()
+        except Exception as exc:
+            raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
 
     def _register_queue(self, lane: Lane) -> Queue:
         options: dict[str, Any] = {
@@ -301,7 +382,13 @@ class DbosJobEngine(JobEngine):
         queue = self._queues[submission.lane]
         if DBOS.get_workflow_status(submission.execution_id) is not None:
             return SubmitOutcome.EXISTING
-        options: dict[str, Any] = {"priority": PRIORITY_RANK[submission.priority]}
+        # Equal engine ranks preserve FIFO without changing the Job's logical priority.
+        rank = (
+            PRIORITY_RANK[WorkPriority.INTERACTIVE]
+            if self.catalog.lanes[submission.lane].queue_order is LaneOrder.FIFO
+            else PRIORITY_RANK[submission.priority]
+        )
+        options: dict[str, Any] = {"priority": rank}
         if isinstance(submission, JobSubmission):
             if isinstance(submission.routing, Deduplicated):
                 options["deduplication_id"] = submission.routing.key

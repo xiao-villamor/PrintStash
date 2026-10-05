@@ -2,6 +2,8 @@
 
 from enum import Enum, StrEnum
 
+from app.core.work_priority import WorkPriority as WorkPriority
+
 
 class FileType(str, Enum):
     STL = "stl"
@@ -162,13 +164,6 @@ class JobState(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-class WorkPriority(StrEnum):
-    """Scheduling tier of a submission; children inherit it and may only lower it."""
-
-    INTERACTIVE = "interactive"
-    BACKFILL = "backfill"
 
 
 class JobKind(StrEnum):

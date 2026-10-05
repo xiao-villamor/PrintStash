@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import local
 
+from app.core.work_priority import current_priority
 from app.runtime.native_admission import LocalResourcePool, NativePermit, Resources
 from app.runtime.native_runtime import current_permit as current_native_permit
 
@@ -71,7 +72,9 @@ def reserve(
     """Reserve a whole input batch atomically; nested preparation would deadlock."""
     if current_native_permit() is not None or current_permit() is not None:
         raise RuntimeError("prepare all sources before acquiring native resources")
-    with _bound().prepared.reserve(request, capacity, checkpoint=checkpoint) as permit:
+    with _bound().prepared.reserve(
+        request, capacity, checkpoint=checkpoint, priority=current_priority()
+    ) as permit:
         _local.permit = permit
         try:
             workspace(permit).mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -86,6 +89,9 @@ def io_slot(slots: int, *, checkpoint: Callable[[], None]) -> Iterator[None]:
     if current_permit() is None or current_native_permit() is not None:
         raise RuntimeError("source I/O requires preparation before native admission")
     with _bound().io.reserve(
-        Resources(1, 1), Resources(slots, slots), checkpoint=checkpoint
+        Resources(1, 1),
+        Resources(slots, slots),
+        checkpoint=checkpoint,
+        priority=current_priority(),
     ):
         yield

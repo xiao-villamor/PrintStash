@@ -156,8 +156,9 @@ class TestLocalResourcePool:
             ("request", [1, 50]),
             ("capacity", [2, 200]),
             ("order", 0),
+            ("priority", "backfill"),
         ],
-        ids=["state", "request", "capacity", "order"],
+        ids=["state", "request", "capacity", "order", "priority"],
     )
     def test_refuses_mutation_of_its_registered_claim(self, tmp_path, field, value):
         pool = LocalResourcePool(tmp_path)
@@ -622,3 +623,201 @@ class TestNamespace:
                 for stream in (launcher.stdin, launcher.stdout, launcher.stderr):
                     if stream is not None:
                         stream.close()
+
+
+class TestPriorityAdmission:
+    def test_interactive_precedes_queued_backfill(self, tmp_path):
+        from app.core.work_priority import WorkPriority
+
+        pool = LocalResourcePool(tmp_path)
+        first_queued, second_queued = threading.Event(), threading.Event()
+        observed = []
+
+        def claim(priority, queued):
+            calls = 0
+
+            def check():
+                nonlocal calls
+                calls += 1
+                if calls >= 3:
+                    queued.set()
+
+            with pool.reserve(
+                Resources(1, 100),
+                Resources(1, 100),
+                checkpoint=check,
+                priority=priority,
+            ):
+                observed.append(priority)
+
+        with ThreadPoolExecutor(2) as executor:
+            with pool.reserve(
+                Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+            ):
+                backfill = executor.submit(claim, WorkPriority.BACKFILL, first_queued)
+                assert first_queued.wait(5)
+                interactive = executor.submit(
+                    claim, WorkPriority.INTERACTIVE, second_queued
+                )
+                assert second_queued.wait(5)
+            interactive.result(timeout=5)
+            backfill.result(timeout=5)
+        assert observed == [WorkPriority.INTERACTIVE, WorkPriority.BACKFILL]
+
+    def test_aged_large_backfill_precedes_later_interactive(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.work_priority import WorkPriority
+        from app.runtime import native_admission
+
+        clock = [1_000_000_000]
+        monkeypatch.setattr(native_admission.time, "monotonic_ns", lambda: clock[0])
+        pool = LocalResourcePool(tmp_path)
+        large_queued, small_queued = threading.Event(), threading.Event()
+        large_active, release_large, small_active = (
+            threading.Event() for _ in range(3)
+        )
+        observed = []
+
+        def claim(priority, amount, queued, active, release):
+            calls = 0
+
+            def check():
+                nonlocal calls
+                calls += 1
+                if calls >= 3:
+                    queued.set()
+
+            with pool.reserve(
+                amount, Resources(3, 100), checkpoint=check, priority=priority
+            ):
+                observed.append(priority)
+                active.set()
+                assert release.wait(5)
+
+        with ThreadPoolExecutor(2) as executor:
+            try:
+                with pool.reserve(
+                    Resources(1, 40), Resources(3, 100), checkpoint=lambda: None
+                ):
+                    large = executor.submit(
+                        claim,
+                        WorkPriority.BACKFILL,
+                        Resources(1, 80),
+                        large_queued,
+                        large_active,
+                        release_large,
+                    )
+                    assert large_queued.wait(5)
+                    clock[0] += 31_000_000_000
+                    small_release = threading.Event()
+                    small_release.set()
+                    small = executor.submit(
+                        claim,
+                        WorkPriority.INTERACTIVE,
+                        Resources(1, 40),
+                        small_queued,
+                        small_active,
+                        small_release,
+                    )
+                    assert small_queued.wait(5)
+                assert large_active.wait(5)
+                assert not small_active.is_set()
+            finally:
+                release_large.set()
+            large.result(timeout=5)
+            small.result(timeout=5)
+        assert observed == [WorkPriority.BACKFILL, WorkPriority.INTERACTIVE]
+
+    @pytest.mark.parametrize("priority", ["interactive", "backfill"])
+    def test_preserves_fifo_within_priority(self, tmp_path, priority):
+        from app.core.work_priority import WorkPriority
+
+        priority = WorkPriority(priority)
+        pool = LocalResourcePool(tmp_path)
+        first_queued, second_queued = threading.Event(), threading.Event()
+        observed = []
+
+        def claim(name, queued):
+            calls = 0
+
+            def check():
+                nonlocal calls
+                calls += 1
+                if calls >= 3:
+                    queued.set()
+
+            with pool.reserve(
+                Resources(1, 100),
+                Resources(1, 100),
+                checkpoint=check,
+                priority=priority,
+            ):
+                observed.append(name)
+
+        with ThreadPoolExecutor(2) as executor:
+            with pool.reserve(
+                Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+            ):
+                first = executor.submit(claim, "first", first_queued)
+                assert first_queued.wait(5)
+                second = executor.submit(claim, "second", second_queued)
+                assert second_queued.wait(5)
+            first.result(timeout=5)
+            second.result(timeout=5)
+        assert observed == ["first", "second"]
+
+    @pytest.mark.parametrize("priority", ["interactive", None, True])
+    def test_rejects_untyped_priority(self, tmp_path, priority):
+        with pytest.raises(TypeError, match="WorkPriority"):
+            with LocalResourcePool(tmp_path).reserve(
+                Resources(1, 100),
+                Resources(1, 100),
+                checkpoint=lambda: None,
+                priority=priority,
+            ):
+                pytest.fail("untyped priority was admitted")
+        assert list(tmp_path.glob("*.ticket")) == []
+
+    def test_accounts_for_inherited_legacy_ticket(self, tmp_path):
+        amount = Resources(1, 100)
+        with LocalResourcePool(tmp_path).reserve(
+            amount, amount, checkpoint=lambda: None
+        ) as original:
+            receipt = json.loads(original.path.read_bytes())
+            receipt["version"] = 1
+            receipt.pop("priority")
+            original.path.write_text(json.dumps(receipt))
+            with NativePermit.inherit(original.fileno, original.path) as inherited:
+                assert inherited.resources == amount
+                assert inherited.identity == original.identity
+            assert (
+                LocalResourcePool(tmp_path).has_waiters(checkpoint=lambda: None)
+                is False
+            )
+
+    @pytest.mark.parametrize("priority", ["unknown", None, 1])
+    def test_refuses_invalid_live_priority(self, tmp_path, priority):
+        with LocalResourcePool(tmp_path).reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ) as permit:
+            receipt = json.loads(permit.path.read_bytes())
+            receipt["priority"] = priority
+            permit.path.write_text(json.dumps(receipt))
+            with pytest.raises(
+                AdmissionCorrupted, match="invalid live resource ticket"
+            ):
+                LocalResourcePool(tmp_path).has_waiters(checkpoint=lambda: None)
+
+    def test_refuses_missing_current_priority(self, tmp_path):
+        with LocalResourcePool(tmp_path).reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ) as permit:
+            receipt = json.loads(permit.path.read_bytes())
+            assert receipt["version"] == 2
+            receipt.pop("priority")
+            permit.path.write_text(json.dumps(receipt))
+            with pytest.raises(
+                AdmissionCorrupted, match="invalid live resource ticket"
+            ):
+                LocalResourcePool(tmp_path).has_waiters(checkpoint=lambda: None)

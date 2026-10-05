@@ -54,12 +54,18 @@ def dedupe_key(definition: JobKind, subject_key: str) -> str:
     return f"{definition.value}|{subject_key}"
 
 
-def submit(job_id: str, *, now: datetime | None = None) -> SubmitOutcome | None:
+def submit(
+    job_id: str,
+    *,
+    now: datetime | None = None,
+    reserved_backfill_epoch: str | None = None,
+) -> SubmitOutcome | None:
     """Submit the next attempt of an active Job. ``None`` when nothing to do.
 
     The attempt number is committed only after the engine accepted it. A crash
     in between re-derives the same attempt, so the same execution id, and the
-    engine returns the execution it already has.
+    engine returns the execution it already has. A reserved backfill submission
+    must still name the exact current admitted epoch when arguments are built.
     """
     now = now or utcnow()
     engine = catalog_module.get_engine()
@@ -67,6 +73,11 @@ def submit(job_id: str, *, now: datetime | None = None) -> SubmitOutcome | None:
     with get_session_factory().scoped_session() as session:
         row = session.get(Job, job_id)
         if row is None or row.state not in ACTIVE_JOB_STATES:
+            return None
+        if reserved_backfill_epoch is not None and (
+            row.execution_epoch != reserved_backfill_epoch
+            or row.backfill_admission_epoch != reserved_backfill_epoch
+        ):
             return None
         definition = catalog.definition(row.kind)
         if definition.admission(session) is not None:

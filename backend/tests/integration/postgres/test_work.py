@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import timedelta
 from threading import Barrier
 
 import pytest
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, col, create_engine, select
 
 from app.core.config import settings
 from app.core.time import utcnow
@@ -31,6 +32,8 @@ from app.db.models import (
     Job,
     JobKind,
     JobState,
+    LaneName,
+    WorkPriority,
 )
 from app.db.session import (
     SQLiteSessionFactory,
@@ -41,8 +44,23 @@ from app.db.url import normalize_database_url
 from app.modules.derivatives.kinds import group
 from app.modules.derivatives.source import DerivativeSource, subject_key
 from app.modules.work import fences
+from app.modules.work.contracts import (
+    DiscoveryBudget,
+    EngineStatus,
+    JobDefinition,
+    JobSubmission,
+    Lane,
+    LaneOrder,
+    Step,
+    WorkItem,
+)
 from app.modules.work.jobs import ActiveJobExists, JobStore
-from app.modules.work.reconciler import run_pass
+from app.modules.work.reconciler import (
+    PassResult,
+    _discover,
+    _discovery_budget,
+    run_pass,
+)
 from tests import factories as f
 from tests.containers import fresh_postgres_database
 
@@ -277,3 +295,171 @@ class TestStagingDiscard:
             assert results == ["accepted", "job_subject_gone"]
             assert retained is None
             assert not path.exists()
+
+
+@dataclass
+class _PriorityAdmissionSource:
+    items: tuple[WorkItem, ...]
+    barrier: Barrier | None = None
+
+    def pending(self, session, *, now, limit):
+        return self.items[:limit]
+
+    def pending_prioritized(self, session, *, now, budget: DiscoveryBudget):
+        if self.barrier is not None:
+            self.barrier.wait(timeout=5)
+        return self.items[: budget.total]
+
+    def next_due(self, session, *, now):
+        return None
+
+
+def _priority_admission_step(_context) -> None:
+    pass
+
+
+@pytest.fixture
+def priority_catalog(work_catalog, work_engine, monkeypatch):
+    """Two definitions share the real engine's one-slot maintenance lane."""
+    monkeypatch.setattr(work_catalog, "definitions", dict(work_catalog.definitions))
+    monkeypatch.setitem(
+        work_catalog.lanes,
+        LaneName.MAINTENANCE,
+        Lane(LaneName.MAINTENANCE, 1, queue_order=LaneOrder.FIFO),
+    )
+    definitions = tuple(
+        JobDefinition(
+            name=kind,
+            lane=LaneName.MAINTENANCE,
+            steps=(Step(f"{kind.value}.priority_probe", _priority_admission_step),),
+            label="Postgres priority qualification",
+            source=_PriorityAdmissionSource(
+                (
+                    WorkItem(
+                        f"pg-priority/{kind.value}", priority=WorkPriority.INTERACTIVE
+                    ),
+                )
+            ),
+        )
+        for kind in (JobKind.INGESTION_UPLOAD, JobKind.SOURCES_SCAN)
+    )
+    for definition in definitions:
+        monkeypatch.setitem(work_catalog.definitions, definition.name, definition)
+    return definitions
+
+
+class TestPriorityAdmission:
+    def test_concurrent_sources_share_one_interactive_queue_slot(
+        self, pg, priority_catalog, work_engine
+    ):
+        barrier = Barrier(2)
+        first, second = priority_catalog
+        assert isinstance(first.source, _PriorityAdmissionSource)
+        assert isinstance(second.source, _PriorityAdmissionSource)
+        first.source.barrier = barrier
+        second.source.barrier = barrier
+
+        def discover(index):
+            _discover(priority_catalog[index], now=utcnow(), result=PassResult())
+
+        outcomes = _race(2, discover)
+        assert outcomes == [None, None]
+        pg.expire_all()
+        queued = pg.exec(
+            select(Job).where(
+                col(Job.kind).in_(tuple(item.name for item in priority_catalog)),
+                Job.state == JobState.QUEUED,
+                Job.priority == WorkPriority.INTERACTIVE,
+            )
+        ).all()
+        assert len(queued) == 1
+        assert queued[0].kind in tuple(item.name for item in priority_catalog)
+        assert queued[0].attempts == 1
+        executions = list(work_engine.executions.values())
+        assert len(executions) == 1
+        execution = executions[0]
+        assert isinstance(execution.submission, JobSubmission)
+        assert execution.submission.job_id == queued[0].id
+        assert execution.submission.attempt == 1
+        assert execution.status is EngineStatus.QUEUED
+
+    def test_running_backfill_preserves_interactive_queue_capacity(
+        self, pg, priority_catalog
+    ):
+        background, interactive = priority_catalog
+        running = f.build_job(
+            pg,
+            kind=background.name,
+            state=JobState.RUNNING,
+            subject="pg-priority/running-backfill",
+            priority=WorkPriority.BACKFILL,
+            attempts=1,
+        )
+        initial = _discovery_budget(pg, interactive)
+        assert initial == DiscoveryBudget(total=1, interactive=1, backfill=0)
+
+        _discover(interactive, now=utcnow(), result=PassResult())
+
+        pg.expire_all()
+        queued = pg.exec(
+            select(Job).where(
+                Job.kind == interactive.name,
+                Job.state == JobState.QUEUED,
+                Job.priority == WorkPriority.INTERACTIVE,
+            )
+        ).all()
+        assert len(queued) == 1
+        assert queued[0].subject_key == f"pg-priority/{interactive.name.value}"
+        assert _discovery_budget(pg, interactive) == DiscoveryBudget(
+            total=0, interactive=0, backfill=0
+        )
+        retained = pg.get(Job, running.id)
+        assert retained is not None
+        assert retained.state is JobState.RUNNING
+        assert retained.priority is WorkPriority.BACKFILL
+        assert retained.attempts == 1
+
+    def test_concurrent_sources_share_one_backfill_execution_slot(
+        self, pg, priority_catalog, work_engine
+    ):
+        barrier = Barrier(2)
+        first, second = priority_catalog
+        assert isinstance(first.source, _PriorityAdmissionSource)
+        assert isinstance(second.source, _PriorityAdmissionSource)
+        first.source.items = (
+            WorkItem("pg-backfill/first", priority=WorkPriority.BACKFILL),
+        )
+        second.source.items = (
+            WorkItem("pg-backfill/second", priority=WorkPriority.BACKFILL),
+        )
+        first.source.barrier = barrier
+        second.source.barrier = barrier
+
+        def discover(index):
+            _discover(priority_catalog[index], now=utcnow(), result=PassResult())
+
+        assert _race(2, discover) == [None, None]
+        pg.expire_all()
+        queued = pg.exec(
+            select(Job).where(
+                Job.state == JobState.QUEUED,
+                Job.priority == WorkPriority.BACKFILL,
+            )
+        ).all()
+        assert len(queued) == 1
+        job = queued[0]
+        assert job.kind in (first.name, second.name)
+        assert job.backfill_admission_epoch == job.execution_epoch
+        assert job.submitted_epoch == job.execution_epoch
+        assert job.attempts == 1
+        assert _discovery_budget(pg, first).backfill == 0
+        assert _discovery_budget(pg, second).backfill == 0
+        executions = list(work_engine.executions.values())
+        assert len(executions) == 1
+        execution = executions[0]
+        assert isinstance(execution.submission, JobSubmission)
+        assert execution.submission.job_id == job.id
+        assert execution.submission.execution_epoch == job.execution_epoch
+        assert execution.submission.attempt == 1
+        assert execution.submission.priority is WorkPriority.BACKFILL
+        assert execution.status is EngineStatus.QUEUED

@@ -19,8 +19,11 @@ from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
 
+from app.core.work_priority import WorkPriority
+
 _POLL_SECONDS = 0.025
 _MAX_RECORD_BYTES = 4096
+_BACKFILL_MAX_WAIT_NS = 30 * 1_000_000_000
 
 
 class AdmissionCorrupted(RuntimeError):
@@ -58,16 +61,22 @@ class _Ticket:
     state: _State
     request: Resources
     capacity: Resources
+    priority: WorkPriority
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.priority, WorkPriority):
+            raise TypeError("priority must be a WorkPriority")
 
     def encode(self) -> bytes:
         return json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "name": self.name,
                 "order": self.order,
                 "state": self.state.value,
                 "request": [self.request.slots, self.request.bytes],
                 "capacity": [self.capacity.slots, self.capacity.bytes],
+                "priority": self.priority.value,
             },
             separators=(",", ":"),
         ).encode("ascii")
@@ -81,7 +90,7 @@ class _Ticket:
             data = json.loads(raw)
             if (
                 type(data["version"]) is not int
-                or data["version"] != 1
+                or data["version"] not in (1, 2)
                 or not isinstance(data["name"], str)
                 or len(data["name"]) != 32
                 or any(c not in "0123456789abcdef" for c in data["name"])
@@ -89,12 +98,29 @@ class _Ticket:
                 or data["order"] < 0
             ):
                 raise ValueError("invalid ticket identity")
+            required = {"version", "name", "order", "state", "request", "capacity"}
+            if data["version"] == 1:
+                # Historical receipts declared FIFO, not a work priority. Keep
+                # their live credits accounted for, treating their old order as
+                # backfill subject to the same finite aging guarantee. All old
+                # application claimants must drain before v2 writers start:
+                # v1 schedulers cannot interpret v2 records. Guardians only
+                # retain inherited descriptors and do not make queue decisions.
+                priority = WorkPriority.BACKFILL
+            else:
+                required.add("priority")
+                if type(data["priority"]) is not str:
+                    raise TypeError("invalid priority representation")
+                priority = WorkPriority(data["priority"])
+            if set(data) != required:
+                raise ValueError("invalid ticket fields")
             ticket = cls(
                 data["name"],
                 data["order"],
                 _State(data["state"]),
                 Resources(*data["request"]),
                 Resources(*data["capacity"]),
+                priority,
             )
             if not ticket.request.fits(ticket.capacity):
                 raise ValueError("invalid ticket resources")
@@ -226,9 +252,19 @@ class LocalResourcePool:
             raise AdmissionCorrupted("owned resource ticket disappeared")
         if registered != ticket:
             raise AdmissionCorrupted("owned resource ticket changed")
+        now = time.monotonic_ns()
+
+        def rank(item: _Ticket) -> tuple[int, int, str]:
+            # Promotion preserves registration order: an aged large claim
+            # becomes the head and accumulates capacity instead of being
+            # bypassed forever by a stream of smaller interactive claims.
+            backfill = item.priority is WorkPriority.BACKFILL
+            aged = now - item.order >= _BACKFILL_MAX_WAIT_NS
+            return (int(backfill and not aged), item.order, item.name)
+
         waiting = sorted(
             (item for item in live if item.state is _State.QUEUED),
-            key=lambda item: (item.order, item.name),
+            key=rank,
         )
         if not waiting or waiting[0].name != ticket.name:
             return False
@@ -258,14 +294,22 @@ class LocalResourcePool:
         capacity: Resources,
         *,
         checkpoint: Callable[[], None],
+        priority: WorkPriority = WorkPriority.INTERACTIVE,
     ) -> Iterator[NativePermit]:
+        if not isinstance(priority, WorkPriority):
+            raise TypeError("priority must be a WorkPriority")
         if not request.fits(capacity):
             raise AdmissionTooLarge("request exceeds total resource capacity")
         with self._coordinator(checkpoint):
-            # Registration defines FIFO order; a slow cancellation probe before
-            # registration cannot jump ahead of claims already waiting.
+            # Registration defines FIFO order within a priority; a slow probe
+            # cannot jump ahead of claims already registered in the same tier.
             ticket = _Ticket(
-                uuid4().hex, time.monotonic_ns(), _State.QUEUED, request, capacity
+                uuid4().hex,
+                time.monotonic_ns(),
+                _State.QUEUED,
+                request,
+                capacity,
+                priority,
             )
             handle = _open(self.directory / (ticket.name + ".ticket"), exclusive=True)
             try:
@@ -287,6 +331,7 @@ class LocalResourcePool:
                                 _State.ACTIVE,
                                 request,
                                 capacity,
+                                priority,
                             )
                             self._write(handle, ticket)
                             break

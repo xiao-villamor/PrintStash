@@ -10,13 +10,10 @@ Every pass is bounded twice. The result is capped by the reconciler's limit
 (batch size and lane headroom). The *examined* range is capped too, so a pass
 over a fully derived library of any size costs the same:
 
-1. **Fresh Artifacts** above the high-water mark (newest uploads) are checked
-   first, at interactive priority when they are recent, so an upload's
-   thumbnail never waits behind a backfill.
-2. **A rotating window** of ``WINDOW`` Artifact ids is then checked at
-   backfill priority, advancing each pass and wrapping around. Every Artifact
-   is re-examined within ``ceil(artifacts / WINDOW)`` passes, which is how
-   recipe bumps, regenerations and expired failure backoffs are found.
+A bounded newest head and a timestamp-keyset tail find interactive intent.
+A separate frozen ID rotation discovers backfill, even while uploads arrive.
+Each priority has a finite queue allowance; a durable turn alternates when
+both priorities compete for a one-item result.
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, exists, func, not_, or_, true
+from sqlalchemy import String, and_, cast, exists, func, literal, not_, or_, true
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -34,13 +31,15 @@ from app.db.models import (
     ArtifactDerivative,
     DerivativeState,
     File,
+    Job,
     JobKind,
     MeshFingerprintContinuation,
     ReconcileCursor,
     WorkPriority,
 )
 from app.db.scopes import live
-from app.modules.work.contracts import WorkItem
+from app.modules.work.contracts import DiscoveryBudget, WorkItem
+from app.modules.work.jobs import active_job_predicate
 
 from . import policy
 from .kinds import DerivativeGroup
@@ -133,73 +132,198 @@ class DerivativeSource:
     def pending(
         self, session: Session, *, now: datetime, limit: int
     ) -> Sequence[WorkItem]:
-        if limit <= 0 or not policy.resolve(session)[self.group.definition].enabled:
+        if limit <= 0:
+            return []
+        return self.pending_prioritized(
+            session,
+            now=now,
+            budget=DiscoveryBudget(total=limit, interactive=limit, backfill=limit),
+        )
+
+    def pending_prioritized(
+        self, session: Session, *, now: datetime, budget: DiscoveryBudget
+    ) -> Sequence[WorkItem]:
+        if (
+            budget.total == 0
+            or not policy.resolve(session)[self.group.definition].enabled
+        ):
             return []
         cursor = self._cursor(session)
-        predicate = pending_predicate(self.group, session, now=now)
-        items: list[WorkItem] = []
-        seen: set[int] = set()
+        timestamp = (
+            col(File.viewer_requested_at)
+            if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
+            else col(File.uploaded_at)
+        )
+        recent = (
+            timestamp.is_not(None)
+            if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
+            else timestamp >= now - FRESH_INTERACTIVE
+        )
+        active = exists().where(
+            col(Job.kind) == self.group.definition,
+            col(Job.subject_key) == literal("file/") + cast(col(File.id), String),
+            active_job_predicate(),
+        )
+        predicate = and_(pending_predicate(self.group, session, now=now), not_(active))
 
-        fresh = session.exec(
-            select(File.id, File.uploaded_at)
-            .where(predicate, col(File.id) > cursor.scan_high_water)
-            .order_by(col(File.id))
-            .limit(limit)
-        ).all()
-        recent = now - FRESH_INTERACTIVE
-        for file_id, uploaded_at in fresh:
-            assert file_id is not None
-            seen.add(file_id)
-            items.append(
-                WorkItem(
-                    subject_key=subject_key(file_id),
-                    priority=WorkPriority.INTERACTIVE
-                    if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                    or ensure_utc(uploaded_at) >= recent
-                    else WorkPriority.BACKFILL,
-                )
+        def eligible(
+            ids: list[int],
+            priority: WorkPriority,
+            cap: int,
+            *,
+            newest: bool = False,
+            by_time: bool = False,
+        ) -> list[int]:
+            if not ids or cap == 0:
+                return []
+            statement = select(File.id).where(
+                col(File.id).in_(ids),
+                predicate,
+                recent if priority is WorkPriority.INTERACTIVE else not_(recent),
             )
-        if len(fresh) < limit:
-            top = session.exec(select(func.max(File.id))).one()
-            cursor.scan_high_water = int(top or 0)
-        elif fresh:
-            cursor.scan_high_water = max(seen)
-
-        room = limit - len(items)
-        if room > 0:
-            start = cursor.scan_position
-            window = session.exec(
-                select(File.id)
-                .where(
-                    predicate,
-                    col(File.id) > start,
-                    col(File.id) <= start + WINDOW,
-                    col(File.id) <= cursor.scan_high_water,
+            if by_time:
+                statement = statement.order_by(
+                    timestamp.desc() if newest else timestamp.asc(),
+                    col(File.id).desc() if newest else col(File.id),
                 )
+            else:
+                statement = statement.order_by(col(File.id))
+            return [
+                value
+                for value in session.exec(statement.limit(cap + 1)).all()
+                if value is not None
+            ]
+
+        # Freeze a whole old-library round; arrivals cannot extend its upper bound.
+        old_round_enabled = (
+            budget.backfill > 0
+            or self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
+        )
+        if old_round_enabled and (
+            cursor.scan_high_water == 0
+            or cursor.scan_position >= cursor.scan_high_water
+        ):
+            cursor.scan_high_water = int(
+                session.exec(select(func.max(File.id))).one() or 0
+            )
+            cursor.scan_position = 0
+        start = cursor.scan_position
+        upper = min(start + WINDOW, cursor.scan_high_water)
+        old_ids = [
+            value
+            for value in session.exec(
+                select(File.id)
+                .where(col(File.id) > start, col(File.id) <= upper)
                 .order_by(col(File.id))
-                .limit(room)
             ).all()
-            last = start
-            for file_id in window:
-                assert file_id is not None
-                last = file_id
-                if file_id in seen:
-                    continue
-                items.append(
-                    WorkItem(
-                        subject_key=subject_key(file_id),
-                        priority=WorkPriority.INTERACTIVE
-                        if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                        else WorkPriority.BACKFILL,
+            if value is not None
+        ]
+        old_i = eligible(old_ids, WorkPriority.INTERACTIVE, budget.interactive)
+        old_b = eligible(old_ids, WorkPriority.BACKFILL, budget.backfill)
+        tail: list[tuple[int, datetime]] = []
+        head_i: list[int] = []
+        tail_i: list[int] = []
+        if budget.interactive:
+            tail_query = select(File.id, timestamp).where(recent)
+            if cursor.scan_recent_at is not None:
+                tail_query = tail_query.where(
+                    or_(
+                        timestamp > cursor.scan_recent_at,
+                        and_(
+                            timestamp == cursor.scan_recent_at,
+                            col(File.id) > cursor.scan_recent_file_id,
+                        ),
                     )
                 )
-            if len(window) >= room and window:
-                cursor.scan_position = last
-            else:
-                advanced = start + WINDOW
-                cursor.scan_position = (
-                    0 if advanced >= cursor.scan_high_water else advanced
-                )
+            tail = [
+                (value, ensure_utc(at))
+                for value, at in session.exec(
+                    tail_query.order_by(timestamp, col(File.id)).limit(WINDOW)
+                ).all()
+                if value is not None and at is not None
+            ]
+            head_ids = [
+                value
+                for value in session.exec(
+                    select(File.id)
+                    .where(recent)
+                    .order_by(timestamp.desc(), col(File.id).desc())
+                    .limit(WINDOW)
+                ).all()
+                if value is not None
+            ]
+            tail_i = eligible(
+                [value for value, _ in tail],
+                WorkPriority.INTERACTIVE,
+                budget.interactive,
+                by_time=True,
+            )
+            head_i = eligible(
+                head_ids,
+                WorkPriority.INTERACTIVE,
+                budget.interactive,
+                newest=True,
+                by_time=True,
+            )
+        candidates = {
+            WorkPriority.INTERACTIVE: list(dict.fromkeys(old_i + tail_i + head_i)),
+            WorkPriority.BACKFILL: old_b.copy(),
+        }
+        caps = {
+            WorkPriority.INTERACTIVE: budget.interactive,
+            WorkPriority.BACKFILL: budget.backfill,
+        }
+        chosen: set[int] = set()
+        items: list[WorkItem] = []
+        turn = cursor.discovery_next_priority
+        while len(items) < budget.total:
+            opposite = (
+                WorkPriority.BACKFILL
+                if turn is WorkPriority.INTERACTIVE
+                else WorkPriority.INTERACTIVE
+            )
+            priority = next(
+                (
+                    value
+                    for value in (turn, opposite)
+                    if caps[value] and candidates[value]
+                ),
+                None,
+            )
+            if priority is None:
+                break
+            file_id = candidates[priority].pop(0)
+            if file_id in chosen:
+                continue
+            chosen.add(file_id)
+            caps[priority] -= 1
+            items.append(WorkItem(subject_key(file_id), priority=priority))
+            turn = (
+                WorkPriority.BACKFILL
+                if priority is WorkPriority.INTERACTIVE
+                else WorkPriority.INTERACTIVE
+            )
+        cursor.discovery_next_priority = turn
+        unreturned_old = [value for value in old_i + old_b if value not in chosen]
+        if old_round_enabled:
+            # Position equal to the frozen upper bound marks a completed round.
+            # Position zero can also mean its first pending subject was not taken.
+            cursor.scan_position = min(unreturned_old) - 1 if unreturned_old else upper
+        if tail:
+            remaining = set(tail_i) - chosen
+            consumed: tuple[int, datetime] | None = None
+            for row in tail:
+                if row[0] in remaining:
+                    break
+                consumed = row
+            if consumed is not None:
+                cursor.scan_recent_file_id, cursor.scan_recent_at = consumed
+            if not remaining and len(tail) < WINDOW:
+                cursor.scan_recent_at = None
+                cursor.scan_recent_file_id = None
+        elif budget.interactive:
+            cursor.scan_recent_at = None
+            cursor.scan_recent_file_id = None
         session.add(cursor)
         session.commit()
         return items

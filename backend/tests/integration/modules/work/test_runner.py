@@ -575,3 +575,35 @@ class TestEpochCallbacks:
         assert _status(job.id).state is JobState.RUNNING
         assert _status(job.id).processed == 0
         assert TRACE.failures == []
+
+
+class TestStepPriority:
+    @pytest.mark.parametrize(
+        "priority", [WorkPriority.INTERACTIVE, WorkPriority.BACKFILL]
+    )
+    def test_binds_step_work_priority(self, engine, make_job, priority):
+        from app.core.work_priority import current_priority
+
+        observed = []
+        TRACE.behaviour["one"] = lambda _context: observed.append(current_priority())
+        TRACE.behaviour["two"] = lambda _context: observed.append(current_priority())
+        job = make_job(kind=MUTATING, priority=priority)
+        _run(engine, job)
+        assert observed == [priority, priority]
+        assert current_priority() is WorkPriority.INTERACTIVE
+
+    def test_restores_priority_after_failed_step(self, engine, make_job):
+        from app.core.work_priority import current_priority
+
+        observed = []
+
+        def failure(_context):
+            observed.append(current_priority())
+            raise RuntimeError("priority probe failed")
+
+        TRACE.behaviour["one"] = failure
+        job = make_job(kind=MUTATING, priority=WorkPriority.BACKFILL)
+        _run(engine, job)
+        assert observed == [WorkPriority.BACKFILL]
+        assert current_priority() is WorkPriority.INTERACTIVE
+        assert _status(job.id).state is JobState.FAILED

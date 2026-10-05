@@ -23,35 +23,49 @@ without ever filling the engine with the whole library.
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 
-from sqlalchemy import case, func, or_, update
+from sqlalchemy import and_, case, func, or_, update
 from sqlmodel import Session, col, select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
-from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, ReconcileCursor
+from app.db.models import (
+    ACTIVE_JOB_STATES,
+    Job,
+    JobKind,
+    JobState,
+    ReconcileCursor,
+    WorkFence,
+)
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 
 from . import catalog as catalog_module
-from . import executors
+from . import executors, fences
 from .contracts import (
+    DiscoveryBudget,
     EngineEvidence,
     EngineStatus,
     ExecutionKind,
     JobDefinition,
     JobOutcome,
+    LaneOrder,
+    PrioritizedWorkSource,
     SkipReason,
     StepRunner,
     SubmitOutcome,
     WorkItem,
+    WorkPriority,
 )
-from .jobs import TERMINAL_STATES, ActiveJobExists, jobs
+from .jobs import TERMINAL_STATES, ActiveJobExists, active_job_predicate, jobs
 from .submission import execution_id, nudge, submit
 
 logger = get_logger(__name__)
@@ -208,9 +222,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
         rows = list(
             session.exec(
                 select(Job)
-                .where(
-                    Job.kind == definition.name, col(Job.state).in_(ACTIVE_JOB_STATES)
-                )
+                .where(Job.kind == definition.name, active_job_predicate())
                 .order_by(*ordering)
                 .limit(settings.jobs_reconcile_batch)
             ).all()
@@ -219,6 +231,26 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             session.expunge(row)
     if not rows:
         return
+    admission = _RecoveryAdmission(definition)
+    lane = catalog_module.get_catalog().lanes[definition.lane]
+    if lane.queue_order is LaneOrder.FIFO:
+        owner = admission.load()
+        if owner is not None and all(row.id != owner for row in rows):
+            # The ordinary update-order page may hide its creation-order owner.
+            # Add at most that one own-definition Job: the bound is batch + 1.
+            with get_session_factory().scoped_session() as session:
+                recovery = session.exec(
+                    select(Job)
+                    .where(
+                        col(Job.id) == owner,
+                        col(Job.kind) == definition.name,
+                        active_job_predicate(),
+                    )
+                    .limit(1)
+                ).first()
+                if recovery is not None:
+                    session.expunge(recovery)
+                    rows.append(recovery)
     ids = [
         execution_id(row.id, row.attempts, row.execution_epoch)
         for row in rows
@@ -288,12 +320,22 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             if settled is None:
                 result.deferred += 1
                 continue
+            admission.settled(row.id)
             result.skipped += 1
             result.count(refused)
-            result.full = len(rows) == settings.jobs_reconcile_batch
+            result.full = len(rows) >= settings.jobs_reconcile_batch
             continue
         result.count(decision.reason)
         if decision.verdict is Verdict.NONE:
+            continue
+        if decision.verdict in (
+            Verdict.SUBMIT,
+            Verdict.INTERRUPT,
+        ) and not admission.allows(row):
+            # Legacy queued intent stays durable without spending retry attempts
+            # or occupying every FIFO execution slot ahead of interactive work.
+            result.deferred += 1
+            result.count(PassNote.LANE_FULL)
             continue
         if decision.cancel_engine and row.attempts:
             try:
@@ -314,6 +356,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             if settled is None:
                 result.deferred += 1
                 continue
+            admission.settled(row.id)
             result.completed += 1
             continue
         if decision.verdict is Verdict.FAIL:
@@ -329,6 +372,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             if settled is None:
                 result.deferred += 1
                 continue
+            admission.settled(row.id)
             result.failed += 1
             continue
         if decision.verdict is Verdict.INTERRUPT:
@@ -347,7 +391,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
                 )
             if exhausted:
                 assert fresh is not None
-                jobs.settle_attempt(
+                settled = jobs.settle_attempt(
                     fresh.id,
                     fresh.attempts,
                     JobOutcome.FAILED,
@@ -356,18 +400,157 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
                     expected_state=fresh.state,
                     on_failure=definition.on_failure,
                 )
+                if settled is not None:
+                    admission.settled(fresh.id)
                 result.failed += 1
                 continue
         _submit(row.id, result)
 
 
-def _submit(job_id: str, result: PassResult) -> None:
+@dataclass
+class _RecoveryAdmission:
+    """One lazy owner lookup per batch, including a cached empty result."""
+
+    definition: JobDefinition
+    loaded: bool = field(default=False, init=False)
+    owner: str | None = field(default=None, init=False)
+
+    def allows(self, row: Job) -> bool:
+        lane = catalog_module.get_catalog().lanes[self.definition.lane]
+        if (
+            row.priority is not WorkPriority.BACKFILL
+            or lane.queue_order is not LaneOrder.FIFO
+        ):
+            return True
+        return self.load() == row.id
+
+    def load(self) -> str | None:
+        if not self.loaded:
+            self.owner = _recovery_owner(self.definition)
+            self.loaded = True
+        return self.owner
+
+    def settled(self, job_id: str) -> None:
+        if self.loaded and self.owner == job_id:
+            self.owner = None
+            self.loaded = False
+
+
+def _backfill_owner_select(definition: JobDefinition) -> SelectOfScalar[str]:
+    """The same bounded owner selection governs observation and reservation."""
+    catalog = catalog_module.get_catalog()
+    definitions = [
+        item.name
+        for item in catalog.definitions.values()
+        if item.lane == definition.lane
+    ]
+    admitted = or_(
+        col(Job.backfill_admission_epoch) == col(Job.execution_epoch),
+        and_(
+            col(Job.attempts) > 0, col(Job.submitted_epoch) == col(Job.execution_epoch)
+        ),
+    )
+    return (
+        select(Job.id)
+        .where(
+            col(Job.kind).in_(definitions),
+            col(Job.priority) == WorkPriority.BACKFILL,
+            active_job_predicate(),
+        )
+        .order_by(
+            case((col(Job.state) == JobState.RUNNING, 0), (admitted, 1), else_=2),
+            col(Job.created_at),
+            col(Job.id),
+        )
+        .limit(1)
+    )
+
+
+def _recovery_owner(definition: JobDefinition) -> str | None:
+    with get_session_factory().scoped_session() as session:
+        return session.exec(_backfill_owner_select(definition)).first()
+
+
+def _reserve_backfill_epoch(
+    job_id: str, definition: JobDefinition, lease: _DiscoveryLease, result: PassResult
+) -> str | None:
+    """Commit current-epoch admission before engine I/O, under live lane authority."""
+    with get_session_factory().scoped_session() as session:
+        begin_write(session, immediate=True)
+        if not _renew_discovery_lease(session, lease):
+            result.count(PassNote.CLAIMED_ELSEWHERE)
+            return None
+        row = session.get(Job, job_id)
+        if row is None or row.state not in ACTIVE_JOB_STATES:
+            return None
+        epoch = row.execution_epoch
+        owner = _backfill_owner_select(definition).correlate(None).scalar_subquery()
+        claimed = affected(
+            session,
+            update(Job)
+            .where(
+                col(Job.id) == job_id,
+                col(Job.kind) == definition.name,
+                col(Job.execution_epoch) == epoch,
+                col(Job.priority) == WorkPriority.BACKFILL,
+                active_job_predicate(),
+                col(Job.id) == owner,
+            )
+            .values(backfill_admission_epoch=epoch)
+            .execution_options(synchronize_session=False),
+        )
+        if not claimed:
+            result.count(PassNote.LANE_FULL)
+            return None
+        session.commit()
+        return epoch
+
+
+def _submit(
+    job_id: str, result: PassResult, *, lease: _DiscoveryLease | None = None
+) -> None:
+    owned: _DiscoveryLease | None = None
     try:
-        outcome = submit(job_id)
-    except Exception:  # noqa: BLE001 - the Job stays queued for the next pass
+        with get_session_factory().scoped_session() as session:
+            row = session.get(Job, job_id)
+            if row is None or row.state not in ACTIVE_JOB_STATES:
+                return
+            definition = catalog_module.get_catalog().definition(row.kind)
+            lane = catalog_module.get_catalog().lanes[definition.lane]
+            reserve = (
+                row.priority is WorkPriority.BACKFILL
+                and lane.queue_order is LaneOrder.FIFO
+            )
+        if reserve:
+            if lease is None:
+                candidate = _DiscoveryLease(
+                    name=f"discovery:{definition.lane.value}", holder=uuid.uuid4().hex
+                )
+                fences.acquire(
+                    candidate.name,
+                    holder=candidate.holder,
+                    reason="backfill submission",
+                )
+                owned = candidate
+                lease = candidate
+            epoch = _reserve_backfill_epoch(job_id, definition, lease, result)
+            if epoch is None:
+                result.deferred += 1
+                return
+            outcome = submit(job_id, reserved_backfill_epoch=epoch)
+        else:
+            outcome = submit(job_id)
+    except fences.FenceHeld:
+        result.count(PassNote.CLAIMED_ELSEWHERE)
+        result.deferred += 1
+        return
+    except Exception:  # noqa: BLE001 - committed admission retains intent across an ACK crash
         logger.exception("job submission failed", extra={"job_id": job_id})
         result.deferred += 1
         return
+    finally:
+        if owned is not None:
+            fences.release(owned.name, holder=owned.holder)
     if outcome is None:
         return
     if outcome is SubmitOutcome.DEDUPLICATED:
@@ -383,6 +566,37 @@ def _headroom(definition: JobDefinition) -> int:
     return max(0, lane.headroom - depth.queued)
 
 
+def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryBudget:
+    catalog = catalog_module.get_catalog()
+    lane = catalog.lanes[definition.lane]
+    definitions = [
+        item.name
+        for item in catalog.definitions.values()
+        if item.lane == definition.lane
+    ]
+    counts = dict(
+        session.exec(
+            select(Job.priority, func.count(col(Job.id)))
+            .where(
+                col(Job.kind).in_(definitions),
+                active_job_predicate(),
+                or_(
+                    col(Job.priority) == WorkPriority.BACKFILL,
+                    col(Job.state).in_([JobState.QUEUED, JobState.INTERRUPTED]),
+                ),
+            )
+            .group_by(col(Job.priority))
+        ).all()
+    )
+    interactive = max(0, lane.concurrency - counts.get(WorkPriority.INTERACTIVE, 0))
+    backfill = max(0, 1 - counts.get(WorkPriority.BACKFILL, 0))
+    return DiscoveryBudget(
+        total=min(settings.jobs_reconcile_batch, interactive + backfill),
+        interactive=interactive,
+        backfill=backfill,
+    )
+
+
 def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -> None:
     source = definition.source
     with get_session_factory().scoped_session() as session:
@@ -390,12 +604,22 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
             return
     if source is None:
         return
-    limit = min(settings.jobs_reconcile_batch, _headroom(definition))
-    if limit <= 0:
-        result.count(PassNote.LANE_FULL)
-        return
     with get_session_factory().scoped_session() as session:
-        items: Sequence[WorkItem] = source.pending(session, now=now, limit=limit)
+        if isinstance(source, PrioritizedWorkSource):
+            budget = _discovery_budget(session, definition)
+            limit = budget.total
+            if limit <= 0:
+                result.count(PassNote.LANE_FULL)
+                return
+            items: Sequence[WorkItem] = source.pending_prioritized(
+                session, now=now, budget=budget
+            )
+        else:
+            limit = min(settings.jobs_reconcile_batch, _headroom(definition))
+            if limit <= 0:
+                result.count(PassNote.LANE_FULL)
+                return
+            items = source.pending(session, now=now, limit=limit)
         finished = (
             {}
             if definition.drain
@@ -406,23 +630,41 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
                 now=now,
             )
         )
-    cooldown = timedelta(seconds=settings.jobs_resubmit_cooldown_seconds)
-    created = 0
-    for item in items:
-        last = finished.get(item.subject_key)
-        if last is not None:
-            due = last + cooldown
-            result.deferred += 1
-            result.count(PassNote.COOLING_DOWN)
-            if result.cooling_until is None or due < result.cooling_until:
-                result.cooling_until = due
-            continue
-        created += _create_and_submit(definition, item, now=now, result=result)
-    # A full batch continues straight away only when it made progress. The same
-    # subjects would come straight back if it did not: ones held back by the
-    # cooldown, or ones whose Jobs are still queued (the source is ahead of the
-    # engine, and those Jobs' completions nudge the next pass).
-    result.full = len(items) >= limit and created > 0 and result.cooling_until is None
+    lease: _DiscoveryLease | None = None
+    if isinstance(source, PrioritizedWorkSource) and items:
+        lease = _DiscoveryLease(
+            name=f"discovery:{definition.lane.value}", holder=uuid.uuid4().hex
+        )
+        try:
+            fences.acquire(lease.name, holder=lease.holder, reason="priority discovery")
+        except fences.FenceHeld:
+            result.count(PassNote.CLAIMED_ELSEWHERE)
+            return
+    try:
+        cooldown = timedelta(seconds=settings.jobs_resubmit_cooldown_seconds)
+        created = 0
+        for item in items:
+            last = finished.get(item.subject_key)
+            if last is not None:
+                due = last + cooldown
+                result.deferred += 1
+                result.count(PassNote.COOLING_DOWN)
+                if result.cooling_until is None or due < result.cooling_until:
+                    result.cooling_until = due
+                continue
+            created += _create_and_submit(
+                definition, item, now=now, result=result, lease=lease
+            )
+        # A full batch continues straight away only when it made progress. The same
+        # subjects would come straight back if it did not: ones held back by the
+        # cooldown, or ones whose Jobs are still queued (the source is ahead of the
+        # engine, and those Jobs' completions nudge the next pass).
+        result.full = (
+            len(items) >= limit and created > 0 and result.cooling_until is None
+        )
+    finally:
+        if lease is not None:
+            fences.release(lease.name, holder=lease.holder)
 
 
 def _recently_finished(
@@ -454,12 +696,57 @@ def _recently_finished(
     }
 
 
+@dataclass(frozen=True)
+class _DiscoveryLease:
+    name: str
+    holder: str
+
+
+def _renew_discovery_lease(session: Session, lease: _DiscoveryLease) -> bool:
+    """The successful conditional write locks admission authority until commit."""
+    now = utcnow()
+    return bool(
+        affected(
+            session,
+            update(WorkFence)
+            .where(
+                col(WorkFence.name) == lease.name,
+                col(WorkFence.holder) == lease.holder,
+                col(WorkFence.expires_at) > now,
+            )
+            .values(
+                heartbeat_at=now,
+                expires_at=now + timedelta(seconds=settings.fence_ttl_seconds),
+            ),
+        )
+    )
+
+
 def _create_and_submit(
-    definition: JobDefinition, item: WorkItem, *, now: datetime, result: PassResult
+    definition: JobDefinition,
+    item: WorkItem,
+    *,
+    now: datetime,
+    result: PassResult,
+    lease: _DiscoveryLease | None = None,
 ) -> int:
     """Create (and submit) the item's Job; 1 when a Job was created."""
     try:
         with get_session_factory().scoped_session() as session:
+            if lease is not None:
+                begin_write(session, immediate=True)
+                if not _renew_discovery_lease(session, lease):
+                    result.count(PassNote.CLAIMED_ELSEWHERE)
+                    return 0
+                budget = _discovery_budget(session, definition)
+                room = (
+                    budget.interactive
+                    if item.priority is WorkPriority.INTERACTIVE
+                    else budget.backfill
+                )
+                if room == 0:
+                    result.count(PassNote.LANE_FULL)
+                    return 0
             # Domain-owned hooks decide admission; coordinator knows no settings.
             if definition.admission(session) is not None:
                 return 0
@@ -481,7 +768,7 @@ def _create_and_submit(
         result.skipped += 1
         result.count(item.skip)
         return 1
-    _submit(job_id, result)
+    _submit(job_id, result, lease=lease)
     return 1
 
 

@@ -142,3 +142,29 @@ class TestPreparationRecovery:
         native_resources.configure(tmp_path)
         with pools[-1].prepared.reserve(amount, amount, checkpoint=lambda: None):
             assert not workspace.exists()
+
+
+class TestPreparationPriority:
+    def test_transports_priority_to_preparation_receipts(self, tmp_path):
+        import json
+
+        from app.core.work_priority import WorkPriority, priority_scope
+        from app.runtime import preparation_runtime
+
+        pools = make_pools(tmp_path / "prepared", tmp_path / "io")
+        previous = preparation_runtime.bind_pools(pools)
+        try:
+            with priority_scope(WorkPriority.BACKFILL):
+                with preparation_runtime.reserve(
+                    Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+                ) as permit:
+                    assert (
+                        json.loads(permit.path.read_bytes())["priority"] == "backfill"
+                    )
+                    with preparation_runtime.io_slot(1, checkpoint=lambda: None):
+                        receipt = next(pools.io.directory.glob("*.ticket"))
+                        assert (
+                            json.loads(receipt.read_bytes())["priority"] == "backfill"
+                        )
+        finally:
+            preparation_runtime.bind_pools(previous)

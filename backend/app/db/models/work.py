@@ -57,6 +57,10 @@ class Job(SQLModel, table=True):
             "submitted_epoch IS NULL OR length(submitted_epoch) > 0",
             name="submitted_epoch_present",
         ),
+        CheckConstraint(
+            "backfill_admission_epoch IS NULL OR length(backfill_admission_epoch) > 0",
+            name="backfill_admission_epoch_present",
+        ),
     )
 
     id: str = Field(primary_key=True, max_length=64)
@@ -82,6 +86,9 @@ class Job(SQLModel, table=True):
     execution_epoch: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
     # Last epoch accepted by the engine; None means never submitted.
     submitted_epoch: Optional[str] = Field(default=None, max_length=64)
+    # Pre-engine backfill reservation; only equality with execution_epoch grants
+    # authority. Retry may retain a stale marker without retaining its slot.
+    backfill_admission_epoch: Optional[str] = Field(default=None, max_length=64)
     # Executions submitted so far, across explicit retries.
     attempts: int = Field(default=0)
     # Consecutive interrupted executions; bounded by ``jobs_max_resubmits``.
@@ -108,6 +115,15 @@ class ReconcileCursor(SQLModel, table=True):
     __table_args__ = (
         enum_check("source", JobKind),
         enum_check("pass_priority", WorkPriority),
+        enum_check("discovery_next_priority", WorkPriority),
+        CheckConstraint(
+            "(scan_recent_at IS NULL) = (scan_recent_file_id IS NULL)",
+            name="recent_keyset_complete",
+        ),
+        CheckConstraint(
+            "scan_recent_file_id IS NULL OR scan_recent_file_id > 0",
+            name="recent_keyset_positive_id",
+        ),
         # A queued pass always records its priority; a held claim, its expiry;
         # a parked drain, both ends of its window.
         CheckConstraint(
@@ -150,6 +166,17 @@ class ReconcileCursor(SQLModel, table=True):
     # where its rotating window over older Artifacts stands.
     scan_high_water: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     scan_position: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    # A one-item discovery pass alternates tiers across processes and restarts.
+    discovery_next_priority: WorkPriority = Field(
+        default=WorkPriority.BACKFILL,
+        sa_column=Column(
+            EnumText(WorkPriority), nullable=False, server_default="backfill"
+        ),
+    )
+    # Indexed keyset for recent uploads or viewer demand. These are scan
+    # positions, not foreign keys: deletion must not invalidate pagination.
+    scan_recent_at: datetime | None = None
+    scan_recent_file_id: int | None = None
 
 
 class WorkFence(SQLModel, table=True):

@@ -95,3 +95,35 @@ class TestInherit:
                 with native_runtime.inherit(original.fileno, original.path):
                     pytest.fail("active scope was replaced")
             assert native_runtime.current_permit() is original
+
+
+class TestWorkPriority:
+    def test_transports_priority_to_the_native_receipt(self, pool):
+        import json
+
+        from app.core.work_priority import WorkPriority, priority_scope
+
+        with priority_scope(WorkPriority.BACKFILL):
+            with native_runtime.admit(
+                Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+            ) as permit:
+                assert json.loads(permit.path.read_bytes())["priority"] == "backfill"
+
+    def test_nested_priority_preserves_the_active_receipt(self, pool):
+        import json
+
+        from app.core.work_priority import WorkPriority, priority_scope
+
+        with priority_scope(WorkPriority.BACKFILL):
+            with native_runtime.admit(
+                Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+            ) as outer:
+                with priority_scope(WorkPriority.INTERACTIVE):
+                    with native_runtime.admit(
+                        Resources(1, 20), Resources(2, 100), checkpoint=lambda: None
+                    ) as nested:
+                        assert nested is outer
+                        assert (
+                            json.loads(outer.path.read_bytes())["priority"]
+                            == "backfill"
+                        )

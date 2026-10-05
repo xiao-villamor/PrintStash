@@ -35,8 +35,9 @@ a port. Why it is shaped this way is in
 | Fence | `work.fences` | A database lease (holder, heartbeat, TTL) checked before every step; restore and migrations hold them. |
 | Executor | `work.executors` | A process that runs Jobs, heartbeating its role, lanes and in-flight writes. |
 
-Kinds, lanes, states and priorities are closed sets: enums in
-`db.models.types`, stored as TEXT with a CHECK constraint listing their values
+Kinds, lanes, states and priorities are closed sets. `core.work_priority` owns
+`WorkPriority`; `db.models.types` re-exports it with the other enums. They are
+stored as TEXT with a CHECK constraint listing their values
 (no database-native enum types, see the database skill reference). A kind
 with no member cannot be declared, recorded or requested, and
 `tests/integration/bootstrap/test_work.py` fails when a member has no
@@ -76,8 +77,14 @@ One pass (`work.reconciler.run_pass`) per definition, claimed through its
    A Job resubmitted more than `JOBS_MAX_RESUBMITS` times fails.
 2. **Discover.** The source is asked for at most
    `min(JOBS_RECONCILE_BATCH, lane headroom)` items, where headroom is the
-   lane's concurrency × `JOBS_LANE_HEADROOM_FACTOR` minus its depth. Each item
-   becomes a Job (unless its subject already has one) and is submitted.
+   lane's concurrency × `JOBS_LANE_HEADROOM_FACTOR` minus its queued depth for
+   ordinary sources. Derivative sources receive explicit priority allowances:
+   interactive queued/interrupted Jobs are capped at lane concurrency; all
+   active backfill Jobs, including running ones, share one slot. Every
+   definition in a lane shares those caps. Each item becomes a Job (unless its
+   subject already has one) and is submitted. A short lane fence locks the
+   quota recheck and Job creation in the same transaction; engine submission
+   follows commit. A lost or expired holder cannot admit work.
 3. **Continue or stop.** A full batch that created Jobs while the lane still had
    room runs again immediately. A full lane stops; each Job's completion nudges
    its source. A nudge that arrived during the pass (the dirty mark,
@@ -88,6 +95,41 @@ already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
 absorbed by a queued backfill pass. The tick, a single persistent DBOS
 schedule, nudges every definition at `JOBS_RECONCILE_INTERVAL_SECONDS` as a
 safety net, and schedule sources become due on it.
+
+## Derivative scheduling
+
+`derive.native` and `derive.light` use one FIFO engine queue each, with equal
+engine ranks for both logical priorities. This gives admitted backfill a finite
+predecessor list under sustained uploads, while preserving each lane's
+concurrency, rate and partition limits. Their pending headroom is concurrency
+plus one; other lanes keep strict engine priority and the configured headroom
+multiplier. Logical priority remains on the Job and is bound around each actual
+step in its execution thread.
+
+Native CPU/RAM, prepared-source bytes and source I/O use shared physical
+resource pools. Interactive waiters precede unaged backfill; backfill waiting
+30 seconds joins the interactive rank in registration order, allowing a large
+claim to accumulate enough free capacity. Active work is never preempted.
+Waiting for capacity does not create a new Job or derivative attempt.
+
+Recovery selects one active backfill per shared FIFO lane, preferring running
+work, then already reserved or accepted epochs, then oldest unsubmitted intent. Other retained intents wait without spending attempts. The owner
+selection is cached for the repair batch and refreshed after its owner settles.
+If update ordering places that owner outside the ordinary page, repair includes
+at most one additional Job belonging to its own definition. This preserves the
+batch-plus-one bound and prevents retries from hiding the only admitted backfill.
+Before each backfill submission, a conditional owner UPDATE under the live lane
+fence commits its admission epoch without spending an attempt. Submission checks
+that exact current reservation before constructing engine arguments. An accepted
+execution whose attempt was not yet recorded retains its slot across a crash;
+terminal state or a public retry epoch change retires the old authority. The
+active-state predicate uses the existing partial active-subject index, so
+terminal Job history cannot enlarge discovery or quota scans.
+
+Before enabling FIFO consumers, startup refuses persisted derivation workflows
+with legacy engine ranks or queue state it cannot verify. Upgrades drain old
+producers and restart API and workers together, as described in the
+[upgrade guide](../../UPGRADE.md#unreleased-derivative-scheduling).
 
 ## Derivatives
 
@@ -137,7 +179,7 @@ both Compose files run the first with no setting.
 | --- | --- | --- |
 | `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick |
 | `JOBS_RECONCILE_BATCH` | 500 | Most Jobs one pass creates |
-| `JOBS_LANE_HEADROOM_FACTOR` | 2 | Queue depth allowed per unit of concurrency |
+| `JOBS_LANE_HEADROOM_FACTOR` | 2 | Pending depth multiplier for ordinary lanes; derivation lanes reserve concurrency plus one |
 | `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails |
 | `JOBS_RESUBMIT_COOLDOWN_SECONDS` / `JOBS_RESUBMIT_BURST` | 30 / 3 | A subject finished this often waits the window out |
 | `JOBS_SUBMIT_GRACE_SECONDS` | 60 | How long a queued pass absorbs further nudges |
@@ -153,9 +195,11 @@ both Compose files run the first with no setting.
 Administrators override lane concurrency at runtime on Settings → Background
 work; the override is stored in the database and applies to every process.
 
-Native memory is bounded by lanes: at most `derive.native` renders plus the
-`similarity` and `search` lanes' steps run at once, and each native child is
-killed past its memory budget. Within one process, local inference (embedding
+Native memory is bounded by shared CPU/RAM admission across API and worker
+processes, independent of lane count. A request reserves its complete geometry,
+raster and analysis profile; admitted credits remain held through descendant
+termination. Preparation separately reserves source-copy bytes and I/O slots.
+Each native child is killed past its memory budget. Within one process, local inference (embedding
 and search-view workers) is also admitted locally, up to `MAX_RENDER_JOBS` at
 once, because a search query embeds in the request, outside every lane: a
 waiting query goes first, and background inference that would wait yields

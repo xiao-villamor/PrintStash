@@ -8,6 +8,30 @@ newer. Recreate the backend virtual environment with Python 3.14 and run
 CI and official images use Python 3.14.8; image installations need no host Python
 upgrade. Earlier Python runtimes are no longer supported.
 
+## Unreleased: derivative scheduling
+
+SQLite remains the default; this upgrade does not move data to PostgreSQL.
+The additive application migrations preserve existing Artifacts, scan positions
+and Job execution facts while adding discovery turns, recent cursor fields,
+timestamp indices and a nullable backfill admission epoch. The new reservation
+is separate from accepted execution epochs and does not spend a retry attempt.
+
+Derivation queues now share bounded interactive/backfill allowances and use FIFO
+engine dispatch. Before upgrading, stop new uploads, viewer requests and bulk
+regeneration. Allow the existing API and workers to drain their derivation Jobs,
+then stop every API and worker process and restart them on the new image
+together. The native resource receipt format also changes; no old application
+process may continue admitting native or prepared-source work during restart.
+Existing previews remain usable; no new recipe is introduced by scheduling.
+
+Startup reports `derivation_queue_requires_drain` before enabling consumers if
+legacy derivation ranks remain, inspection fails, or its bounded inspection
+cannot verify the queue. Keep the old image available to finish draining. Do
+not delete application Jobs, managed files or admission receipts to bypass this
+check. As with the DBOS upgrade below, disposable engine state may be rebuilt
+only with all processes stopped; unfinished application Jobs then replay through
+the reconciler, and engine checkpoints are lost.
+
 ## Unreleased: DBOS 3.0
 
 The embedded background engine upgrades from DBOS 2.31.1 to 3.0.0. Its first

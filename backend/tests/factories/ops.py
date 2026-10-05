@@ -767,3 +767,27 @@ def build_mesh_continuation(
     )
     overrides.setdefault("job_attempt", None if job is None else job.attempts)
     return save(session, MeshFingerprintContinuation(file_id=file.id, **overrides))
+
+
+def build_job_history(
+    session: Session, *, count: int, kind: JobKind, subject: str
+) -> None:
+    """Seed terminal history from the canonical Job builder in one bulk batch.
+
+    The original row supplies valid state, timestamps and attempt authority;
+    historical copies differ only in their independent Job identities.
+    """
+    from sqlalchemy import insert
+
+    if type(count) is not int or count <= 0:
+        raise ValueError("history count must be a positive integer")
+    template = build_job(
+        session, kind=kind, state=JobState.COMPLETED, subject=subject, attempts=1
+    )
+    values = template.model_dump()
+    if count > 1:
+        session.execute(
+            insert(Job),
+            [dict(values, id=uuid4().hex) for _ in range(count - 1)],
+        )
+        session.commit()

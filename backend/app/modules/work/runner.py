@@ -17,6 +17,7 @@ from typing import Any
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.logging import get_logger
 from app.core.time import utcnow
+from app.core.work_priority import priority_scope
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
 from app.db.session import get_session_factory
 
@@ -158,8 +159,13 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
         if refused is not None:
             context.finish(JobOutcome.CANCELLED, error=refused, retryable=False)
             return StepOutcome.CANCELLED.value
-        with cancellation_scope(
-            lambda: _withdrawn(context.job_id, context.attempt, context.execution_epoch)
+        with (
+            cancellation_scope(
+                lambda: _withdrawn(
+                    context.job_id, context.attempt, context.execution_epoch
+                )
+            ),
+            priority_scope(context.priority),
         ):
             step.fn(context)
     except OperationCancelled:

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Reserve interactive discovery slots beside one active backfill Job per
+  derivation lane. Keep bounded indexed scans and durable backfill progress
+  during uploads, dispatch admitted derivatives in FIFO order, and carry Job
+  priority through shared native and source-preparation admission with aging.
+  Preserve backfill reservations across public retries and engine-acceptance
+  crashes without spending another attempt while waiting. Verify legacy queue state before starting consumers; upgrades drain and
+  restart API and workers together.
+
 - Local ONNX models reserve a shared, bounded memory partition across API and worker processes, retain warm reuse, retire idle residents under pressure, and release their credits after guarded process-tree termination.
 
 **Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).

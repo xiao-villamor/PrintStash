@@ -23,7 +23,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from app.db.models.types import JobKind, JobState, LaneName, WorkPriority
 
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ActiveExecution",
     "Deduplicated",
+    "DiscoveryBudget",
     "EngineEvidence",
     "EngineStatus",
     "ExecutionKind",
@@ -43,9 +44,11 @@ __all__ = [
     "JobSubmission",
     "Lane",
     "LaneDepth",
+    "LaneOrder",
     "Partitioned",
     "PassSubmission",
     "RetryPolicy",
+    "PrioritizedWorkSource",
     "SkipReason",
     "Step",
     "StepRunner",
@@ -108,6 +111,11 @@ class RetryPolicy:
 NO_RETRY = RetryPolicy()
 
 
+class LaneOrder(StrEnum):
+    PRIORITY = "priority"
+    FIFO = "fifo"
+
+
 @dataclass(frozen=True)
 class Lane:
     """A concurrency class of work.
@@ -124,14 +132,19 @@ class Lane:
     scope: Literal["worker", "global"] = "worker"
     partitioned: bool = False
     rate_limit: tuple[int, float] | None = None
+    queue_order: LaneOrder = LaneOrder.PRIORITY
 
     def __post_init__(self) -> None:
+        if not isinstance(self.queue_order, LaneOrder):
+            raise TypeError("lane_queue_order_requires_enum")
         if self.concurrency < 1:
             raise ValueError("lane_concurrency_below_one")
 
     @property
     def headroom(self) -> int:
-        """How many queued executions a reconcile pass may leave in this lane."""
+        """Pending slots: FIFO reserves concurrency interactive slots plus one backfill."""
+        if self.queue_order is LaneOrder.FIFO:
+            return self.concurrency + 1
         from app.core.config import settings
 
         return self.concurrency * settings.jobs_lane_headroom_factor
@@ -219,6 +232,33 @@ class WorkSource(Protocol):
     ) -> Sequence[WorkItem]: ...
 
     def next_due(self, session: Session, *, now: datetime) -> datetime | None: ...
+
+
+@dataclass(frozen=True)
+class DiscoveryBudget:
+    """Finite pending slots, independently reserved for each priority."""
+
+    total: int
+    interactive: int
+    backfill: int
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not int or value < 0
+            for value in (self.total, self.interactive, self.backfill)
+        ):
+            raise ValueError("invalid_discovery_budget")
+        if self.total > self.interactive + self.backfill:
+            raise ValueError("discovery_total_exceeds_priority_caps")
+
+
+@runtime_checkable
+class PrioritizedWorkSource(WorkSource, Protocol):
+    """A source that respects separate finite pending quotas."""
+
+    def pending_prioritized(
+        self, session: Session, *, now: datetime, budget: DiscoveryBudget
+    ) -> Sequence[WorkItem]: ...
 
 
 FailureHook = Callable[["Session", str, str], None]

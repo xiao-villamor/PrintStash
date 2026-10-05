@@ -182,6 +182,75 @@ class TestSubmit:
         ].submission
         assert submission.routing == Partitioned("7")
 
+    def test_retokened_backfill_cannot_submit_a_reserved_epoch(
+        self, work_engine, make_job, make_user, make_model, make_file, db_session
+    ):
+        from app.db.models import Job
+        from app.modules.derivatives.source import subject_key
+        from app.modules.work import service
+
+        actor = make_user()
+        first_file = make_file(make_model(), filename="first.stl")
+        reserved_epoch = "first-reserved-backfill"
+        first = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(first_file.id),
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            execution_epoch=reserved_epoch,
+            backfill_admission_epoch=reserved_epoch,
+        )
+        first_id = first.id
+        service.cancel(first_id, actor=actor)
+        service.retry(first_id, actor=actor)
+        db_session.expire_all()
+        retokened = db_session.get(Job, first_id)
+        assert retokened is not None
+        assert retokened.execution_epoch != reserved_epoch
+        second_file = make_file(make_model(), filename="second.stl")
+        other_epoch = "second-reserved-backfill"
+        second = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(second_file.id),
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            execution_epoch=other_epoch,
+            backfill_admission_epoch=other_epoch,
+        )
+        second_id = second.id
+        assert (
+            submit(second_id, reserved_backfill_epoch=other_epoch)
+            is SubmitOutcome.ACCEPTED
+        )
+
+        outcome = submit(first_id, reserved_backfill_epoch=reserved_epoch)
+
+        assert outcome is None
+        db_session.expire_all()
+        assert db_session.get(Job, first_id).attempts == 0
+        assert db_session.get(Job, second_id).attempts == 1
+        assert execution_id(second_id, 1, other_epoch) in work_engine.executions
+        assert (
+            execution_id(first_id, 1, retokened.execution_epoch)
+            not in work_engine.executions
+        )
+
+    def test_unreserved_current_backfill_epoch_cannot_submit(
+        self, work_engine, make_job, db_session
+    ):
+        job = make_job(kind=JobKind.SOURCES_SCAN, priority=WorkPriority.BACKFILL)
+        job_id, current_epoch = job.id, job.execution_epoch
+
+        outcome = submit(job_id, reserved_backfill_epoch=current_epoch)
+
+        assert outcome is None
+        db_session.refresh(job)
+        assert job.execution_epoch == current_epoch
+        assert job.backfill_admission_epoch is None
+        assert job.attempts == 0
+        assert job.submitted_epoch is None
+        assert work_engine.executions == {}
+
 
 class TestNudge:
     def test_a_nudge_queues_a_pass_of_a_dirty_source(

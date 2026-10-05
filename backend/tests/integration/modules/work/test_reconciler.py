@@ -662,3 +662,758 @@ class TestInterrupt:
             2,
             0,
         )
+
+
+class _PrioritizedSource(_Source):
+    def __init__(self):
+        self.budgets = []
+
+    def pending_prioritized(self, session, *, now, budget):
+        self.budgets.append(budget)
+        chosen = []
+        for priority, room in [
+            (WorkPriority.INTERACTIVE, budget.interactive),
+            (WorkPriority.BACKFILL, budget.backfill),
+        ]:
+            chosen.extend(
+                [item for item in PROBE.items if item.priority is priority][:room]
+            )
+        return chosen[: budget.total]
+
+
+class TestPriorityDiscovery:
+    @staticmethod
+    def source(engine):
+        from dataclasses import replace
+
+        source = _PrioritizedSource()
+        definition = engine.catalog.definitions[SOURCED]
+        engine.catalog.definitions[SOURCED] = replace(definition, source=source)
+        return source
+
+    def test_backfill_headroom_cannot_hide_interactive_intent(
+        self, engine, db_session, make_job
+    ):
+        source = self.source(engine)
+        for index in range(engine.catalog.lanes[PROBE_LANE].headroom):
+            make_job(
+                kind=REQUESTED, subject=f"old/{index}", priority=WorkPriority.BACKFILL
+            )
+        PROBE.items = _items("new", priority=WorkPriority.INTERACTIVE)
+        run_pass(SOURCED)
+        assert source.budgets
+        assert source.budgets[0].backfill == 0
+        assert source.budgets[0].interactive == 1
+        (created,) = _jobs(db_session)
+        assert created.subject_key == "new"
+        assert created.priority is WorkPriority.INTERACTIVE
+
+    def test_interactive_queue_preserves_a_backfill_discovery_slot(
+        self, engine, db_session, make_job
+    ):
+        source = self.source(engine)
+        make_job(
+            kind=REQUESTED,
+            subject="interactive/queued",
+            priority=WorkPriority.INTERACTIVE,
+        )
+        PROBE.items = _items("backfill/new", priority=WorkPriority.BACKFILL)
+        run_pass(SOURCED)
+        assert source.budgets
+        assert source.budgets[0].interactive == 0
+        assert source.budgets[0].backfill == 1
+        (created,) = _jobs(db_session)
+        assert created.priority is WorkPriority.BACKFILL
+
+    @pytest.mark.parametrize("state", [JobState.QUEUED, JobState.INTERRUPTED])
+    def test_shared_lane_priority_quotas_bound_durable_pending_jobs(
+        self, engine, db_session, make_job, state
+    ):
+        source = self.source(engine)
+        for priority in (WorkPriority.INTERACTIVE, WorkPriority.BACKFILL):
+            make_job(
+                kind=REQUESTED, subject=priority.value, priority=priority, state=state
+            )
+        PROBE.items = _items("new/i", priority=WorkPriority.INTERACTIVE) + _items(
+            "new/b", priority=WorkPriority.BACKFILL
+        )
+        run_pass(SOURCED)
+        assert _jobs(db_session) == []
+        assert source.budgets == []
+
+    def test_running_jobs_do_not_consume_pending_discovery_slots(
+        self, engine, db_session, make_job
+    ):
+        source = self.source(engine)
+        make_job(
+            kind=REQUESTED,
+            subject="running/i",
+            priority=WorkPriority.INTERACTIVE,
+            state=JobState.RUNNING,
+            attempts=1,
+        )
+        PROBE.items = _items("new/i", priority=WorkPriority.INTERACTIVE) + _items(
+            "new/b", priority=WorkPriority.BACKFILL
+        )
+        run_pass(SOURCED)
+        assert source.budgets
+        assert source.budgets[0].interactive == 1
+        assert source.budgets[0].backfill == 1
+        assert source.budgets[0].total == 2
+        assert {row.priority for row in _jobs(db_session)} == {
+            WorkPriority.INTERACTIVE,
+            WorkPriority.BACKFILL,
+        }
+
+    def test_running_backfill_holds_its_single_admission_slot(
+        self, engine, db_session, make_job
+    ):
+        source = self.source(engine)
+        make_job(
+            kind=REQUESTED,
+            subject="running/b",
+            priority=WorkPriority.BACKFILL,
+            state=JobState.RUNNING,
+            attempts=1,
+        )
+        PROBE.items = _items("new/i", priority=WorkPriority.INTERACTIVE) + _items(
+            "new/b", priority=WorkPriority.BACKFILL
+        )
+        run_pass(SOURCED)
+        assert source.budgets
+        assert source.budgets[0].interactive == 1
+        assert source.budgets[0].backfill == 0
+        assert source.budgets[0].total == 1
+        (created,) = _jobs(db_session)
+        assert created.subject_key == "new/i"
+        assert created.priority is WorkPriority.INTERACTIVE
+
+
+@pytest.fixture
+def priority_admission_vault(tmp_path):
+    from sqlalchemy import event
+    from sqlmodel import SQLModel, create_engine
+
+    from app.db.session import (
+        SQLiteSessionFactory,
+        _set_sqlite_pragmas,
+        get_session_factory,
+        override_session_factory,
+    )
+
+    database = create_engine(
+        f"sqlite:///{tmp_path / 'priority-admission.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(database, "connect", _set_sqlite_pragmas)
+    SQLModel.metadata.create_all(database)
+    previous = get_session_factory()
+    factory = SQLiteSessionFactory(database)
+    override_session_factory(factory)
+    try:
+        yield factory
+    finally:
+        override_session_factory(previous)
+        database.dispose()
+
+
+class TestPriorityAdmission:
+    def test_concurrent_sources_share_one_interactive_queue_slot(
+        self, priority_admission_vault, engine, db_session, monkeypatch
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from contextvars import copy_context
+        from dataclasses import replace
+        from threading import Barrier
+
+        from app.modules.work.reconciler import PassResult, _discover
+
+        barrier = Barrier(2)
+
+        class ConcurrentSource(_Source):
+            def __init__(self, subject):
+                self.subject = subject
+
+            def pending_prioritized(self, session, *, now, budget):
+                barrier.wait(timeout=5)
+                return [WorkItem(self.subject, priority=WorkPriority.INTERACTIVE)]
+
+        definitions = []
+        for kind in (SOURCED, REQUESTED):
+            definition = replace(
+                engine.catalog.definitions[kind],
+                source=ConcurrentSource(f"concurrent/{kind.value}"),
+            )
+            engine.catalog.definitions[kind] = definition
+            definitions.append(definition)
+        monkeypatch.setattr("app.modules.work.reconciler.submit", lambda _job: None)
+
+        def discover(definition):
+            from app.db.session import override_session_factory
+
+            override_session_factory(priority_admission_vault)
+            _discover(definition, now=utcnow(), result=PassResult())
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(copy_context().run, discover, definition)
+                for definition in definitions
+            ]
+            for future in futures:
+                future.result(timeout=10)
+        db_session.expire_all()
+        queued = db_session.exec(
+            select(Job).where(
+                Job.state == JobState.QUEUED,
+                Job.priority == WorkPriority.INTERACTIVE,
+            )
+        ).all()
+        assert len(queued) == 1
+        assert queued[0].kind in (SOURCED, REQUESTED)
+
+    def test_admission_rechecks_pending_counts_after_source_discovery(
+        self, engine, db_session, make_job, monkeypatch
+    ):
+        from dataclasses import replace
+
+        from app.modules.work.reconciler import PassResult, _discover
+
+        class ArrivingSource(_Source):
+            def pending_prioritized(self, session, *, now, budget):
+                make_job(
+                    kind=REQUESTED,
+                    subject="arrived/i",
+                    priority=WorkPriority.INTERACTIVE,
+                )
+                return [WorkItem("late/i", priority=WorkPriority.INTERACTIVE)]
+
+        definition = replace(
+            engine.catalog.definitions[SOURCED], source=ArrivingSource()
+        )
+        monkeypatch.setattr("app.modules.work.reconciler.submit", lambda _job: None)
+        _discover(definition, now=utcnow(), result=PassResult())
+        assert _jobs(db_session) == []
+        assert len(_jobs(db_session, REQUESTED)) == 1
+
+    @pytest.mark.parametrize("authority", ["expired", "replaced"])
+    def test_lost_holder_cannot_admit_work(
+        self, engine, db_session, monkeypatch, authority
+    ):
+        from app.db.models import WorkFence
+        from app.modules.work.reconciler import (
+            PassNote,
+            PassResult,
+            _create_and_submit,
+            _DiscoveryLease,
+        )
+
+        now = utcnow()
+        name = f"discovery:{PROBE_LANE.value}"
+        db_session.add(
+            WorkFence(
+                name=name,
+                holder="old" if authority == "expired" else "replacement",
+                reason="qualification",
+                acquired_at=now,
+                heartbeat_at=now,
+                expires_at=now
+                + timedelta(seconds=-1 if authority == "expired" else 60),
+            )
+        )
+        db_session.commit()
+        submissions = []
+        monkeypatch.setattr("app.modules.work.reconciler.submit", submissions.append)
+        result = PassResult()
+        created = _create_and_submit(
+            engine.catalog.definitions[SOURCED],
+            WorkItem("lost/i", priority=WorkPriority.INTERACTIVE),
+            now=now,
+            result=result,
+            lease=_DiscoveryLease(name, "old"),
+        )
+        assert created == 0
+        assert _jobs(db_session) == []
+        assert submissions == []
+        assert result.outcomes[PassNote.CLAIMED_ELSEWHERE] == 1
+        assert result.full is False
+        db_session.expire_all()
+        retained = db_session.get(WorkFence, name)
+        assert retained is not None
+        assert retained.holder == ("old" if authority == "expired" else "replacement")
+
+    def test_previous_pass_cannot_release_a_replacement_holder(
+        self, engine, db_session, monkeypatch
+    ):
+        from app.db.models import WorkFence
+        from app.modules.work import reconciler
+
+        TestPriorityDiscovery.source(engine)
+        PROBE.items = _items("retained/i", priority=WorkPriority.INTERACTIVE)
+        original = reconciler._create_and_submit
+
+        def replace_holder(definition, item, *, now, result, lease):
+            assert lease is not None
+            row = db_session.get(WorkFence, lease.name)
+            assert row is not None and row.holder == lease.holder
+            row.holder = "replacement"
+            row.expires_at = utcnow() + timedelta(seconds=60)
+            db_session.add(row)
+            db_session.commit()
+            return original(definition, item, now=now, result=result, lease=lease)
+
+        monkeypatch.setattr(reconciler, "_create_and_submit", replace_holder)
+        result = reconciler.PassResult()
+        reconciler._discover(
+            engine.catalog.definitions[SOURCED], now=utcnow(), result=result
+        )
+        assert _jobs(db_session) == []
+        assert result.full is False
+        db_session.expire_all()
+        retained = db_session.get(WorkFence, f"discovery:{PROBE_LANE.value}")
+        assert retained is not None and retained.holder == "replacement"
+        assert [item.subject_key for item in PROBE.items] == ["retained/i"]
+
+    def test_create_error_releases_the_discovery_fence(
+        self, engine, db_session, monkeypatch
+    ):
+        from app.db.models import WorkFence
+        from app.modules.work import reconciler
+
+        TestPriorityDiscovery.source(engine)
+        PROBE.items = _items("retained/i", priority=WorkPriority.INTERACTIVE)
+
+        def fail_create(**_kwargs):
+            raise ValueError("qualification create failure")
+
+        monkeypatch.setattr(reconciler.jobs, "create", fail_create)
+        result = reconciler.PassResult()
+        with pytest.raises(ValueError, match="qualification create failure"):
+            reconciler._discover(
+                engine.catalog.definitions[SOURCED], now=utcnow(), result=result
+            )
+        assert _jobs(db_session) == []
+        assert db_session.get(WorkFence, f"discovery:{PROBE_LANE.value}") is None
+        assert result.full is False
+        assert [item.subject_key for item in PROBE.items] == ["retained/i"]
+
+
+class TestFIFORecovery:
+    @staticmethod
+    def configure(engine):
+        from app.modules.work.contracts import LaneOrder
+
+        engine.catalog.lanes[PROBE_LANE] = Lane(
+            PROBE_LANE, 2, queue_order=LaneOrder.FIFO
+        )
+
+    def test_legacy_backfill_queue_recovers_one_oldest_attempt(
+        self, engine, db_session, make_job
+    ):
+        self.configure(engine)
+        now = utcnow()
+        backlog = [
+            make_job(
+                kind=REQUESTED,
+                subject=f"legacy/{index}",
+                priority=WorkPriority.BACKFILL,
+                created_at=now - timedelta(minutes=3 - index),
+                updated_at=now - timedelta(minutes=3 - index),
+            )
+            for index in range(3)
+        ]
+        identities = [(row.id, row.execution_epoch) for row in backlog]
+        result = run_pass(REQUESTED)
+        assert result.submitted == 1
+        assert result.deferred == 2
+        assert [_row(db_session, identity).attempts for identity, _ in identities] == [
+            1,
+            0,
+            0,
+        ]
+        assert execution_id(identities[0][0], 1, identities[0][1]) in engine.executions
+        assert all(
+            execution_id(identity, 1, epoch) not in engine.executions
+            for identity, epoch in identities[1:]
+        )
+        assert all(
+            _row(db_session, identity).state is JobState.QUEUED
+            for identity, _ in identities
+        )
+
+    def test_running_backfill_blocks_another_definition_recovery(
+        self, engine, db_session, make_job
+    ):
+        self.configure(engine)
+        running = make_job(
+            kind=REQUESTED, subject="running/b", priority=WorkPriority.BACKFILL
+        )
+        running_id, running_epoch = running.id, running.execution_epoch
+        run_pass(REQUESTED)
+        engine.executions[
+            execution_id(running_id, 1, running_epoch)
+        ].status = EngineStatus.RUNNING
+        row = _row(db_session, running_id)
+        row.state = JobState.RUNNING
+        db_session.add(row)
+        db_session.commit()
+        older = make_job(
+            kind=SOURCED,
+            subject="old/b",
+            priority=WorkPriority.BACKFILL,
+            created_at=utcnow() - timedelta(days=1),
+        )
+        interactive = make_job(
+            kind=SOURCED, subject="new/i", priority=WorkPriority.INTERACTIVE
+        )
+        older_id, interactive_id = older.id, interactive.id
+        result = run_pass(SOURCED)
+        assert result.submitted == 1
+        assert result.deferred == 1
+        assert _row(db_session, older_id).attempts == 0
+        assert _row(db_session, older_id).state is JobState.QUEUED
+        assert _row(db_session, interactive_id).attempts == 1
+        assert _row(db_session, running_id).attempts == 1
+        assert (
+            engine.executions[execution_id(running_id, 1, running_epoch)].status
+            is EngineStatus.RUNNING
+        )
+
+    def test_settled_backfill_releases_the_next_oldest_attempt(
+        self, engine, db_session, make_job
+    ):
+        self.configure(engine)
+        first = make_job(
+            kind=REQUESTED, subject="first/b", priority=WorkPriority.BACKFILL
+        )
+        first_id, first_epoch = first.id, first.execution_epoch
+        run_pass(REQUESTED)
+        second = make_job(
+            kind=REQUESTED, subject="second/b", priority=WorkPriority.BACKFILL
+        )
+        second_id, second_epoch = second.id, second.execution_epoch
+        engine.executions[
+            execution_id(first_id, 1, first_epoch)
+        ].status = EngineStatus.SUCCEEDED
+        result = run_pass(REQUESTED)
+        assert result.completed == 1
+        assert result.submitted == 1
+        assert _row(db_session, first_id).state is JobState.COMPLETED
+        assert _row(db_session, second_id).attempts == 1
+        assert execution_id(second_id, 1, second_epoch) in engine.executions
+
+    @pytest.mark.parametrize("backlog_size", [10, 100])
+    def test_backfill_recovery_selects_one_owner_per_pending_batch(
+        self, engine, db_session, make_job, backlog_size
+    ):
+        from sqlalchemy import event
+
+        self.configure(engine)
+        now = utcnow()
+        backlog = [
+            make_job(
+                kind=REQUESTED,
+                subject=f"legacy/batch/{index}",
+                priority=WorkPriority.BACKFILL,
+                created_at=now + timedelta(microseconds=index),
+                updated_at=now + timedelta(microseconds=index),
+            )
+            for index in range(backlog_size)
+        ]
+        identities = [row.id for row in backlog]
+        owner_selections = []
+
+        def capture_owner(
+            _connection, _cursor, statement, _parameters, _context, _executemany
+        ):
+            sql = " ".join(statement.lower().split())
+            if (
+                sql.startswith("select ")
+                and "order by case" in sql
+                and "jobs.created_at" in sql
+            ):
+                owner_selections.append(sql)
+
+        database = db_session.get_bind()
+        event.listen(database, "before_cursor_execute", capture_owner)
+        try:
+            result = run_pass(REQUESTED)
+        finally:
+            event.remove(database, "before_cursor_execute", capture_owner)
+        assert len(owner_selections) == 1
+        assert result.submitted == 1
+        assert result.deferred == backlog_size - 1
+        assert [_row(db_session, identity).attempts for identity in identities] == [
+            1,
+            *([0] * (backlog_size - 1)),
+        ]
+        assert all(
+            _row(db_session, identity).state is JobState.QUEUED
+            for identity in identities
+        )
+
+    @staticmethod
+    def complete_recovered_backfill(engine, db_session, identities):
+        for _ in range(6):
+            for identity, epoch in identities:
+                execution = engine.executions.get(execution_id(identity, 1, epoch))
+                if execution is not None:
+                    execution.status = EngineStatus.SUCCEEDED
+            run_pass(REQUESTED)
+            if all(
+                _row(db_session, identity).state is JobState.COMPLETED
+                for identity, _ in identities
+            ):
+                break
+
+    def test_oldest_recovery_owner_cannot_be_hidden_by_the_page(
+        self, engine, db_session, make_job, monkeypatch
+    ):
+        self.configure(engine)
+        monkeypatch.setitem(_overlay, "jobs_reconcile_batch", 2)
+        now = utcnow()
+        oldest = make_job(
+            kind=REQUESTED,
+            subject="oldest/outside-page",
+            priority=WorkPriority.BACKFILL,
+            created_at=now - timedelta(days=3),
+            updated_at=now,
+        )
+        others = [
+            make_job(
+                kind=REQUESTED,
+                subject=f"newer/page/{index}",
+                priority=WorkPriority.BACKFILL,
+                created_at=now - timedelta(days=2 - index),
+                updated_at=now - timedelta(minutes=3 - index),
+            )
+            for index in range(2)
+        ]
+        identities = [(row.id, row.execution_epoch) for row in [oldest, *others]]
+        result = run_pass(REQUESTED)
+        assert result.submitted == 1
+        assert _row(db_session, oldest.id).attempts == 1
+        assert [_row(db_session, row.id).attempts for row in others] == [0, 0]
+        self.complete_recovered_backfill(engine, db_session, identities)
+        assert all(
+            _row(db_session, identity).state is JobState.COMPLETED
+            for identity, _ in identities
+        )
+        assert [_row(db_session, identity).attempts for identity, _ in identities] == [
+            1,
+            1,
+            1,
+        ]
+
+    def test_exhausted_cached_owner_releases_the_next_attempt(
+        self, engine, db_session, make_job
+    ):
+        self.configure(engine)
+        exhausted = _stale(
+            make_job,
+            priority=WorkPriority.BACKFILL,
+            resubmits=settings.jobs_max_resubmits,
+            created_at=utcnow() - timedelta(days=1),
+        )
+        exhausted_id = exhausted.id
+        next_job = make_job(
+            kind=REQUESTED, subject="after-exhausted/b", priority=WorkPriority.BACKFILL
+        )
+        next_id, next_epoch = next_job.id, next_job.execution_epoch
+        result = run_pass(REQUESTED)
+        assert result.interrupted == 1
+        assert result.failed == 1
+        assert result.submitted == 1
+        failed = _row(db_session, exhausted_id)
+        assert failed.state is JobState.FAILED
+        assert failed.attempts == 1
+        assert failed.resubmits == settings.jobs_max_resubmits + 1
+        assert _row(db_session, next_id).attempts == 1
+        assert _row(db_session, next_id).state is JobState.QUEUED
+        assert execution_id(next_id, 1, next_epoch) in engine.executions
+        assert PROBE.failures == [(failed.subject_key, "interrupted_repeatedly")]
+
+    @pytest.mark.parametrize("terminal", [JobState.FAILED, JobState.CANCELLED])
+    def test_public_retry_preserves_accepted_queued_backfill_authority(
+        self, engine, db_session, make_job, make_user, terminal
+    ):
+        from app.modules.work import service
+        from app.modules.work.contracts import LaneOrder
+
+        engine.catalog.lanes[PROBE_LANE] = Lane(
+            PROBE_LANE, 1, queue_order=LaneOrder.FIFO
+        )
+        actor = make_user()
+        old = make_job(
+            kind=REQUESTED,
+            subject="older/retried/b",
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            state=terminal,
+            attempts=1,
+            created_at=utcnow() - timedelta(days=2),
+        )
+        old_id, original_epoch = old.id, old.execution_epoch
+        running = make_job(
+            kind=REQUESTED, subject="running/i", priority=WorkPriority.INTERACTIVE
+        )
+        running_id, running_epoch = running.id, running.execution_epoch
+        run_pass(REQUESTED)
+        engine.executions[
+            execution_id(running_id, 1, running_epoch)
+        ].status = EngineStatus.RUNNING
+        running_row = _row(db_session, running_id)
+        running_row.state = JobState.RUNNING
+        db_session.add(running_row)
+        db_session.commit()
+        accepted = make_job(
+            kind=REQUESTED, subject="accepted/queued/b", priority=WorkPriority.BACKFILL
+        )
+        accepted_id, accepted_epoch = accepted.id, accepted.execution_epoch
+        run_pass(REQUESTED)
+        accepted_execution = execution_id(accepted_id, 1, accepted_epoch)
+        accepted_evidence = engine.evidence([accepted_execution])
+        assert accepted_evidence[accepted_execution].status is EngineStatus.QUEUED
+        assert _row(db_session, accepted_id).submitted_epoch == accepted_epoch
+        later = make_job(
+            kind=REQUESTED, subject="later/i", priority=WorkPriority.INTERACTIVE
+        )
+        later_id, later_epoch = later.id, later.execution_epoch
+        retry_status = service.retry(old_id, actor=actor)
+        retried_epoch = _row(db_session, old_id).execution_epoch
+        assert retry_status.state is JobState.QUEUED
+        assert retried_epoch != original_epoch
+
+        result = run_pass(REQUESTED)
+
+        assert result.submitted == 1
+        assert _row(db_session, old_id).attempts == 1
+        assert _row(db_session, old_id).submitted_epoch == original_epoch
+        assert execution_id(old_id, 2, retried_epoch) not in engine.executions
+        assert _row(db_session, accepted_id).attempts == 1
+        assert (
+            engine.evidence([accepted_execution])[accepted_execution].status
+            is EngineStatus.QUEUED
+        )
+        assert _row(db_session, later_id).attempts == 1
+        assert execution_id(later_id, 1, later_epoch) in engine.executions
+        assert _row(db_session, running_id).state is JobState.RUNNING
+
+    @staticmethod
+    def crash_after_backfill_acceptance(
+        original_submit, backfill_id, retry_id, actor, observed, submission
+    ):
+        from app.modules.work import service
+        from app.modules.work.contracts import JobSubmission
+
+        outcome = original_submit(submission)
+        if isinstance(submission, JobSubmission) and submission.job_id == backfill_id:
+            service.retry(retry_id, actor=actor)
+            observed.append(run_pass(REQUESTED))
+            raise RuntimeError("worker crashed after actual engine acceptance")
+        return outcome
+
+    def test_acceptance_before_recording_keeps_backfill_authority(
+        self, engine, db_session, make_job, make_user, monkeypatch
+    ):
+        from functools import partial
+
+        self.configure(engine)
+        actor = make_user()
+        old = make_job(
+            kind=REQUESTED,
+            subject="old/retried/b",
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            state=JobState.FAILED,
+            attempts=1,
+            created_at=utcnow() - timedelta(days=2),
+        )
+        old_id = old.id
+        current = make_job(
+            kind=SOURCED,
+            subject="accepted/before-recording",
+            priority=WorkPriority.BACKFILL,
+        )
+        current_id, current_epoch = current.id, current.execution_epoch
+        interactive = make_job(
+            kind=REQUESTED,
+            subject="interactive/during-acceptance",
+            priority=WorkPriority.INTERACTIVE,
+        )
+        interactive_id = interactive.id
+        observed = []
+        original_submit = engine.submit
+        monkeypatch.setattr(
+            engine,
+            "submit",
+            partial(
+                self.crash_after_backfill_acceptance,
+                original_submit,
+                current_id,
+                old_id,
+                actor,
+                observed,
+            ),
+        )
+
+        crashed = run_pass(SOURCED)
+
+        assert crashed.submitted == 0
+        assert crashed.deferred == 1
+        (during_acceptance,) = observed
+        assert during_acceptance.submitted == 1
+        assert _row(db_session, interactive_id).attempts == 1
+        assert _row(db_session, old_id).attempts == 1
+        retried_epoch = _row(db_session, old_id).execution_epoch
+        assert execution_id(old_id, 2, retried_epoch) not in engine.executions
+        unrecorded = _row(db_session, current_id)
+        assert unrecorded.attempts == 0
+        assert unrecorded.submitted_epoch is None
+        assert unrecorded.backfill_admission_epoch == current_epoch
+        accepted_id = execution_id(current_id, 1, current_epoch)
+        accepted_execution = engine.executions[accepted_id]
+        assert accepted_execution.status is EngineStatus.QUEUED
+        monkeypatch.setattr(engine, "submit", original_submit)
+
+        run_pass(REQUESTED)
+        recovered = run_pass(SOURCED)
+
+        assert _row(db_session, old_id).attempts == 1
+        assert recovered.submitted == 1
+        recorded = _row(db_session, current_id)
+        assert recorded.attempts == 1
+        assert recorded.submitted_epoch == current_epoch
+        assert recorded.backfill_admission_epoch == current_epoch
+        assert engine.executions[accepted_id] is accepted_execution
+
+    def test_busy_lane_fence_defers_backfill_without_blocking_interactive(
+        self, engine, db_session, make_job
+    ):
+        from app.db.models import WorkFence
+        from app.modules.work import fences
+
+        self.configure(engine)
+        backfill = make_job(
+            kind=REQUESTED, subject="busy/b", priority=WorkPriority.BACKFILL
+        )
+        interactive = make_job(
+            kind=REQUESTED, subject="busy/i", priority=WorkPriority.INTERACTIVE
+        )
+        backfill_id = backfill.id
+        interactive_id, interactive_epoch = interactive.id, interactive.execution_epoch
+        name = f"discovery:{PROBE_LANE.value}"
+        fences.acquire(name, holder="other-pass", reason="qualify busy repair")
+
+        result = run_pass(REQUESTED)
+
+        assert result.submitted == 1
+        assert result.deferred == 1
+        assert result.full is False
+        pending = _row(db_session, backfill_id)
+        assert pending.state is JobState.QUEUED
+        assert pending.attempts == 0
+        assert pending.backfill_admission_epoch is None
+        assert _row(db_session, interactive_id).attempts == 1
+        assert execution_id(interactive_id, 1, interactive_epoch) in engine.executions
+        held = db_session.get(WorkFence, name)
+        assert held is not None and held.holder == "other-pass"

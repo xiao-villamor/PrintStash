@@ -14,8 +14,9 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
-from sqlalchemy import delete, func, or_
+from sqlalchemy import delete, func, literal, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -60,6 +61,19 @@ _STATUS_FIELDS = frozenset(JobStatus.model_fields) - {
     "staging",
 }
 _COUNT_FIELDS = ("processed", "total", "succeeded", "deduplicated", "skipped", "failed")
+
+
+def active_job_predicate() -> ColumnElement[bool]:
+    """Expose closed active states to the database's partial-index planner.
+
+    These values come only from the canonical enum, never request input. Bound
+    state parameters prevent SQLite from proving the active-subject index's
+    predicate; escaped SQLAlchemy literals preserve that proof on both dialects.
+    Other query inputs remain bound parameters.
+    """
+    return col(Job.state).in_(
+        [literal(state.value, literal_execute=True) for state in ACTIVE_JOB_STATES]
+    )
 
 
 class ActiveJobExists(Exception):

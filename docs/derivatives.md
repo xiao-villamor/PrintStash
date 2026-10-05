@@ -40,11 +40,20 @@ whose push was lost stayed without a thumbnail forever. Now each producer
 group's source (`derivatives.source.DerivativeSource`) asks the database which
 Artifacts are missing a kind at its current recipe:
 
-- a **bounded anti-join** of live, non-sentinel Artifacts of the group's types
-  against satisfying rows, never scanning more than it was asked for;
-- first everything above a **high-water mark** (fresh uploads, interactive
-  priority), then a **rotating window** of older ids (backfill priority), so a
-  pass over a fully derived library of any size costs the same few queries.
+- **bounded candidate windows** followed by anti-joins against satisfying
+  derivatives and active Jobs, so active subjects cannot hide eligible results;
+- a recent timestamp index with a newest head and a durable ascending keyset
+  for interactive uploads, plus a frozen ID rotation for older backfill;
+- separate admission allowances within each shared lane: up to its concurrency
+  in queued interactive Jobs, plus one active backfill Job. A durable turn
+  alternates when both priorities compete for a one-item discovery budget.
+
+Each candidate window examines at most 5,000 Artifacts, independent of library
+size. New uploads cannot extend an old rotation indefinitely, and a full
+backfill allowance preserves its position until a slot becomes available.
+Viewer requests use their request timestamp, including requests for old
+Artifacts. See [background work](architecture/background-work.md) for queue
+ordering and physical resource admission.
 
 A new kind, a recipe bump or "regenerate all" therefore needs no migration
 code: the anti-join starts matching again and the reconciler works through the
