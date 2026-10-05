@@ -844,7 +844,11 @@ class TestCleanupCaptureSlots:
         execution = JobExecution(
             stored_job.id, stored_job.attempts, stored_job.execution_epoch
         )
-        job = type("Job", (), {"state": "completed", "model_id": 1, "result": None})()
+        job = type(
+            "Job",
+            (),
+            {"state": "completed", "model_id": 1, "result": None, "failed": 0},
+        )()
         monkeypatch.setattr(inbox.registry, "get", lambda _job_id: job)
         monkeypatch.setattr(inbox, "_record_v2_results", lambda *_args: (True, 1, 0))
         monkeypatch.setattr(inbox, "_attach_capture_cover", lambda *_args: write)

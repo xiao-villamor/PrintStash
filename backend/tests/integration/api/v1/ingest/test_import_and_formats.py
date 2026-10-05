@@ -19,7 +19,7 @@ import trimesh
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.core.config import _overlay
+from app.core.config import _overlay, settings
 from app.db.models import Collection, File, FileType, Model
 from tests._env import use_local_storage
 from tests.integration.api.v1._ingest_assertions import drain_work
@@ -225,7 +225,8 @@ class TestImportFromUrl:
     ) -> None:
         use_local_storage(tmp_path)
 
-        async def _fake_download(url: str):
+        async def _fake_download(url: str, *, window_max_bytes: int | None = None):
+            assert window_max_bytes == settings.ingestion_batch_max_mb * 1024 * 1024
             staging = Path(_overlay["staging_dir"])
             staging.mkdir(parents=True, exist_ok=True)
             staged = staging / "remote-cube.stl"

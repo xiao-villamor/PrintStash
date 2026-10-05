@@ -600,7 +600,7 @@ class TestPut:
         job = type(
             "Job",
             (),
-            {"state": "completed", "model_id": model_id, "result": None},
+            {"state": "completed", "model_id": model_id, "result": None, "failed": 0},
         )()
         monkeypatch.setattr(inbox.registry, "get", lambda _job_id: job)
         monkeypatch.setattr(inbox, "get_backend", lambda: backend)

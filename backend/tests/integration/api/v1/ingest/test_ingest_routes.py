@@ -363,7 +363,8 @@ class TestIngestUrl:
         staged.parent.mkdir(parents=True, exist_ok=True)
         staged.write_bytes(_cube_stl_bytes())
 
-        async def fake_download(url: str):
+        async def fake_download(url: str, *, window_max_bytes: int | None = None):
+            assert window_max_bytes == settings.ingestion_batch_max_mb * 1024 * 1024
             return staged, "cube.stl"
 
         with (
@@ -566,9 +567,10 @@ class TestSelectArchiveEntries:
     ) -> None:
         use_local_storage(tmp_path)
         manifest = _inspected(client, auth_headers)
+        # Window discovery uses the same archive-directory policy as extraction.
         with patch.object(
             importer,
-            "extract_selected",
+            "selected_archive_entries",
             side_effect=ImportError_("archive_entry_unsafe"),
         ):
             payload = _job(
@@ -590,7 +592,9 @@ class TestSelectArchiveEntries:
     ) -> None:
         use_local_storage(tmp_path)
         manifest = _inspected(client, auth_headers)
-        with patch.object(importer, "extract_selected", return_value=[]):
+        # No selected importable entries means no planned or materialized units.
+        # Keep discovery and the window iterator consistent with that directory.
+        with patch.object(importer, "selected_archive_entries", return_value=()):
             payload = _job(
                 client,
                 client.post(

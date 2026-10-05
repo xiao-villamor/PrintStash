@@ -95,7 +95,10 @@ def _stage_bytes(data: bytes, suffix: str) -> Path:
 def _fake_download(staged: Path, original_filename: str) -> AsyncMock:
     """Mock for ``download_to_staging`` that yields an already-staged file."""
 
-    async def _dl(url: str):  # signature mirrors the real coroutine
+    async def _dl(url: str, *, window_max_bytes: int | None = None):
+        assert window_max_bytes is None or window_max_bytes > 0
+        if window_max_bytes is not None and Path(original_filename).suffix != ".zip":
+            assert staged.stat().st_size <= window_max_bytes
         return staged, original_filename
 
     return AsyncMock(side_effect=_dl)
@@ -691,7 +694,7 @@ class TestImportFromUrl:
         use_local_storage(tmp_path)
         files = [
             import_resolvers.ModelFile(file_id="10", name="a.stl", file_type="stl"),
-            import_resolvers.ModelFile(file_id="11", name="b.stl", file_type="stl"),
+            import_resolvers.ModelFile(file_id="11", name="b.gcode", file_type="gcode"),
             import_resolvers.ModelFile(file_id="12", name="c.stl", file_type="stl"),
         ]
         with (
@@ -727,18 +730,23 @@ class TestImportFromUrl:
                 (BENCHY_GCODE_A.read_bytes(), "b.gcode"),
             ]
         )
+        selected = AsyncMock(
+            return_value=(
+                import_resolvers.SelectedFileDownload(
+                    files[0], "https://files.printables.test/a.stl"
+                ),
+                import_resolvers.SelectedFileDownload(
+                    files[1], "https://files.printables.test/b.gcode"
+                ),
+            )
+        )
         with (
             patch(
                 "app.modules.ingestion.importer.validate_public_url", return_value=None
             ),
             patch(
-                "app.modules.ingestion.import_resolvers.resolve_selected_download",
-                new=AsyncMock(
-                    return_value=[
-                        "https://files.printables.test/a.stl",
-                        "https://files.printables.test/b.stl",
-                    ]
-                ),
+                "app.modules.ingestion.import_resolvers.resolve_selected_sources",
+                new=selected,
             ),
             patch("app.modules.ingestion.importer.download_to_staging", new=download),
         ):
@@ -762,6 +770,29 @@ class TestImportFromUrl:
             m.source_url == "https://www.printables.com/model/1660232-springy-cat"
             for m in models
         )
+
+        selected.assert_awaited_once_with(
+            "https://www.printables.com/model/1660232-springy-cat", files[:2]
+        )
+        assert [call.args[0] for call in download.await_args_list] == [
+            "https://files.printables.test/a.stl",
+            "https://files.printables.test/b.gcode",
+        ]
+        assert [call.kwargs for call in download.await_args_list] == [
+            {"window_max_bytes": settings.ingestion_batch_max_mb * 1024 * 1024}
+        ] * 2
+        imported_files = db_session.exec(
+            select(File)
+            .join(Model, File.model_id == Model.id)
+            .where(
+                Model.source_url
+                == "https://www.printables.com/model/1660232-springy-cat"
+            )
+        ).all()
+        assert {file.original_filename: file.size_bytes for file in imported_files} == {
+            "a.stl": BENCHY_STL.stat().st_size,
+            "b.gcode": BENCHY_GCODE_A.stat().st_size,
+        }
 
     @_requires(BENCHY_STL)
     def test_import_from_url_names_model_from_download(
@@ -836,8 +867,11 @@ def _fake_download_seq(items: list[tuple[bytes, str]]) -> AsyncMock:
     """
     pending = list(items)
 
-    async def _dl(url: str):
+    async def _dl(url: str, *, window_max_bytes: int | None = None):
+        assert window_max_bytes is None or window_max_bytes > 0
         data, filename = pending.pop(0)
+        if window_max_bytes is not None and Path(filename).suffix != ".zip":
+            assert len(data) <= window_max_bytes
         staged = _stage_bytes(data, Path(filename).suffix or ".bin")
         return staged, filename
 
