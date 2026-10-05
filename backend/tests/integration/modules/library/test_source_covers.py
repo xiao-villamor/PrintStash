@@ -170,7 +170,10 @@ class TestPut:
         backend.rollback_create.assert_called_once_with(receipt)
         assert db_session.exec(select(ModelSourceCover)).all() == []
         assert db_session.exec(select(StagingLease)).all() == []
-        assert db_session.exec(select(OwnedStorageObject)).all() == []
+        history = db_session.exec(select(OwnedStorageObject)).all()
+        assert len(history) == 1
+        assert history[0].state is StorageObjectState.RETIRING
+        assert db_session.exec(select(StorageDeleteIntent)).one().token == receipt.token
 
     def test_leaves_the_old_cover_untouched_when_the_replace_fails(
         self, db_session: Session
@@ -220,7 +223,17 @@ class TestPut:
         assert latest.cover.id == first.cover.id
         expected = process_source_cover_upload(_png("gold"), "image/png").data
         assert backend.read_bytes(latest.cover.storage_key) == expected
-        proof = db_session.exec(select(OwnedStorageObject)).one()
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.COMMITTED
+            )
+        ).one()
+        history = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.RETIRING
+            )
+        ).all()
+        assert first.creation_receipt.token in {row.token for row in history}
         assert proof.provider_ref == provider_ref_for_backend(
             backend, namespace=proof.namespace
         )
@@ -414,7 +427,17 @@ class TestPut:
         source_covers.rollback_after_commit_failure(db_session, backend, replacement)
 
         assert backend.read_bytes(first.cover.storage_key) == old_bytes
-        proof = db_session.exec(select(OwnedStorageObject)).one()
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.COMMITTED
+            )
+        ).one()
+        history = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.RETIRING
+            )
+        ).all()
+        assert first.creation_receipt.token in {row.token for row in history}
         assert backend.creation_matches(
             CreationReceipt(
                 key=proof.key,
@@ -583,15 +606,14 @@ class TestPut:
             )
             row_id = row.id
             model_id = model.id
-            source_id = source.id
         commits.clear()
 
         backend = _backend()
         backend.source_cover_key.side_effect = lambda ident: f"opaque/cover/{ident}"
         backend.read_bytes.return_value = data
         processed = process_source_cover_upload(data, "image/png")
-        backend.create_bytes.return_value = CreationReceipt(
-            key=f"opaque/cover/{source_id}",
+        backend.create_bytes.side_effect = lambda _data, key: CreationReceipt(
+            key=key,
             size=len(processed.data),
             token="finish-cover",
             backend="fake",
@@ -605,12 +627,14 @@ class TestPut:
         monkeypatch.setattr(inbox.registry, "get", lambda _job_id: job)
         monkeypatch.setattr(inbox, "get_backend", lambda: backend)
         monkeypatch.setattr(inbox, "_record_v2_results", lambda *_args: (True, 1, 0))
-        monkeypatch.setattr(inbox, "_cleanup_capture_slots", lambda *_args: True)
+        monkeypatch.setattr(
+            inbox, "_cleanup_capture_slots", lambda *_args, **_kwargs: True
+        )
 
         inbox._finish_import(row_id, execution, factory)
 
-        # Cover, publication intent, proof finalization, then Inbox terminalization.
-        assert len(commits) == 4
+        # Reservation, prepared receipt, then atomic cover/Inbox adoption.
+        assert len(commits) == 3
         with Session(engine) as check:
             finished = check.get(InboxItem, row_id)
             assert finished is not None
@@ -738,7 +762,12 @@ class TestReconcilePending:
                 OwnedStorageObject.key == cover.storage_key
             )
         ).all()
-        assert [row.provider_ref for row in remaining] == ["foreign-provider"]
+        active = [
+            row for row in remaining if row.state is not StorageObjectState.RETIRING
+        ]
+        assert [row.provider_ref for row in active] == ["foreign-provider"]
+        retired = [row for row in remaining if row.state is StorageObjectState.RETIRING]
+        assert [row.provider_ref for row in retired] == [current_ref]
 
     def test_restart_reconciles_replacement_without_restoring_old_bytes(
         self,
@@ -774,7 +803,17 @@ class TestReconcilePending:
         cover = db_session.get(ModelSourceCover, first.cover.id)
         assert cover is not None
         assert cover.size_bytes == len(normalized)
-        proof = db_session.exec(select(OwnedStorageObject)).one()
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.COMMITTED
+            )
+        ).one()
+        history = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.RETIRING
+            )
+        ).all()
+        assert first.creation_receipt.token in {row.token for row in history}
         assert backend.creation_matches(
             CreationReceipt(
                 key=proof.key,
@@ -1109,3 +1148,317 @@ class TestPruneExpired:
         ) == (0, 0)
         assert db_session.get(ModelSourceCover, cover.id) is not None
         assert db_session.get(StagingLease, lease.id) is not None
+
+
+class TestCandidatePublication:
+    @pytest.mark.parametrize("replacement", [False, True], ids=["first", "replacement"])
+    def test_commits_cover_publication_atomically(self, db_session, replacement):
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        old_key = None
+        old_bytes = None
+        if replacement:
+            previous = _put_cover(db_session, backend, source, "red")
+            db_session.commit()
+            old_key = previous.cover.storage_key
+            old_bytes = backend.read_bytes(old_key)
+        candidate = source_covers.prepare_candidate(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png("navy"),
+            content_type="image/png",
+        )
+        visible = source_covers.get(db_session, source.id)
+        assert (visible.storage_key if visible else None) == old_key
+        if old_key is not None:
+            assert backend.read_bytes(old_key) == old_bytes
+        cover = source_covers.attach_candidate(db_session, candidate)
+        source_covers.adopt_candidate(db_session, candidate)
+        db_session.commit()
+        assert cover.storage_key == candidate.publication.receipt.key
+        assert (
+            backend.read_bytes(cover.storage_key)
+            == process_source_cover_upload(_png("navy"), "image/png").data
+        )
+        proof = db_session.get(OwnedStorageObject, candidate.publication.reservation.id)
+        assert proof.state is StorageObjectState.COMMITTED
+        intents = db_session.exec(select(StorageDeleteIntent)).all()
+        if replacement:
+            assert len(intents) == 1
+            assert intents[0].key == old_key
+            assert intents[0].status == "pending"
+            assert backend.read_bytes(old_key) == old_bytes
+        else:
+            assert intents == []
+
+    def test_rolled_back_publication_preserves_previous_cover(self, db_session):
+        from app.modules.storage.storage_ownership import abandon_publication
+
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        previous = _put_cover(db_session, backend, source, "red")
+        db_session.commit()
+        old_key = previous.cover.storage_key
+        old_bytes = backend.read_bytes(old_key)
+        candidate = source_covers.prepare_candidate(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png("navy"),
+            content_type="image/png",
+        )
+        source_covers.attach_candidate(db_session, candidate)
+        source_covers.adopt_candidate(db_session, candidate)
+        db_session.rollback()
+        assert abandon_publication(db_session, candidate.publication)
+        db_session.expire_all()
+        assert source_covers.get(db_session, source.id).storage_key == old_key
+        assert backend.read_bytes(old_key) == old_bytes
+        intents = db_session.exec(select(StorageDeleteIntent)).all()
+        assert [intent.key for intent in intents] == [candidate.publication.receipt.key]
+        assert (
+            db_session.get(
+                OwnedStorageObject, candidate.publication.reservation.id
+            ).state
+            is StorageObjectState.RETIRING
+        )
+
+    def test_rejects_a_candidate_superseded_by_a_later_pointer(self, db_session):
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        stale = source_covers.prepare_candidate(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png("red"),
+            content_type="image/png",
+        )
+        current = source_covers.prepare_candidate(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png("navy"),
+            content_type="image/png",
+        )
+        source_covers.attach_candidate(db_session, current)
+        source_covers.adopt_candidate(db_session, current)
+        db_session.commit()
+        with pytest.raises(
+            source_covers.SourceCoverChangedError, match="source_cover_changed"
+        ):
+            source_covers.attach_candidate(db_session, stale)
+        db_session.rollback()
+        assert (
+            source_covers.get(db_session, source.id).storage_key
+            == current.publication.receipt.key
+        )
+        assert (
+            db_session.get(OwnedStorageObject, stale.publication.reservation.id).state
+            is StorageObjectState.PENDING
+        )
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
+
+
+class TestCommittedCoverCleanup:
+    def test_replacement_rollback_does_not_restore_a_concurrently_deleted_cover(
+        self, tmp_path, monkeypatch
+    ):
+        from app.modules.storage.storage_deletion import (
+            enqueue_prepared_owned_deletion,
+            prepare_owned_key_deletion,
+        )
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'cover-retirement.sqlite'}")
+        event.listen(engine, "connect", _set_sqlite_pragmas)
+        SQLModel.metadata.create_all(engine)
+        backend = get_backend()
+        with Session(engine) as publisher:
+            source = _source(publisher)
+            publisher.commit()
+            first = _put_cover(publisher, backend, source, "red")
+            publisher.commit()
+            cover_id = first.cover.id
+            key = first.cover.storage_key
+            with Session(engine) as deleter:
+                retirement = prepare_owned_key_deletion(
+                    deleter, backend, key, required_proof=True
+                )
+                deleter.rollback()
+            replacement = source_covers.prepare_put(
+                publisher,
+                backend,
+                provenance_source_id=source.id,
+                actor_id=None,
+                data=_png("navy"),
+                content_type="image/png",
+            )
+            publisher.rollback()
+            replace_bytes = backend.replace_bytes
+
+            def deletion_wins(data, receipt):
+                with Session(engine) as deleter:
+                    assert enqueue_prepared_owned_deletion(
+                        deleter, retirement, required_proof=True
+                    )
+                    deleter.delete(deleter.get(ModelSourceCover, cover_id))
+                    deleter.commit()
+                return replace_bytes(data, receipt)
+
+            monkeypatch.setattr(backend, "replace_bytes", deletion_wins)
+
+            source_covers.rollback_after_commit_failure(publisher, backend, replacement)
+
+            publisher.expire_all()
+            assert publisher.get(ModelSourceCover, cover_id) is None
+            assert (
+                publisher.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == key,
+                        OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                    )
+                ).all()
+                == []
+            )
+            intent = publisher.exec(
+                select(StorageDeleteIntent).order_by(StorageDeleteIntent.id.desc())
+            ).first()
+            assert intent.status == "pending"
+            assert backend.creation_matches(
+                CreationReceipt(
+                    key=intent.key,
+                    size=intent.size_bytes,
+                    token=intent.token,
+                    backend=intent.backend,
+                    namespace=intent.namespace,
+                    device=intent.device,
+                    inode=intent.inode,
+                    ctime_ns=intent.ctime_ns,
+                    provider_ref=intent.provider_ref,
+                )
+            )
+
+    def test_delete_preserves_a_pointer_changed_after_storage_preflight(
+        self, db_session, monkeypatch
+    ):
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        previous = _put_cover(db_session, backend, source, "red")
+        db_session.commit()
+        source_id = source.id
+        previous_key = previous.cover.storage_key
+        matches = backend.creation_matches
+
+        def pointer_wins(receipt):
+            monkeypatch.setattr(backend, "creation_matches", matches)
+            with Session(db_session.get_bind()) as adopter:
+                candidate = source_covers.prepare_candidate(
+                    adopter,
+                    backend,
+                    provenance_source_id=source_id,
+                    actor_id=None,
+                    data=_png("navy"),
+                    content_type="image/png",
+                )
+                source_covers.attach_candidate(adopter, candidate)
+                source_covers.adopt_candidate(adopter, candidate)
+                adopter.commit()
+            return matches(receipt)
+
+        monkeypatch.setattr(backend, "creation_matches", pointer_wins)
+
+        with pytest.raises(
+            source_covers.SourceCoverChangedError, match="source_cover_changed"
+        ):
+            source_covers.delete(db_session, backend, source_id)
+        db_session.rollback()
+
+        current = source_covers.get(db_session, source_id)
+        assert current.storage_key != previous_key
+        assert (
+            backend.read_bytes(current.storage_key)
+            == process_source_cover_upload(_png("navy"), "image/png").data
+        )
+
+    @pytest.mark.parametrize("replacement", [False, True], ids=["create", "replace"])
+    def test_commit_failure_cleanup_cannot_undo_an_adopted_cover(
+        self, db_session, replacement
+    ):
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        if replacement:
+            _put_cover(db_session, backend, source, "red")
+            db_session.commit()
+        current = _put_cover(db_session, backend, source, "navy")
+        db_session.commit()
+        key = current.cover.storage_key
+        published_bytes = backend.read_bytes(key)
+        source_covers.rollback_after_commit_failure(db_session, backend, current)
+        db_session.expire_all()
+        assert source_covers.get(db_session, source.id).storage_key == key
+        assert backend.read_bytes(key) == published_bytes
+        active = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state == StorageObjectState.COMMITTED
+            )
+        ).one()
+        assert active.key == key
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
+
+
+class TestAbsentCoverRecovery:
+    def test_absence_observed_before_adoption_cannot_remove_a_committed_cover(
+        self, db_session, monkeypatch
+    ):
+        from app.modules.storage.storage_ownership import adopt_publication
+
+        backend = get_backend()
+        source = _source(db_session)
+        db_session.commit()
+        prepared = source_covers.prepare_put(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png(),
+            content_type="image/png",
+        )
+        db_session.rollback()
+        cover = source_covers.get(db_session, source.id)
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.model_source_cover_id == cover.id)
+        ).one()
+        original_bytes = backend.read_bytes(cover.storage_key)
+
+        def adoption_wins(_key):
+            with Session(db_session.get_bind()) as adopter:
+                adopt_publication(adopter, prepared.publication)
+                adopter.commit()
+            return None
+
+        monkeypatch.setattr(backend, "object_info", adoption_wins)
+        assert not source_covers._discard_cover_if_absent(
+            db_session, backend, cover=cover, lease=lease
+        )
+        db_session.commit()
+        db_session.expire_all()
+        assert (
+            source_covers.get(db_session, source.id).storage_key
+            == prepared.publication.receipt.key
+        )
+        assert backend.read_bytes(cover.storage_key) == original_bytes
+        assert (
+            db_session.get(
+                OwnedStorageObject, prepared.publication.reservation.id
+            ).state
+            is StorageObjectState.COMMITTED
+        )

@@ -80,6 +80,7 @@ from tests.factories.identity import (
 from tests.factories.inference import (
     build_inference_endpoint as build_inference_endpoint,
 )
+from tests.factories.ingestion_scratch import build_ingestion_scratch_window
 from tests.factories.library import (
     build_collection,
     build_file,
@@ -200,6 +201,7 @@ from tests.factories.similarity import (
 from tests.factories.storage import (
     build_owned_storage_object,
     build_storage_delete_intent,
+    build_storage_publication_locator,
     build_stored_file,
     build_unowned_file,
     store_owned_bytes,
@@ -275,6 +277,7 @@ __all__ = [
     "build_backup_retry_attempt",
     "build_stored_file",
     "build_storage_delete_intent",
+    "build_storage_publication_locator",
     "build_tag",
     "build_unowned_file",
     "build_user",
@@ -342,3 +345,5 @@ __all__ += [
 __all__ += ["build_search_projection_request"]
 
 __all__ += ["build_ingestion_entry"]
+
+__all__ += ["build_ingestion_scratch_window"]

@@ -46,7 +46,6 @@ from app.db.models import (
     Job,
     JobKind,
     ModelProvenanceSource,
-    ModelSourceCover,
     StagingLease,
     StorageDeleteIntent,
     User,
@@ -54,9 +53,7 @@ from app.db.models import (
 from app.db.session import get_session_factory
 from app.modules.identity.auth import create_access_token
 from app.modules.ingestion import inbox, staging_leases
-from app.modules.library.source_covers import SourceCoverWrite
 from app.modules.storage.storage_backend.contracts import (
-    CreationReceipt,
     StorageBackend,
 )
 from app.modules.storage.storage_deletion import process_storage_delete_intents
@@ -576,7 +573,7 @@ class TestUploadCaptureSlot:
         db_session.commit()
         monkeypatch.setattr(
             inbox.source_covers,
-            "put",
+            "prepare_candidate",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 RuntimeError("cover publish failed")
             ),
@@ -587,7 +584,7 @@ class TestUploadCaptureSlot:
         attached: list[int] = []
         monkeypatch.setattr(
             inbox.source_covers,
-            "put",
+            "prepare_candidate",
             lambda _s, _b, **kwargs: attached.append(kwargs["provenance_source_id"]),
         )
         assert inbox._attach_capture_cover(db_session, row)
@@ -691,7 +688,7 @@ class TestCleanupCaptureSlots:
             stream=BytesIO(b"two"),
             media_type="application/octet-stream",
         )
-        original_enqueue = inbox.enqueue_creation_receipt
+        original_enqueue = inbox.enqueue_prevalidated_receipt
         calls = 0
 
         def fail_second(*args: object, **kwargs: object) -> object:
@@ -701,7 +698,7 @@ class TestCleanupCaptureSlots:
                 raise OSError("intent store unavailable")
             return original_enqueue(*args, **kwargs)
 
-        monkeypatch.setattr(inbox, "enqueue_creation_receipt", fail_second)
+        monkeypatch.setattr(inbox, "enqueue_prevalidated_receipt", fail_second)
 
         assert not inbox._cleanup_capture_slots(db_session, row)
         db_session.commit()
@@ -790,51 +787,58 @@ class TestCleanupCaptureSlots:
         assert not backend.exists(slot.storage_key)
 
     @pytest.mark.parametrize("created", [True, False])
-    def test_finished_capture_rolls_back_cover_write_when_commit_fails(
-        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, created: bool
+    def test_finished_capture_retires_only_the_candidate_when_commit_fails(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        created: bool,
+        make_model,
+        make_provenance_source,
     ) -> None:
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (8, 8), "navy").save(image, format="PNG")
+        image_bytes = image.getvalue()
+        from app.db.models import (
+            JobKind,
+            JobState,
+            OwnedStorageObject,
+            StorageDeleteIntent,
+            StorageObjectState,
+        )
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.work.contracts import JobExecution
+        from tests.factories.ops import build_job
+
         owner = build_user(
             db_session, f"cover-commit-failure-{created}", superuser=True
         )
+        model = make_model()
+        source = make_provenance_source(model)
+        backend = get_backend()
+        original_key = original_bytes = None
+        db_session.commit()
+        if not created:
+            original = inbox.source_covers.put(
+                db_session,
+                backend,
+                provenance_source_id=source.id,
+                actor_id=owner.id,
+                data=image_bytes,
+                content_type="image/png",
+            )
+            db_session.commit()
+            original_key = original.cover.storage_key
+            original_bytes = backend.read_bytes(original_key)
         row = InboxItem(
             owner_user_id=owner.id,
             source_kind="browser",
             source_url="https://makerworld.com/en/models/1234-widget",
-            source_hostname="makerworld.com",
             state=InboxItemState.IMPORTING,
         )
         db_session.add(row)
         db_session.commit()
-        receipt = CreationReceipt(
-            key=f"covers/{created}.webp",
-            size=1,
-            token="receipt",
-            backend="fake",
-            namespace="test",
-        )
-        write = SourceCoverWrite(
-            cover=ModelSourceCover(provenance_source_id=1, storage_key=receipt.key),
-            created=created,
-            creation_receipt=receipt if created else None,
-            replacement_receipt=None if created else receipt,
-            replaced_bytes=None if created else b"old",
-        )
-
-        class _Factory:
-            def scoped_session(self) -> object:
-                class _Scope:
-                    def __enter__(self) -> Session:
-                        return db_session
-
-                    def __exit__(self, *args: object) -> None:
-                        return None
-
-                return _Scope()
-
-        from app.db.models import JobKind, JobState
-        from app.modules.work.contracts import JobExecution
-        from tests.factories.ops import build_job
-
         stored_job = build_job(
             db_session, kind=JobKind.INGESTION_INBOX_IMPORT, state=JobState.COMPLETED
         )
@@ -844,33 +848,55 @@ class TestCleanupCaptureSlots:
         execution = JobExecution(
             stored_job.id, stored_job.attempts, stored_job.execution_epoch
         )
+        candidate = inbox.source_covers.prepare_candidate(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=owner.id,
+            data=image_bytes,
+            content_type="image/png",
+        )
+
+        class _Factory:
+            def scoped_session(self):
+                class _Scope:
+                    def __enter__(self):
+                        return db_session
+
+                    def __exit__(self, *args):
+                        return None
+
+                return _Scope()
+
         job = type(
             "Job",
             (),
-            {"state": "completed", "model_id": 1, "result": None, "failed": 0},
+            {"state": "completed", "model_id": model.id, "result": None, "failed": 0},
         )()
         monkeypatch.setattr(inbox.registry, "get", lambda _job_id: job)
         monkeypatch.setattr(inbox, "_record_v2_results", lambda *_args: (True, 1, 0))
-        monkeypatch.setattr(inbox, "_attach_capture_cover", lambda *_args: write)
-        monkeypatch.setattr(inbox, "_cleanup_capture_slots", lambda *_args: True)
-        rollback = pytest.MonkeyPatch()
-        rollback.setattr(
-            db_session,
-            "commit",
-            lambda: (_ for _ in ()).throw(RuntimeError("commit failed")),
-        )
-        seam_calls: list[SourceCoverWrite] = []
+        monkeypatch.setattr(inbox, "_attach_capture_cover", lambda *_args: candidate)
         monkeypatch.setattr(
-            inbox.source_covers,
-            "rollback_after_commit_failure",
-            lambda _session, _backend, result: seam_calls.append(result),
+            inbox, "_cleanup_capture_slots", lambda *_args, **_kwargs: True
         )
-
-        with pytest.raises(RuntimeError, match="commit failed"):
-            inbox._finish_import(row.id, execution, _Factory())
-
-        assert seam_calls == [write]
-        rollback.undo()
+        with monkeypatch.context() as failure:
+            failure.setattr(
+                db_session,
+                "commit",
+                lambda: (_ for _ in ()).throw(RuntimeError("commit failed")),
+            )
+            with pytest.raises(RuntimeError, match="commit failed"):
+                inbox._finish_import(row.id, execution, _Factory())
+        db_session.expire_all()
+        visible = inbox.source_covers.get(db_session, source.id)
+        assert (visible.storage_key if visible else None) == original_key
+        if original_key is not None:
+            assert backend.read_bytes(original_key) == original_bytes
+        proof = db_session.get(OwnedStorageObject, candidate.publication.reservation.id)
+        assert proof.state is StorageObjectState.RETIRING
+        intents = db_session.exec(select(StorageDeleteIntent)).all()
+        assert [intent.key for intent in intents] == [candidate.publication.receipt.key]
+        assert db_session.get(InboxItem, row.id).state is InboxItemState.IMPORTING
 
     def test_a_rolled_back_slot_cleanup_leaves_everything_in_place(
         self,
@@ -1092,7 +1118,7 @@ class TestRetry:
         )
         calls: list[int] = []
 
-        async def fake_resolve(item_id: int) -> None:
+        async def fake_resolve(item_id: int, **kwargs) -> None:
             # A resolve always moves the item on from CAPTURED, as the real one
             # does; otherwise the resolve source would find it pending again.
             calls.append(item_id)
@@ -1185,7 +1211,7 @@ class TestDismiss:
         )
         monkeypatch.setattr(
             inbox,
-            "enqueue_creation_receipt",
+            "enqueue_prevalidated_receipt",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 OSError("intent unavailable")
             ),
@@ -1250,3 +1276,304 @@ class TestPruneExpiredBrowserLeases:
         assert expired_item is not None
         assert expired_item.state == InboxItemState.FAILED
         assert expired_item.error_code == "staging_expired"
+
+
+class TestTerminalCaptureCleanup:
+    def test_terminal_cleanup_attaches_durable_receipt_without_provider_or_spool_io(
+        self, db_session, monkeypatch
+    ):
+        owner = build_user(db_session, "terminal-receipt-owner", superuser=True)
+        item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        slot = _upload(db_session, slots[0])
+        key = slot.storage_key
+        backend = inbox.get_backend()
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("terminal cleanup performed external I/O")
+
+        monkeypatch.setattr(backend, "creation_matches", forbidden)
+        monkeypatch.setattr(backend, "object_info", forbidden)
+        monkeypatch.setattr(staging_leases, "remove_capture_slot_staging", forbidden)
+        assert inbox._cleanup_capture_slots(db_session, item, durable_only=True)
+        db_session.commit()
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []
+        assert db_session.exec(select(StagingLease)).all() == []
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.key == key
+        assert intent.status == "pending"
+        assert backend.read_bytes(key) == b"slot-owned"
+
+    @pytest.mark.parametrize("incomplete", ["spool", "receipt"])
+    def test_terminal_cleanup_defers_incomplete_publication_without_losing_staging_owner(
+        self, db_session, monkeypatch, incomplete
+    ):
+        owner = build_user(
+            db_session, f"terminal-deferred-{incomplete}", superuser=True
+        )
+        item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        slot = slots[0]
+        if incomplete == "spool":
+            path = staging_leases.prepare_capture_slot_staging(
+                db_session, slot_id=slot.id
+            )
+            with staging_leases.open_capture_slot_staging(
+                db_session, slot_id=slot.id
+            ) as output:
+                output.write(b"part")
+            db_session.commit()
+        else:
+            slot = _upload(db_session, slot)
+            slot.receipt_json = None
+            db_session.add(slot)
+            db_session.commit()
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot.id)
+        ).one()
+        lease_id = lease.id
+        backend = inbox.get_backend()
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("deferred cleanup performed external I/O")
+
+        monkeypatch.setattr(backend, "object_info", forbidden)
+        monkeypatch.setattr(backend, "creation_matches", forbidden)
+        monkeypatch.setattr(staging_leases, "remove_capture_slot_staging", forbidden)
+        assert not inbox._cleanup_capture_slots(db_session, item, durable_only=True)
+        db_session.commit()
+        assert db_session.get(CaptureUploadSlot, slot.id) is not None
+        assert db_session.get(StagingLease, lease_id) is not None
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
+        if incomplete == "spool":
+            assert path.read_bytes() == b"part"
+        else:
+            assert backend.read_bytes(slot.storage_key) == b"slot-owned"
+
+
+class TestPublishedSlotInputCustody:
+    @pytest.mark.parametrize("materialization", ["local", "stream"])
+    def test_cancelled_import_retains_published_slot_during_active_read(
+        self,
+        db_session,
+        make_user,
+        local_storage,
+        monkeypatch,
+        materialization,
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from contextlib import closing
+        from threading import Event
+
+        from app.db.session import override_session_factory
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.work import runner, service
+        from tests.factories.content import three_mf
+        from tests.factories.ops import build_job_context
+
+        owner = make_user(superuser=True)
+        body = three_mf()
+        item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload(body)
+        )
+        slot = _upload(db_session, slots[0], body)
+        assert slot.storage_key is not None
+        slot_id, item_id, key = slot.id, item.id, slot.storage_key
+        inbox.finalize_capture_upload(db_session, owner, item_id)
+        db_session.expire_all()
+        item = db_session.get(InboxItem, item_id)
+        assert item is not None
+        job_id = inbox.begin_import(db_session, item, ["widget.3mf"])
+        assert job_id is not None
+        lease_id = db_session.exec(
+            select(StagingLease.id).where(
+                StagingLease.capture_upload_slot_origin_id == slot_id
+            )
+        ).one()
+        context = build_job_context(job_id)
+        definition = {
+            definition.name: definition for definition in inbox.definitions()
+        }[JobKind.INGESTION_INBOX_IMPORT]
+        factory = get_session_factory()
+        backend = get_backend()
+        entered, resume = Event(), Event()
+        copy = inbox._copy_import_source
+
+        def pause_source(source, target, **kwargs):
+            with source.open("rb") as opened:
+                assert opened.read(1) == body[:1]
+                entered.set()
+                assert resume.wait(timeout=10), (
+                    "parent did not resume published slot reader"
+                )
+                return copy(source, target, **kwargs)
+
+        def actor():
+            override_session_factory(factory)
+            return runner._run_step(
+                definition.steps[0], context, mutating=definition.mutating
+            )
+
+        def attempt_dismiss(row):
+            try:
+                inbox.dismiss(db_session, row)
+            except OperationError as exc:
+                db_session.rollback()
+                return exc.code
+            return "dismissed"
+
+        if materialization == "local":
+            monkeypatch.setattr(inbox, "_copy_import_source", pause_source)
+        else:
+            stream = backend.stream_chunks
+
+            def pause_stream(key, *args, **kwargs):
+                with closing(stream(key, *args, **kwargs)) as chunks:
+                    first = next(chunks)
+                    yield first
+                    entered.set()
+                    assert resume.wait(timeout=10), (
+                        "parent did not resume slot materialization"
+                    )
+                    yield from chunks
+
+            monkeypatch.setattr(backend, "direct_path", lambda key: None)
+            monkeypatch.setattr(backend, "stream_chunks", pause_stream)
+        _ = owner.id, owner.is_superuser
+        db_session.expunge(owner)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            running = executor.submit(actor)
+            try:
+                assert entered.wait(timeout=10), "published slot reader never started"
+                service.cancel(job_id, actor=owner)
+                db_session.expire_all()
+                cancelled = db_session.get(InboxItem, item_id)
+                assert (
+                    cancelled is not None and cancelled.state == InboxItemState.FAILED
+                )
+                outcome = attempt_dismiss(cancelled)
+                process_storage_delete_intents()
+
+                assert not running.done()
+                assert backend.read_bytes(key) == body
+                assert outcome == "staging_cleanup_failed"
+                with factory.scoped_session() as session:
+                    assert session.get(CaptureUploadSlot, slot_id) is not None
+                    assert session.get(StagingLease, lease_id) is not None
+                    assert (
+                        session.exec(
+                            select(StorageDeleteIntent).where(
+                                StorageDeleteIntent.key == key
+                            )
+                        ).all()
+                        == []
+                    )
+            finally:
+                resume.set()
+                running.result(timeout=15)
+
+        db_session.expire_all()
+        terminal = db_session.get(InboxItem, item_id)
+        assert terminal is not None
+        inbox.dismiss(db_session, terminal)
+        process_storage_delete_intents()
+        assert not backend.exists(key)
+        with factory.scoped_session() as session:
+            assert session.get(CaptureUploadSlot, slot_id) is None
+            assert session.get(StagingLease, lease_id) is None
+
+    def test_cancel_before_window_claim_never_opens_published_source(
+        self,
+        db_session,
+        make_user,
+        local_storage,
+        monkeypatch,
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from app.db.session import override_session_factory
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.work import runner, service
+        from tests.factories.content import three_mf
+        from tests.factories.ops import build_job_context
+
+        owner = make_user(superuser=True)
+        body = three_mf()
+        item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload(body)
+        )
+        slot = _upload(db_session, slots[0], body)
+        assert slot.storage_key is not None
+        slot_id, item_id, key = slot.id, item.id, slot.storage_key
+        inbox.finalize_capture_upload(db_session, owner, item_id)
+        db_session.expire_all()
+        item = db_session.get(InboxItem, item_id)
+        assert item is not None
+        job_id = inbox.begin_import(db_session, item, ["widget.3mf"])
+        assert job_id is not None
+        lease_id = db_session.exec(
+            select(StagingLease.id).where(
+                StagingLease.capture_upload_slot_origin_id == slot_id
+            )
+        ).one()
+        context = build_job_context(job_id)
+        definition = {
+            definition.name: definition for definition in inbox.definitions()
+        }[JobKind.INGESTION_INBOX_IMPORT]
+        factory = get_session_factory()
+        backend = get_backend()
+
+        from app.db.models import CapacityReservation, IngestionScratchWindow
+        from app.modules.ingestion import scratch_windows
+
+        entered, resume = Event(), Event()
+        reads = []
+
+        def forbidden_read(key):
+            reads.append(key)
+            raise AssertionError("cancelled claimant opened its published source")
+
+        def actor():
+            override_session_factory(factory)
+            return runner._run_step(
+                definition.steps[0], context, mutating=definition.mutating
+            )
+
+        # Pause before entering the authority transaction, so cancellation can
+        # win without waiting for the claimant's SQLite writer lock.
+        create = scratch_windows.create_window
+
+        def pause_prepared(*args, **kwargs):
+            window = create(*args, **kwargs)
+            entered.set()
+            assert resume.wait(timeout=10), "parent did not resume prepared window"
+            return window
+
+        monkeypatch.setattr(scratch_windows, "create_window", pause_prepared)
+        monkeypatch.setattr(backend, "direct_path", forbidden_read)
+        _ = owner.id, owner.is_superuser
+        db_session.expunge(owner)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            running = executor.submit(actor)
+            try:
+                assert entered.wait(timeout=10), "window was not prepared"
+                service.cancel(job_id, actor=owner)
+                db_session.expire_all()
+                terminal = db_session.get(InboxItem, item_id)
+                assert terminal is not None
+                inbox.dismiss(db_session, terminal)
+                process_storage_delete_intents()
+                assert not backend.exists(key)
+            finally:
+                resume.set()
+                running.result(timeout=15)
+        assert reads == []
+        with factory.scoped_session() as session:
+            assert session.get(CaptureUploadSlot, slot_id) is None
+            assert session.get(StagingLease, lease_id) is None
+            assert session.exec(select(IngestionScratchWindow)).all() == []
+            assert session.exec(select(CapacityReservation)).all() == []

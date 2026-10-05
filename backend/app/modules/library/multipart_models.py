@@ -34,6 +34,10 @@ from app.db.projections import content_changed
 from app.db.scopes import live
 from app.modules.identity import rbac
 from app.modules.library import collection_tree
+from app.modules.storage.storage_deletion import (
+    PreparedOwnedDeletion,
+    enqueue_prepared_owned_deletion,
+)
 from app.schemas.documents import DocumentListItem
 from app.schemas.multipart_models import (
     MultipartChoiceWrite,
@@ -724,6 +728,7 @@ def save(
     cover_model_set: bool = False,
     cover_image_url: str | None = None,
     cover_image_set: bool = False,
+    cover_retirement: PreparedOwnedDeletion | None = None,
 ) -> MultipartModelRead:
     """Validate and commit a composition through the transactional owner."""
     save_in_transaction(
@@ -742,6 +747,9 @@ def save(
         cover_image_url=cover_image_url,
         cover_image_set=cover_image_set,
     )
+    session.flush()
+    if cover_retirement is not None:
+        enqueue_prepared_owned_deletion(session, cover_retirement, required_proof=True)
     session.commit()
     session.refresh(aggregate)
     return read(session, user, aggregate)
@@ -756,10 +764,18 @@ def replace_parts(
     return save(session, user, aggregate, requested)
 
 
-def delete_aggregate(session: Session, aggregate: MultipartModel) -> None:
+def delete_aggregate(
+    session: Session,
+    aggregate: MultipartModel,
+    *,
+    cover_retirement: PreparedOwnedDeletion | None = None,
+) -> None:
     """Delete only grouping rows; Models and their files remain untouched."""
     session.delete(aggregate)
     content_changed(session, "multipart_model", [aggregate.id])
+    session.flush()
+    if cover_retirement is not None:
+        enqueue_prepared_owned_deletion(session, cover_retirement, required_proof=True)
     session.commit()
 
 

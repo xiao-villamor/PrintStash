@@ -34,7 +34,11 @@ from app.db.models import (
 from app.db.projections import content_changed
 from app.modules.identity.rbac import effective_collection_role, role_allows
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_deletion import enqueue_owned_key
+from app.modules.storage.storage_deletion import (
+    PreparedOwnedDeletion,
+    prepare_owned_key_deletion,
+)
+from app.modules.storage.storage_ownership import finish_publication_batch
 from app.schemas.provenance import PROVENANCE_FIELD_NAMES
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -179,6 +183,7 @@ class CaptureUpsertResult:
     source: ModelProvenanceSource
     capture: ProvenanceCapture
     created_capture: bool
+    storage_retirements: tuple[PreparedOwnedDeletion, ...]
 
 
 @dataclass(frozen=True)
@@ -194,6 +199,20 @@ class PortableProvenanceMergeResult:
     link: ArtifactProvenanceLink
     imported_override_fields: tuple[str, ...]
     conflicting_override_fields: tuple[str, ...]
+    storage_retirements: tuple[PreparedOwnedDeletion, ...]
+
+
+@dataclass(frozen=True)
+class ProvenanceAttachment:
+    link: ArtifactProvenanceLink
+    storage_retirements: tuple[PreparedOwnedDeletion, ...]
+
+
+def finish_storage_retirements(
+    session: Session, retirements: tuple[PreparedOwnedDeletion, ...]
+) -> None:
+    session.flush()
+    finish_publication_batch(session, publications=(), retirements=retirements)
 
 
 @dataclass(frozen=True)
@@ -238,11 +257,33 @@ def _find_source(
 
 def _merge_sources(
     session: Session, target: ModelProvenanceSource, obsolete: ModelProvenanceSource
-) -> ModelProvenanceSource:
+) -> tuple[ModelProvenanceSource, tuple[PreparedOwnedDeletion, ...]]:
     """Merge the URL fallback row into the stable row and its source cover."""
     if target.id == obsolete.id:
-        return target
+        return target, ()
     assert target.id is not None and obsolete.id is not None
+    obsolete_cover = session.exec(
+        select(ModelSourceCover).where(
+            ModelSourceCover.provenance_source_id == obsolete.id
+        )
+    ).first()
+    target_cover = session.exec(
+        select(ModelSourceCover).where(
+            ModelSourceCover.provenance_source_id == target.id
+        )
+    ).first()
+    retirement = (
+        prepare_owned_key_deletion(
+            session,
+            get_backend(),
+            obsolete_cover.storage_key,
+            required_proof=True,
+            resource_kind="model_source_cover",
+            resource_id=obsolete_cover.id,
+        )
+        if obsolete_cover is not None and target_cover is not None
+        else None
+    )
     target_fields = {
         row.field_name: row
         for row in session.exec(
@@ -322,19 +363,13 @@ def _merge_sources(
             # obsolete cover's positive receipt into the DB-first deletion
             # outbox before deleting its row; the caller's transaction keeps
             # source/field/capture/link and storage authorization atomic.
-            enqueue_owned_key(
-                session,
-                get_backend(),
-                obsolete_cover.storage_key,
-                required_proof=True,
-                resource_kind="model_source_cover",
-                resource_id=obsolete_cover.id,
-            )
+            # Exact evidence was prepared before source mutations. The caller
+            # attaches retirement only after its remaining links/domain work.
             session.delete(obsolete_cover)
     session.flush()
     session.delete(obsolete)
     session.flush()
-    return target
+    return target, (retirement,) if retirement is not None else ()
 
 
 def upsert_capture(
@@ -347,6 +382,7 @@ def upsert_capture(
     update_captured_fields: bool = True,
 ) -> CaptureUpsertResult:
     now = utcnow()
+    retirements: tuple[PreparedOwnedDeletion, ...] = ()
     key = identity_key(manifest)
     provider, source_item_id, canonical_url, source_revision = _source_values(manifest)
     source = _find_source(session, model_id, key)
@@ -357,7 +393,7 @@ def upsert_capture(
         else None
     )
     if source is not None and legacy is not None and source.id != legacy.id:
-        source = _merge_sources(session, source, legacy)
+        source, retirements = _merge_sources(session, source, legacy)
     elif source is None and legacy is not None:
         try:
             with session.begin_nested():
@@ -375,7 +411,7 @@ def upsert_capture(
                 raise
             stale = _find_source(session, model_id, legacy_key)
             if stale is not None and stale.id != source.id:
-                source = _merge_sources(session, source, stale)
+                source, retirements = _merge_sources(session, source, stale)
     if source is None:
         source = ModelProvenanceSource(
             model_id=model_id,
@@ -463,7 +499,7 @@ def upsert_capture(
     ).first()
     if capture is not None:
         capture.checked_at = now
-        return CaptureUpsertResult(source, capture, False)
+        return CaptureUpsertResult(source, capture, False, retirements)
     capture = ProvenanceCapture(
         provenance_source_id=source.id,
         inbox_item_id=inbox_item_id,
@@ -479,7 +515,7 @@ def upsert_capture(
         with session.begin_nested():
             session.add(capture)
             session.flush()
-        return CaptureUpsertResult(source, capture, True)
+        return CaptureUpsertResult(source, capture, True, retirements)
     except IntegrityError:
         capture = session.exec(
             select(ProvenanceCapture).where(
@@ -490,7 +526,7 @@ def upsert_capture(
         if capture is None:
             raise
         capture.checked_at = now
-        return CaptureUpsertResult(source, capture, False)
+        return CaptureUpsertResult(source, capture, False, retirements)
 
 
 def set_user_override(
@@ -610,7 +646,7 @@ def attach_ingested_artifact(
     context: ProvenanceContext,
     *,
     update_captured_fields: bool = True,
-) -> ArtifactProvenanceLink:
+) -> ProvenanceAttachment:
     """Attach capture and link inside the caller's existing ingestion transaction."""
     result = upsert_capture(
         session,
@@ -636,7 +672,7 @@ def attach_ingested_artifact(
     ).first()
     if existing is not None:
         if existing.file_id == file_row.id:
-            return existing
+            return ProvenanceAttachment(existing, result.storage_retirements)
         raise ValueError("captured_artifact_already_linked") from None
     source_filename = _bounded(context.source_filename, 512, "source_filename")
     assert source_filename is not None
@@ -659,7 +695,7 @@ def attach_ingested_artifact(
         with session.begin_nested():
             session.add(link)
             session.flush()
-        return link
+        return ProvenanceAttachment(link, result.storage_retirements)
     except IntegrityError:
         existing = session.exec(
             select(ArtifactProvenanceLink).where(
@@ -669,7 +705,7 @@ def attach_ingested_artifact(
         if existing is None:
             raise
         if existing.file_id == file_row.id:
-            return existing
+            return ProvenanceAttachment(existing, result.storage_retirements)
         raise ValueError("captured_artifact_already_linked") from None
 
 
@@ -681,9 +717,10 @@ def attach_existing_artifact(
     imported_overrides: Mapping[str, object] | None = None,
 ) -> PortableProvenanceMergeResult:
     """Merge portable provenance onto an existing Artifact without blob I/O or commit."""
-    link = attach_ingested_artifact(
+    attachment = attach_ingested_artifact(
         session, file_row, context, update_captured_fields=False
     )
+    link = attachment.link
     imported: list[str] = []
     conflicts: list[str] = []
     for field_name, value in (imported_overrides or {}).items():
@@ -720,4 +757,6 @@ def attach_existing_artifact(
         row.user_updated_by = context.actor_id
         row.user_updated_at = utcnow()
         imported.append(field_name)
-    return PortableProvenanceMergeResult(link, tuple(imported), tuple(conflicts))
+    return PortableProvenanceMergeResult(
+        link, tuple(imported), tuple(conflicts), attachment.storage_retirements
+    )

@@ -21,7 +21,7 @@ tail, and retention never removes a Job that still owns staged bytes.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -679,6 +679,49 @@ class TestCounts:
 
 
 class TestPrune:
+    @pytest.mark.parametrize("policy", ["user-age", "system-age", "user-cap"])
+    def test_retains_source_authority_until_scratch_custody_is_released(
+        self,
+        policy,
+        store,
+        owner,
+        make_job,
+        make_ingestion_scratch_window,
+        db_session,
+    ) -> None:
+        from app.db.models.ingestion_scratch import IngestionScratchWindow
+
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        expired = now - timedelta(days=365)
+        job = make_job(
+            owner=None if policy == "system-age" else owner,
+            state=JobState.CANCELLED,
+            updated_at=expired if policy != "user-cap" else now - timedelta(minutes=1),
+        )
+        job_id = job.id
+        if policy == "user-cap":
+            _overlay["jobs_retention_per_user"] = 1
+            make_job(owner=owner, state=JobState.COMPLETED, updated_at=now)
+        receipt = make_ingestion_scratch_window(
+            job=job,
+            execution_epoch="retired-reader-epoch",
+            job_id=None,
+        )
+        receipt_id = receipt.id
+
+        assert store.prune(now=now) == 0
+        db_session.expire_all()
+        assert db_session.get(Job, job_id) is not None
+        assert (
+            db_session.get(IngestionScratchWindow, receipt_id).origin_job_id == job_id
+        )
+
+        db_session.delete(db_session.get(IngestionScratchWindow, receipt_id))
+        db_session.commit()
+        assert store.prune(now=now) == 1
+        db_session.expire_all()
+        assert db_session.get(Job, job_id) is None
+
     def test_drops_a_user_job_past_retention(
         self, store: JobStore, owner: User, make_job, db_session: Session
     ) -> None:

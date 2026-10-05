@@ -21,7 +21,9 @@ from app.modules.storage.storage_ownership import (
     complete_publication,
     delete_owned_key,
     provider_ref_for_backend,
+    settle_observed_publication,
 )
+from app.modules.storage.storage_publication import PublicationReservation
 from app.runtime.maintenance import RestoreConflictError
 
 logger = get_logger(__name__)
@@ -76,18 +78,42 @@ def reconcile_backup_caches(limit: int = 100) -> int:
             .limit(limit)
         ).all()
         for row in rows:
+            publication_reservation = PublicationReservation.of(row)
+            observed_state = row.state
+
+            def settle(
+                state,
+                error=None,
+                *,
+                reservation=publication_reservation,
+                expected_state=observed_state,
+            ):
+                settle_observed_publication(
+                    session,
+                    reservation,
+                    observed_state=expected_state,
+                    state=state,
+                    last_error=error,
+                )
+                session.commit()
+
             if _cache_path_pinned_by_restore_journal(row.key):
                 continue
             path = Path(row.key).resolve(strict=False)
             cache_root = (settings.backup_dir / ".cloud-cache").resolve(strict=False)
             if path.parent != cache_root or not path.name:
-                row.state = StorageObjectState.BLOCKED
-                row.last_error = "backup_cache_path_invalid"
-                session.add(row)
+                settle(StorageObjectState.BLOCKED, "backup_cache_path_invalid")
                 continue
             if not path.exists():
-                session.delete(row)
-                reconciled += 1
+                if settle_observed_publication(
+                    session,
+                    publication_reservation,
+                    observed_state=observed_state,
+                    state=StorageObjectState.RETIRING,
+                    last_error=None,
+                ):
+                    reconciled += 1
+                session.commit()
                 continue
             if row.state == StorageObjectState.COMMITTED:
                 created_at = row.created_at
@@ -102,14 +128,10 @@ def reconcile_backup_caches(limit: int = 100) -> int:
                         if delete_owned_key(session, backend, str(path)):
                             reconciled += 1
                     except Exception as exc:
-                        row.state = StorageObjectState.BLOCKED
-                        row.last_error = type(exc).__name__[:255]
-                        session.add(row)
+                        settle(StorageObjectState.BLOCKED, type(exc).__name__[:255])
                     continue
             if row.size_bytes is None or not row.sha256:
-                row.state = StorageObjectState.BLOCKED
-                row.last_error = "backup_cache_evidence_missing"
-                session.add(row)
+                settle(StorageObjectState.BLOCKED, "backup_cache_evidence_missing")
                 continue
             try:
                 receipt = backend.adopt_existing(
@@ -120,7 +142,7 @@ def reconcile_backup_caches(limit: int = 100) -> int:
                 if row.state == StorageObjectState.PENDING:
                     complete_publication(
                         session,
-                        int(row.id),
+                        publication_reservation,
                         receipt,
                         object_kind="backup-cloud-cache",
                         sha256=row.sha256,
@@ -128,11 +150,11 @@ def reconcile_backup_caches(limit: int = 100) -> int:
                             backend, namespace=backend.namespace_for(str(path))
                         ),
                     )
+                    session.commit()
                 reconciled += 1
+                session.commit()
             except Exception as exc:
-                row.state = StorageObjectState.BLOCKED
-                row.last_error = type(exc).__name__[:255]
-                session.add(row)
+                settle(StorageObjectState.BLOCKED, type(exc).__name__[:255])
         session.commit()
     return reconciled
 

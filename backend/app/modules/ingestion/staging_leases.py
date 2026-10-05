@@ -8,11 +8,15 @@ recorded path after its device/inode/ctime/size still match the receipt.
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import logging
+import math
 import os
 import stat
+import time
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -23,6 +27,7 @@ from printstash_core.files import PublicationStrategy, publish_staged_file
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from app.core.cancellation import checkpoint as cancellation_checkpoint
 from app.core.config import settings
 from app.core.time import ensure_utc, utcnow
 from app.db.models import (
@@ -39,6 +44,7 @@ from app.modules.storage.storage_backend.contracts import (
 )
 from app.modules.storage.storage_ownership import provider_ref_for_backend
 
+_JOB_INPUT_ACQUIRE_TIMEOUT_SECONDS = 10.0
 _CAPTURE_MARKER = b"user.printstash.capture-slot"
 _logger = logging.getLogger(__name__)
 
@@ -216,14 +222,26 @@ def _quarantine_owned_file(
         return False
     parent_fd: int | None = None
     quarantine_fd: int | None = None
+    custody_fd: int | None = None
     quarantine_created = False
     moved = False
     quarantine_dir_name = ".printstash-staging-quarantine"
     quarantine_name = quarantine.name
     quarantine_dir = quarantine.parent
 
+    def take_custody(candidate: Path, *, check_ctime: bool) -> bool:
+        nonlocal custody_fd
+        try:
+            custody_fd = os.open(candidate, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            fcntl.flock(custody_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return matches(os.fstat(custody_fd), candidate, check_ctime=check_ctime)
+        except OSError:
+            return False
+
     def remove_empty_quarantine_dir() -> None:
         """Drop only our now-empty quarantine directory via its parent FD."""
+        if parent_fd is None:
+            raise RuntimeError("staging_quarantine_parent_not_open")
         try:
             os.rmdir(quarantine_dir_name, dir_fd=parent_fd)
             os.fsync(parent_fd)
@@ -279,6 +297,8 @@ def _quarantine_owned_file(
         except OSError:
             return False
         if retained is not None:
+            if not take_custody(quarantine, check_ctime=False):
+                return False
             if not matches(retained, quarantine, check_ctime=False):
                 return False
             try:
@@ -302,6 +322,8 @@ def _quarantine_owned_file(
         except OSError:
             return False
         if not matches(before, path):
+            return False
+        if not take_custody(path, check_ctime=True):
             return False
 
         # The private name is reserved before the cross-directory rename so a
@@ -372,6 +394,8 @@ def _quarantine_owned_file(
     except OSError:
         return False
     finally:
+        if custody_fd is not None:
+            os.close(custody_fd)
         if parent_fd is not None:
             if quarantine_created and not moved:
                 try:
@@ -1194,8 +1218,8 @@ def job_leases(session: Session, job_id: str) -> list[StagingLease]:
     return list(session.exec(select(StagingLease).where(StagingLease.job_id == job_id)))
 
 
-def required_job_path(session: Session, job_id: str) -> Path:
-    """Resolve exactly one Job-owned file only while its received identity matches."""
+def _required_job_lease(session: Session, job_id: str) -> StagingLease:
+    """Select one exact received lease before snapshotting or returning its path."""
     leases = job_leases(session, job_id)
     if not leases:
         raise StagingLeaseNotFoundError("expected one staging lease for job")
@@ -1204,7 +1228,130 @@ def required_job_path(session: Session, job_id: str) -> Path:
     path = _matching_path(leases[0])
     if path is None:
         raise StagingLeaseError("staged path identity does not match receipt")
-    return path
+    return leases[0]
+
+
+def required_job_path(session: Session, job_id: str) -> Path:
+    """Resolve exactly one Job-owned file only while its received identity matches."""
+    return Path(_required_job_lease(session, job_id).path)
+
+
+@dataclass(frozen=True)
+class _JobInputReceipt:
+    path: Path
+    device: int
+    inode: int
+    ctime_ns: int
+    size_bytes: int
+
+
+def open_job_input(
+    session: Session,
+    job_id: str,
+    *,
+    checkpoint: Callable[[], None] = cancellation_checkpoint,
+    acquire_timeout_seconds: float = _JOB_INPUT_ACQUIRE_TIMEOUT_SECONDS,
+) -> AbstractContextManager[Path]:
+    "Snapshot an existing lease; retain physical custody without a SQL session."
+    if not math.isfinite(acquire_timeout_seconds) or acquire_timeout_seconds <= 0:
+        raise ValueError("invalid_staged_input_acquisition_timeout")
+    lease = _required_job_lease(session, job_id)
+    path = Path(lease.path)
+    if lease.device is None or lease.inode is None or lease.ctime_ns is None:
+        raise StagingLeaseError("staged input receipt has no identity")
+    return _hold_job_input(
+        _JobInputReceipt(
+            path, lease.device, lease.inode, lease.ctime_ns, lease.size_bytes
+        ),
+        checkpoint=checkpoint,
+        acquire_timeout_seconds=acquire_timeout_seconds,
+    )
+
+
+def open_leased_input(
+    session: Session,
+    *,
+    job_id: str,
+    path: Path,
+    checkpoint: Callable[[], None] = cancellation_checkpoint,
+    acquire_timeout_seconds: float = _JOB_INPUT_ACQUIRE_TIMEOUT_SECONDS,
+) -> AbstractContextManager[Path]:
+    """Hold one exact existing Job lease, including Jobs with several inputs."""
+    if not math.isfinite(acquire_timeout_seconds) or acquire_timeout_seconds <= 0:
+        raise ValueError("invalid_staged_input_acquisition_timeout")
+    leases = session.exec(
+        select(StagingLease)
+        .where(StagingLease.job_id == job_id, StagingLease.path == str(path))
+        .limit(2)
+    ).all()
+    if not leases:
+        raise StagingLeaseNotFoundError("expected one staging lease for path")
+    if len(leases) != 1:
+        raise StagingLeaseAmbiguousError("expected one staging lease for path")
+    lease = leases[0]
+    if lease.device is None or lease.inode is None or lease.ctime_ns is None:
+        raise StagingLeaseError("staged input receipt has no identity")
+    return _hold_job_input(
+        _JobInputReceipt(
+            path, lease.device, lease.inode, lease.ctime_ns, lease.size_bytes
+        ),
+        checkpoint=checkpoint,
+        acquire_timeout_seconds=acquire_timeout_seconds,
+    )
+
+
+@contextmanager
+def _hold_job_input(
+    receipt: _JobInputReceipt,
+    *,
+    checkpoint: Callable[[], None],
+    acquire_timeout_seconds: float,
+) -> Iterator[Path]:
+    fd: int | None = None
+    try:
+        try:
+            fd = os.open(receipt.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            deadline = time.monotonic() + acquire_timeout_seconds
+            while True:
+                checkpoint()
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise StagingLeaseError(
+                            "staged input custody acquisition timed out"
+                        ) from None
+                    time.sleep(0.05)
+            checkpoint()
+            info = os.fstat(fd)
+            current = receipt.path.lstat()
+        except OSError as exc:
+            raise StagingLeaseError("staged input custody unavailable") from exc
+        expected = (receipt.device, receipt.inode, receipt.ctime_ns, receipt.size_bytes)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or not stat.S_ISREG(current.st_mode)
+            or (
+                info.st_dev,
+                info.st_ino,
+                info.st_ctime_ns,
+                info.st_size,
+            )
+            != expected
+            or (
+                current.st_dev,
+                current.st_ino,
+                current.st_ctime_ns,
+                current.st_size,
+            )
+            != expected
+        ):
+            raise StagingLeaseError("staged input custody identity changed")
+        yield receipt.path
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def renew_review_lease(

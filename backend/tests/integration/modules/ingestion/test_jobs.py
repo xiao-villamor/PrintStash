@@ -85,13 +85,17 @@ class TestDefinitions:
         ],
     )
     def test_each_import_runs_in_the_lane_its_io_needs(
-        self, name: str, lane: str
+        self, name: JobKind, lane: LaneName
     ) -> None:
         # Network-bound imports must not queue behind local hashing.
         assert DEFINITIONS[name].lane == lane
 
     def test_every_import_is_requested_not_discovered(self) -> None:
-        assert all(definition.source is None for definition in DEFINITIONS.values())
+        assert all(
+            definition.source is None
+            for name, definition in DEFINITIONS.items()
+            if name is not JobKind.INGESTION_SCRATCH_CLEANUP
+        )
 
 
 class TestCancel:
@@ -341,3 +345,242 @@ class TestDbosBatchWithdrawal:
             finally:
                 harness.close()
                 catalog_module.bind(previous_engine, previous_catalog)
+
+
+class TestScratchCleanupSource:
+    def test_discovers_due_windows_in_bounded_order(self, db_session, local_storage):
+        from tests.factories.ingestion_scratch import build_ingestion_scratch_window
+
+        now = utcnow()
+        first = build_ingestion_scratch_window(
+            db_session, available_at=now - timedelta(minutes=2)
+        )
+        build_ingestion_scratch_window(
+            db_session, available_at=now + timedelta(minutes=2)
+        )
+        build_ingestion_scratch_window(
+            db_session, available_at=now - timedelta(minutes=1)
+        )
+
+        items = ingest_jobs.ScratchCleanupSource().pending(db_session, now=now, limit=1)
+
+        assert [item.subject_key for item in items] == [f"scratch_window/{first.id}"]
+        due = ingest_jobs.ScratchCleanupSource().next_due(db_session, now=now)
+        assert due is not None
+        assert ensure_utc(due) == ensure_utc(first.available_at)
+
+    def test_reclaims_abandoned_window_through_definition(
+        self, local_storage, make_job
+    ):
+        from app.db.models import CapacityReservation, IngestionScratchWindow
+        from app.db.session import get_session_factory
+        from app.modules.ingestion import scratch_windows
+        from tests.factories.ops import build_job_context
+
+        window = scratch_windows.create_window(
+            kind=scratch_windows.WindowKind.LOCAL_COPY, max_bytes=16
+        )
+        (window.directory / "partial").write_bytes(b"owned")
+        window.detach()
+        job = make_job(
+            kind=JobKind.INGESTION_SCRATCH_CLEANUP,
+            subject=f"scratch_window/{window.id}",
+        )
+        definition = DEFINITIONS[JobKind.INGESTION_SCRATCH_CLEANUP]
+
+        definition.steps[0].fn(build_job_context(job.id))
+
+        assert not window.directory.exists()
+        with get_session_factory().scoped_session() as session:
+            assert session.get(IngestionScratchWindow, window.id) is None
+            assert session.get(CapacityReservation, window.operation_id) is None
+
+    def test_delays_recovery_of_an_active_writer(self, local_storage, make_job):
+        from app.db.models import CapacityReservation, IngestionScratchWindow
+        from app.db.session import get_session_factory
+        from app.modules.ingestion import scratch_windows
+        from tests.factories.ops import build_job_context
+
+        before = utcnow()
+        with scratch_windows.open_window(
+            kind=scratch_windows.WindowKind.LOCAL_COPY, max_bytes=16
+        ) as window:
+            output = window.directory / "partial"
+            output.write_bytes(b"owned")
+            job = make_job(
+                kind=JobKind.INGESTION_SCRATCH_CLEANUP,
+                subject=f"scratch_window/{window.id}",
+            )
+
+            DEFINITIONS[JobKind.INGESTION_SCRATCH_CLEANUP].steps[0].fn(
+                build_job_context(job.id)
+            )
+
+            assert output.read_bytes() == b"owned"
+            with get_session_factory().scoped_session() as session:
+                row = session.get(IngestionScratchWindow, window.id)
+                assert row is not None
+                assert ensure_utc(row.available_at) >= ensure_utc(
+                    before + timedelta(seconds=60)
+                )
+                assert session.get(CapacityReservation, window.operation_id) is not None
+
+    def test_preserves_replacement_during_background_recovery(
+        self, local_storage, make_job
+    ):
+        from app.db.models import IngestionScratchWindow
+        from app.db.session import get_session_factory
+        from app.modules.ingestion import scratch_windows
+        from tests.factories.ops import build_job_context
+
+        window = scratch_windows.create_window(
+            kind=scratch_windows.WindowKind.LOCAL_COPY, max_bytes=16
+        )
+        window.detach()
+        window.directory.rename(window.directory.with_name(window.id + "-displaced"))
+        window.directory.mkdir()
+        replacement = window.directory / "foreign"
+        replacement.write_bytes(b"foreign")
+        job = make_job(
+            kind=JobKind.INGESTION_SCRATCH_CLEANUP,
+            subject=f"scratch_window/{window.id}",
+        )
+
+        DEFINITIONS[JobKind.INGESTION_SCRATCH_CLEANUP].steps[0].fn(
+            build_job_context(job.id)
+        )
+
+        assert replacement.read_bytes() == b"foreign"
+        with get_session_factory().scoped_session() as session:
+            assert session.get(IngestionScratchWindow, window.id) is not None
+
+
+class TestJobInput:
+    def test_cleanup_fault_preserves_primary_actor_error(
+        self,
+        db_session,
+        owner,
+        make_ingest_request,
+        tmp_path,
+        monkeypatch,
+    ):
+        from app.modules.work.jobs import jobs
+        from tests.factories.ops import build_job_context
+
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        path = _stage(db_session, request, tmp_path)
+        context = build_job_context(request.job_id)
+        primary = RuntimeError("actor failed during persistence")
+
+        def fail_cleanup(*args, **kwargs):
+            raise RuntimeError("settled replay SQL unavailable")
+
+        monkeypatch.setattr(jobs, "reconcile_settled_attempt", fail_cleanup)
+
+        with pytest.raises(
+            RuntimeError, match="actor failed during persistence"
+        ) as caught:
+            with ingest_jobs._job_input(context):
+                raise primary
+
+        assert caught.value is primary
+        assert any(
+            "settled replay SQL unavailable" in note for note in primary.__notes__
+        )
+        assert path.read_bytes() == b"staged"
+
+    @pytest.mark.parametrize("field", ["device", "inode", "ctime_ns", "size_bytes"])
+    def test_input_rejects_invalid_receipt_identity(
+        self,
+        db_session,
+        owner,
+        make_ingest_request,
+        tmp_path,
+        field,
+    ):
+        from app.modules.ingestion import staging_leases
+
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        path = _stage(db_session, request, tmp_path)
+        lease = _leases(db_session, request.job_id)[0]
+        setattr(lease, field, getattr(lease, field) + 1)
+        db_session.add(lease)
+        db_session.commit()
+
+        with pytest.raises(staging_leases.StagingLeaseError, match="identity"):
+            staging_leases.open_job_input(db_session, request.job_id)
+
+        assert path.read_bytes() == b"staged"
+
+    @pytest.mark.parametrize("replacement", ["regular", "symlink", "directory"])
+    def test_input_rejects_replacement_after_receipt_read(
+        self,
+        db_session,
+        owner,
+        make_ingest_request,
+        tmp_path,
+        replacement,
+    ):
+        from app.modules.ingestion import staging_leases
+
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        path = _stage(db_session, request, tmp_path)
+        custody = staging_leases.open_job_input(db_session, request.job_id)
+        outside = tmp_path / "foreign-file"
+        outside.write_bytes(b"foreign bytes")
+        path.unlink()
+        replace = {
+            "regular": lambda: path.write_bytes(b"foreign bytes"),
+            "symlink": lambda: path.symlink_to(outside),
+            "directory": lambda: path.mkdir(),
+        }[replacement]
+        replace()
+
+        with pytest.raises(staging_leases.StagingLeaseError, match="custody"):
+            with custody:
+                pytest.fail("replacement acquired staged-input custody")
+
+        assert path.exists()
+        assert outside.read_bytes() == b"foreign bytes"
+
+    def test_retry_actor_waits_for_previous_input_owner(
+        self,
+        db_session,
+        owner,
+        make_ingest_request,
+        tmp_path,
+        monkeypatch,
+    ):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        from app.db.session import get_session_factory, override_session_factory
+        from app.modules.work import service
+        from tests.factories.ops import build_job_context
+
+        request = make_ingest_request(owner, kind=IngestRequestKind.UPLOAD)
+        path = _stage(db_session, request, tmp_path)
+        old_context = build_job_context(request.job_id)
+        factory = get_session_factory()
+        entered = Event()
+        monkeypatch.setattr(service, "nudge", lambda *_args: None)
+
+        def retry_actor(context):
+            override_session_factory(factory)
+            entered.set()
+            with ingest_jobs._job_input(context) as owned:
+                return owned.read_bytes()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with ingest_jobs._job_input(old_context):
+                service.cancel(request.job_id, actor=owner)
+                service.retry(request.job_id, actor=owner)
+                new_context = build_job_context(request.job_id)
+                running = executor.submit(retry_actor, new_context)
+                assert entered.wait(timeout=2)
+                with pytest.raises(TimeoutError):
+                    running.result(timeout=0.2)
+                assert path.read_bytes() == b"staged"
+            assert running.result(timeout=3) == b"staged"
+        assert path.read_bytes() == b"staged"
+        assert len(_leases(db_session, request.job_id)) == 1

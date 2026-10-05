@@ -102,8 +102,9 @@ class TestBackupOperations:
             ("local", {}, False),
             ("local", {"device": 1, "inode": 2}, True),
             ("s3", {}, False),
-            ("s3", {"etag": "tag"}, True),
+            ("s3", {"etag": "tag"}, False),
             ("s3", {"version_id": "v1"}, True),
+            ("s3", {"version_id": "null", "etag": "tag"}, False),
         ],
     )
     def test_native_sources_keep_their_exact_deletion_contract(

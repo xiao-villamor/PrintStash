@@ -232,6 +232,7 @@ class TestRemoteWindows:
         unlink = os.unlink
         download = importer.download_to_staging
         owned = []
+        owned_directories = []
         blocked = []
 
         async def observe_download(url, **kwargs):
@@ -239,10 +240,23 @@ class TestRemoteWindows:
             if not owned:
                 assert staged[0].read_bytes() == bodies["bad"]
                 owned.append(staged[0])
+                directory = staged[0].parent.stat()
+                owned_directories.append((directory.st_dev, directory.st_ino))
             return staged
 
         def refuse_owned_window(path, *args, **kwargs):
-            if owned and Path(path) == owned[0]:
+            directory_fd = kwargs.get("dir_fd")
+            matches_directory = False
+            if directory_fd is not None and owned_directories:
+                current = os.fstat(directory_fd)
+                matches_directory = (
+                    current.st_dev,
+                    current.st_ino,
+                ) == owned_directories[0]
+            if owned and (
+                Path(path) == owned[0]
+                or (matches_directory and Path(path).name == owned[0].name)
+            ):
                 blocked.append(owned[0])
                 raise OSError("owned window cannot be released")
             return unlink(path, *args, **kwargs)
@@ -268,10 +282,25 @@ class TestRemoteWindows:
             item = session.get(InboxItem, item_id)
             assert item.state is InboxItemState.FAILED and item.retryable
             assert item.error_code == "batch_window_release_failed"
-        assert blocked[0].read_bytes() == bodies["bad"]
-        # Release only this test-owned scratch file after the failure is observed.
+        from app.db.models import CapacityReservation, IngestionScratchWindow
+        from app.modules.ingestion.scratch_windows import cleanup_window
+
+        with get_session_factory().scoped_session() as session:
+            receipt = session.exec(select(IngestionScratchWindow)).one()
+            assert (
+                session.get(CapacityReservation, receipt.capacity_operation_id)
+                is not None
+            )
+            retained = [
+                path
+                for path in Path(receipt.path).parent.rglob(owned[0].name)
+                if path.is_file()
+            ]
+            assert len(retained) == 1
+            assert retained[0].read_bytes() == bodies["bad"]
+            identifier = receipt.id
         monkeypatch.setattr(os, "unlink", unlink)
-        unlink(blocked[0])
+        assert cleanup_window(identifier)
 
     def test_partial_retry_preserves_confirmed_artifacts(self, remote_window):
         item_id, job_id, _, bodies, observed, baseline = remote_window

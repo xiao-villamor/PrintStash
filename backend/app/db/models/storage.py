@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Index,
     Text,
@@ -18,9 +19,28 @@ from sqlmodel import Field
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
+from app.db.enum_columns import EnumText, enum_check
 
 from .base import SQLModel
 from .types import LibrarySourceKind, StorageConnectionPurpose, StorageObjectState
+
+
+class StoragePublicationLocator(SQLModel, table=True):
+    """Permanent SQL anchor for one backend/namespace/key publication boundary.
+
+    An insert-on-conflict arbitrates the first writer. Every publication,
+    adoption and retirement locks this row after domain authority locks; storage
+    I/O happens before that transaction or after its commit. Provider proof is
+    still checked separately: sharing an anchor never rebinds a destination.
+    """
+
+    __tablename__ = "storage_publication_locators"
+
+    id: str = Field(primary_key=True, max_length=64)
+    backend: str = Field(max_length=32)
+    namespace: str = Field(max_length=1024)
+    key: str = Field(max_length=2048)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class OwnedStorageObject(SQLModel, table=True):
@@ -32,29 +52,38 @@ class OwnedStorageObject(SQLModel, table=True):
 
     __tablename__ = "owned_storage_objects"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_owned_storage_active_provider_locator",
             "backend",
             "provider_ref",
             "namespace",
             "key",
-            name="uq_owned_storage_provider_locator",
+            unique=True,
+            sqlite_where=text("provider_ref IS NOT NULL AND state != 'retiring'"),
+            postgresql_where=text("provider_ref IS NOT NULL AND state != 'retiring'"),
         ),
-        # Historical rows have no provider identity.  Keep those rows
-        # collision-safe as well: SQLite/Postgres both allow multiple NULLs in
-        # a normal UNIQUE constraint, so the partial index is the legacy
-        # equivalent while new rows use the provider-aware constraint above.
         Index(
-            "uq_owned_storage_legacy_locator",
+            "uq_owned_storage_active_legacy_locator",
             "backend",
             "namespace",
             "key",
             unique=True,
-            sqlite_where=text("provider_ref IS NULL"),
-            postgresql_where=text("provider_ref IS NULL"),
+            sqlite_where=text("provider_ref IS NULL AND state != 'retiring'"),
+            postgresql_where=text("provider_ref IS NULL AND state != 'retiring'"),
+        ),
+        enum_check("state", StorageObjectState),
+        CheckConstraint(
+            "length(publication_generation) > 0", name="publication_generation_present"
         ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    publication_generation: str = Field(
+        default_factory=lambda: secrets.token_hex(32), max_length=64, nullable=False
+    )
+    # Incomplete retired writers retain their recovery evidence and are retried
+    # fairly instead of monopolizing every bounded sweep batch.
+    next_recovery_at: Optional[datetime] = Field(default=None, index=True)
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024, index=True)
     key: str = Field(max_length=2048)
@@ -67,16 +96,7 @@ class OwnedStorageObject(SQLModel, table=True):
     object_kind: str = Field(max_length=64, index=True)
     state: StorageObjectState = Field(
         default=StorageObjectState.PENDING,
-        sa_column=Column(
-            SAEnum(
-                StorageObjectState,
-                values_callable=lambda members: [member.value for member in members],
-                native_enum=False,
-                length=16,
-            ),
-            nullable=False,
-            index=True,
-        ),
+        sa_column=Column(EnumText(StorageObjectState), nullable=False, index=True),
     )
     token: Optional[str] = Field(default=None, max_length=64)
     size_bytes: Optional[int] = None

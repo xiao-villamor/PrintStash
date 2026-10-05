@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -70,23 +71,89 @@ class TestGenerate:
         assert result.geometry["triangle_count"] == 4
         assert result.image is not None
 
-    def test_matches_the_in_process_engine(self, tmp_path):
-        path = tmp_path / "cube.stl"
-        path.write_bytes(content.binary_stl())
-        request = _request(path)
+    @pytest.mark.parametrize("slots", [1, 2, 4], ids=["slots-1", "slots-2", "slots-4"])
+    @pytest.mark.parametrize("file_type", ["stl", "3mf"])
+    def test_matches_the_in_process_engine(
+        self, tmp_path, monkeypatch, slots, file_type
+    ):
+        import fcntl
+        import time
 
-        isolated = mesh_isolation.generate(request)
+        from app.bootstrap.native_resources import configure
+        from app.modules.media.native_process import native_capacity
+        from app.runtime.native_runtime import admit
+
+        path = tmp_path / f"cube.{file_type}"
+        mesh = trimesh.creation.box(extents=[10, 20, 30])
+        original = (
+            mesh.export(file_type="stl")
+            if file_type == "stl"
+            else three_mf(meshes={1: mesh})
+        )
+        path.write_bytes(original)
+        monkeypatch.setitem(_overlay, "max_render_jobs", slots)
+        configure(tmp_path)
+        assert native_capacity().slots == slots
+        request = _request(path, file_type=file_type, width=64, height=48)
         direct = ThumbnailEngine().generate(request)
 
-        assert isolated.image == direct.image
-        assert isolated.image is not None
-        assert isolated.geometry == direct.geometry
-        assert isolated.strategy == direct.strategy
-        assert isolated.coverage == direct.coverage
-        assert isolated.failure_reason == direct.failure_reason
-        assert isolated.fingerprint_result == direct.fingerprint_result
-        assert isolated.fingerprint_result is not None
-        assert isolated.fingerprint_result.state is FingerprintResultState.READY
+        # Identical input under concurrent demand: the configured admission
+        # width may change completion order, never the quality of each result.
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(mesh_isolation.generate, request) for _ in range(4)
+            ]
+            isolated_results = [future.result(timeout=60) for future in futures]
+
+        for isolated in isolated_results:
+            assert isolated.image == direct.image
+            assert isolated.image is not None
+            with Image.open(io.BytesIO(isolated.image)) as image:
+                image.load()
+                assert image.size == (64, 48)
+            assert isolated.geometry == direct.geometry
+            assert isolated.geometry["triangle_count"] == 12
+            assert isolated.geometry["volume_mm3"] == 6000.0
+            assert isolated.strategy == direct.strategy
+            assert isolated.coverage == direct.coverage
+            assert isolated.failure_reason == direct.failure_reason
+            assert isolated.fingerprint_result == direct.fingerprint_result
+            assert isolated.fingerprint_result is not None
+            assert isolated.fingerprint_result.state is FingerprintResultState.READY
+        assert path.read_bytes() == original
+        pool_directory = tmp_path / "runtime" / "native"
+        retired_tickets = list(pool_directory.glob("*.ticket"))
+        assert retired_tickets
+
+        def assert_released(ticket):
+            descriptor = os.open(ticket, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            try:
+                # Closed receipts can remain until the next admission. The flock,
+                # rather than the filename, determines whether credits are live.
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(descriptor)
+
+        for ticket in retired_tickets:
+            assert_released(ticket)
+        deadline = time.monotonic() + 5
+
+        def checkpoint():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("native credits were not released")
+
+        capacity = native_capacity()
+        with admit(capacity, capacity, checkpoint=checkpoint) as permit:
+            assert permit.resources == capacity
+            assert all(not ticket.exists() for ticket in retired_tickets)
+            assert list(pool_directory.glob("*.ticket")) == [permit.path]
+            descriptor = os.open(permit.path, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(descriptor)
+        assert_released(permit.path)
 
     def test_renders_real_benchy_webp_with_its_full_source_envelope(self, monkeypatch):
         source = TESTDATA_DIR / "benchy" / "3dbenchy.stl"

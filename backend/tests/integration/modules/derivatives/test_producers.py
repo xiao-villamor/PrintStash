@@ -911,7 +911,7 @@ class TestDeriveMesh:
         def collision(*_args, **_kwargs):
             raise ThumbnailPublicationError("thumbnail_key_collision")
 
-        monkeypatch.setattr(producers, "publish_thumbnail", collision)
+        monkeypatch.setattr(producers, "prepare_thumbnail", collision)
 
         with pytest.raises(
             ThumbnailPublicationError, match="^thumbnail_key_collision$"
@@ -1342,7 +1342,7 @@ class TestMeshCancellation:
         assert status.state is (JobState.QUEUED if retry else JobState.CANCELLED)
         assert acted
         assert cancelled_at is not None
-        assert finished - cancelled_at < 3
+        assert finished - cancelled_at <= 2
         for pid in json.loads(pids.read_text()):
             assert not Path(f"/proc/{pid}").exists()
         assert not Path(ready.read_text()).exists()
@@ -2329,7 +2329,7 @@ class TestStagedMeshPublication:
             reached_final.append(True)
             raise AssertionError("worker continued after publication failure")
 
-        monkeypatch.setattr(producers, "publish_thumbnail", publication)
+        monkeypatch.setattr(producers, "prepare_thumbnail", publication)
         monkeypatch.setattr(mesh_isolation, "generate", worker)
         with pytest.raises(RuntimeError) as error:
             producers.derive_mesh(artifact.id)

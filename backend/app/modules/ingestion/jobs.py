@@ -10,22 +10,29 @@ crash, a restore or an upgrade).
 from __future__ import annotations
 
 import json
+import sys
+from contextlib import contextmanager
 from dataclasses import fields as dataclass_fields
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
+from app.core.time import utcnow
 from app.db.models import (
     FileRevisionStatus,
     FileType,
+    IngestionScratchWindow,
     IngestRequest,
     IngestRequestKind,
+    JobKind,
     LaneName,
+    WorkPriority,
 )
 from app.db.session import get_session_factory
 from app.modules.work.async_steps import run_async
-from app.modules.work.contracts import JobContext, JobDefinition, Step
+from app.modules.work.contracts import JobContext, JobDefinition, Step, WorkItem
 from app.schemas.ingest import UrlIngestRequest
 
 from . import background, requests, staging_leases
@@ -40,12 +47,44 @@ def _request(ctx: JobContext) -> IngestRequest:
         return request
 
 
-def _staged_path(job_id: str) -> Path:
+@contextmanager
+def _job_input(ctx: JobContext) -> Iterator[Path]:
+    from app.core.cancellation import OperationCancelled, checkpoint
+    from app.modules.work.jobs import jobs
+
+    def ensure_authority() -> None:
+        if ctx.cancelled():
+            raise OperationCancelled()
+        checkpoint(force=True)
+
     try:
         with get_session_factory().scoped_session() as session:
-            return staging_leases.required_job_path(session, job_id)
+            custody = staging_leases.open_job_input(
+                session,
+                ctx.job_id,
+                checkpoint=ensure_authority,
+            )
     except staging_leases.StagingLeaseError as exc:
         raise RuntimeError("staging_expired") from exc
+    try:
+        with custody as path:
+            checkpoint(force=True)
+            yield path
+    except staging_leases.StagingLeaseError as exc:
+        raise RuntimeError("staging_expired") from exc
+    finally:
+        primary = sys.exception()
+        try:
+            jobs.reconcile_settled_attempt(
+                ctx.job_id,
+                ctx.attempt,
+                _settled,
+                execution_epoch=ctx.execution_epoch,
+            )
+        except Exception as exc:
+            if primary is None:
+                raise
+            primary.add_note(f"staging settlement cleanup failed: {exc}")
 
 
 def _typed(cls: Any, values: list[dict[str, Any]]) -> list[Any]:
@@ -54,35 +93,36 @@ def _typed(cls: Any, values: list[dict[str, Any]]) -> list[Any]:
 
 
 def _upload(ctx: JobContext) -> None:
-    request = _request(ctx)
-    staged = _staged_path(ctx.job_id)
-    selection = requests.selection(request)
-    ingest_staged_file(
-        job_context=ctx,
-        artifact=StagedArtifact(
-            staged_path=staged,
-            original_filename=request.original_filename or staged.name,
-            model_name=request.model_name or Path(request.original_filename or "").stem,
-            file_type=FileType(request.file_type),
-            collection=request.collection,
-            tags=request.tags,
-            source_hash=request.source_hash,
-            source_url=request.source_url,
-            target_library_id=request.target_library_id,
-            native_context=selection.get("native_context"),
-            revision_label=selection.get("revision_label"),
-            revision_status=(
-                FileRevisionStatus(selection["revision_status"])
-                if selection.get("revision_status")
-                else None
+    with _job_input(ctx) as staged:
+        request = _request(ctx)
+        selection = requests.selection(request)
+        ingest_staged_file(
+            job_context=ctx,
+            artifact=StagedArtifact(
+                staged_path=staged,
+                original_filename=request.original_filename or staged.name,
+                model_name=request.model_name
+                or Path(request.original_filename or "").stem,
+                file_type=FileType(request.file_type),
+                collection=request.collection,
+                tags=request.tags,
+                source_hash=request.source_hash,
+                source_url=request.source_url,
+                target_library_id=request.target_library_id,
+                native_context=selection.get("native_context"),
+                revision_label=selection.get("revision_label"),
+                revision_status=(
+                    FileRevisionStatus(selection["revision_status"])
+                    if selection.get("revision_status")
+                    else None
+                ),
+                revision_notes=selection.get("revision_notes"),
+                is_recommended=bool(selection.get("is_recommended")),
+                auto_recommend_first_gcode=False,
             ),
-            revision_notes=selection.get("revision_notes"),
-            is_recommended=bool(selection.get("is_recommended")),
-            auto_recommend_first_gcode=False,
-        ),
-        actor_user_id=request.owner_user_id,
-        ingestion_key=selection.get("ingestion_key"),
-    )
+            actor_user_id=request.owner_user_id,
+            ingestion_key=selection.get("ingestion_key"),
+        )
 
 
 def _url(ctx: JobContext) -> None:
@@ -108,31 +148,33 @@ def _url(ctx: JobContext) -> None:
 
 
 def _archive_inspect(ctx: JobContext) -> None:
-    request = _request(ctx)
-    background.inspect_uploaded_archive(
-        job_context=ctx,
-        staged=_staged_path(ctx.job_id),
-        original_filename=request.original_filename or "archive.zip",
-        cancelled=ctx.cancelled,
-    )
+    with _job_input(ctx) as staged:
+        request = _request(ctx)
+        background.inspect_uploaded_archive(
+            job_context=ctx,
+            staged=staged,
+            original_filename=request.original_filename or "archive.zip",
+            cancelled=ctx.cancelled,
+        )
 
 
 def _archive_selection(ctx: JobContext) -> None:
-    request = _request(ctx)
-    selection = requests.selection(request)
-    archive = _staged_path(ctx.job_id)
-    background.run_archive_selection(
-        job_context=ctx,
-        archive=archive,
-        archive_name=str(selection.get("archive_name") or archive.name),
-        names=[str(name) for name in selection.get("names", [])],
-        collection=request.collection,
-        tags=request.tags,
-        source_url=request.source_url,
-        actor_user_id=request.owner_user_id,
-        session_factory=get_session_factory(),
-    )
-    release_job_staging(ctx)
+    with _job_input(ctx) as staged:
+        request = _request(ctx)
+        selection = requests.selection(request)
+        archive = staged
+        background.run_archive_selection(
+            job_context=ctx,
+            archive=archive,
+            archive_name=str(selection.get("archive_name") or archive.name),
+            names=[str(name) for name in selection.get("names", [])],
+            collection=request.collection,
+            tags=request.tags,
+            source_url=request.source_url,
+            actor_user_id=request.owner_user_id,
+            session_factory=get_session_factory(),
+        )
+        release_job_staging(ctx)
 
 
 def _url_selection(ctx: JobContext) -> None:
@@ -171,11 +213,12 @@ def _job_id(subject_key: str) -> str:
 
 
 def _cancel(session: Session, subject_key: str) -> None:
-    """Withdraw an ingest request: its staged bytes are released now."""
+    """Withdraw intent; physical custody defers cleanup until the actor stops."""
     job_id = _job_id(subject_key)
     from .staging_cleanup import release_job
 
     release_job(session, job_id)
+    _release_scratch(session, job_id)
     request = session.get(IngestRequest, job_id)
     if request is not None:
         request.source_credential = None
@@ -208,10 +251,22 @@ def _retry(session: Session, subject_key: str) -> bool:
     return True
 
 
+def _release_scratch(session: Session, job_id: str) -> None:
+    from sqlalchemy import update
+
+    session.exec(
+        update(IngestionScratchWindow)
+        .where(col(IngestionScratchWindow.origin_job_id) == job_id)
+        .values(available_at=utcnow())
+    )
+
+
 def _settled(session: Session, subject_key: str) -> None:
     from .staging_cleanup import reconcile_jobs
 
-    reconcile_jobs(session, job_id=_job_id(subject_key))
+    job_id = _job_id(subject_key)
+    _release_scratch(session, job_id)
+    reconcile_jobs(session, job_id=job_id)
 
 
 def _definition(
@@ -229,8 +284,61 @@ def _definition(
     )
 
 
+class ScratchCleanupSource:
+    """The indexed durable receipt queue; filesystem proof is checked by the job."""
+
+    def pending(self, session: Session, *, now: datetime, limit: int) -> list[WorkItem]:
+        identifiers = session.exec(
+            select(IngestionScratchWindow.id)
+            .where(IngestionScratchWindow.available_at <= now)
+            .order_by(
+                col(IngestionScratchWindow.available_at), col(IngestionScratchWindow.id)
+            )
+            .limit(limit)
+        ).all()
+        return [
+            WorkItem(
+                subject_key=f"scratch_window/{identifier}",
+                priority=WorkPriority.BACKFILL,
+            )
+            for identifier in identifiers
+        ]
+
+    def next_due(self, session: Session, *, now: datetime) -> datetime | None:
+        return session.exec(
+            select(IngestionScratchWindow.available_at)
+            .order_by(
+                col(IngestionScratchWindow.available_at), col(IngestionScratchWindow.id)
+            )
+            .limit(1)
+        ).first()
+
+
+def _cleanup_scratch(ctx: JobContext) -> None:
+    from .scratch_windows import cleanup_window
+
+    prefix, separator, identifier = ctx.subject_key.partition("/")
+    if prefix != "scratch_window" or not separator or not identifier:
+        raise ValueError("invalid_scratch_cleanup_subject")
+    if cleanup_window(identifier):
+        return
+    with get_session_factory().scoped_session() as session:
+        row = session.get(IngestionScratchWindow, identifier)
+        if row is not None:
+            row.available_at = utcnow() + timedelta(seconds=60)
+            session.add(row)
+            session.commit()
+
+
 def definitions() -> list[JobDefinition]:
     return [
+        JobDefinition(
+            name=JobKind.INGESTION_SCRATCH_CLEANUP,
+            lane=LaneName.MAINTENANCE,
+            steps=(Step("ingestion.scratch_cleanup", _cleanup_scratch),),
+            source=ScratchCleanupSource(),
+            label="Ingestion temporary files",
+        ),
         _definition(IngestRequestKind.UPLOAD, LaneName.INGEST, _upload, "Uploads"),
         _definition(IngestRequestKind.URL, LaneName.NETWORK, _url, "URL imports"),
         _definition(

@@ -317,9 +317,11 @@ class TestUpsertCapture:
         db_session.add_all([target_cover, obsolete_cover])
         db_session.commit()
 
-        provenance.upsert_capture(
+        merged = provenance.upsert_capture(
             db_session, model_id=model.id, manifest=_capture(title="Stable update")
         )
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
+        provenance.finish_storage_retirements(db_session, merged.storage_retirements)
         db_session.commit()
 
         covers = db_session.exec(select(ModelSourceCover)).all()
@@ -370,7 +372,7 @@ class TestUpsertCapture:
             blob_sha256="d" * 64,
             actor_id=actor.id,
         )
-        link = provenance.attach_ingested_artifact(db_session, artifact, context)
+        link = provenance.attach_ingested_artifact(db_session, artifact, context).link
         db_session.commit()
         source_id = link.provenance_source_id
         capture_id = link.capture_id

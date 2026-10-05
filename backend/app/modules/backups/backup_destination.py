@@ -6,7 +6,7 @@ import hashlib
 import logging
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -32,8 +32,8 @@ from app.modules.storage.storage_connections import (
     StorageConnectionConfigError,
     load_connection_config,
 )
-from app.modules.storage.storage_ownership import provider_ref_for_backend
 from app.modules.storage.storage_providers import resolve_transport
+from app.modules.storage.storage_receipts import provider_ref_for_backend
 
 BACKUP_PREFIX = "printstash-backups"
 logger = logging.getLogger(__name__)
@@ -172,43 +172,28 @@ class RemoteBackupDestination:
                 raise
             raise BackupDestinationError("backup_remote_read_failed") from exc
 
-    def publish_file(
-        self, session, key: str, source: Path, *, sha256: str
-    ) -> CreationReceipt:
-        """Reserve and commit a replica without borrowing managed creation authority."""
-        from app.db.publication import require_clean_publication_transaction
-        from app.modules.storage.storage_ownership import (
-            complete_publication,
-            fail_publication,
-            reserve_creation,
+    def can_delete_receipt(self, receipt: CreationReceipt) -> bool:
+        """Pure capability/binding check for immutable generation deletion."""
+        return (
+            receipt.backend == self.backend.backend_name
+            and receipt.namespace == self.namespace
+            and receipt.provider_ref == self.provider_ref
+            and receipt.version_id is not None
+            and receipt.version_id != "null"
+            and self.backend.exact_deletion is not None
         )
 
-        require_clean_publication_transaction(session)
-        reservation_id = reserve_creation(
-            session,
-            self.backend,
-            key,
-            object_kind="backup",
-            expected_size=source.stat().st_size,
-            sha256=sha256,
-            provider_ref=self.provider_ref,
-        )
+    def delete_receipt(self, receipt: CreationReceipt) -> bool:
+        """Consume exact outbox evidence after its transaction commits."""
+        if not self.can_delete_receipt(receipt):
+            return False
+        extension = self.backend.exact_deletion
+        assert extension is not None and receipt.version_id is not None
         try:
-            with source.open("rb") as reader:
-                receipt = self.backend.publish_replica(reader, key)
-        except Exception as exc:
-            fail_publication(session, reservation_id, exc)
-            raise
-        receipt = replace(receipt, provider_ref=self.provider_ref)
-        complete_publication(
-            session,
-            reservation_id,
-            receipt,
-            object_kind="backup",
-            sha256=sha256,
-            provider_ref=self.provider_ref,
-        )
-        return receipt
+            extension.delete_versioned(receipt.key, receipt.version_id)
+        except StorageConfigurationError:
+            return False
+        return True
 
     def delete_owned(self, row: OwnedStorageObject) -> bool:
         """Delete only through an immutable version identity.

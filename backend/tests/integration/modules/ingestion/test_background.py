@@ -105,9 +105,6 @@ class TestDownloadAndCollect:
 
         assert batch_store.counts(download_batch.owner).skipped == 1
         assert not staged.exists()
-        download.assert_awaited_once_with(
-            url, window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024
-        )
 
     @pytest.mark.asyncio
     async def test_extracts_the_entries_of_a_zip(
@@ -216,10 +213,6 @@ class TestStageMembers:
         with get_session_factory().scoped_session() as session:
             file = session.get(File, items["Good"]["file_id"])
             assert file is not None and get_backend().read_bytes(file.path) == body
-        download.assert_awaited_once_with(
-            members[0].page_url,
-            window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
-        )
 
     @pytest.mark.asyncio
     async def test_stage_members_reports_no_importable_files_without_error(
@@ -444,14 +437,26 @@ class TestImportFromUrl:
         job_id: str,
     ) -> None:
         use_local_storage(tmp_path)
-        from app.core.config import settings
         from app.schemas.ingest import UrlIngestRequest
 
         staged = settings.incoming_dir / f"{_uuid.uuid4().hex}.html"
         staged.write_bytes(b"<html>not a model</html>")
         req = UrlIngestRequest(url="https://example.com/some-page")
 
-        async def fake_download(url: str, *, window_max_bytes: int):
+        async def fake_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            owner=None,
+            session_factory=None,
+            window=None,
+        ):
+            nonlocal staged
+            assert window is not None
+            target = window.directory / staged.name
+            staged.rename(target)
+            staged = target
+            window.seal(staged)
             return staged, "some-page.html"
 
         with (
@@ -484,14 +489,26 @@ class TestImportFromUrl:
         job_id: str,
     ) -> None:
         use_local_storage(tmp_path)
-        from app.core.config import settings
         from app.schemas.ingest import UrlIngestRequest
 
         staged = settings.incoming_dir / f"{_uuid.uuid4().hex}.zip"
         staged.write_bytes(_zip_bytes())
         req = UrlIngestRequest(url="https://cdn.test/bundle.zip")
 
-        async def fake_download(url: str, *, window_max_bytes: int):
+        async def fake_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            owner=None,
+            session_factory=None,
+            window=None,
+        ):
+            nonlocal staged
+            assert window is not None
+            target = window.directory / staged.name
+            staged.rename(target)
+            staged = target
+            window.seal(staged)
             return staged, "bundle.zip"
 
         with (
@@ -560,14 +577,26 @@ class TestImportFromUrl:
         job_id: str,
     ) -> None:
         use_local_storage(tmp_path)
-        from app.core.config import settings
         from app.schemas.ingest import UrlIngestRequest
 
         staged = settings.incoming_dir / f"{_uuid.uuid4().hex}.zip"
         staged.write_bytes(_zip_bytes())
         req = UrlIngestRequest(url="https://cdn.test/bundle.zip")
 
-        async def fake_download(url: str, *, window_max_bytes: int):
+        async def fake_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            owner=None,
+            session_factory=None,
+            window=None,
+        ):
+            nonlocal staged
+            assert window is not None
+            target = window.directory / staged.name
+            staged.rename(target)
+            staged = target
+            window.seal(staged)
             return staged, "bundle.zip"
 
         with (
@@ -605,14 +634,26 @@ class TestImportFromUrl:
         job_id: str,
     ) -> None:
         use_local_storage(tmp_path)
-        from app.core.config import settings
         from app.schemas.ingest import UrlIngestRequest
 
         staged = settings.incoming_dir / f"{_uuid.uuid4().hex}.stl"
         staged.write_bytes(_cube_stl_bytes())
         req = UrlIngestRequest(url="https://cdn.test/cube.stl")
 
-        async def fake_download(url: str, *, window_max_bytes: int):
+        async def fake_download(
+            url: str,
+            *,
+            window_max_bytes: int,
+            owner=None,
+            session_factory=None,
+            window=None,
+        ):
+            nonlocal staged
+            assert window is not None
+            target = window.directory / staged.name
+            staged.rename(target)
+            staged = target
+            window.seal(staged)
             return staged, "cube.stl"
 
         with (
@@ -662,7 +703,6 @@ class TestInspectUploadedArchive:
         self, db_session, owner, tmp_path, job_id, monkeypatch
     ):
         from app.core.cancellation import time as probe_time
-        from app.core.config import settings
         from app.modules.ingestion import staging_leases
         from app.modules.storage.hashing import sha256_file
 
@@ -940,7 +980,6 @@ def _leased_archive(session: Session, owner: User, job_id: str) -> Path:
     """An uploaded ZIP in staging, owned by ``job_id`` the way the route leaves it."""
     import hashlib
 
-    from app.core.config import settings
     from app.modules.ingestion import staging_leases
 
     staged = settings.incoming_dir / f"{_uuid.uuid4().hex}.zip"
@@ -995,7 +1034,7 @@ class TestBatchWithdrawal:
             resolved.append(url)
             return url + "/download"
 
-        async def download(url, *, window_max_bytes):
+        async def download(url, *, window_max_bytes, **_window_options):
             assert window_max_bytes > 0
             downloaded.append(url)
             service.cancel(request.job_id, actor=owner)
@@ -1054,7 +1093,7 @@ class TestBatchWithdrawal:
                 import_resolvers.SelectedFileDownload(files[1], links[1]),
             )
 
-        async def download(url, *, window_max_bytes):
+        async def download(url, *, window_max_bytes, **_window_options):
             assert window_max_bytes > 0
             downloaded.append(url)
             service.cancel(request.job_id, actor=owner)
@@ -1080,7 +1119,6 @@ class TestBatchWithdrawal:
 def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypatch):
     """Observe real ZIP reads, disposable paths and the first Artifact commit."""
     from app.core.cancellation import cancellation_scope
-    from app.core.config import settings
     from app.db.models import File, IngestRequestKind
     from app.modules.ingestion import staging_leases
     from app.modules.storage.storage_backend.runtime import get_backend
@@ -1113,7 +1151,8 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
     context = build_job_context(request.job_id)
     incoming = settings.incoming_dir
     incoming.mkdir(parents=True, exist_ok=True)
-    baseline_paths = set(incoming.iterdir())
+    (incoming / "scratch-windows").mkdir(mode=0o700, exist_ok=True)
+    baseline_paths = set(incoming.rglob("*"))
     seen_entries = []
     observation = {}
     read = zipfile.ZipExtFile.read
@@ -1129,7 +1168,13 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
         if not observation and result is not None and "file_id" in result:
             # Include unfinished private copies; exclude only paths present
             # before this batch and the separately leased ZIP input.
-            disposable = set(incoming.iterdir()) - baseline_paths - {source}
+            disposable = {
+                path
+                for path in set(incoming.rglob("*")) - baseline_paths - {source}
+                if path.is_file()
+                and path.name != ".ownership.json"
+                and path.suffix != ".lock"
+            }
             with get_session_factory().scoped_session() as session:
                 file = session.get(File, result["file_id"])
                 assert file is not None
@@ -1166,7 +1211,7 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
         } == baseline_files
         assert len([file for file in all_files if file.id not in baseline_files]) == 3
         assert len(staging_leases.job_leases(session, request.job_id)) == 1
-    assert set(incoming.iterdir()) == baseline_paths
+    assert set(incoming.rglob("*")) == baseline_paths
     observation["expected_first_bytes"] = bodies["first.gcode"]
     return observation
 
@@ -1313,7 +1358,6 @@ class TestBatchWindows:
         self, make_user, make_ingest_request, tmp_path, monkeypatch, extra
     ) -> None:
         from app.core.cancellation import cancellation_scope
-        from app.core.config import settings
         from app.db.models import File, IngestRequestKind
         from app.modules.ingestion import staging_leases
         from app.modules.storage.storage_backend.runtime import get_backend
@@ -1342,7 +1386,8 @@ class TestBatchWindows:
             session.commit()
         incoming = settings.incoming_dir
         incoming.mkdir(parents=True, exist_ok=True)
-        initial_paths = set(incoming.iterdir())
+        (incoming / "scratch-windows").mkdir(mode=0o700, exist_ok=True)
+        initial_paths = set(incoming.rglob("*"))
         context = build_job_context(request.job_id)
         with cancellation_scope(context.cancelled):
             ingest_background.run_archive_selection(
@@ -1372,7 +1417,7 @@ class TestBatchWindows:
                 assert status.state == "completed"
                 assert len(new_files) == 1
                 assert get_backend().read_bytes(new_files[0].path) == body
-        assert set(incoming.iterdir()) == initial_paths
+        assert set(incoming.rglob("*")) == initial_paths
         assert source.read_bytes() == source_bytes
 
     @pytest.mark.asyncio
@@ -1384,7 +1429,6 @@ class TestBatchWindows:
     ) -> None:
         import httpx
 
-        from app.core.config import settings
         from app.core.url_safety import PinnedTarget
         from app.db.models import CapacityReservation, File
         from tests.factories.content import oversized_gcode
@@ -1416,7 +1460,8 @@ class TestBatchWindows:
         )
         incoming = settings.incoming_dir
         incoming.mkdir(parents=True, exist_ok=True)
-        initial_paths = set(incoming.iterdir())
+        (incoming / "scratch-windows").mkdir(mode=0o700, exist_ok=True)
+        initial_paths = set(incoming.rglob("*"))
         with get_session_factory().scoped_session() as session:
             baseline_files = {
                 file.id: file.model_dump() for file in session.exec(select(File)).all()
@@ -1424,9 +1469,85 @@ class TestBatchWindows:
         with pytest.raises(importer.ImportError_, match="^batch_entry_too_large$"):
             await importer.download_to_staging(url, window_max_bytes=1024 * 1024)
         assert closed
-        assert set(incoming.iterdir()) == initial_paths
+        assert set(incoming.rglob("*")) == initial_paths
         with get_session_factory().scoped_session() as session:
             assert session.exec(select(CapacityReservation)).all() == []
             assert {
                 file.id: file.model_dump() for file in session.exec(select(File)).all()
             } == baseline_files
+
+
+class TestSingleUrlCustody:
+    @pytest.mark.asyncio
+    async def test_cleanup_preserves_sealed_archive_until_input_handoff(
+        self,
+        db_session,
+        owner,
+        job_id,
+        tmp_path,
+        monkeypatch,
+    ):
+        import httpx
+
+        from app.db.models import CapacityReservation, StagingLease
+        from app.db.models.ingestion_scratch import IngestionScratchWindow
+        from app.modules.ingestion import scratch_windows
+        from app.schemas.ingest import UrlIngestRequest
+
+        use_local_storage(tmp_path)
+        body = _zip_bytes(entry="cube.stl", content=_cube_stl_bytes())
+        monkeypatch.setattr(import_resolvers, "classify_collection", lambda _: None)
+        monkeypatch.setattr(
+            import_resolvers, "list_model_files", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            import_resolvers, "resolve_page_url", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(importer, "_resolve_or_raise", lambda _: None)
+        monkeypatch.setattr(
+            importer,
+            "pinned_transport",
+            lambda _: httpx.MockTransport(lambda _: httpx.Response(200, content=body)),
+        )
+        inspect = importer.inspect_archive
+        observed = []
+
+        def inspect_with_cleanup(path):
+            with get_session_factory().scoped_session() as session:
+                row = session.exec(
+                    select(IngestionScratchWindow).where(
+                        IngestionScratchWindow.path == str(path.parent)
+                    )
+                ).one()
+                assert not scratch_windows.cleanup_window(row.id)
+                assert (
+                    session.get(CapacityReservation, row.capacity_operation_id)
+                    is not None
+                )
+            assert path.read_bytes() == body
+            observed.append(path)
+            return inspect(path)
+
+        monkeypatch.setattr(importer, "inspect_archive", inspect_with_cleanup)
+
+        await ingest_background.import_from_url(
+            job_context=build_job_context(job_id),
+            req=UrlIngestRequest(url="https://cdn.test/bundle.zip"),
+            actor_user_id=owner.id,
+            session_factory=get_session_factory(),
+        )
+
+        assert len(observed) == 1
+        assert observed[0].read_bytes() == body
+        status = jobs.get(job_id)
+        assert status is not None and status.state == "completed", status
+        with get_session_factory().scoped_session() as session:
+            lease = session.exec(
+                select(StagingLease).where(StagingLease.job_id == job_id)
+            ).one()
+            assert lease.path == str(observed[0])
+            row = session.exec(select(IngestionScratchWindow)).one()
+            assert not scratch_windows.cleanup_window(row.id)
+            assert (
+                session.get(CapacityReservation, row.capacity_operation_id) is not None
+            )

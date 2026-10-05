@@ -47,6 +47,7 @@ from printstash_core.files import (
     safe_subdir as _safe_subdir,
 )
 from printstash_core.imports import StagedAsset
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
@@ -63,6 +64,7 @@ from app.modules.ingestion.ingestion import StagedArtifact, commit_staged_artifa
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.work.contracts import JobContext, JobExecution
 
+from . import scratch_windows
 from .batch_contracts import (
     ArchiveSource,
     BatchCommitReference,
@@ -131,7 +133,12 @@ def _filename_from_url(url: str, fallback: str = "download") -> str:
 
 
 async def download_to_staging(
-    url: str, *, window_max_bytes: int | None = None
+    url: str,
+    *,
+    window_max_bytes: int | None = None,
+    window: scratch_windows.ScratchWindow | None = None,
+    owner: scratch_windows.WindowOwner | None = None,
+    session_factory: SessionFactory | None = None,
 ) -> tuple[Path, str]:
     """Download ``url`` into the staging dir, re-validating every redirect hop.
 
@@ -141,6 +148,11 @@ async def download_to_staging(
         type(window_max_bytes) is not int or window_max_bytes <= 0
     ):
         raise ValueError("invalid_batch_window_bytes")
+    if window is None and isinstance(owner, scratch_windows.JobWindowOwner):
+        # Retry cleanup precedes resolution and the first outbound request.
+        scratch_windows.recover_prior_windows(
+            owner, session_factory or get_session_factory()
+        )
     current = url
     for _ in range(settings.url_import_max_redirects + 1):
         checkpoint(force=True)
@@ -169,48 +181,55 @@ async def download_to_staging(
                 if window_limited:
                     assert window_max_bytes is not None
                     limit = min(limit, window_max_bytes)
-                staged = settings.incoming_dir / f"{uuid.uuid4().hex}{suffix}"
-                with CapacityManager(get_session_factory()).hold(
-                    f"url-download:{staged.name}",
-                    [
-                        CapacityResource.for_path(
-                            staged.parent,
-                            limit,
-                            role="URL import staging",
-                        )
-                    ],
-                ):
-                    staged.parent.mkdir(parents=True, exist_ok=True)
+                owned = window is None
+                active = window or scratch_windows.create_window(
+                    kind=scratch_windows.WindowKind.DOWNLOAD,
+                    max_bytes=limit,
+                    owner=owner,
+                    session_factory=session_factory,
+                )
+                if active.max_bytes < limit:
+                    limit = active.max_bytes
+                    window_limited = True
+                staged = active.directory / f"{uuid.uuid4().hex}{suffix}"
+                succeeded = False
+                try:
                     fd, temp_name = tempfile.mkstemp(
-                        prefix=".printstash-url-", dir=staged.parent
+                        prefix=".printstash-url-", dir=active.directory
                     )
                     temp = Path(temp_name)
                     written = 0
-                    try:
-                        with os.fdopen(fd, "wb") as out:
-                            async for chunk in resp.aiter_bytes(1024 * 1024):
-                                checkpoint()
-                                written += len(chunk)
-                                if written > limit:
-                                    raise ImportError_(
-                                        "batch_entry_too_large"
-                                        if window_limited
-                                        and window_max_bytes is not None
-                                        and window_max_bytes
-                                        <= settings.max_upload_bytes
-                                        else "download_too_large"
-                                    )
-                                out.write(chunk)
-                            out.flush()
-                            os.fsync(out.fileno())
-                        checkpoint(force=True)
-                        publish_staged_file(temp, staged)
-                        return staged, original_filename
-                    finally:
+                    with os.fdopen(fd, "wb") as out:
+                        async for chunk in resp.aiter_bytes(1024 * 1024):
+                            checkpoint()
+                            written += len(chunk)
+                            if written > limit:
+                                raise ImportError_(
+                                    "batch_entry_too_large"
+                                    if window_limited
+                                    and limit <= settings.max_upload_bytes
+                                    else "download_too_large"
+                                )
+                            out.write(chunk)
+                        out.flush()
+                        os.fsync(out.fileno())
+                    checkpoint(force=True)
+                    publish_staged_file(temp, staged)
+                    active.seal(staged)
+                    succeeded = True
+                    if owned:
+                        active.detach()
+                    return staged, original_filename
+                finally:
+                    if owned and not succeeded:
+                        primary = sys.exception()
                         try:
-                            temp.unlink(missing_ok=True)
-                        except OSError:
-                            pass
+                            active.close()
+                        except scratch_windows.WindowCleanupError as exc:
+                            if primary is not None:
+                                primary.add_note(f"scratch cleanup failed: {exc}")
+                            else:
+                                raise WindowReleaseError() from exc
     raise ImportError_("url_too_many_redirects")
 
 
@@ -362,6 +381,8 @@ def iter_archive_entries(
     names: Sequence[str],
     *,
     skip_entry: Callable[[ArchiveEntry], bool] | None = None,
+    owner: scratch_windows.WindowOwner | None = None,
+    session_factory: SessionFactory | None = None,
 ) -> Generator[tuple[ArchiveEntry, tuple[Path, str]], None, None]:
     """Yield one expanded output with capacity retained until consumption/cleanup.
 
@@ -377,21 +398,17 @@ def iter_archive_entries(
         files: list[tuple[Path, str]] = []
         output_identity: tuple[int, int] | None = None
         try:
-            with CapacityManager(get_session_factory()).hold(
-                f"archive-window:{uuid.uuid4().hex}",
-                [
-                    CapacityResource.for_path(
-                        settings.incoming_dir,
-                        entry.size_bytes,
-                        role="archive extraction",
-                    )
-                ],
-            ):
+            with scratch_windows.open_window(
+                kind=scratch_windows.WindowKind.ARCHIVE_ENTRY,
+                max_bytes=max(entry.size_bytes, 1),
+                owner=owner,
+                session_factory=session_factory,
+            ) as workspace:
                 try:
                     files = extract_selected_archive_entries(
                         path,
                         [entry.name],
-                        staging_dir=settings.incoming_dir,
+                        staging_dir=workspace.directory,
                         max_entry_bytes=entry.size_bytes,
                         importable_suffixes=_IMPORTABLE_SUFFIXES,
                         on_chunk=checkpoint,
@@ -399,6 +416,7 @@ def iter_archive_entries(
                     )
                     if len(files) != 1:
                         raise ImportError_("archive_entry_missing")
+                    workspace.seal(files[0][0])
                     metadata = files[0][0].lstat()
                     output_identity = (metadata.st_dev, metadata.st_ino)
                     checkpoint(force=True)
@@ -406,8 +424,13 @@ def iter_archive_entries(
                 finally:
                     for staged, _ in files:
                         _discard_staged_file(
-                            staged, strict=True, expected_identity=output_identity
+                            staged,
+                            strict=True,
+                            expected_identity=output_identity,
+                            session_factory=session_factory,
                         )
+        except scratch_windows.WindowCleanupError as exc:
+            raise WindowReleaseError() from exc
         except ArchivePolicyError as exc:
             raise ImportError_(exc.code) from exc
 
@@ -417,9 +440,21 @@ def _discard_staged_file(
     *,
     strict: bool,
     expected_identity: tuple[int, int] | None = None,
+    session_factory: SessionFactory | None = None,
 ) -> None:
     primary = sys.exception()
     try:
+        disposition = scratch_windows.release_path(
+            path, session_factory=session_factory
+        )
+        if disposition in (
+            scratch_windows.ReleaseDisposition.RELEASED,
+            scratch_windows.ReleaseDisposition.TRANSFERRED,
+            scratch_windows.ReleaseDisposition.DEFERRED,
+        ):
+            return
+        if disposition is scratch_windows.ReleaseDisposition.UNCERTAIN:
+            raise OSError("scratch workspace identity or release is uncertain")
         if expected_identity is not None:
             current = path.lstat()
             if (
@@ -430,19 +465,20 @@ def _discard_staged_file(
         path.unlink(missing_ok=True)
     except FileNotFoundError:
         pass
-    except OSError as exc:
+    except (OSError, SQLAlchemyError) as exc:
         if strict:
             if primary is None:
                 raise WindowReleaseError() from exc
-            if isinstance(primary, Exception):
-                failure = WindowReleaseError()
-                failure.add_note(f"staging release failed: {path.name}: {exc}")
-                raise failure from primary
             primary.add_note(f"batch_window_release_failed: {path.name}: {exc}")
         logger.warning("import staging cleanup failed: %s", path.name, exc_info=True)
 
 
-def discard_staged_files(paths: Iterable[Path], *, strict: bool = False) -> None:
+def discard_staged_files(
+    paths: Iterable[Path],
+    *,
+    strict: bool = False,
+    session_factory: SessionFactory | None = None,
+) -> None:
     """Release exact temporary sources transferred to an import operation.
 
     Archive/slot inputs with durable leases are never included. Strict window
@@ -451,7 +487,7 @@ def discard_staged_files(paths: Iterable[Path], *, strict: bool = False) -> None
     private staging and do not promise atomicity against an active renamer.
     """
     for path in paths:
-        _discard_staged_file(path, strict=strict)
+        _discard_staged_file(path, strict=strict, session_factory=session_factory)
 
 
 # ---------------------------------------------------------------------------
@@ -726,8 +762,11 @@ def import_assets(
         session.finish()
     finally:
         discard_staged_files(
-            staged.staged_path if isinstance(staged, StagedAsset) else staged[0]
-            for staged in staged_files
+            (
+                staged.staged_path if isinstance(staged, StagedAsset) else staged[0]
+                for staged in staged_files
+            ),
+            session_factory=session_factory,
         )
 
 
@@ -829,4 +868,7 @@ def import_resolved_groups(
                 )
         session.finish()
     finally:
-        discard_staged_files(path for group in groups for path, _ in group.staged_files)
+        discard_staged_files(
+            (path for group in groups for path, _ in group.staged_files),
+            session_factory=session_factory,
+        )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,7 +27,9 @@ from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_ownership import (
     complete_publication,
     provider_ref_for_backend,
+    settle_observed_publication,
 )
+from app.modules.storage.storage_publication import PublicationReservation
 from app.runtime.maintenance import exclusive_backup_operation
 
 logger = get_logger(__name__)
@@ -61,6 +64,23 @@ def reconcile_backup_publications(
         s3 = target.client if target else None
         bucket = target.bucket if target else ""
         for row in pending:
+            publication_reservation = PublicationReservation.of(row)
+
+            def settle(
+                state,
+                error,
+                *,
+                reservation=publication_reservation,
+            ):
+                settle_observed_publication(
+                    session,
+                    reservation,
+                    observed_state=StorageObjectState.PENDING,
+                    state=state,
+                    last_error=error,
+                )
+                session.commit()
+
             receipt: CreationReceipt | None = None
             try:
                 if row.backend == "local":
@@ -85,8 +105,10 @@ def reconcile_backup_publications(
                     if row_bucket != bucket:
                         continue
                     if row.provider_ref and row.provider_ref != target.provider_ref:
-                        row.last_error = "retryable:backup_target_changed"
-                        session.add(row)
+                        settle(
+                            StorageObjectState.PENDING,
+                            "retryable:backup_target_changed",
+                        )
                         continue
                     # A reservation is intentionally written before PUT, so it
                     # has no remote ETag/version yet.  This one reconciliation
@@ -171,8 +193,10 @@ def reconcile_backup_publications(
                         row
                     )
                     if destination is None:
-                        row.last_error = "retryable:backup_target_changed"
-                        session.add(row)
+                        settle(
+                            StorageObjectState.PENDING,
+                            "retryable:backup_target_changed",
+                        )
                         continue
                     info = destination.backend.object_info(row.key)
                     if (
@@ -182,6 +206,16 @@ def reconcile_backup_publications(
                         or info.size != row.size_bytes
                     ):
                         raise RuntimeError("backup_publication_evidence_mismatch")
+                    if not row.token and info.version_id in (None, "", "null"):
+                        # An interrupted creator has no operation receipt. Size
+                        # and digest alone cannot name a physical generation.
+                        # Keep its durable reservation for explicit recovery;
+                        # never fabricate a blank token or cleanup authority.
+                        settle(
+                            StorageObjectState.PENDING,
+                            "retryable:backup_publication_evidence_missing",
+                        )
+                        continue
                     fd, raw_name = tempfile.mkstemp(
                         prefix=".printstash-backup-reconcile-",
                         dir=settings.backup_dir,
@@ -192,6 +226,8 @@ def reconcile_backup_publications(
                     try:
                         committed = OwnedStorageObject.model_validate(row.model_dump())
                         committed.state = StorageObjectState.COMMITTED
+                        committed.etag = info.etag
+                        committed.version_id = info.version_id
                         destination.download_owned(committed, candidate)
                         _snapshot_module._validate_created_archive_payload(candidate)
                     finally:
@@ -199,7 +235,7 @@ def reconcile_backup_publications(
                     receipt = CreationReceipt(
                         key=row.key,
                         size=info.size,
-                        token=row.token or "",
+                        token=row.token if row.token else uuid.uuid4().hex,
                         backend=row.backend,
                         namespace=row.namespace,
                         etag=info.etag,
@@ -214,14 +250,16 @@ def reconcile_backup_publications(
                         # publication is corrupt. Keep the reservation pending
                         # so a later reconciliation can prove this exact
                         # namespace rather than making it permanently blocked.
-                        row.last_error = "retryable:backup_provider_unavailable"
-                        session.add(row)
+                        settle(
+                            StorageObjectState.PENDING,
+                            "retryable:backup_provider_unavailable",
+                        )
                         continue
                     raise RuntimeError("backup_publication_backend_unavailable")
                 assert receipt is not None
                 complete_publication(
                     session,
-                    int(row.id),
+                    publication_reservation,
                     receipt,
                     object_kind="backup",
                     sha256=row.sha256,
@@ -235,13 +273,13 @@ def reconcile_backup_publications(
                 )
                 reconciled += 1
             except RuntimeError as exc:
-                row.state = StorageObjectState.BLOCKED
-                row.last_error = type(exc).__name__[:255]
-                session.add(row)
+                settle(StorageObjectState.BLOCKED, type(exc).__name__[:255])
             except Exception as exc:
                 # A provider outage is retryable; do not turn an unavailable
                 # S3 endpoint into a permanent operator decision.
-                row.last_error = f"retryable:{type(exc).__name__}"[:255]
-                session.add(row)
+                settle(
+                    StorageObjectState.PENDING, f"retryable:{type(exc).__name__}"[:255]
+                )
+            session.commit()
         session.commit()
     return reconciled

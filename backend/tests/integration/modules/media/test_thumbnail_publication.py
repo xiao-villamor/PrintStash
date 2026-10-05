@@ -49,6 +49,7 @@ class TestPublishThumbnail:
             db_session, get_backend(), artifact, WEBP, recipe_tag="thumbnail:1"
         )
 
+        db_session.commit()
         second = publish_thumbnail(
             db_session, get_backend(), artifact, WEBP, recipe_tag="thumbnail:2"
         )
@@ -63,6 +64,7 @@ class TestPublishThumbnail:
             db_session, get_backend(), artifact, WEBP, recipe_tag="thumbnail:1"
         )
 
+        db_session.commit()
         again = publish_thumbnail(
             db_session, get_backend(), artifact, WEBP, recipe_tag="thumbnail:1"
         )
@@ -81,6 +83,7 @@ class TestPublishThumbnail:
         first = publish_thumbnail(
             db_session, backend, artifact, WEBP, recipe_tag="thumbnail:1"
         )
+        db_session.commit()
         monkeypatch.setattr(backend, "thumbnail_variant_key", lambda *_args: first.key)
 
         with pytest.raises(ThumbnailPublicationError, match="collision"):
@@ -100,6 +103,7 @@ class TestPublishThumbnail:
         first = publish_thumbnail(
             db_session, backend, artifact, WEBP, recipe_tag="thumbnail:1"
         )
+        db_session.commit()
         monkeypatch.setattr(backend, "thumbnail_variant_key", lambda *_args: first.key)
 
         with pytest.raises(ThumbnailPublicationError):

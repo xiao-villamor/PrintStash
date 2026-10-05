@@ -336,3 +336,81 @@ class TestLoadMesh:
 #   PRINTSTASH_MESH_CORPUS=/path/to/nas/sample  pytest -k corpus -s
 #   PRINTSTASH_MESH_RSS_BUDGET_MB=2048           # optional peak-RSS budget
 # --------------------------------------------------------------------------- #
+
+
+class TestDescendantPeakExport:
+    def test_exported_peak_includes_known_descendant_allocation(self, tmp_path, caplog):
+        import fcntl
+        import json
+        import logging
+        import time
+
+        from app.modules.media import mesh_observability
+        from app.modules.media.mesh_isolation import supervise_result
+        from app.modules.media.mesh_telemetry import WorkerExitCause
+        from app.modules.media.worker_bootstrap import WorkerLifecycle, command
+        from app.runtime.native_admission import LocalResourcePool, Resources
+
+        allocation = 64 * 1024**2
+        budget = Resources(1, 256 * 1024**2)
+        pool = LocalResourcePool(tmp_path / "native")
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+        with pool.reserve(budget, budget, checkpoint=lambda: None) as permit:
+            reply = supervise_result(
+                command(
+                    "tests.fakes.viewer_recovery_process",
+                    ["allocation-tree", str(allocation)],
+                    budget.bytes,
+                ),
+                memory_budget=budget.bytes,
+                timeout_seconds=20,
+                permit=permit,
+                lifecycle=WorkerLifecycle.GUARDED,
+            )
+        observed = json.loads(reply.payload)
+        assert observed["descendant_allocation_bytes"] == allocation
+        exported = [
+            json.loads(record.getMessage().removeprefix("mesh_supervision "))
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_supervision ")
+        ]
+        (record,) = [
+            entry
+            for entry in exported
+            if entry["execution_id"] == reply.stats.execution_id
+        ]
+        assert record["exit_cause"] == WorkerExitCause.EXITED_ZERO.value
+        # The worker reports only its own RSS. A root-only sampler cannot reach
+        # this bound: it must include the descendant's touched resident pages.
+        assert record["peak_tree_rss_bytes"] >= observed["root_rss_bytes"] + allocation
+        assert reply.stats.peak_tree_rss_bytes == record["peak_tree_rss_bytes"]
+        retired_ticket = permit.path
+        assert retired_ticket.exists()
+
+        def assert_released(ticket):
+            descriptor = os.open(ticket, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(descriptor)
+
+        # Successful tree supervision reaps descendants and releases their
+        # inherited descriptors. The next admission owns receipt reclamation.
+        assert_released(retired_ticket)
+        deadline = time.monotonic() + 5
+
+        def checkpoint():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("descendant native credits were not released")
+
+        with pool.reserve(budget, budget, checkpoint=checkpoint) as next_permit:
+            assert next_permit.resources == budget
+            assert not retired_ticket.exists()
+            assert list(pool.directory.glob("*.ticket")) == [next_permit.path]
+            descriptor = os.open(next_permit.path, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(descriptor)
+        assert_released(next_permit.path)

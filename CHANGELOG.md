@@ -247,6 +247,16 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 - Streamed STL previews preserve valid oblique facets that the degeneracy filter could discard.
 
+- Serialize storage adoption and retirement by immutable reservation generation;
+  retain exact cleanup revocations and preserve newer objects at reused keys.
+  S3 backup deletion now requires an immutable object version. Failed commit
+  acknowledgements preserve already adopted covers, documents and embedded images.
+- Import completion prepares private source-cover candidates and switches their
+  visible pointer only under the current Job and Inbox authority.
+- Interrupted downloads, archive extraction and local copies retain exact cleanup
+  receipts and disk reservations; restart or retry reclaims their private workspaces
+  before the next input is admitted.
+
 ### Performance
 
 - Convex hull descriptors use normalized SciPy/Qhull geometry, preserving dense convex surfaces and finite extreme scales while rejecting invalid coordinates. Existing fingerprints are recalculated.

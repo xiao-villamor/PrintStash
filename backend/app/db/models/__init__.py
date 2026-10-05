@@ -91,6 +91,7 @@ from .ingestion import (
 from .ingestion import (
     StagingLease as StagingLease,
 )
+from .ingestion_scratch import IngestionScratchWindow as IngestionScratchWindow
 from .library import (
     ArtifactMaterialRequirement as ArtifactMaterialRequirement,
 )
@@ -272,6 +273,7 @@ from .storage import (
 from .storage import (
     StorageFailureDomainDeclaration as StorageFailureDomainDeclaration,
 )
+from .storage import StoragePublicationLocator as StoragePublicationLocator
 from .types import (
     SENTINEL_FILE_HASH as SENTINEL_FILE_HASH,
 )

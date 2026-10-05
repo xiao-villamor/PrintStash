@@ -16,7 +16,6 @@ from tests.paths import BACKEND_DIR
 # A new consumer must use mesh_isolation, stl_isolation, verification_isolation,
 # embedding_isolation or visual_render rather than extending this list.
 OWNERS = {
-    "modules/media/mesh_processing.py",
     "modules/media/mesh_loading.py",
     "modules/media/mesh_measurements.py",
     "modules/media/scene_measurements.py",
@@ -384,15 +383,8 @@ class TestPrimitiveDependencies:
         }
 
 
-# The compatibility facade has one fixed test consumer and no production ones.
-# Shrinking this inventory is allowed; adding a consumer requires using an owner.
-FACADE_CONSUMERS = {
-    "tests/unit/modules/media/mesh_processing/test_entry_points.py",
-}
-
-
-class TestMeshFacadeInventory:
-    def test_only_fixed_legacy_consumers_import_the_facade(self):
+class TestRetiredMeshFacade:
+    def test_refuses_retired_facade_consumers(self):
         consumers = set()
         for directory in (
             BACKEND_DIR / "app",
@@ -407,26 +399,7 @@ class TestMeshFacadeInventory:
                     for target in _orchestrator_dependencies(path.read_text(), package)
                 ):
                     consumers.add(path.relative_to(BACKEND_DIR).as_posix())
-        assert consumers <= FACADE_CONSUMERS, "\n".join(
-            sorted(consumers - FACADE_CONSUMERS)
-        )
+        assert consumers == set(), "\n".join(sorted(consumers))
 
-    def test_facade_holds_no_mutable_policy_or_native_implementation(self):
-        path = BACKEND_DIR / "app/modules/media/mesh_processing.py"
-        tree = ast.parse(path.read_text())
-        assert {
-            n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))
-        } == {"extract_geometry"}
-        assert {
-            target.id
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            for target in node.targets
-            if isinstance(target, ast.Name)
-        } == {"__all__"}
-        assert set(_violations(path.read_text(), "app.modules.media")) <= {
-            "app.modules.media.mesh_loading.load_mesh",
-            "app.modules.media.mesh_loading.load_step_mesh",
-            "app.modules.media.mesh_loading.to_stl_bytes",
-            "app.modules.media.mesh_measurements.geometry_from_mesh",
-        }
+    def test_removes_retired_facade(self):
+        assert not (BACKEND_DIR / "app/modules/media/mesh_processing.py").exists()

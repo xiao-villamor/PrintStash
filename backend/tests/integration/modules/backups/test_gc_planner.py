@@ -921,7 +921,7 @@ class TestFinalizeGcPlan:
         monkeypatch.setattr(gc_planner, "_resource", lambda *_args: resource)
         monkeypatch.setattr(
             f"app.modules.library.trash.{function_name}",
-            lambda _session, row: called.append(row),
+            lambda _session, row, *, prepared_deletions: called.append(row),
         )
         monkeypatch.setattr(
             "app.modules.storage.storage_deletion.process_storage_delete_intents",

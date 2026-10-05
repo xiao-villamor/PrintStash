@@ -13,11 +13,16 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.db.models import FileType, OwnedStorageObject, StorageObjectState, User
+from app.db.models import (
+    FileType,
+    OwnedStorageObject,
+    StorageDeleteIntent,
+    StorageObjectState,
+    User,
+)
 from app.db.session import _set_sqlite_pragmas, get_session_factory
 from app.modules.ingestion.ingestion import _resolve_committed_artifact
 from app.modules.storage.storage_backend.contracts import (
-    CreationReceipt,
     StagedRemoteObject,
     StorageCollisionError,
 )
@@ -131,7 +136,7 @@ class TestPublishBytes:
         )
 
         with get_session_factory().session() as independent:
-            row = independent.get(OwnedStorageObject, reservation_id)
+            row = independent.get(OwnedStorageObject, reservation_id.id)
             assert row is not None
             assert row.state is StorageObjectState.PENDING
         assert not backend.exists(key)
@@ -145,7 +150,7 @@ class TestPublishBytes:
             reserve_creation(db_session, backend, key, object_kind="thumbnail")
 
         with get_session_factory().session() as independent:
-            assert independent.get(OwnedStorageObject, first_id) is not None
+            assert independent.get(OwnedStorageObject, first_id.id) is not None
 
     def test_commits_ownership_with_the_callers_transaction(
         self, db_session: Session
@@ -386,11 +391,11 @@ class TestPublishFile:
 
 class TestReserveCreation:
     def test_reuses_a_stale_committed_locator_when_bytes_are_absent(
-        self, db_session: Session
+        self, db_session: Session, make_owned_storage_object
     ) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(930)
-        row = OwnedStorageObject(
+        row = make_owned_storage_object(
             backend=backend.backend_name,
             namespace=backend.namespace_for(key),
             key=key,
@@ -414,11 +419,17 @@ class TestReserveCreation:
         )
 
         db_session.refresh(row)
-        assert reservation_id == original_id
-        assert row.state is StorageObjectState.PENDING
-        assert row.token is None
-        assert row.size_bytes == 8
-        assert row.sha256 == "new-hash"
+        assert reservation_id.id != original_id
+        assert row.state is StorageObjectState.RETIRING
+        assert row.token == "old-token"
+        assert row.size_bytes == 5
+        fresh = db_session.get(OwnedStorageObject, reservation_id.id)
+        assert fresh is not None
+        assert fresh.publication_generation != row.publication_generation
+        assert fresh.state is StorageObjectState.PENDING
+        assert fresh.token is None
+        assert fresh.size_bytes == 8
+        assert fresh.sha256 == "new-hash"
 
     def test_rejects_completion_when_the_reservation_is_missing(
         self, db_session: Session
@@ -426,19 +437,26 @@ class TestReserveCreation:
         backend = get_backend()
         key = backend.thumbnail_key(931)
 
-        creation = CreationReceipt(
-            key=key,
-            size=4,
-            token="token",
-            backend=backend.backend_name,
-            namespace=backend.namespace_for(key),
+        reservation = reserve_creation(
+            db_session, backend, key, object_kind="thumbnail"
         )
+        row = db_session.get(OwnedStorageObject, reservation.id)
+        assert row is not None
+        db_session.delete(row)
+        db_session.commit()
+        creation = backend.create_bytes(b"lost", key)
 
-        with pytest.raises(RuntimeError, match="storage_reservation_lost"):
+        with pytest.raises(RuntimeError, match="storage_reservation_retired"):
             complete_publication(
                 db_session,
-                999999,
+                reservation,
                 creation,
                 object_kind="thumbnail",
                 sha256=None,
             )
+        db_session.rollback()
+        assert db_session.get(OwnedStorageObject, reservation.id) is None
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.key == creation.key
+        assert intent.token == creation.token
+        assert backend.read_bytes(key) == b"lost"

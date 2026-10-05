@@ -1953,7 +1953,7 @@ class TestCoverUploadExecution:
         aggregate = make_multipart_model("Cover boundary")
         loop = asyncio.get_running_loop()
         observations = []
-        publish = multipart_router.publish_bytes
+        publish = multipart_router.prepare_bytes
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -1969,7 +1969,7 @@ class TestCoverUploadExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(multipart_router, "publish_bytes", delayed_publication)
+            monkeypatch.setattr(multipart_router, "prepare_bytes", delayed_publication)
             response = await client.put(
                 f"/api/v1/multipart-models/{aggregate.id}/cover",
                 headers=auth_headers,

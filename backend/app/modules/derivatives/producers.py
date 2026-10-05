@@ -52,8 +52,9 @@ from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.source_preparation import reserve_sources
 from app.modules.media.thumbnail_publication import (
     ThumbnailPublicationError,
+    adopt_thumbnail,
     point_at,
-    publish_thumbnail,
+    prepare_thumbnail,
 )
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager, CapacityResource
@@ -61,8 +62,9 @@ from app.modules.storage.capacity_estimates import vault_allocation
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import (
-    publish_file,
-    publish_stream,
+    adopt_publication,
+    prepare_file,
+    prepare_stream,
 )
 from app.modules.work.contracts import JobExecution
 from app.runtime.native_admission import AdmissionTooLarge
@@ -216,7 +218,7 @@ def _publish_thumbnail(
     backend = get_backend()
     with get_session_factory().scoped_session() as session:
         try:
-            published = publish_thumbnail(
+            prepared = prepare_thumbnail(
                 session,
                 backend,
                 file_row,
@@ -236,6 +238,7 @@ def _publish_thumbnail(
             if abort_on_failure:
                 raise
             return DerivativeState.FAILED
+        published = prepared.published
         fresh = records.mark_ready(
             session,
             attempt,
@@ -254,6 +257,8 @@ def _publish_thumbnail(
             peak_rss_bytes=peak_rss_bytes,
         )
         point_at(session, fresh, published.key)
+        session.flush()
+        adopt_thumbnail(session, prepared)
         session.commit()
     return DerivativeState.READY
 
@@ -643,7 +648,7 @@ def _derive_toolpath(file_id: int, *, execution: JobExecution | None = None) -> 
             f"{file_row.sha256}-toolpath-r{recipe}-{attempts[DerivativeKind.TOOLPATH].token}.gcode",
         )
         with get_session_factory().scoped_session() as session:
-            receipt = publish_file(
+            candidate = prepare_file(
                 session,
                 backend,
                 key,
@@ -652,6 +657,7 @@ def _derive_toolpath(file_id: int, *, execution: JobExecution | None = None) -> 
                 sha256=None,
                 move=True,
             )
+            receipt = candidate.receipt
             records.mark_ready(
                 session,
                 attempts[DerivativeKind.TOOLPATH],
@@ -660,6 +666,8 @@ def _derive_toolpath(file_id: int, *, execution: JobExecution | None = None) -> 
                 output={"size": receipt.size},
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+            session.flush()
+            adopt_publication(session, candidate)
             session.commit()
     return Outcome({DerivativeKind.TOOLPATH: DerivativeState.READY})
 
@@ -754,7 +762,7 @@ def _derive_viewer_stl(
                     f"{file.sha256}-viewer-stl-r{attempt.recipe}-{attempt.token}.stl",
                 )
                 with get_session_factory().scoped_session() as session:
-                    receipt = publish_stream(
+                    candidate = prepare_stream(
                         session,
                         backend,
                         key,
@@ -763,6 +771,7 @@ def _derive_viewer_stl(
                         sha256=output.sha256,
                         object_kind="viewer_stl",
                     )
+                    receipt = candidate.receipt
                     output.verify()
                     if receipt.size != output.size:
                         raise MeshWorkerError(ThumbnailFailureReason.STORAGE)
@@ -774,6 +783,8 @@ def _derive_viewer_stl(
                         output={"size": receipt.size},
                         duration_ms=int((time.monotonic() - started) * 1000),
                     )
+                    session.flush()
+                    adopt_publication(session, candidate)
                     session.commit()
     except (MeshWorkerError, AdmissionTooLarge) as exc:
         reason = (

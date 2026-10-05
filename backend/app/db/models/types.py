@@ -149,6 +149,7 @@ class StorageObjectState(str, Enum):
     PENDING = "pending"
     COMMITTED = "committed"
     BLOCKED = "blocked"
+    RETIRING = "retiring"
 
 
 class JobState(StrEnum):
@@ -198,6 +199,7 @@ class JobKind(StrEnum):
     INGESTION_UPLOAD_RECOVERY = "ingestion.upload_recovery"
     INGESTION_URL = "ingestion.url"
     INGESTION_URL_SELECTION = "ingestion.url_selection"
+    INGESTION_SCRATCH_CLEANUP = "ingestion.scratch_cleanup"
     NOTIFICATIONS_DELIVER = "notifications.deliver"
     NOTIFICATIONS_RETENTION = "notifications.retention"
     PRINTING_DISPATCH = "printing.dispatch"

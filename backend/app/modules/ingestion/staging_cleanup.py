@@ -87,6 +87,9 @@ def reconcile_jobs(session: Session, *, job_id: str | None = None) -> int:
         statement = statement.where(Job.id == job_id)
     released = 0
     for job, request in session.exec(statement).all():
+        if job.state == JobState.CANCELLED:
+            released += release_job(session, job.id)
+            continue
         if request.kind == IngestRequestKind.UPLOAD:
             selection = json.loads(request.selection_json)
             key = selection.get("ingestion_key")
@@ -172,22 +175,12 @@ def prune_expired(
         )
     )
     removed = unlinked = 0
+    cover_leases: list[StagingLease] = []
     for lease in rows:
         if lease.model_source_cover_id is not None:
-            # A cover lease never represents a local path. Reconcile its
-            # backend-native publication first; if no bytes were published,
-            # the reconciler removes the broken cover row and stale proof too.
-            # A mismatched or unavailable object remains leased for retry —
-            # expiry must never become an unverified delete.
-            from app.modules.library import source_covers
-            from app.modules.storage.storage_backend.runtime import get_backend
-
-            if source_covers.expire_pending(
-                session,
-                backend or get_backend(),
-                lease=lease,
-            ):
-                removed += 1
+            # Prepare all filesystem work before cover recovery takes storage
+            # anchors; its owner probes the entire cover batch before SQL.
+            cover_leases.append(lease)
             continue
         path = Path(lease.path)
         quarantine = _quarantine_entry_path(path, lease.id)
@@ -217,5 +210,12 @@ def prune_expired(
         # Keep uncertain rows charged. A replaced or inaccessible pathname is
         # not evidence that this lease's bytes were safely reclaimed.
         continue
+    if cover_leases:
+        from app.modules.library import source_covers
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        removed += source_covers.expire_pending_many(
+            session, backend or get_backend(), leases=cover_leases
+        )
     session.flush()
     return removed, unlinked

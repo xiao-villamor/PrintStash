@@ -55,7 +55,12 @@ from app.modules.storage.storage_backend.contracts import (
 )
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_ownership import provider_ref_for_backend, publish_file
+from app.modules.storage.storage_ownership import (
+    abandon_publication,
+    finish_publication_batch,
+    prepare_file,
+    provider_ref_for_backend,
+)
 from app.modules.work.contracts import JobContext, JobOutcome
 from app.modules.work.jobs import failure_of
 
@@ -143,7 +148,7 @@ def _resolve_committed_artifact(
 
 def _attach_ingested_artifact(
     session: Session, file_row: File, context: ProvenanceContext
-) -> None:
+):
     """Attach provenance without taking over artifact transaction ownership.
 
     The import is deliberately deferred so all existing ingestion callers stay
@@ -153,7 +158,7 @@ def _attach_ingested_artifact(
     """
     from app.modules.library.provenance import attach_ingested_artifact
 
-    attach_ingested_artifact(session, file_row, context)
+    return attach_ingested_artifact(session, file_row, context).storage_retirements
 
 
 def verify_durable_artifact(
@@ -473,6 +478,8 @@ def persist_artifact(
             f"artifact:{model_id}:{version}", [allocation]
         )
     blob_receipt = None
+    blob_publication = None
+    provenance_retirements = ()
     commit_started = False
     commit_resolved = False
     try:
@@ -506,7 +513,7 @@ def persist_artifact(
                 # not create a vault ownership-ledger row or delete intent.
                 blob_receipt = external_backend.move_in(staged_path, dest_key)
             else:
-                blob_receipt = publish_file(
+                blob_publication = prepare_file(
                     session,
                     backend,
                     dest_key,
@@ -516,6 +523,7 @@ def persist_artifact(
                     move=True,
                     remote_source=staged_origin,
                 )
+                blob_receipt = blob_publication.receipt
         if blob_receipt is not None:
             size_bytes = blob_receipt.size
         elif is_external and not move_blob:
@@ -583,7 +591,9 @@ def persist_artifact(
             # The File id exists, but the Artifact has not yet become visible.
             # A provenance failure therefore follows the established rollback
             # path for both its link and the bytes/row it describes.
-            _attach_ingested_artifact(session, file_row, provenance_context)
+            provenance_retirements = _attach_ingested_artifact(
+                session, file_row, provenance_context
+            )
         # A caller's facts may carry detection-only keys (e.g.
         # printer_preset_name) that have no Metadata column.
         meta = meta or {}
@@ -619,6 +629,12 @@ def persist_artifact(
         # A driver may acknowledge a committed transaction as an exception
         # (for example, a connection loss after COMMIT). From here onward the
         # blob must be preserved until a fresh session resolves the outcome.
+        session.flush()
+        finish_publication_batch(
+            session,
+            publications=(blob_publication,) if blob_publication is not None else (),
+            retirements=provenance_retirements,
+        )
         commit_started = True
         session.commit()
     except BaseException as exc:
@@ -656,10 +672,13 @@ def persist_artifact(
         else:
             # Before the domain commit boundary, exact receipt rollback is safe.
             # External-library bytes remain user-owned for the next scan.
-            if blob_receipt is not None and not is_external:
+            if blob_publication is not None and not is_external:
                 try:
-                    backend.rollback_create(blob_receipt)
-                except OSError as cleanup_exc:
+                    if abandon_publication(session, blob_publication):
+                        backend.rollback_create(blob_publication.receipt)
+                except Exception as cleanup_exc:
+                    # SQL retirement and physical rollback are both best effort;
+                    # retain the durable receipt if either cannot prove cleanup.
                     exc.add_note(f"receipt cleanup failed: {cleanup_exc}")
             raise
 
@@ -909,13 +928,19 @@ def commit_staged_artifact(
                 existing_file = session.get(File, preflight.file_id)
                 if existing_file is None:
                     raise RuntimeError("captured_artifact_missing")
-                attach_existing_artifact(session, existing_file, provenance_context)
+                merged = attach_existing_artifact(
+                    session, existing_file, provenance_context
+                )
                 if batch_commit is not None:
                     from .batch_store import record_committed
 
                     record_committed(
                         session, batch_commit, existing_file, deduplicated=True
                     )
+                session.flush()
+                finish_publication_batch(
+                    session, publications=(), retirements=merged.storage_retirements
+                )
                 session.commit()
             return CommitOutcome(
                 model_id=preflight.model_id,

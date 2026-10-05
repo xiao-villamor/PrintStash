@@ -570,7 +570,7 @@ def render_prepared_pixels(
             # Free this chunk's temporaries before the next one so only one
             # chunk's worth of per-face arrays is ever live. No gc.collect() here:
             # there are no reference cycles in the hot loop, and the per-file
-            # _reclaim_memory() in mesh_processing already returns arenas to the OS.
+            # The application mesh policy returns retired arenas to the OS.
             del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
             del corner_smooth, cos_crease, corner_n, cvn, tri, valid
 

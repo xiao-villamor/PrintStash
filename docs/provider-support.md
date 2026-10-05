@@ -311,7 +311,7 @@ filesystem, protocol, auth mode and the release-validation checklist result.
 
 Backup recovery and backup deletion have separate requirements. An archive can remain listable and recoverable while its destination cannot safely delete its exact owned object. Such deletion requests return `409 backup_exact_delete_unsupported`, even when the administrator confirms storage risk. Bytes and ownership evidence remain intact.
 
-OpenDAL backup destinations require an immutable object version and compiled version-deletion support. Empty and S3 `null` versions are mutable and do not qualify. Native S3 backups continue to use an immutable version or a conditional ETag; they never substitute an unconditional delete. Automatic retention leaves unsupported replicas in place without repeating provider-error warnings. The backup operation explanation remains visible until the destination supports safe deletion.
+OpenDAL backup destinations require an immutable object version and compiled version-deletion support. Empty and S3 `null` versions are mutable and do not qualify. Native S3 backups also require an immutable version. An ETag identifies content and can recur after replacement, so it cannot authorize delayed exact deletion. Enable bucket versioning before creating archives; enabling it later does not add immutable versions to existing receipts. Automatic retention leaves unsupported replicas in place without repeating provider-error warnings. The backup operation explanation remains visible until the destination supports safe deletion.
 
 ### Remote transport contracts
 

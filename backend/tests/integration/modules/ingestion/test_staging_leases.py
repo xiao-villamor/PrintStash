@@ -35,6 +35,7 @@ still never recursively scanned.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -1077,3 +1078,108 @@ class TestCaptureSpoolContext:
 
         assert path.read_bytes() == replacement
         assert original.read_bytes() == b""
+
+
+class TestOpenJobInput:
+    def test_waiting_owner_cancels_promptly(
+        self,
+        db_session,
+        make_user,
+        make_ingest_request,
+        tmp_path,
+    ):
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from app.core.cancellation import OperationCancelled
+        from app.db.models import IngestRequestKind
+        from app.db.session import get_session_factory, override_session_factory
+
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        path = tmp_path / "wait-owned.stl"
+        path.write_bytes(b"waiting input")
+        lease = staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        factory = get_session_factory()
+        waiting, cancelled = Event(), Event()
+        first = staging_leases.open_job_input(db_session, request.job_id)
+
+        def checkpoint_waiter():
+            waiting.set()
+            if cancelled.is_set():
+                raise OperationCancelled()
+
+        def waiter():
+            override_session_factory(factory)
+            with factory.scoped_session() as session:
+                custody = staging_leases.open_job_input(
+                    session,
+                    request.job_id,
+                    checkpoint=checkpoint_waiter,
+                    acquire_timeout_seconds=5,
+                )
+            with custody:
+                pytest.fail("waiter entered while the first actor owns the inode")
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with first:
+                running = executor.submit(waiter)
+                assert waiting.wait(timeout=2)
+                started = time.monotonic()
+                cancelled.set()
+                with pytest.raises(OperationCancelled):
+                    running.result(timeout=2)
+                assert time.monotonic() - started < 2
+                assert path.read_bytes() == b"waiting input"
+            with staging_leases.open_job_input(db_session, request.job_id):
+                assert path.read_bytes() == b"waiting input"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_waiting_owner_has_a_finite_acquisition_deadline(
+        self,
+        db_session,
+        make_user,
+        make_ingest_request,
+        tmp_path,
+    ):
+        from app.db.models import IngestRequestKind
+
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        path = tmp_path / "timeout-owned.stl"
+        path.write_bytes(b"bounded input")
+        staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        first = staging_leases.open_job_input(db_session, request.job_id)
+        second = staging_leases.open_job_input(
+            db_session, request.job_id, acquire_timeout_seconds=0.1
+        )
+
+        with first:
+            with pytest.raises(staging_leases.StagingLeaseError, match="timed out"):
+                with second:
+                    pytest.fail("second actor acquired the live input")
+        assert path.read_bytes() == b"bounded input"
+
+    @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+    def test_rejects_invalid_acquisition_timeout(self, db_session, timeout):
+        with pytest.raises(ValueError, match="acquisition_timeout"):
+            staging_leases.open_job_input(
+                db_session, "unregistered-job", acquire_timeout_seconds=timeout
+            )

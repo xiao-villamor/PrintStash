@@ -3,25 +3,73 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import app.modules.backups.backup.targets as backup_targets
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import OwnedStorageObject, StorageObjectState
 from app.db.session import get_session_factory
 from app.modules.backups import backup_runs
 from app.modules.backups.backup.contracts import BackupProgress, BackupStage
-from app.modules.backups.backup_destination import destination_from_connection
+from app.modules.backups.backup_destination import (
+    RemoteBackupDestination,
+    destination_from_connection,
+)
 from app.modules.storage.storage_backend.contracts import CreationReceipt
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_ownership import (
+    complete_publication,
     provider_ref_for_backend,
     publish_file,
-    record_creation,
+    reserve_publication,
 )
 
 logger = get_logger(__name__)
+
+
+def publish_replica(
+    destination: RemoteBackupDestination,
+    session,
+    key: str,
+    source: Path,
+    *,
+    sha256: str,
+) -> CreationReceipt:
+    """Reserve and commit a replica without borrowing managed creation authority."""
+    from app.db.publication import require_clean_publication_transaction
+    from app.modules.storage.storage_ownership import (
+        complete_publication,
+        fail_publication,
+        reserve_creation,
+    )
+
+    require_clean_publication_transaction(session)
+    reservation_id = reserve_creation(
+        session,
+        destination.backend,
+        key,
+        object_kind="backup",
+        expected_size=source.stat().st_size,
+        sha256=sha256,
+        provider_ref=destination.provider_ref,
+    )
+    try:
+        with source.open("rb") as reader:
+            receipt = destination.backend.publish_replica(reader, key)
+    except Exception as exc:
+        fail_publication(session, reservation_id, exc)
+        raise
+    receipt = replace(receipt, provider_ref=destination.provider_ref)
+    complete_publication(
+        session,
+        reservation_id,
+        receipt,
+        object_kind="backup",
+        sha256=sha256,
+        provider_ref=destination.provider_ref,
+    )
+    return receipt
 
 
 def prepare_destinations(selected):
@@ -169,18 +217,17 @@ def publish_archive(
             )
             token = uuid.uuid4().hex
             with get_session_factory().session() as reservation_session:
-                reservation = OwnedStorageObject(
+                reservation = reserve_publication(
+                    reservation_session,
                     backend="backup-s3",
                     namespace=namespace,
                     key=s3_key,
                     object_kind="backup",
                     provider_ref=target.provider_ref,
-                    state=StorageObjectState.PENDING,
-                    size_bytes=final_size,
+                    expected_size=final_size,
                     sha256=archive_sha256,
                     token=token,
                 )
-                reservation_session.add(reservation)
                 reservation_session.commit()
             with archive_temp.open("rb") as source:
                 s3.put_object(
@@ -215,10 +262,12 @@ def publish_archive(
                 ),
             )
             with get_session_factory().session() as commit_session:
-                record_creation(
+                complete_publication(
                     commit_session,
+                    reservation,
                     s3_receipt,
                     object_kind="backup",
+                    sha256=archive_sha256,
                     provider_ref=target.provider_ref,
                 )
                 commit_session.commit()
@@ -271,8 +320,12 @@ def publish_archive(
                 target=destination.backend.storage_target,
             )
             with get_session_factory().session() as remote_session:
-                remote_receipt = destination.publish_file(
-                    remote_session, remote_key, archive_temp, sha256=archive_sha256
+                remote_receipt = publish_replica(
+                    destination,
+                    remote_session,
+                    remote_key,
+                    archive_temp,
+                    sha256=archive_sha256,
                 )
                 remote_session.commit()
             created_sources.append(

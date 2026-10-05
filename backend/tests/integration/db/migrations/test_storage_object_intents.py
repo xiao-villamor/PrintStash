@@ -167,8 +167,7 @@ class TestStorageObjectIntentMigration:
         finally:
             upgraded_engine.dispose()
 
-        expected = {("backend", "provider_ref", "namespace", "key")}
-        assert fresh_unique == expected
+        assert fresh_unique == set()
         assert upgraded_unique == fresh_unique
         expected_intents = {("backend", "provider_ref", "namespace", "key", "token")}
         assert fresh_intent_unique == expected_intents
@@ -183,7 +182,8 @@ class TestStorageObjectIntentMigration:
                 item["name"]: item
                 for item in inspect(engine).get_indexes("owned_storage_objects")
             }
-            assert indexes["uq_owned_storage_legacy_locator"]["unique"] == 1
+            assert indexes["uq_owned_storage_active_legacy_locator"]["unique"] == 1
+            assert indexes["uq_owned_storage_active_provider_locator"]["unique"] == 1
             intent_indexes = {
                 item["name"]: item
                 for item in inspect(engine).get_indexes("storage_delete_intents")

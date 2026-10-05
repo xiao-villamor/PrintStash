@@ -103,10 +103,12 @@ from app.modules.storage import storage
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import (
     cleanup_status,
-    enqueue_owned_key,
     process_storage_delete_intents,
 )
-from app.modules.storage.storage_ownership import UnsafeStorageDeleteError
+from app.modules.storage.storage_ownership import (
+    UnsafeStorageDeleteError,
+    abandon_publication,
+)
 from app.modules.work import nudge
 from app.modules.work import service as work_service
 from app.schemas.jobs import JobAccepted
@@ -964,7 +966,7 @@ def put_model_source_cover(
         _provenance_source_or_404(session, model_id, source_id)
         data = file.file.read(15 * 1024 * 1024 + 1)
         try:
-            result = source_covers.put(
+            candidate = source_covers.prepare_candidate(
                 session,
                 get_backend(),
                 provenance_source_id=source_id,
@@ -975,13 +977,19 @@ def put_model_source_cover(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
         try:
+            cover = source_covers.attach_candidate(session, candidate)
+            source_covers.adopt_candidate(session, candidate)
             session.commit()
+        except source_covers.SourceCoverChangedError as exc:
+            session.rollback()
+            abandon_publication(session, candidate.publication)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception:
             session.rollback()
-            source_covers.rollback_after_commit_failure(session, get_backend(), result)
+            abandon_publication(session, candidate.publication)
             raise
-        session.refresh(result.cover)
-        return ModelSourceCoverRead.model_validate(result.cover)
+        session.refresh(cover)
+        return ModelSourceCoverRead.model_validate(cover)
 
 
 @router.delete(
@@ -997,18 +1005,13 @@ def delete_model_source_cover(
 ) -> Response:
     _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     _provenance_source_or_404(session, model_id, source_id)
-    cover = source_covers.get(session, source_id)
-    if cover is None:
+    try:
+        removed = source_covers.delete(session, get_backend(), source_id)
+    except source_covers.SourceCoverChangedError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
-    enqueue_owned_key(
-        session,
-        get_backend(),
-        cover.storage_key,
-        required_proof=True,
-        resource_kind="model_source_cover",
-        resource_id=cover.id,
-    )
-    session.delete(cover)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

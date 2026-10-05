@@ -1065,6 +1065,36 @@ describe("syncImportJobs", () => {
     expect(tc.taskDetail(tc.listTasks()[0])).toBe("Backup created; some destinations failed");
   });
 
+  it("titles a discovered scratch cleanup Job with its supplied label", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "scratch-cleanup-job",
+        kind: "ingestion.scratch_cleanup",
+        label: "Ingestion temporary files",
+        state: "running",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskTitle(tc.listTasks()[0])).toBe("Ingestion temporary files");
+  });
+
+  it("titles a discovered archive inspection Job as ZIP preparation", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "archive-inspect-job",
+        kind: "ingestion.archive_inspect",
+        label: "ingestion.archive_inspect",
+        state: "running",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskTitle(tc.listTasks()[0])).toBe("Prepare ZIP");
+  });
+
   it("titles a discovered import Job as an import", async () => {
     listJobs.mockResolvedValue([
       aJob({ job_id: "url-job", kind: "ingestion.url", label: "ingestion.url", state: "running" }),

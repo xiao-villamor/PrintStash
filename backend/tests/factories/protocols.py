@@ -47,6 +47,7 @@ from app.db.models import (
     InboxSourceKind,
     IndexGeneration,
     InferenceEndpoint,
+    IngestionScratchWindow,
     IngestRequest,
     IngestRequestKind,
     Job,
@@ -85,6 +86,7 @@ from app.db.models import (
     SimilarityRun,
     StorageConnection,
     StorageConnectionPurpose,
+    StoragePublicationLocator,
     SubjectCaption,
     SystemConfig,
     Tag,
@@ -428,6 +430,17 @@ class MakeDocument(Protocol):
     ) -> Document: ...
 
 
+class MakeStoragePublicationLocator(Protocol):
+    def __call__(
+        self,
+        *,
+        backend: str = "local",
+        namespace: str = "local/test",
+        key: str | None = None,
+        **overrides: Any,
+    ) -> StoragePublicationLocator: ...
+
+
 class MakeOwnedStorageObject(Protocol):
     def __call__(
         self,
@@ -490,6 +503,7 @@ __all__ = [
     "MakeMultipartModel",
     "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
+    "MakeStoragePublicationLocator",
     "MakePrintJob",
     "MakePrinter",
     "MakePrinterFile",
@@ -707,3 +721,14 @@ class MakeSearchProjectionRequest(Protocol):
     def __call__(
         self, source: ContentSource, **overrides: Any
     ) -> SearchProjectionRequest: ...
+
+
+class MakeIngestionScratchWindow(Protocol):
+    def __call__(
+        self,
+        *,
+        directory: Path | None = None,
+        job: Job | None = None,
+        execution_epoch: str | None = None,
+        **overrides: Any,
+    ) -> IngestionScratchWindow: ...

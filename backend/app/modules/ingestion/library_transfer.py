@@ -1537,7 +1537,7 @@ def _restore_portable_covers(
             source = sources[0]
             data = archive.read(cover_data["entry"])
             writes.append(
-                source_covers.put(
+                source_covers.prepare_put(
                     session,
                     get_backend(),
                     provenance_source_id=source.id,
@@ -1921,6 +1921,7 @@ def import_archive(
                 for artifact_data in sorted(
                     model_data.get("artifacts", []), key=lambda row: row["version"]
                 ):
+                    provenance_retirements = []
                     existing = session.exec(
                         select(File).where(
                             File.model_id == model.id,
@@ -1939,6 +1940,7 @@ def import_archive(
                             merge = provenance.attach_existing_artifact(
                                 session, existing, context, imported_overrides=overrides
                             )
+                            provenance_retirements.extend(merge.storage_retirements)
                             provenance_conflicts += len(
                                 merge.conflicting_override_fields
                             )
@@ -1958,6 +1960,9 @@ def import_archive(
                                 session.add(
                                     FileTagLink(file_id=existing.id, tag_id=tag.id)
                                 )
+                        provenance.finish_storage_retirements(
+                            session, tuple(provenance_retirements)
+                        )
                         session.commit()
                         if progress is not None:
                             progress(
@@ -2008,7 +2013,13 @@ def import_archive(
                         merge = provenance.attach_existing_artifact(
                             session, file_row, context, imported_overrides=overrides
                         )
+                        provenance_retirements.extend(merge.storage_retirements)
                         provenance_conflicts += len(merge.conflicting_override_fields)
+                    if provenance_retirements:
+                        provenance.finish_storage_retirements(
+                            session, tuple(provenance_retirements)
+                        )
+                        session.commit()
                     created_files += 1
                     if progress is not None:
                         session.commit()
@@ -2338,6 +2349,11 @@ def import_archive(
             session, archive, sidecar, source_models, user
         )
         try:
+            session.flush()
+            for write in sorted(
+                cover_writes, key=lambda value: value.cover.storage_key
+            ):
+                source_covers.adopt_write(session, write)
             session.commit()
         except Exception:
             session.rollback()

@@ -55,7 +55,11 @@ from app.modules.identity import rbac
 from app.modules.library import collection_tree, library_search, taxonomy, trash
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_ownership import publish_bytes
+from app.modules.storage.storage_ownership import (
+    abandon_publication,
+    adopt_publication,
+    prepare_bytes,
+)
 from app.schemas.models import (
     CollectionCreate,
     CollectionImageUpload,
@@ -527,15 +531,17 @@ def upload_collection_image(
         name = f"{hashlib.sha256(data).hexdigest()}{'.jpg' if ext == '.jpeg' else ext}"
         backend = get_backend()
         key = backend.collection_image_key(col.id, name)
-        receipt = None
+        candidate = None
         try:
-            receipt = publish_bytes(
+            candidate = prepare_bytes(
                 session,
                 backend,
                 key,
                 data,
                 object_kind="collection_image",
             )
+            session.flush()
+            adopt_publication(session, candidate)
             session.commit()
         except StorageCollisionError as exc:
             session.rollback()
@@ -545,8 +551,8 @@ def upload_collection_image(
             ) from exc
         except Exception:
             session.rollback()
-            if receipt is not None:
-                backend.rollback_create(receipt)
+            if candidate is not None and abandon_publication(session, candidate):
+                backend.rollback_create(candidate.receipt)
             raise
         return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
 

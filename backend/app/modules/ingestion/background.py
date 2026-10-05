@@ -24,7 +24,13 @@ from app.core.cancellation import OperationCancelled, cancellation_scope, checkp
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.modules.ingestion import batch_store, import_resolvers, importer, requests
+from app.modules.ingestion import (
+    batch_store,
+    import_resolvers,
+    importer,
+    requests,
+    scratch_windows,
+)
 from app.modules.ingestion.batch_contracts import (
     ArchiveSource,
     CollectionSource,
@@ -190,6 +196,10 @@ def _consume_archive(
         importer.iter_archive_entries(
             archive,
             names,
+            owner=scratch_windows.JobWindowOwner(
+                batch.context.job_id, batch.context.execution_epoch
+            ),
+            session_factory=batch.factory,
             skip_entry=lambda entry: (
                 batch.confirmed(
                     by_id[entry.entry_id],
@@ -231,42 +241,57 @@ async def _consume_download(
         legacy_candidates = _legacy_candidates(batch)
     if _confirmed_source(batch, spec.descriptor.source_id, member_title=member_title):
         return
-    staged, filename = await importer.download_to_staging(
-        download_url, window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024
-    )
-    try:
-        checkpoint(force=True)
-        suffix = Path(filename).suffix.lower()
-        if suffix == ".zip" or (
-            suffix not in MESH_SUFFIXES | GCODE_SUFFIXES and zipfile.is_zipfile(staged)
-        ):
-            entries = await run_in_threadpool(importer.inspect_archive, staged)
-            names = [entry.name for entry in entries if entry.file_type]
-            await run_in_threadpool(
-                _consume_archive,
-                batch,
-                staged,
-                names,
-                source_id=spec.descriptor.source_id,
-                source_url=source_url,
-                member_title=member_title,
-                legacy_candidates=legacy_candidates,
-                source_spec=spec,
+    with scratch_windows.open_window(
+        kind=scratch_windows.WindowKind.DOWNLOAD,
+        max_bytes=settings.max_upload_bytes,
+        owner=scratch_windows.JobWindowOwner(
+            batch.context.job_id, batch.context.execution_epoch
+        ),
+        session_factory=batch.factory,
+    ) as workspace:
+        staged, filename = await importer.download_to_staging(
+            download_url,
+            window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
+            window=workspace,
+        )
+        try:
+            checkpoint(force=True)
+            suffix = Path(filename).suffix.lower()
+            if suffix == ".zip" or (
+                suffix not in MESH_SUFFIXES | GCODE_SUFFIXES
+                and zipfile.is_zipfile(staged)
+            ):
+                entries = await run_in_threadpool(importer.inspect_archive, staged)
+                names = [entry.name for entry in entries if entry.file_type]
+                await run_in_threadpool(
+                    _consume_archive,
+                    batch,
+                    staged,
+                    names,
+                    source_id=spec.descriptor.source_id,
+                    source_url=source_url,
+                    member_title=member_title,
+                    legacy_candidates=legacy_candidates,
+                    source_spec=spec,
+                )
+            elif suffix in MESH_SUFFIXES | GCODE_SUFFIXES:
+                batch.register((spec,))
+                await run_in_threadpool(
+                    batch.consume,
+                    spec,
+                    (staged, filename),
+                    source_url=source_url,
+                    member_title=member_title,
+                    legacy_keys=_certified_legacy_keys(
+                        legacy_candidates, staged, filename
+                    ),
+                )
+            else:
+                batch.record_skipped(spec, "unsupported_file_type")
+        finally:
+            importer.discard_staged_files(
+                (staged,), strict=True, session_factory=batch.factory
             )
-        elif suffix in MESH_SUFFIXES | GCODE_SUFFIXES:
-            batch.register((spec,))
-            await run_in_threadpool(
-                batch.consume,
-                spec,
-                (staged, filename),
-                source_url=source_url,
-                member_title=member_title,
-                legacy_keys=_certified_legacy_keys(legacy_candidates, staged, filename),
-            )
-        else:
-            batch.record_skipped(spec, "unsupported_file_type")
-    finally:
-        importer.discard_staged_files((staged,), strict=True)
 
 
 def _entry_error(exc: Exception) -> str:
@@ -426,13 +451,14 @@ async def _handle_collection_url(
     )
 
 
-def _lease_archive(job_id: str, staged: Path, actor_user_id: int) -> None:
+def _lease_archive(
+    job_id: str, staged: Path, actor_user_id: int, session_factory: SessionFactory
+) -> None:
     """Make the URL Job the owner of the archive it downloaded for review."""
-    from app.db.session import get_session_factory
     from app.modules.ingestion import staging_leases
     from app.modules.storage.hashing import sha256_file
 
-    with get_session_factory().scoped_session() as session:
+    with session_factory.scoped_session() as session:
         staging_leases.create_job_lease(
             session,
             job_id=job_id,
@@ -498,10 +524,7 @@ async def import_from_url(
         )
         job_context.update(stage="downloading")
         checkpoint(force=True)
-        staged, original_filename = await importer.download_to_staging(
-            download_url, window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024
-        )
-    except importer.WindowReleaseError:
+    except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
         raise
     except importer.ImportError_ as exc:
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
@@ -511,65 +534,102 @@ async def import_from_url(
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
         return
 
-    leased = False
-    try:
-        checkpoint(force=True)
-        suffix = Path(original_filename).suffix.lower()
-        # Treat anything that is actually a zip as an archive (handles missing/odd
-        # extensions on direct download links). A .3mf is itself a zip container but
-        # is a single model, so route it (and other known mesh/g-code suffixes) to
-        # direct ingestion rather than the archive-manifest flow.
-        if suffix == ".zip" or (
-            zipfile.is_zipfile(staged)
-            and suffix not in MESH_SUFFIXES
-            and suffix not in GCODE_SUFFIXES
-        ):
-            try:
-                job_context.update(stage="inspecting", current_item=original_filename)
-                entries = await run_in_threadpool(importer.inspect_archive, staged)
-            except importer.ImportError_ as exc:
-                staged.unlink(missing_ok=True)
-                job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
-                return
+    with scratch_windows.open_window(
+        kind=scratch_windows.WindowKind.DOWNLOAD,
+        max_bytes=settings.max_upload_bytes,
+        owner=scratch_windows.JobWindowOwner(job_id, job_context.execution_epoch),
+        session_factory=session_factory,
+    ) as window:
+        try:
+            staged, original_filename = await importer.download_to_staging(
+                download_url,
+                window=window,
+                window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
+                owner=scratch_windows.JobWindowOwner(
+                    job_id, job_context.execution_epoch
+                ),
+                session_factory=session_factory,
+            )
+        except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
+            raise
+        except importer.ImportError_ as exc:
+            job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 — network/IO boundary
+            logger.exception("url import download failed: %s", req.url)
+            job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
+            return
+
+        leased = False
+        try:
             checkpoint(force=True)
-            await run_in_threadpool(_lease_archive, job_id, staged, actor_user_id)
-            leased = True
-            manifest = _record_archive(
-                job_id,
-                archive_name=original_filename,
-                entries=entries,
-                source_url=req.url,
+            suffix = Path(original_filename).suffix.lower()
+            # Treat anything that is actually a zip as an archive (handles missing/odd
+            # extensions on direct download links). A .3mf is itself a zip container but
+            # is a single model, so route it (and other known mesh/g-code suffixes) to
+            # direct ingestion rather than the archive-manifest flow.
+            if suffix == ".zip" or (
+                zipfile.is_zipfile(staged)
+                and suffix not in MESH_SUFFIXES
+                and suffix not in GCODE_SUFFIXES
+            ):
+                try:
+                    job_context.update(
+                        stage="inspecting", current_item=original_filename
+                    )
+                    entries = await run_in_threadpool(importer.inspect_archive, staged)
+                except importer.ImportError_ as exc:
+                    importer.discard_staged_files(
+                        (staged,), strict=True, session_factory=session_factory
+                    )
+                    job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
+                    return
+                checkpoint(force=True)
+                await run_in_threadpool(
+                    _lease_archive, job_id, staged, actor_user_id, session_factory
+                )
+                window.handoff(staged)
+                leased = True
+                manifest = _record_archive(
+                    job_id,
+                    archive_name=original_filename,
+                    entries=entries,
+                    source_url=req.url,
+                )
+                job_context.finish(
+                    JobOutcome.COMPLETED,
+                    result={"kind": "archive_manifest", **manifest.model_dump()},
+                )
+                return
+
+            if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
+                # The URL resolved to something that isn't a model file or a .zip —
+                # almost always a model *page* (HTML) rather than a direct download
+                # link. Use a dedicated code so the UI can tell the user what to paste.
+                importer.discard_staged_files(
+                    (staged,), strict=True, session_factory=session_factory
+                )
+                job_context.finish(JobOutcome.FAILED, error="url_not_a_direct_file")
+                return
+
+            spec = _download_spec(req.url, original_filename)
+            batch.register((spec,))
+            await run_in_threadpool(
+                batch.consume,
+                spec,
+                (staged, original_filename),
+                legacy_keys=(
+                    importer.item_ingestion_key(job_id, f"0:{original_filename}"),
+                ),
             )
-            job_context.finish(
-                JobOutcome.COMPLETED,
-                result={"kind": "archive_manifest", **manifest.model_dump()},
-            )
-            return
+            batch.discovery_complete()
+            batch.finish()
 
-        if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
-            # The URL resolved to something that isn't a model file or a .zip —
-            # almost always a model *page* (HTML) rather than a direct download
-            # link. Use a dedicated code so the UI can tell the user what to paste.
-            staged.unlink(missing_ok=True)
-            job_context.finish(JobOutcome.FAILED, error="url_not_a_direct_file")
-            return
-
-        spec = _download_spec(req.url, original_filename)
-        batch.register((spec,))
-        await run_in_threadpool(
-            batch.consume,
-            spec,
-            (staged, original_filename),
-            legacy_keys=(
-                importer.item_ingestion_key(job_id, f"0:{original_filename}"),
-            ),
-        )
-        batch.discovery_complete()
-        batch.finish()
-
-    finally:
-        if not leased:
-            importer.discard_staged_files((staged,), strict=True)
+        finally:
+            if not leased:
+                importer.discard_staged_files(
+                    (staged,), strict=True, session_factory=session_factory
+                )
 
 
 def inspect_uploaded_archive(
@@ -647,7 +707,7 @@ def run_archive_selection(
             )
         batch.discovery_complete()
         batch.finish()
-    except importer.WindowReleaseError:
+    except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
         raise
     except Exception as exc:  # noqa: BLE001 — one archive's expanded units
         code = _entry_error(exc)
@@ -718,13 +778,13 @@ async def run_file_selection_import(
                     source_url=page_url,
                     legacy_candidates=legacy_candidates,
                 )
-            except importer.WindowReleaseError:
+            except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
                 raise
             except Exception as exc:  # noqa: BLE001 — isolate one source, preserve cancellation
                 _record_source_failure(batch, spec, _entry_error(exc))
         batch.discovery_complete()
         batch.finish()
-    except importer.WindowReleaseError:
+    except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
         raise
     except importer.ImportError_ as exc:
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc))
@@ -776,7 +836,7 @@ async def run_collection_member_import(
                 member_title=member.title,
                 legacy_candidates=legacy_candidates,
             )
-        except importer.WindowReleaseError:
+        except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
             raise
         except Exception as exc:  # noqa: BLE001 — isolate one member, preserve cancellation
             logger.exception("collection member import failed")

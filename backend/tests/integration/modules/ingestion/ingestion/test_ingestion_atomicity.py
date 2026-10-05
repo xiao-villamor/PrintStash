@@ -29,6 +29,7 @@ from printstash_core.mesh.measurements import (
     encode_volume,
 )
 from sqlalchemy import Engine, event
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import _overlay
@@ -342,13 +343,13 @@ class TestIncomingDimensionEvidence:
         self, db_session, storage, model, tmp_path, monkeypatch, axis, value
     ):
         calls = []
-        original_publish = ingestion.publish_file
+        original_publish = ingestion.prepare_file
 
         def observe_publication(*args, **kwargs):
             calls.append(kwargs)
             return original_publish(*args, **kwargs)
 
-        monkeypatch.setattr(ingestion, "publish_file", observe_publication)
+        monkeypatch.setattr(ingestion, "prepare_file", observe_publication)
         staged = _staged(tmp_path)
         with pytest.raises(ValueError):
             _persist(db_session, model, staged, meta={axis: value})
@@ -392,13 +393,13 @@ class TestIncomingVolumeEvidence:
         self, db_session, storage, model, tmp_path, monkeypatch, meta
     ):
         publication_calls = []
-        original_publish = ingestion.publish_file
+        original_publish = ingestion.prepare_file
 
         def observe_publication(*args, **kwargs):
             publication_calls.append(kwargs)
             return original_publish(*args, **kwargs)
 
-        monkeypatch.setattr(ingestion, "publish_file", observe_publication)
+        monkeypatch.setattr(ingestion, "prepare_file", observe_publication)
         staged = _staged(tmp_path)
         next_version = model.next_file_version
         with pytest.raises(ValueError):
@@ -542,15 +543,16 @@ class TestMetadata:
         cancellation = OperationCancelled()
         published = []
         metadata_file_ids = []
-        original_publish = ingestion.publish_file
+        original_publish = ingestion.prepare_file
 
         def observe_publication(*args, **kwargs):
-            receipt = original_publish(*args, **kwargs)
+            publication = original_publish(*args, **kwargs)
+            receipt = publication.receipt
             published.append(receipt)
             assert Path(receipt.key).read_bytes() == b"solid bracket\nendsolid\n"
-            return receipt
+            return publication
 
-        monkeypatch.setattr(ingestion, "publish_file", observe_publication)
+        monkeypatch.setattr(ingestion, "prepare_file", observe_publication)
 
         def withdrawn_metadata(*_args, **kwargs):
             metadata_file_ids.append(kwargs["file_id"])
@@ -568,9 +570,12 @@ class TestMetadata:
             db_session.exec(select(File).where(File.model_id == model.id)).all() == []
         )
         assert len(metadata_file_ids) == 1
-        assert db_session.exec(
-            select(Metadata).where(Metadata.file_id == metadata_file_ids[0])
-        ).all() == []
+        assert (
+            db_session.exec(
+                select(Metadata).where(Metadata.file_id == metadata_file_ids[0])
+            ).all()
+            == []
+        )
         assert len(published) == 1
         assert not Path(published[0].key).exists()
 
@@ -603,6 +608,38 @@ class TestMetadata:
         )
         assert len(receipts) == 1
         assert Path(receipts[0].key).read_bytes() == b"solid bracket\nendsolid\n"
+
+    def test_preserves_cancellation_when_publication_retirement_is_unavailable(
+        self, db_session, storage, model, tmp_path, monkeypatch
+    ):
+        from app.core.cancellation import OperationCancelled
+        from app.db.models import OwnedStorageObject, StorageObjectState
+
+        cancellation = OperationCancelled()
+
+        def withdrawn_metadata(*_args, **_kwargs):
+            raise cancellation
+
+        def unavailable_retirement(*_args, **_kwargs):
+            raise OperationalError(
+                "retire publication", {}, OSError("database unavailable")
+            )
+
+        withdrawn_metadata.model_fields = ingestion.Metadata.model_fields
+        monkeypatch.setattr(ingestion, "Metadata", withdrawn_metadata)
+        monkeypatch.setattr(ingestion, "abandon_publication", unavailable_retirement)
+
+        with pytest.raises(OperationCancelled) as raised:
+            _persist(db_session, model, _staged(tmp_path))
+
+        assert raised.value is cancellation
+        assert any("receipt cleanup failed" in note for note in cancellation.__notes__)
+        assert (
+            db_session.exec(select(File).where(File.model_id == model.id)).all() == []
+        )
+        ownership = db_session.exec(select(OwnedStorageObject)).one()
+        assert ownership.state == StorageObjectState.PENDING
+        assert Path(ownership.key).read_bytes() == b"solid bracket\nendsolid\n"
 
     def test_preserves_committed_artifact_after_cooperative_cancellation(
         self, db_session, storage, model, tmp_path, monkeypatch
@@ -753,7 +790,7 @@ class TestProvenance:
             blob_sha256=blob_hash,
             actor_id=actor.id,
         )
-        link = provenance.attach_ingested_artifact(db_session, file_row, first)
+        link = provenance.attach_ingested_artifact(db_session, file_row, first).link
         provenance.set_user_override(
             db_session,
             provenance_source_id=link.provenance_source_id,

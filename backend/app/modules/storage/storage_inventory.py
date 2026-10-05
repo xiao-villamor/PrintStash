@@ -290,6 +290,7 @@ def cleanup_opportunities(session: Session) -> list[dict]:
             func.coalesce(func.sum(col(OwnedStorageObject.size_bytes)), 0),
         ).where(
             col(OwnedStorageObject.object_kind).startswith("backup"),
+            OwnedStorageObject.state != StorageObjectState.RETIRING,
             OwnedStorageObject.created_at <= backup_cutoff,
         )
     ).one()
@@ -418,7 +419,13 @@ def inventory(
     snapshot = ownership_snapshot(session, discover=False)
     objects: dict[tuple[str, str, str], int | None] = {}
     current_provider = provider_ref_for_backend(backend)
-    receipts = list(session.exec(select(OwnedStorageObject)))
+    receipts = list(
+        session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.state != StorageObjectState.RETIRING
+            )
+        )
+    )
     pending_deletions = list(
         session.exec(
             select(StorageDeleteIntent).where(StorageDeleteIntent.status != "completed")
@@ -790,7 +797,8 @@ def cleanup_derived_cache(session: Session, actor: User) -> dict:
     from app.modules.administration import audit
     from app.modules.storage.capacity_observability import record_cleanup
     from app.modules.storage.storage_deletion import (
-        enqueue_owned_key,
+        enqueue_prepared_owned_deletion,
+        prepare_owned_key_deletion,
         process_storage_delete_intents,
     )
 
@@ -813,16 +821,31 @@ def cleanup_derived_cache(session: Session, actor: User) -> dict:
             .limit(10_000)
         )
     )
-    enqueued = 0
-    for candidate in candidates:
-        if enqueue_owned_key(
-            session,
-            backend,
-            candidate.key,
-            resource_kind="derived_stl_cache",
-            resource_id=candidate.id,
-        ):
-            enqueued += 1
+    prepared = [
+        value
+        for candidate in candidates
+        if (
+            value := prepare_owned_key_deletion(
+                session,
+                backend,
+                candidate.key,
+                resource_kind="derived_stl_cache",
+                resource_id=candidate.id,
+            )
+        )
+        is not None
+    ]
+    enqueued = sum(
+        enqueue_prepared_owned_deletion(session, value)
+        for value in sorted(
+            prepared,
+            key=lambda value: (
+                value.receipt.backend,
+                value.receipt.namespace,
+                value.receipt.key,
+            ),
+        )
+    )
     session.commit()
     process_storage_delete_intents(limit=max(100, enqueued))
     audit.record(
@@ -851,7 +874,7 @@ def legacy_usage(session: Session) -> dict:
         select(
             func.count(col(OwnedStorageObject.id)),
             func.coalesce(func.sum(col(OwnedStorageObject.size_bytes)), 0),
-        )
+        ).where(OwnedStorageObject.state != StorageObjectState.RETIRING)
     ).one()
     return {
         "backend": settings.storage_backend,

@@ -58,8 +58,10 @@ from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import process_storage_delete_intents
 from app.modules.storage.storage_ownership import (
     UnsafeStorageDeleteError,
-    publish_bytes,
-    publish_stream,
+    abandon_publication,
+    adopt_publication,
+    prepare_bytes,
+    prepare_stream,
 )
 from app.schemas.documents import (
     DocumentCreate,
@@ -379,9 +381,9 @@ def upload_document(
         document_id = doc.id
         backend = get_backend()
         key = backend.document_file_key(doc.id, safe)
-        receipt = None
+        candidate = None
         try:
-            receipt = publish_stream(
+            candidate = prepare_stream(
                 session,
                 backend,
                 key,
@@ -390,6 +392,7 @@ def upload_document(
                 expected_size=file.size,
                 sha256=None,
             )
+            receipt = candidate.receipt
             if receipt.size > settings.max_upload_bytes:
                 raise HTTPException(status_code=413, detail="upload_too_large")
             doc.filename = safe
@@ -400,6 +403,8 @@ def upload_document(
                 aggregate.updated_by = current_user.id
                 session.add(aggregate)
             content_changed(session, "document", [document_id])
+            session.flush()
+            adopt_publication(session, candidate)
             session.commit()
         except StorageCollisionError as exc:
             session.rollback()
@@ -412,8 +417,11 @@ def upload_document(
             ) from exc
         except Exception:
             session.rollback()
-            if receipt is not None:
-                backend.rollback_create(receipt)
+            if candidate is not None:
+                if not abandon_publication(session, candidate):
+                    # An adopted generation survives a lost commit acknowledgement.
+                    raise
+                backend.rollback_create(candidate.receipt)
             persisted = session.get(Document, document_id)
             if persisted is not None:
                 session.delete(persisted)
@@ -538,15 +546,17 @@ def upload_document_image(
         name = f"{hashlib.sha256(data).hexdigest()}{'.jpg' if ext == '.jpeg' else ext}"
         backend = get_backend()
         key = backend.document_image_key(doc.id, name)
-        receipt = None
+        candidate = None
         try:
-            receipt = publish_bytes(
+            candidate = prepare_bytes(
                 session,
                 backend,
                 key,
                 data,
                 object_kind="document_image",
             )
+            session.flush()
+            adopt_publication(session, candidate)
             session.commit()
         except StorageCollisionError as exc:
             session.rollback()
@@ -556,8 +566,8 @@ def upload_document_image(
             ) from exc
         except Exception:
             session.rollback()
-            if receipt is not None:
-                backend.rollback_create(receipt)
+            if candidate is not None and abandon_publication(session, candidate):
+                backend.rollback_create(candidate.receipt)
             raise
         return DocumentImageUpload(url=f"/api/v1/documents/{doc.id}/images/{name}")
 

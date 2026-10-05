@@ -1175,7 +1175,7 @@ class TestDocumentUploadExecution:
     ):
         loop = asyncio.get_running_loop()
         observations = []
-        publish = documents_router.publish_stream
+        publish = documents_router.prepare_stream
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -1191,7 +1191,7 @@ class TestDocumentUploadExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(documents_router, "publish_stream", delayed_publication)
+            monkeypatch.setattr(documents_router, "prepare_stream", delayed_publication)
             response = await client.post(
                 "/api/v1/documents/upload",
                 headers=admin_headers,
@@ -1238,7 +1238,7 @@ class TestDocumentImageExecution:
         doc = make_document("Illustrated")
         loop = asyncio.get_running_loop()
         observations = []
-        publish = documents_router.publish_bytes
+        publish = documents_router.prepare_bytes
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -1254,7 +1254,7 @@ class TestDocumentImageExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(documents_router, "publish_bytes", delayed_publication)
+            monkeypatch.setattr(documents_router, "prepare_bytes", delayed_publication)
             response = await client.post(
                 f"/api/v1/documents/{doc.id}/images",
                 headers=admin_headers,
@@ -1262,3 +1262,124 @@ class TestDocumentImageExecution:
             )
         assert response.status_code == 201, response.text
         assert observations == [200]
+
+
+class TestImageCommitAcknowledgement:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("owner_kind", ["document", "collection"])
+    async def test_lost_commit_acknowledgement_preserves_adopted_image(
+        self,
+        app,
+        db_session,
+        admin_headers,
+        make_document,
+        make_collection,
+        monkeypatch,
+        owner_kind,
+    ):
+        from app.db.models import OwnedStorageObject, StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        owner = make_document() if owner_kind == "document" else make_collection()
+        db_session.commit()
+        backend = get_backend()
+        name = hashlib.sha256(_PNG).hexdigest() + ".png"
+        key = (
+            backend.document_image_key(owner.id, name)
+            if owner_kind == "document"
+            else backend.collection_image_key(owner.id, name)
+        )
+        route = (
+            f"/api/v1/documents/{owner.id}/images"
+            if owner_kind == "document"
+            else f"/api/v1/collections/{owner.id}/images"
+        )
+        original_commit = Session.commit
+        lost = False
+
+        def lost_acknowledgement(session):
+            nonlocal lost
+            adopting = (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == key,
+                        OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                    )
+                ).first()
+                is not None
+            )
+            original_commit(session)
+            if adopting and not lost:
+                lost = True
+                raise RuntimeError("commit acknowledgement lost")
+
+        monkeypatch.setattr(Session, "commit", lost_acknowledgement)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            with pytest.raises(RuntimeError, match="commit acknowledgement lost"):
+                await client.post(
+                    route,
+                    headers=admin_headers,
+                    files={"file": ("image.png", _PNG, "image/png")},
+                )
+        assert lost
+        assert backend.read_bytes(key) == _PNG
+        db_session.expire_all()
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        assert proof.state is StorageObjectState.COMMITTED
+
+
+class TestBinaryCommitAcknowledgement:
+    @pytest.mark.asyncio
+    async def test_lost_final_commit_acknowledgement_keeps_binary_publication(
+        self, app, db_session, admin_headers, monkeypatch
+    ):
+        from app.db.models import Document, OwnedStorageObject, StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        db_session.commit()
+        original_commit = Session.commit
+        lost = False
+
+        def lose_final_acknowledgement(session):
+            nonlocal lost
+            adopting = (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.object_kind == "document_file",
+                        OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                    )
+                ).first()
+                is not None
+            )
+            original_commit(session)
+            if adopting and not lost:
+                lost = True
+                raise RuntimeError("final commit acknowledgement lost")
+
+        monkeypatch.setattr(Session, "commit", lose_final_acknowledgement)
+        data = b"%PDF-adopted-document"
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            with pytest.raises(RuntimeError, match="final commit acknowledgement lost"):
+                await client.post(
+                    "/api/v1/documents/upload",
+                    headers=admin_headers,
+                    data={"name": "Guide"},
+                    files={"file": ("guide.pdf", data, "application/pdf")},
+                )
+        assert lost
+        db_session.expire_all()
+        doc = db_session.exec(select(Document).where(Document.name == "Guide")).one()
+        assert doc.filename == "guide.pdf"
+        backend = get_backend()
+        key = backend.document_file_key(doc.id, doc.filename)
+        assert backend.read_bytes(key) == data
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        assert proof.state is StorageObjectState.COMMITTED

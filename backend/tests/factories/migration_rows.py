@@ -403,3 +403,111 @@ def create_pre_derivative_attempt_schema(connection) -> None:
         }:
             jobs.constraints.remove(constraint)
     metadata.create_all(connection)
+
+
+def create_pre_storage_retirement_schema(connection) -> None:
+    """Pinned ownership-ledger DDL at 67494831ae72, independent of today's model."""
+    from sqlalchemy import BigInteger, Column, Index, String, UniqueConstraint, text
+
+    metadata = MetaData()
+    owned = Table(
+        "owned_storage_objects",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("backend", String(32), nullable=False, index=True),
+        Column("namespace", String(1024), nullable=False, index=True),
+        Column("key", String(2048), nullable=False),
+        Column("provider_ref", String(64), index=True),
+        Column("object_kind", String(64), nullable=False, index=True),
+        Column("state", String(16), nullable=False, index=True),
+        Column("token", String(64)),
+        Column("size_bytes", Integer),
+        Column("sha256", String(64), index=True),
+        Column("etag", String(255)),
+        Column("version_id", String(1024)),
+        Column("device", BigInteger),
+        Column("inode", BigInteger),
+        Column("ctime_ns", BigInteger),
+        Column("created_at", DateTime, nullable=False, index=True),
+        Column("committed_at", DateTime, index=True),
+        Column("last_error", String(255)),
+        UniqueConstraint(
+            "backend",
+            "provider_ref",
+            "namespace",
+            "key",
+            name="uq_owned_storage_provider_locator",
+        ),
+    )
+    Index(
+        "uq_owned_storage_legacy_locator",
+        owned.c.backend,
+        owned.c.namespace,
+        owned.c.key,
+        unique=True,
+        sqlite_where=text("provider_ref IS NULL"),
+        postgresql_where=text("provider_ref IS NULL"),
+    )
+    metadata.create_all(connection)
+
+
+def create_pre_scratch_windows_schema(connection) -> None:
+    """Only the unchanged tables touched by the 8ce8989462c0 successor.
+
+    Like the derivative-controls fixture, clone current unchanged shapes while
+    reverting precisely this migration's added enum member. The scratch table
+    is absent. Users are included solely for the two existing Job/group FKs.
+    """
+    from sqlalchemy import CheckConstraint, text
+    from sqlmodel import SQLModel
+
+    metadata = MetaData(naming_convention=SQLModel.metadata.naming_convention)
+    for name in (
+        "users",
+        "jobs",
+        "reconcile_cursors",
+        "derivative_group_regenerations",
+    ):
+        SQLModel.metadata.tables[name].to_metadata(metadata)
+    for table, name in (
+        ("jobs", "ck_jobs_kind_values"),
+        ("reconcile_cursors", "ck_reconcile_cursors_source_values"),
+        (
+            "derivative_group_regenerations",
+            "ck_derivative_group_regenerations_definition_values",
+        ),
+    ):
+        constraint = next(
+            row
+            for row in metadata.tables[table].constraints
+            if isinstance(row, CheckConstraint) and row.name == name
+        )
+        constraint.sqltext = text(
+            str(constraint.sqltext).replace(", 'ingestion.scratch_cleanup'", "")
+        )
+    metadata.create_all(connection)
+
+
+def seed_ingestion_scratch_receipt(connection, **overrides: object) -> str:
+    """A coherent preparing receipt for migrated-schema constraint scenarios."""
+    from uuid import uuid4
+
+    identity = uuid4().hex
+    values: dict[str, object] = {
+        "id": identity,
+        "path": f"/vault/staging/scratch-{identity}",
+        "lock_path": f"/vault/staging/scratch-{identity}.lock",
+        "parent_device": 1,
+        "parent_inode": 2,
+        "lock_device": 1,
+        "lock_inode": 3,
+        "marker_token": uuid4().hex,
+        "kind": "download",
+        "phase": "preparing",
+        "request_token": uuid4().hex,
+        "capacity_operation_id": f"scratch/{identity}",
+        "max_bytes": 1048576,
+    }
+    values.update(overrides)
+    seed_schema_row(connection, "ingestion_scratch_windows", **values)
+    return str(values["id"])

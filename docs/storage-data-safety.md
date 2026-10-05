@@ -182,3 +182,96 @@ A verified backup in an OpenDAL S3 connection can satisfy GC's independent-backu
 Custom S3 targets require an administrator-declared failure domain bound to the current target identity. Different profiles, prefixes or credentials do not establish independence, and a declaration cannot override known shared storage. Approval records the evidence; finalization verifies the same archive and rechecks the evidence after quarantine. A removed profile, edited target, changed declaration, changed archive or incompatible backup blocks finalization and preserves the candidates.
 
 This eligibility does not grant backup deletion, promote the destination's maturity, or enable witnesses from other remote transports.
+
+
+## Publication, Adoption And Retirement
+
+Byte preparation commits a `PENDING` ownership reservation with an immutable
+reservation generation and exact creation receipt. Preparation does not grant
+permission to attach a domain pointer. Guarded producers first lock their Job
+execution and domain output, update the pointer, then adopt the prepared receipt
+in the same transaction. A rolled-back domain transaction leaves its durable
+pending receipt available to the orphan owner.
+
+Adopters, reservers, collectors and cleanup use one persistent SQL locator
+anchor, ordered by backend, namespace and key. Domain authority and output rows
+are locked before these anchors; receipt verification and provider I/O happen
+before the final SQL attachment phase or after its commit. The anchor also
+arbitrates the first insertion when no ownership row exists.
+
+Retirement changes a specific reservation generation to `RETIRING` and commits
+its exact delete intent before cleanup I/O. A retired reservation cannot be
+revived by a late creator or adopter. A new physical generation may reuse the
+same canonical locator with a distinct reservation. Incomplete retired receipts
+keep their recovery evidence and a future recovery date; uncertain evidence is
+deferred, and bytes of an active successor are never inferred to be the old
+creator's output.
+
+Completed delete intents remain exact-receipt revocations. Locator anchors and
+retired ownership history are retained as well: the current implementation has
+no age-based prune for this authority. These rows grow with publication and
+retirement history. A future compactor must prove that no late reservation,
+receipt, restore or legacy adopter can reintroduce a removed revocation; expiry
+alone is insufficient. Retired history is excluded from current inventory and
+backup-retention counts.
+
+Local adoption tokens identify a physical generation (device, inode, ctime,
+size and digest), so identical bytes in a replacement inode have different
+authority. Historical local receipts remain valid only for their exact recorded
+physical identity.
+
+Remote receipts with an immutable version ID identify that physical version
+even when a legacy adopter supplies a different logical token. Exact retirement
+revokes the version itself. OpenDAL recovery may reconstruct a lost logical
+token only after pinning an immutable version and validating the archive digest;
+without that physical authority, the reservation stays pending with an explicit
+missing-evidence outcome instead of manufacturing an empty receipt.
+
+Delayed S3 cleanup requires an immutable version ID. ETags may repeat after
+replacement and therefore cannot authorize delayed deletion. Unsupported
+unversioned cleanup remains explicitly blocked and is not continuously retried.
+Manual backup deletion reports `backup_exact_delete_unsupported` and preserves
+its archive and catalog proof. Enable bucket versioning before archive creation;
+enabling it later does not retrofit older receipts. Version deletion targets
+only the recorded version even if a newer version has the same content ETag.
+
+Import completion prepares source-cover candidates at private immutable keys.
+It inserts or switches the visible source-cover pointer only after the Job and
+Inbox authority fence, then adopts the new receipt and retires the old receipt
+in the same transaction. A retired import can neither expose its first cover
+nor overwrite an existing cover's bytes.
+
+Intentional cover replacement through the explicit API remains supported; failure
+compensation first commits exact revocation and yields to any owner that already
+adopted the physical generation.
+
+Restore is an exclusive maintenance operation: its durable restore journal owns
+staged blob generations and offline database reconstruction. It does not share a
+live publication transaction with ingestion. Vault migration stages objects in
+its journal and adopts destination receipts only after domain/config changes in
+its activation transaction.
+
+
+## Disposable ingestion workspaces
+
+Downloads, archive entries and local copies use private flat workspaces with a
+SQL receipt written before filesystem creation. The receipt records the owning
+Job execution, directory and lock identities, output identity and durable
+capacity claim. A process lock prevents cleanup while the writer is alive.
+Payload is admitted only after physical identities have been committed and
+capacity reserved. An uncertain empty creation is retained for inspection; it
+has no payload allocation or capacity credit.
+
+Closing an entry releases its exact workspace before the next entry starts.
+An unlink or SQL failure keeps its receipt and capacity claim and stops further
+batch admission. A new Job execution recovers the prior execution's windows
+before admitting another input. Cleanup also runs as an indexed, bounded
+`ingestion.scratch_cleanup` Job source after interruption or restart. A live
+input staging lease protects the output even if the transfer acknowledgement
+was interrupted.
+
+Recovery first checks the physical identities and private ownership marker,
+then quarantines and removes the recorded directory. A replaced directory,
+lock or sealed output is preserved. SQL retirement follows physical cleanup;
+a failed acknowledgement can be retried without guessing ownership. Downgrading
+past the scratch migration is blocked until all receipts have been reconciled.

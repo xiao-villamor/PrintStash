@@ -993,3 +993,62 @@ class TestBuildIngestionEntry:
             "factory-frozen-source", "parts/tetra.stl", LocalSource("factory"), None
         )
         assert records[0].state is IngestionEntryState.PENDING
+
+
+class TestStoragePublicationFactories:
+    def test_locator_factory_matches_the_production_exclusion_identity(
+        self, db_session
+    ):
+        from app.db.models import StoragePublicationLocator
+        from app.modules.storage.storage_publication import lock_publication_locator
+
+        anchor = factories.build_storage_publication_locator(db_session)
+
+        lock_publication_locator(
+            db_session,
+            backend=anchor.backend,
+            namespace=anchor.namespace,
+            key=anchor.key,
+        )
+
+        current = db_session.exec(select(StoragePublicationLocator)).one()
+        assert current.id == anchor.id
+        assert (current.backend, current.namespace, current.key) == (
+            anchor.backend,
+            anchor.namespace,
+            anchor.key,
+        )
+
+    def test_owned_factory_generates_distinct_publication_authority(self, db_session):
+        from app.modules.storage.storage_publication import PublicationReservation
+
+        first = factories.build_owned_storage_object(db_session, key="factory/first")
+        second = factories.build_owned_storage_object(db_session, key="factory/second")
+
+        assert (
+            PublicationReservation.of(first).generation
+            != PublicationReservation.of(second).generation
+        )
+
+
+class TestBuildIngestionScratchWindow:
+    def test_defaults_to_uncharged_preparing_custody(self, db_session, tmp_path):
+        from app.db.models import CapacityReservation
+        from app.db.models.ingestion_scratch import ScratchWindowPhase
+
+        row = factories.build_ingestion_scratch_window(
+            db_session, directory=tmp_path / "window"
+        )
+
+        assert row.phase is ScratchWindowPhase.PREPARING
+        assert row.device is None and row.inode is None
+        assert not (tmp_path / "window").exists()
+        assert db_session.get(CapacityReservation, row.capacity_operation_id) is None
+
+    def test_rejects_job_owner_without_execution_epoch(self, db_session, tmp_path):
+        job = factories.build_job(db_session)
+
+        with pytest.raises(ValueError, match="execution epoch"):
+            factories.build_ingestion_scratch_window(
+                db_session, directory=tmp_path / "window", job=job
+            )

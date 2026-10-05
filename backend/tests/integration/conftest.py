@@ -46,6 +46,7 @@ from tests.factories.protocols import (
     MakeInboxItem,
     MakeIndexGeneration,
     MakeInferenceEndpoint,
+    MakeIngestionScratchWindow,
     MakeIngestRequest,
     MakeJob,
     MakeMeshContinuation,
@@ -81,6 +82,7 @@ from tests.factories.protocols import (
     MakeSimilarityObservation,
     MakeSimilarityRun,
     MakeStorageConnection,
+    MakeStoragePublicationLocator,
     MakeSubjectCaption,
     MakeSystemConfig,
     MakeUser,
@@ -324,6 +326,14 @@ def make_document(db_session: Session) -> MakeDocument:
 
 
 @pytest.fixture
+def make_storage_publication_locator(
+    db_session: Session,
+) -> MakeStoragePublicationLocator:
+    """The stable anchor shared by every publication at a storage locator."""
+    return _bound(factories.build_storage_publication_locator, db_session)
+
+
+@pytest.fixture
 def make_owned_storage_object(db_session: Session) -> MakeOwnedStorageObject:
     """An ownership ledger row with an explicit proof state and identity."""
     return _bound(factories.build_owned_storage_object, db_session)
@@ -481,6 +491,7 @@ __all__ = [
     "MakeMultipartModel",
     "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
+    "MakeStoragePublicationLocator",
     "MakePrintJob",
     "MakePrinter",
     "MakePrinterFile",
@@ -529,6 +540,7 @@ __all__ = [
     "make_multipart_model_star",
     "make_notification_channel",
     "make_owned_storage_object",
+    "make_storage_publication_locator",
     "make_print_job",
     "make_printer",
     "make_printer_file",
@@ -751,3 +763,8 @@ __all__ += ["make_search_projection_request"]
 def make_mesh_continuation(db_session: Session) -> MakeMeshContinuation:
     """Pending optional mesh analysis with a canonical current source snapshot."""
     return _bound(factories.build_mesh_continuation, db_session)
+
+
+@pytest.fixture
+def make_ingestion_scratch_window(db_session: Session) -> MakeIngestionScratchWindow:
+    return _bound(factories.build_ingestion_scratch_window, db_session)

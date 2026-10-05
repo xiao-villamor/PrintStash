@@ -25,6 +25,7 @@ from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
 from app.db.models import (
     ACTIVE_JOB_STATES,
+    IngestionScratchWindow,
     Job,
     JobKind,
     JobState,
@@ -696,7 +697,7 @@ class JobStore:
     # -- retention ----------------------------------------------------------
 
     def prune(self, *, now: datetime | None = None) -> int:
-        """Drop terminal Jobs past retention, never one a staging lease still owns.
+        """Drop terminal history only after durable input and scratch custody end.
 
         User Jobs are kept ``jobs_retention_days`` and capped per user; system
         Jobs (no owner) are high-volume backfill records and keep a day.
@@ -708,12 +709,21 @@ class JobStore:
         unleased = ~col(Job.id).in_(
             select(StagingLease.job_id).where(col(StagingLease.job_id).is_not(None))
         )
+        # A retry may move the input lease to a new Job while the old actor
+        # still reads it. Preserve the origin's subject authority until its
+        # exact scratch receipt is retired, even after job_id is detached.
+        without_scratch = ~col(Job.id).in_(
+            select(IngestionScratchWindow.origin_job_id).where(
+                col(IngestionScratchWindow.origin_job_id).is_not(None)
+            )
+        )
         with get_session_factory().scoped_session() as session:
             removed = affected(
                 session,
                 delete(Job).where(
                     col(Job.state).in_(terminal),
                     unleased,
+                    without_scratch,
                     or_(
                         (col(Job.owner_user_id).is_(None))
                         & (col(Job.finished_at) < system_cutoff),
@@ -741,6 +751,7 @@ class JobStore:
                         col(Job.owner_user_id) == owner,
                         col(Job.state).in_(terminal),
                         unleased,
+                        without_scratch,
                         ~col(Job.id).in_(keep),
                     ),
                 )

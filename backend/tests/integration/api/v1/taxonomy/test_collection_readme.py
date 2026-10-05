@@ -251,7 +251,7 @@ class TestCollectionImageExecution:
         collection = make_collection("Image boundary")
         loop = asyncio.get_running_loop()
         observations = []
-        publish = taxonomy_router.publish_bytes
+        publish = taxonomy_router.prepare_bytes
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -267,7 +267,7 @@ class TestCollectionImageExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(taxonomy_router, "publish_bytes", delayed_publication)
+            monkeypatch.setattr(taxonomy_router, "prepare_bytes", delayed_publication)
             response = await client.post(
                 f"/api/v1/collections/{collection.id}/images",
                 headers=auth_headers,

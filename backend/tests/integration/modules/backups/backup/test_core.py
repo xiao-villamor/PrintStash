@@ -62,6 +62,7 @@ from app.db.models import (
     OwnedStorageObject,
     PrintJobState,
     RestoreMarker,
+    StorageDeleteIntent,
     StorageObjectState,
 )
 from app.modules.backups import backup_destination
@@ -1205,23 +1206,41 @@ class TestListLocalBackups:
                 select(OwnedStorageObject).where(
                     OwnedStorageObject.key == str(archive),
                     OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.provider_ref == meta.provider_ref,
+                    OwnedStorageObject.state == StorageObjectState.COMMITTED,
                 )
             ).one()
             session.delete(row)
             session.commit()
+            history = {
+                receipt.id: receipt.model_dump()
+                for receipt in session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(archive)
+                    )
+                ).all()
+            }
+        assert history
+        assert all(
+            receipt["state"] is StorageObjectState.RETIRING
+            for receipt in history.values()
+        )
+        original = archive.read_bytes()
 
         with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
             backup_adoption.adopt_local_backup(archive.name)
 
         with backup_env.new_session() as session:
-            assert (
-                session.exec(
-                    select(OwnedStorageObject).where(
-                        OwnedStorageObject.key == str(archive),
-                    )
-                ).all()
-                == []
+            remaining = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == str(archive))
+            ).all()
+            assert {
+                receipt.id: receipt.model_dump() for receipt in remaining
+            } == history
+            assert all(
+                receipt.state is StorageObjectState.RETIRING for receipt in remaining
             )
+        assert archive.read_bytes() == original
 
     def test_cloud_cache_is_not_a_listable_backup_source(
         self, backup_env: BackupEnv
@@ -1930,6 +1949,7 @@ class TestDeleteBackup:
             object_kind="backup",
             provider_ref=provider_ref,
             sha256="a" * 64,
+            version_id="version-1",
         )
         ownership_id = row.id
         source_ref = backup_targets.source_reference(
@@ -1958,11 +1978,12 @@ class TestDeleteBackup:
             def require_owned(self, owned: OwnedStorageObject) -> None:
                 assert owned.id == ownership_id
 
-            def delete_owned(
-                self, owned: OwnedStorageObject, *, allow_unversioned: bool = False
-            ) -> bool:
-                assert allow_unversioned is False
-                deleted_keys.append(owned.key)
+            def can_delete_receipt(self, receipt) -> bool:
+                return receipt.version_id == "version-1"
+
+            def delete_receipt(self, receipt) -> bool:
+                assert receipt.version_id == "version-1"
+                deleted_keys.append(receipt.key)
                 return True
 
         destination = Destination()
@@ -1976,7 +1997,10 @@ class TestDeleteBackup:
         assert backup_deletion.delete_backup(meta.id, source_ref=source_ref) is True
         assert deleted_keys == [key]
         with backup_snapshot.get_session_factory().session() as session:
-            assert session.get(OwnedStorageObject, ownership_id) is None
+            assert (
+                session.get(OwnedStorageObject, ownership_id).state
+                is StorageObjectState.RETIRING
+            )
 
     def test_delete_backup_refuses_an_unverified_opendal_delete(
         self,
@@ -2007,10 +2031,8 @@ class TestDeleteBackup:
         )
 
         class Destination:
-            def delete_owned(
-                self, _owned: OwnedStorageObject, *, allow_unversioned: bool = False
-            ) -> bool:
-                assert allow_unversioned is False
+            def can_delete_receipt(self, receipt) -> bool:
+                assert receipt.version_id is None
                 return False
 
         monkeypatch.setattr(
@@ -2141,9 +2163,12 @@ class TestDeleteBackup:
     @requires_s3
     def test_delete_backup_removes_s3_copy(self, backup_s3_env: BackupEnv):
         seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
-        meta = backup_creation.create_backup()
-
         s3 = backup_targets._get_backup_s3()
+        s3.put_bucket_versioning(
+            Bucket=backup_targets.settings.backup_s3_bucket,
+            VersioningConfiguration={"Status": "Enabled"},
+        )
+        meta = backup_creation.create_backup()
         key = backup_targets._backup_s3_key(Path(meta.path).name)
         assert s3.head_object(Bucket=backup_targets.settings.backup_s3_bucket, Key=key)
 
@@ -2332,6 +2357,7 @@ class TestBackupCacheRecovery:
                     select(OwnedStorageObject).where(
                         OwnedStorageObject.object_kind == "backup-cloud-cache",
                         OwnedStorageObject.key == str(cache_path),
+                        OwnedStorageObject.state != StorageObjectState.RETIRING,
                     )
                 ).first()
                 is None
@@ -2426,7 +2452,8 @@ class TestBackupCacheRecovery:
             assert (
                 session.exec(
                     select(OwnedStorageObject).where(
-                        OwnedStorageObject.key == str(stale)
+                        OwnedStorageObject.key == str(stale),
+                        OwnedStorageObject.state != StorageObjectState.RETIRING,
                     )
                 ).first()
                 is None
@@ -2504,7 +2531,10 @@ class TestBackupCacheRecovery:
         assert backup_caches.reconcile_backup_caches() == 1
 
         with backup_env.new_session() as session:
-            assert session.get(OwnedStorageObject, missing_id) is None
+            assert (
+                session.get(OwnedStorageObject, missing_id).state
+                is StorageObjectState.RETIRING
+            )
             assert session.get(OwnedStorageObject, root_id) is not None
 
     @pytest.mark.parametrize(
@@ -2563,6 +2593,7 @@ class TestBackupCacheRecovery:
                 key=str(cache),
                 object_kind="backup-cloud-cache",
                 state=StorageObjectState.PENDING,
+                token=None,
                 size_bytes=len(payload),
                 sha256=hashlib.sha256(payload).hexdigest(),
             )
@@ -2754,6 +2785,7 @@ class TestBackupCacheRecovery:
                     select(OwnedStorageObject).where(
                         OwnedStorageObject.object_kind == "backup-cloud-cache",
                         OwnedStorageObject.key == str(cache_path),
+                        OwnedStorageObject.state != StorageObjectState.RETIRING,
                     )
                 )
                 .one()
@@ -2897,6 +2929,7 @@ class TestBackupCacheRecovery:
                     select(OwnedStorageObject).where(
                         OwnedStorageObject.object_kind == "backup-cloud-cache",
                         OwnedStorageObject.key == str(cache_path),
+                        OwnedStorageObject.state != StorageObjectState.RETIRING,
                     )
                 ).first()
                 is None
@@ -3363,7 +3396,7 @@ class TestRestoreDatabase:
             sha256="b" * 64,
         )
         with backup_env.new_session() as session:
-            build_owned_storage_object(
+            foreign = build_owned_storage_object(
                 session,
                 backend=backend.backend_name,
                 namespace=namespace,
@@ -3373,7 +3406,8 @@ class TestRestoreDatabase:
                 size_bytes=8,
                 sha256="c" * 64,
             )
-            build_owned_storage_object(
+            foreign_facts = foreign.model_dump()
+            archived = build_owned_storage_object(
                 session,
                 backend=backend.backend_name,
                 namespace=namespace,
@@ -3383,6 +3417,7 @@ class TestRestoreDatabase:
                 size_bytes=7,
                 sha256="d" * 64,
             )
+            archived_facts = archived.model_dump()
 
         backup_restore_blobs._sync_restored_ownership(
             backup_env.db_file,
@@ -3401,8 +3436,31 @@ class TestRestoreDatabase:
                 old_provider,
                 current_provider,
             }
-            restored = next(
-                row for row in siblings if row.provider_ref == current_provider
+            current = [row for row in siblings if row.provider_ref == current_provider]
+            committed = [
+                row for row in current if row.state is StorageObjectState.COMMITTED
+            ]
+            retired = [
+                row for row in current if row.state is StorageObjectState.RETIRING
+            ]
+            assert len(committed) == 1
+            assert len(retired) == 1
+            restored = committed[0]
+            historical = retired[0]
+            assert historical.model_dump() == {
+                **archived_facts,
+                "state": StorageObjectState.RETIRING,
+                "next_recovery_at": None,
+            }
+            assert restored.publication_generation != historical.publication_generation
+            assert restored.object_kind == "current-provider"
+            assert restored.size_bytes == len(b"restored")
+            assert restored.sha256 == hashlib.sha256(b"restored").hexdigest()
+            assert (
+                next(
+                    row for row in siblings if row.provider_ref == old_provider
+                ).model_dump()
+                == foreign_facts
             )
             assert restored.token == "restore-token"
             assert restored.inode == 2
@@ -5829,8 +5887,22 @@ class TestReconcileBackupPublications:
             assert row.state is StorageObjectState.COMMITTED
             assert row.last_error is None
 
+    @pytest.mark.parametrize(
+        "token,version_id,recoverable",
+        [
+            pytest.param("opendal-token", "version-1", True, id="existing-receipt"),
+            pytest.param(None, "version-1", True, id="lost-token-immutable-version"),
+            pytest.param("", "version-1", True, id="historical-empty-token"),
+            pytest.param(None, None, False, id="lost-token-unversioned"),
+        ],
+    )
     def test_reconciles_an_opendal_archive_with_matching_object_proof(
-        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        token: str | None,
+        version_id: str | None,
+        recoverable: bool,
     ) -> None:
         seed_model_with_blob(backup_env, name="Reconcile OpenDAL", content=b"remote")
         meta = backup_creation.create_backup()
@@ -5843,7 +5915,7 @@ class TestReconcileBackupPublications:
             def object_info(self, requested_key: str):
                 assert requested_key == key
                 return storage_contracts.StorageObjectInfo(
-                    size=len(payload), etag='"opendal-etag"', version_id="version-1"
+                    size=len(payload), etag='"opendal-etag"', version_id=version_id
                 )
 
         class Destination:
@@ -5853,6 +5925,8 @@ class TestReconcileBackupPublications:
                 self, owned: OwnedStorageObject, candidate: Path
             ) -> None:
                 assert owned.state is StorageObjectState.COMMITTED
+                assert owned.version_id == version_id
+                assert recoverable
                 candidate.write_bytes(payload)
 
         monkeypatch.setattr(
@@ -5870,7 +5944,7 @@ class TestReconcileBackupPublications:
             row.key = key
             row.provider_ref = provider_ref
             row.state = StorageObjectState.PENDING
-            row.token = "opendal-token"
+            row.token = token
             row.committed_at = None
             session.add(row)
             session.commit()
@@ -5881,11 +5955,19 @@ class TestReconcileBackupPublications:
             row = session.exec(
                 select(OwnedStorageObject).where(OwnedStorageObject.key == key)
             ).one()
-            assert reconciled == 1, (row.state, row.last_error)
-            assert row.state is StorageObjectState.COMMITTED
-            assert row.etag == '"opendal-etag"'
-            assert row.version_id == "version-1"
-            assert row.provider_ref == provider_ref
+            if recoverable:
+                assert reconciled == 1, (row.state, row.last_error)
+                assert row.state is StorageObjectState.COMMITTED
+                assert row.token
+                assert row.etag == '"opendal-etag"'
+                assert row.version_id == version_id
+                assert row.provider_ref == provider_ref
+            else:
+                assert reconciled == 0
+                assert row.state is StorageObjectState.PENDING
+                assert row.token is None
+                assert row.last_error == "retryable:backup_publication_evidence_missing"
+                assert session.exec(select(StorageDeleteIntent)).first() is None
 
     def test_keeps_an_opendal_archive_pending_when_the_target_changes(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch

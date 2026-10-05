@@ -352,6 +352,8 @@ class TestProvenance:
                 # This write occurs *after* the raced savepoints.  It proves that
                 # retrying a unique insert did not abort the outer transaction.
                 build_user(session, f"pg-provenance-outer-{index}")
+                provenance.finish_storage_retirements(session, link.storage_retirements)
+                link = link.link
                 session.commit()
                 assert link.id is not None
                 return link.id

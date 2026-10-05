@@ -291,7 +291,6 @@ class TestRestoreDocument:
 
 
 class TestHardDeleteCollection:
-
     def test_does_nothing_for_a_collection_that_was_never_persisted(
         self, db_session: Session
     ) -> None:
@@ -432,3 +431,36 @@ class TestHardDeleteExpiredModels:
         # A negative retention is the operator saying "never empty the trash".
         assert trash.hard_delete_expired_models(db_session, -1) == []
         assert db_session.get(Model, model.id) is not None
+
+
+class TestPurgePublicationLockOrder:
+    def test_prepares_all_model_receipts_before_any_locator_lock(
+        self, db_session, storage, monkeypatch
+    ):
+        from app.db.models import StorageDeleteIntent
+        from app.modules.storage import storage_deletion
+
+        model = build_model(db_session, "ordered purge")
+        build_stored_file(db_session, storage, model, filename="one.stl")
+        build_stored_file(db_session, storage, model, filename="two.stl")
+        anchor_taken = False
+        original_lock = storage_deletion.lock_publication_locator
+        original_matches = storage.creation_matches
+
+        def lock(*args, **kwargs):
+            nonlocal anchor_taken
+            anchor_taken = True
+            return original_lock(*args, **kwargs)
+
+        def matches(receipt):
+            assert not anchor_taken, (
+                "backend I/O performed while a locator anchor is retained"
+            )
+            return original_matches(receipt)
+
+        monkeypatch.setattr(storage_deletion, "lock_publication_locator", lock)
+        monkeypatch.setattr(storage, "creation_matches", matches)
+        trash.hard_delete_model(db_session, model)
+        db_session.commit()
+        assert db_session.get(Model, model.id) is None
+        assert len(db_session.exec(select(StorageDeleteIntent)).all()) == 2

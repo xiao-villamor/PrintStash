@@ -53,7 +53,7 @@ export function taskStatusOf(state: JobState): TaskStatus {
 
 function titleForJob(job: JobStatus): MessageDescriptor | string {
   if (job.kind === "ingestion.archive_inspect") return uiMessage("Prepare ZIP");
-  if (job.kind.startsWith("ingestion.")) {
+  if (job.kind.startsWith("ingestion.") && job.kind !== "ingestion.scratch_cleanup") {
     return uiMessage("Import");
   }
   return job.label ?? job.kind;

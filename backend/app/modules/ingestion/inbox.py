@@ -7,6 +7,7 @@ import uuid
 import zipfile
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, Literal, cast
@@ -44,6 +45,8 @@ from app.db.models import (
     InboxItemState,
     InboxSourceKind,
     IngestionEntryState,
+    IngestionScratchWindow,
+    Job,
     JobKind,
     JobState,
     ModelProvenanceSource,
@@ -56,6 +59,7 @@ from app.modules.identity import rbac
 from app.modules.ingestion import (
     import_resolvers,
     importer,
+    scratch_windows,
     staging_cleanup,
     staging_leases,
 )
@@ -71,9 +75,17 @@ from app.modules.storage.storage_backend.contracts import (
     StorageCollisionError,
 )
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_deletion import enqueue_creation_receipt
-from app.modules.storage.storage_ownership import publish_file
+from app.modules.storage.storage_deletion import (
+    enqueue_prevalidated_receipt,
+)
+from app.modules.storage.storage_ownership import (
+    abandon_publication,
+    adopt_publication,
+    prepare_file,
+    provider_ref_for_backend,
+)
 from app.modules.storage.storage_paths import unlink_managed_file
+from app.modules.storage.storage_publication import lock_publication_locator
 from app.modules.work import service as work_service
 from app.modules.work.contracts import JobContext, JobExecution, JobOutcome
 from app.modules.work.jobs import TERMINAL_STATES, failure_of, safe_error, safe_item
@@ -632,7 +644,7 @@ def upload_capture_slot(
             session.refresh(slot)
             return slot
         try:
-            receipt = publish_file(
+            candidate = prepare_file(
                 session,
                 backend,
                 slot.storage_key,
@@ -649,8 +661,10 @@ def upload_capture_slot(
             session.commit()
             session.refresh(slot)
             return slot
+        receipt = candidate.receipt
         if receipt.size != slot.size_bytes:
-            backend.rollback_create(receipt)
+            session.rollback()
+            abandon_publication(session, candidate)
             raise ValueError("capture_upload_size_mismatch")
         try:
             slot.state = CaptureUploadSlotState.UPLOADED
@@ -667,6 +681,8 @@ def upload_capture_slot(
             # rolled back by the exception path.
             if not staging_leases.remove_capture_slot_staging(session, slot_id=slot.id):
                 raise ValueError("capture_upload_staging_cleanup_failed")
+            session.flush()
+            adopt_publication(session, candidate)
             session.commit()
             session.refresh(slot)
             item = session.get(InboxItem, slot.inbox_item_id)
@@ -679,7 +695,7 @@ def upload_capture_slot(
             return slot
         except Exception:
             session.rollback()
-            backend.rollback_create(receipt)
+            abandon_publication(session, candidate)
             raise
     finally:
         # Error paths are also responsible for their exact owned spool. A
@@ -722,9 +738,34 @@ def _receipt_from_json(value: str | None) -> CreationReceipt | None:
         return None
 
 
-def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
+def _cleanup_capture_slots(
+    session: Session,
+    row: InboxItem,
+    *,
+    durable_only: bool = False,
+    cover_candidate: source_covers.SourceCoverCandidate | None = None,
+) -> bool:
     """Release exact slot receipts only after the whole inbox job is terminal."""
     if row.id is None:
+        return False
+    # Claim and release share Job -> Inbox authority. An older execution's
+    # receipt remains a source custodian until its descriptor is closed.
+    if row.job_id is not None:
+        job = registry.lock_execution(session, row.job_id)
+        if job is None or job.state not in TERMINAL_STATES:
+            return False
+    current_binding = session.exec(
+        select(InboxItem.job_id).where(InboxItem.id == row.id).with_for_update()
+    ).first()
+    if current_binding != row.job_id:
+        return False
+    active_source = session.exec(
+        select(IngestionScratchWindow.id)
+        .join(Job, col(Job.id) == col(IngestionScratchWindow.origin_job_id))
+        .where(Job.subject_key == f"inbox_item/{row.id}")
+        .limit(1)
+    ).first()
+    if active_source is not None:
         return False
     slots = list(
         session.exec(
@@ -736,6 +777,7 @@ def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
         intent.id for intent in session.exec(select(StorageDeleteIntent)).all()
     }
     created_intents: list[StorageDeleteIntent] = []
+    validated_receipts: list[tuple[str, CreationReceipt]] = []
     try:
         # Do not relinquish any slot ownership until every deletion intent is
         # durable. Compensate intents made in this caller transaction on a
@@ -750,6 +792,15 @@ def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
             ).first()
             if lease is None:
                 raise ValueError("capture upload slot lease missing")
+            if durable_only and (
+                slot.state != CaptureUploadSlotState.UPLOADED
+                or lease.device is not None
+                or lease.inode is not None
+            ):
+                # A terminal completion holds domain authority. Partial spools
+                # and missing receipts stay with their durable staging owner;
+                # recovery performs their provider/filesystem work separately.
+                raise ValueError("capture upload cleanup requires recovery")
             if slot.state != CaptureUploadSlotState.UPLOADED:
                 # A crash can leave bytes published while both receipt columns
                 # are still empty. Reconcile before considering the slot safe
@@ -771,19 +822,76 @@ def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
             # case capture_upload_slot_id is intentionally NULL and the
             # origin column is the only durable slot identity left. Passing
             # the exact row avoids looking it up through the pre-import owner.
-            if not staging_leases.remove_capture_slot_staging(session, lease=lease):
+            if not durable_only and not staging_leases.remove_capture_slot_staging(
+                session, lease=lease
+            ):
                 raise ValueError("capture upload staging cleanup failed")
             receipt = _receipt_from_json(slot.receipt_json)
             if slot.state != CaptureUploadSlotState.UPLOADED:
                 continue
             if receipt is None:
                 raise ValueError("capture upload receipt missing")
-            intent = enqueue_creation_receipt(
+            expected_namespace = backend.namespace_for(receipt.key)
+            expected_ref = provider_ref_for_backend(
+                backend, namespace=expected_namespace
+            )
+            if (
+                receipt.backend != backend.backend_name
+                or receipt.namespace != expected_namespace
+                or receipt.provider_ref not in (None, expected_ref)
+            ):
+                raise ValueError("capture upload receipt provider mismatch")
+            if not durable_only and not backend.creation_matches(receipt):
+                raise ValueError("capture upload receipt no longer matches")
+            validated_receipts.append(
+                (slot.id, replace(receipt, provider_ref=expected_ref))
+            )
+        # Lock all domain owners before acquiring any locator anchor. Their
+        # deletion happens only after every exact outbox insert succeeds, so
+        # a failed later insert leaves the original slot/lease rows intact.
+        session.flush()
+        session.exec(
+            select(CaptureUploadSlot)
+            .where(CaptureUploadSlot.inbox_item_id == row.id)
+            .with_for_update()
+        ).all()
+        for slot in slots:
+            session.exec(
+                select(StagingLease)
+                .where(
+                    (StagingLease.capture_upload_slot_id == slot.id)
+                    | (StagingLease.capture_upload_slot_origin_id == slot.id)
+                )
+                .with_for_update()
+            ).all()
+        if cover_candidate is not None:
+            receipts = [receipt for _slot_id, receipt in validated_receipts]
+            receipts.append(cover_candidate.publication.receipt)
+            if cover_candidate.previous is not None:
+                receipts.append(cover_candidate.previous.receipt)
+            for receipt in sorted(
+                receipts,
+                key=lambda receipt: (receipt.backend, receipt.namespace, receipt.key),
+            ):
+                lock_publication_locator(
+                    session,
+                    backend=receipt.backend,
+                    namespace=receipt.namespace,
+                    key=receipt.key,
+                )
+        # Every probe/spool operation and domain mutation above precedes the
+        # first storage anchor. Attach only validated exact receipts below.
+        for slot_id, receipt in sorted(
+            validated_receipts,
+            key=lambda item: (item[1].backend, item[1].namespace, item[1].key),
+        ):
+            intent = enqueue_prevalidated_receipt(
                 session,
-                backend,
                 receipt,
+                object_kind="capture_upload_slot",
+                sha256=None,
                 resource_kind="capture_upload_slot",
-                resource_id=slot.id,
+                resource_id=slot_id,
             )
             if intent.id not in existing_intent_ids:
                 created_intents.append(intent)
@@ -818,7 +926,7 @@ def _cleanup_capture_slots(session: Session, row: InboxItem) -> bool:
 
 def _attach_capture_cover(
     session: Session, row: InboxItem
-) -> source_covers.SourceCoverWrite | bool | None:
+) -> source_covers.SourceCoverCandidate | bool | None:
     """Normalize a durable optional cover only after provenance has been attached."""
     if row.id is None or row.resulting_model_id is None:
         return True
@@ -866,9 +974,10 @@ def _attach_capture_cover(
     if len(sources) != 1 or sources[0].id is None:
         return False
     source = sources[0]
+    assert source.id is not None
     backend = get_backend()
     data = backend.read_bytes(cover.storage_key)
-    result = source_covers.put(
+    result = source_covers.prepare_candidate(
         session,
         backend,
         provenance_source_id=source.id,
@@ -878,7 +987,7 @@ def _attach_capture_cover(
     )
     # Test doubles and legacy adapters may acknowledge without returning the
     # ownership write; production publication always returns it.
-    return result if isinstance(result, source_covers.SourceCoverWrite) else True
+    return result if isinstance(result, source_covers.SourceCoverCandidate) else True
 
 
 def finalize_capture_upload(session: Session, user: User, item_id: int) -> InboxItem:
@@ -916,7 +1025,6 @@ def create_browser_upload(
     filename: str,
     stream: BinaryIO,
 ) -> InboxItem:
-    from app.modules.storage.capacity import CapacityManager, CapacityResource
 
     with CapacityManager(get_session_factory()).hold(
         f"browser-upload:{uuid.uuid4().hex}",
@@ -1068,8 +1176,10 @@ def _parse_capture_source(value: str | None, source_url: str) -> CaptureSource |
             raw_provider = raw.get("provider")
             raw_item_id = raw.get("source_item_id")
             raw_url = raw.get("canonical_url")
-            if all(
-                isinstance(item, str) for item in (raw_provider, raw_item_id, raw_url)
+            if (
+                isinstance(raw_provider, str)
+                and isinstance(raw_item_id, str)
+                and isinstance(raw_url, str)
             ):
                 try:
                     submitted = _canonical_capture_source_url(
@@ -1245,8 +1355,8 @@ def _finish_resolve(
         result = session.exec(
             sql_update(InboxItem)
             .where(
-                InboxItem.id == item_id,
-                InboxItem.state == InboxItemState.RESOLVING,
+                col(InboxItem.id) == item_id,
+                col(InboxItem.state) == InboxItemState.RESOLVING,
             )
             .values(**values)
         )
@@ -1324,7 +1434,12 @@ def _prepare_archive(item_id: int, staged: Path, filename: str) -> tuple[dict, P
     )
 
 
-async def resolve(item_id: int) -> None:
+async def resolve(
+    item_id: int,
+    *,
+    owner: scratch_windows.WindowOwner | None = None,
+    session_factory: SessionFactory | None = None,
+) -> None:
     started, source_url, owner_user_id = await asyncio.to_thread(
         _begin_resolve, item_id
     )
@@ -1386,18 +1501,29 @@ async def resolve(item_id: int) -> None:
                         await import_resolvers.resolve_page_url(source_url)
                         or source_url
                     )
-                    staged, filename = await importer.download_to_staging(download_url)
-                    suffix = Path(filename).suffix.lower()
-                    if suffix == ".zip" or (
-                        zipfile.is_zipfile(staged) and suffix != ".3mf"
-                    ):
-                        manifest, managed = await asyncio.to_thread(
-                            _prepare_archive, item_id, staged, filename
+                    with scratch_windows.open_window(
+                        kind=scratch_windows.WindowKind.DOWNLOAD,
+                        max_bytes=settings.max_upload_bytes,
+                        owner=owner,
+                        session_factory=session_factory,
+                    ) as window:
+                        staged, filename = await importer.download_to_staging(
+                            download_url,
+                            window=window,
+                            owner=owner,
+                            session_factory=session_factory,
                         )
-                    else:
-                        staged.unlink(missing_ok=True)
-                        managed = None
-                        manifest = {"kind": "direct", "title": safe_item(filename)}
+                        suffix = Path(filename).suffix.lower()
+                        if suffix == ".zip" or (
+                            zipfile.is_zipfile(staged) and suffix != ".3mf"
+                        ):
+                            manifest, managed = await asyncio.to_thread(
+                                _prepare_archive, item_id, staged, filename
+                            )
+                        else:
+                            staged.unlink(missing_ok=True)
+                            managed = None
+                            manifest = {"kind": "direct", "title": safe_item(filename)}
         await asyncio.to_thread(_finish_resolve, item_id, manifest, managed)
     except Exception as exc:
         await asyncio.to_thread(_fail_item, item_id, exc, "resolve_failed")
@@ -1531,7 +1657,7 @@ class _InboxBatchImport:
         """Isolate a source failure; cancellation remains outside Exception."""
         try:
             yield
-        except importer.WindowReleaseError:
+        except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
             raise
         except Exception as exc:
             records = self.batch.source_entries(spec.descriptor.source_id)
@@ -1679,7 +1805,139 @@ class _InboxBatchImport:
                 record, resolved.source_selection_id if resolved else None, result_key
             )
         finally:
-            importer.discard_staged_files((path,), strict=True)
+            importer.discard_staged_files(
+                (path,), strict=True, session_factory=self.factory
+            )
+
+    def _authority(self) -> None:
+        checkpoint(force=True)
+        with self.factory.scoped_session() as session:
+            self._lock_source_authority(session)
+
+    def _lock_source_authority(self, session: Session) -> None:
+        job = registry.lock_execution(
+            session,
+            self.execution.job_id,
+            epoch=self.execution.execution_epoch,
+            attempt=self.execution.attempt,
+            states=(JobState.RUNNING,),
+        )
+        row = session.exec(
+            select(InboxItem).where(InboxItem.id == self.item_id).with_for_update()
+        ).first()
+        if (
+            job is None
+            or row is None
+            or row.job_id != self.execution.job_id
+            or row.state != InboxItemState.IMPORTING
+        ):
+            raise OperationCancelled()
+
+    @contextmanager
+    def _source_custody(self, source: Path) -> Iterator[Path]:
+        with self.factory.scoped_session() as session:
+            self._lock_source_authority(session)
+            try:
+                holder = staging_leases.open_leased_input(
+                    session,
+                    job_id=self.execution.job_id,
+                    path=source,
+                    checkpoint=self._authority,
+                )
+            except staging_leases.StagingLeaseNotFoundError:
+                holder = None
+        if holder is None:
+            yield source
+        else:
+            with holder as owned:
+                yield owned
+
+    def slot_copy(
+        self, file_id: str, key: str, spec: EntrySpec, resolved: ResolvedAsset
+    ) -> None:
+        scratch_windows.recover_prior_windows(
+            scratch_windows.JobWindowOwner(
+                self.execution.job_id, self.execution.execution_epoch
+            ),
+            self.factory,
+        )
+        with self.factory.scoped_session() as session:
+            slot = session.exec(
+                select(CaptureUploadSlot).where(
+                    CaptureUploadSlot.inbox_item_id == self.item_id,
+                    CaptureUploadSlot.source_file_id == file_id,
+                )
+            ).one()
+            slot_id, size, receipt = slot.id, slot.size_bytes, slot.receipt_json
+        with scratch_windows.open_window(
+            kind=scratch_windows.WindowKind.LOCAL_COPY,
+            max_bytes=max(1, size),
+            owner=scratch_windows.RequestWindowOwner(uuid.uuid4().hex),
+            session_factory=self.factory,
+        ) as window:
+            with self.factory.scoped_session() as session:
+                self._lock_source_authority(session)
+                slot = session.get(CaptureUploadSlot, slot_id)
+                lease = session.exec(
+                    select(StagingLease).where(
+                        StagingLease.capture_upload_slot_origin_id == slot_id,
+                        StagingLease.job_id == self.execution.job_id,
+                    )
+                ).first()
+                if (
+                    slot is None
+                    or slot.inbox_item_id != self.item_id
+                    or slot.source_file_id != file_id
+                    or slot.storage_key != key
+                    or slot.state != CaptureUploadSlotState.UPLOADED
+                    or slot.size_bytes != size
+                    or slot.receipt_json != receipt
+                    or lease is None
+                    or lease.receipt_json != receipt
+                ):
+                    raise importer.ImportError_("capture_upload_slots_incomplete")
+                window.claim_job(
+                    session,
+                    scratch_windows.JobWindowOwner(
+                        self.execution.job_id,
+                        self.execution.execution_epoch,
+                    ),
+                )
+                session.commit()
+            self._authority()
+            backend = get_backend()
+            source = backend.direct_path(key)
+            if source is not None:
+                self._copy_in_window(source, spec, resolved, window, size)
+            else:
+                limit = settings.ingestion_batch_max_mb * 1024 * 1024
+                if size > limit:
+                    raise importer.ImportError_("batch_entry_too_large")
+                target = window.directory / (
+                    "artifact" + Path(spec.display_name).suffix
+                )
+                digest = hashlib.sha256()
+                received = 0
+                with (
+                    closing(backend.stream_chunks(key)) as chunks,
+                    target.open("xb") as output,
+                ):
+                    for chunk in chunks:
+                        checkpoint(force=True)
+                        received += len(chunk)
+                        if received > min(size, limit):
+                            raise importer.ImportError_("batch_entry_too_large")
+                        output.write(chunk)
+                        digest.update(chunk)
+                if received != size:
+                    raise importer.ImportError_("batch_snapshot_mismatch")
+                window.seal(target)
+                self.consume(
+                    spec,
+                    (target, spec.display_name),
+                    resolved,
+                    digest=digest.hexdigest(),
+                )
 
     def archive(
         self,
@@ -1689,96 +1947,113 @@ class _InboxBatchImport:
         resolved: ResolvedAsset | None = None,
         manifest: CaptureManifestV2 | None = None,
     ) -> None:
-        captured = {}
-        if manifest is not None:
-            for file in manifest.files:
-                asset = _local_resolved_asset(manifest, file.id, file=file)
-                captured[file.id] = asset
-                captured[file.name] = asset
-            self._archive_assets = captured
-
-        def capture(spec: EntrySpec) -> tuple[ResolvedAsset | None, str]:
-            if resolved is not None:
-                return resolved, _zip_result_key(
-                    resolved.source_selection_id, spec.display_name
-                )
+        with self._source_custody(source):
+            captured = {}
             if manifest is not None:
-                asset = captured.get(spec.display_name)
-                if asset is None:
-                    raise importer.ImportError_("capture_manifest_invalid")
-                return asset, _zip_result_key(
-                    asset.source_selection_id, spec.display_name
+                for file in manifest.files:
+                    asset = _local_resolved_asset(manifest, file.id, file=file)
+                    captured[file.id] = asset
+                    captured[file.name] = asset
+                self._archive_assets = captured
+
+            def capture(spec: EntrySpec) -> tuple[ResolvedAsset | None, str]:
+                if resolved is not None:
+                    return resolved, _zip_result_key(
+                        resolved.source_selection_id, spec.display_name
+                    )
+                if manifest is not None:
+                    asset = captured.get(spec.display_name)
+                    if asset is None:
+                        raise importer.ImportError_("capture_manifest_invalid")
+                    return asset, _zip_result_key(
+                        asset.source_selection_id, spec.display_name
+                    )
+                return None, "self"
+
+            wanted_names = set(wanted)
+            retained = [
+                record.spec
+                for record in self.batch.source_entries(source_id)
+                if isinstance(record.spec.descriptor, ArchiveSource)
+                and (
+                    not wanted_names
+                    or record.spec.display_name in wanted_names
+                    or record.spec.descriptor.entry_id in wanted_names
                 )
-            return None, "self"
+            ]
+            if retained:
+                reused = [self.confirmed(spec, *capture(spec)) for spec in retained]
+                if all(reused):
+                    return
+            specs = importer.archive_entry_specs(source, wanted, source_id)
+            if retained and set(specs) != set(retained):
+                raise importer.ImportError_("batch_snapshot_mismatch")
+            self.batch.register(specs)
+            self._retire_expansion_placeholder(source_id, resolved)
+            by_name = {spec.display_name: spec for spec in specs}
 
-        wanted_names = set(wanted)
-        retained = [
-            record.spec
-            for record in self.batch.source_entries(source_id)
-            if isinstance(record.spec.descriptor, ArchiveSource)
-            and (
-                not wanted_names
-                or record.spec.display_name in wanted_names
-                or record.spec.descriptor.entry_id in wanted_names
-            )
-        ]
-        if retained:
-            reused = [self.confirmed(spec, *capture(spec)) for spec in retained]
-            if all(reused):
-                return
-        specs = importer.archive_entry_specs(source, wanted, source_id)
-        if retained and set(specs) != set(retained):
-            raise importer.ImportError_("batch_snapshot_mismatch")
-        self.batch.register(specs)
-        self._retire_expansion_placeholder(source_id, resolved)
-        by_name = {spec.display_name: spec for spec in specs}
-
-        def skip(entry) -> bool:
-            spec = by_name[entry.name.replace("\\", "/")]
-            return self.confirmed(spec, *capture(spec))
-
-        with closing(
-            importer.iter_archive_entries(source, wanted, skip_entry=skip)
-        ) as entries:
-            for entry, staged in entries:
+            def skip(entry) -> bool:
                 spec = by_name[entry.name.replace("\\", "/")]
-                asset, result_key = capture(spec)
-                self.consume(
-                    spec,
-                    staged,
-                    asset,
-                    result_key,
-                    spec.display_name if asset else None,
+                return self.confirmed(spec, *capture(spec))
+
+            with closing(
+                importer.iter_archive_entries(
+                    source,
+                    wanted,
+                    skip_entry=skip,
+                    owner=scratch_windows.JobWindowOwner(
+                        self.execution.job_id, self.execution.execution_epoch
+                    ),
+                    session_factory=self.factory,
                 )
+            ) as entries:
+                for entry, staged in entries:
+                    spec = by_name[entry.name.replace("\\", "/")]
+                    asset, result_key = capture(spec)
+                    self.consume(
+                        spec,
+                        staged,
+                        asset,
+                        result_key,
+                        spec.display_name if asset else None,
+                    )
 
     def copy(
         self, source: Path, spec: EntrySpec, resolved: ResolvedAsset | None = None
     ) -> None:
         if self.confirmed(spec, resolved):
             return
-        size = source.stat().st_size
+        with self._source_custody(source):
+            size = source.stat().st_size
+            with scratch_windows.open_window(
+                kind=scratch_windows.WindowKind.LOCAL_COPY,
+                max_bytes=max(1, size),
+                owner=scratch_windows.JobWindowOwner(
+                    self.execution.job_id, self.execution.execution_epoch
+                ),
+                session_factory=self.factory,
+            ) as window:
+                self._copy_in_window(source, spec, resolved, window, size)
+
+    def _copy_in_window(
+        self,
+        source: Path,
+        spec: EntrySpec,
+        resolved: ResolvedAsset | None,
+        window: scratch_windows.ScratchWindow,
+        size: int,
+    ) -> None:
         limit = settings.ingestion_batch_max_mb * 1024 * 1024
         if size > limit:
             raise importer.ImportError_("batch_entry_too_large")
-        target = (
-            settings.incoming_dir
-            / f"capture-import-{uuid.uuid4().hex}{Path(spec.display_name).suffix}"
-        )
-        with CapacityManager(self.factory).hold(
-            f"inbox-window:{uuid.uuid4().hex}",
-            [
-                CapacityResource.for_path(
-                    settings.incoming_dir, size, role="Pending Import window"
-                )
-            ],
-        ):
-            try:
-                digest = _copy_import_source(source, target, max_bytes=min(size, limit))
-                if target.stat().st_size != size:
-                    raise importer.ImportError_("batch_snapshot_mismatch")
-                self.consume(spec, (target, spec.display_name), resolved, digest=digest)
-            finally:
-                importer.discard_staged_files((target,), strict=True)
+        if source.stat().st_size != size:
+            raise importer.ImportError_("batch_snapshot_mismatch")
+        target = window.directory / ("artifact" + Path(spec.display_name).suffix)
+        digest = _copy_import_source(source, target, max_bytes=min(size, limit))
+        if target.stat().st_size != size:
+            raise importer.ImportError_("batch_snapshot_mismatch")
+        window.seal(target)
+        self.consume(spec, (target, spec.display_name), resolved, digest=digest)
 
     async def remote(
         self,
@@ -1813,11 +2088,19 @@ class _InboxBatchImport:
                 return
         # The accepted manifest is the source intent. A response of unknown
         # container kind becomes either one unit or frozen archive children.
-        staged, actual_name = await importer.download_to_staging(
-            url,
-            window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
-        )
-        try:
+        with scratch_windows.open_window(
+            kind=scratch_windows.WindowKind.DOWNLOAD,
+            max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
+            owner=scratch_windows.JobWindowOwner(
+                self.execution.job_id, self.execution.execution_epoch
+            ),
+            session_factory=self.factory,
+        ) as window:
+            staged, actual_name = await importer.download_to_staging(
+                url,
+                window_max_bytes=window.max_bytes,
+                window=window,
+            )
             checkpoint(force=True)
             suffix = Path(actual_name).suffix.lower()
             if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
@@ -1835,8 +2118,6 @@ class _InboxBatchImport:
                     result_key="self" if resolved else None,
                 )
                 self.consume(spec, (staged, actual_name), resolved)
-        finally:
-            importer.discard_staged_files((staged,), strict=True)
 
 
 def _source_identity(source: str, selection: str) -> str:
@@ -1899,8 +2180,7 @@ async def _run_import(
                     key = context["slot_storage"].get(file_id)
                     if key is None:
                         raise importer.ImportError_("capture_upload_slots_incomplete")
-                    with get_backend().local_path(key) as source:
-                        flow.copy(source, spec, resolved)
+                    flow.slot_copy(file_id, key, spec, resolved)
         elif v2 is not None and staging_key:
             source = Path(staging_key)
             files = {file.id: file for file in v2.files}
@@ -2244,7 +2524,7 @@ def _finish_import(
         row = session.get(InboxItem, item_id)
         if row is None:
             return
-        cover_write: source_covers.SourceCoverWrite | None = None
+        cover_write: source_covers.SourceCoverCandidate | None = None
         # The cover intent uses a separate engine-bound transaction. Keep this
         # terminalization session in ``no_autoflush`` until that intent commit
         # is complete; otherwise result upserts or Inbox state assignment can
@@ -2271,22 +2551,31 @@ def _finish_import(
                     if cover_result is False:
                         row.error_code = "capture_cover_attach_pending"
                         row.retryable = True
-                    elif isinstance(cover_result, source_covers.SourceCoverWrite):
+                    elif isinstance(cover_result, source_covers.SourceCoverCandidate):
                         cover_write = cover_result
                 # Byte publication above precedes the short authority transaction.
                 # Never clean staging or commit completion across a retry.
                 if not _lock_import_completion(session, item_id, execution):
-                    # Cover bytes have an independently committed pending lease
-                    # and ownership intent. Leave those for receipt-based recovery;
-                    # compensating here could race the current import's adoption.
+                    # The private candidate has a durable PENDING receipt and
+                    # no visible cover pointer. Orphan recovery can retire it;
+                    # this stale execution cannot publish or remove any cover.
                     session.rollback()
                     return
-                if not row.retryable and not _cleanup_capture_slots(session, row):
+                # Local staging is removed before source/cover locks or any
+                # storage anchor. Candidate preparation never touched it.
+                if row.staging_key and not row.retryable:
+                    if _release_inbox_staging(session, row):
+                        row.staging_key = None
+                    else:
+                        row.error_code = "capture_upload_cleanup_pending"
+                        row.retryable = True
+                if cover_write is not None:
+                    source_covers.attach_candidate(session, cover_write)
+                if not row.retryable and not _cleanup_capture_slots(
+                    session, row, durable_only=True, cover_candidate=cover_write
+                ):
                     row.error_code = "capture_upload_cleanup_pending"
                     row.retryable = True
-                if row.staging_key and not row.retryable:
-                    unlink_managed_file(row.staging_key, settings.incoming_dir)
-                    row.staging_key = None
             else:
                 if not _lock_import_completion(session, item_id, execution):
                     session.rollback()
@@ -2303,13 +2592,14 @@ def _finish_import(
             row.updated_at = utcnow()
             session.add(row)
         try:
+            session.flush()
+            if cover_write is not None:
+                source_covers.adopt_candidate(session, cover_write)
             session.commit()
         except Exception:
             session.rollback()
             if cover_write is not None:
-                source_covers.rollback_after_commit_failure(
-                    session, get_backend(), cover_write
-                )
+                abandon_publication(session, cover_write.publication)
             raise
 
 
@@ -2496,6 +2786,26 @@ def retry(session: Session, row: InboxItem) -> InboxItem:
     return row
 
 
+def _release_inbox_staging(session: Session, row: InboxItem) -> bool:
+    lease = session.exec(
+        select(StagingLease)
+        .where(
+            StagingLease.path == row.staging_key,
+        )
+        .limit(1)
+    ).first()
+    if lease is not None:
+        owned = (row.job_id is not None and lease.job_id == row.job_id) or (
+            row.id is not None and lease.inbox_item_id == row.id
+        )
+        if not owned:
+            return False
+        return staging_cleanup.release_lease(session, lease)
+    if row.staging_key:
+        unlink_managed_file(row.staging_key, settings.incoming_dir)
+    return True
+
+
 def dismiss(session: Session, row: InboxItem) -> None:
     if row.state in {InboxItemState.RESOLVING, InboxItemState.IMPORTING}:
         raise OperationError("pending_import_busy", kind=ErrorKind.CONFLICT)
@@ -2517,7 +2827,8 @@ def dismiss(session: Session, row: InboxItem) -> None:
         row.job_id = None
     elif row.staging_key:
         path = Path(row.staging_key)
-        unlink_managed_file(path, settings.incoming_dir)
+        if not _release_inbox_staging(session, row):
+            raise OperationError("staging_cleanup_failed", kind=ErrorKind.CONFLICT)
         try:
             path.parent.rmdir()
         except OSError:
@@ -2659,7 +2970,7 @@ def _recover_completed_capture_cleanups() -> int:
         item_ids = session.exec(
             select(InboxItem.id).where(
                 InboxItem.state == InboxItemState.COMPLETED,
-                InboxItem.retryable.is_(True),
+                col(InboxItem.retryable).is_(True),
                 InboxItem.error_code == "capture_upload_cleanup_pending",
             )
         ).all()
@@ -2761,7 +3072,13 @@ class ResolveSource:
 def _resolve_step(ctx) -> None:
     from app.modules.work.async_steps import run_async
 
-    run_async(resolve(_item_id(ctx.subject_key)))
+    run_async(
+        resolve(
+            _item_id(ctx.subject_key),
+            owner=scratch_windows.JobWindowOwner(ctx.job_id, ctx.execution_epoch),
+            session_factory=get_session_factory(),
+        )
+    )
 
 
 def _import_step(ctx) -> None:

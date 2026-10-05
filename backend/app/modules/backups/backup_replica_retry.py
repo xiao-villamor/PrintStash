@@ -226,10 +226,16 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
     from app.modules.storage.storage_ownership import (
         complete_publication,
         fail_publication,
-        reserve_creation,
+        reserve_publication,
     )
+    from app.modules.storage.storage_publication import PublicationReservation
 
-    if result.key is None or result.namespace is None or run.size_bytes is None:
+    if (
+        result.key is None
+        or result.namespace is None
+        or result.provider_ref is None
+        or run.size_bytes is None
+    ):
         raise RetryRefused("backup_retry_target_unverified")
     binding = binding_for(result)
     with get_session_factory().scoped_session() as session:
@@ -239,6 +245,7 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
                 OwnedStorageObject.namespace == result.namespace,
                 OwnedStorageObject.provider_ref == result.provider_ref,
                 OwnedStorageObject.object_kind == "backup",
+                OwnedStorageObject.state != StorageObjectState.RETIRING,
             )
         ).one_or_none()
         if existing is not None and (
@@ -246,7 +253,7 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
             or existing.size_bytes != run.size_bytes
         ):
             raise RetryRefused("backup_retry_publication_conflict")
-        reservation_id = existing.id if existing is not None else None
+        previous = PublicationReservation.of(existing) if existing is not None else None
     # Absence is required before attempting another create. A concurrent writer
     # after this observation is still protected by create-only publication.
     if binding.kind == "s3":
@@ -272,48 +279,26 @@ def publish_retry(result: BackupDestinationResult, run: BackupRun, path: Path) -
 
     token = uuid.uuid4().hex
     with get_session_factory().scoped_session() as session:
-        if reservation_id is not None:
-            existing = session.get(OwnedStorageObject, reservation_id)
-            if existing is None:
-                raise RetryRefused("backup_retry_publication_conflict")
-            existing.state = StorageObjectState.PENDING
-            existing.last_error = None
-            existing.token = token if binding.kind == "s3" else existing.token
-            session.add(existing)
-            session.commit()
-        elif binding.kind == "s3":
-            existing = OwnedStorageObject(
-                backend="backup-s3",
-                namespace=result.namespace,
-                key=result.key,
-                provider_ref=result.provider_ref,
-                object_kind="backup",
-                state=StorageObjectState.PENDING,
-                token=token,
-                sha256=run.archive_sha256,
-                size_bytes=run.size_bytes,
-            )
-            session.add(existing)
-            session.commit()
-            reservation_id = existing.id
-        else:
-            backend = (
-                binding.destination
-                if binding.kind == "local"
-                else binding.destination.backend
-            )
-            reservation_id = reserve_creation(
-                session,
-                backend,
-                result.key,
-                object_kind="backup",
-                expected_size=run.size_bytes,
-                sha256=run.archive_sha256,
-                provider_ref=result.provider_ref,
-            )
-            session.commit()
-    if reservation_id is None:
-        raise RetryRefused("backup_retry_publication_conflict")
+        backend_name = (
+            "backup-s3"
+            if binding.kind == "s3"
+            else binding.destination.backend_name
+            if binding.kind == "local"
+            else binding.destination.backend.backend_name
+        )
+        reservation_id = reserve_publication(
+            session,
+            backend=backend_name,
+            namespace=result.namespace,
+            key=result.key,
+            provider_ref=result.provider_ref,
+            object_kind="backup",
+            expected_size=run.size_bytes,
+            sha256=run.archive_sha256,
+            token=token if binding.kind == "s3" else None,
+            previous=previous,
+        )
+        session.commit()
     try:
         binding_for(result)
         with path.open("rb") as source:
@@ -406,6 +391,7 @@ def reconcile_result(result: BackupDestinationResult, run: BackupRun) -> bool:
                 OwnedStorageObject.provider_ref == result.provider_ref,
                 OwnedStorageObject.object_kind == "backup",
                 OwnedStorageObject.sha256 == run.archive_sha256,
+                OwnedStorageObject.state != StorageObjectState.RETIRING,
             )
         ).one_or_none()
         if row is None:

@@ -54,34 +54,25 @@ uses `render_geometry` to prepare relative float32 positions and repeatable boun
 face chunks; it still retains O(expanded referenced vertices) position and normal
 arrays. It does not provide zero-copy or GPU instancing.
 
-## Compatibility facade inventory
+## Retired compatibility facade
 
-`app.modules.media.mesh_processing` is a temporary import facade. Its operation
-aliases delegate to the owners above; its legacy `extract_geometry` wrapper projects
-`MeshMeasurements.geometry`. It owns no mutable policy or native algorithms.
-
-| Fixed consumer | Retained operation | Retirement condition |
-| --- | --- | --- |
-| `backend/tests/unit/modules/media/mesh_processing/test_entry_points.py` | `extract_geometry` | Remove these compatibility assertions with the facade |
-
-There are no production consumers. The repo guard
-`TestMeshFacadeInventory.test_only_fixed_legacy_consumers_import_the_facade` rejects
-any new consumer. This inventory may shrink, and new code must use a destination
-owner. The facade and its remaining tests are removed together after compatibility
-retirement; they must not become an alternative implementation.
+The temporary `app.modules.media.mesh_processing` facade and its scalar geometry
+alias are removed. All production, tooling and test consumers enter the owning
+seams above. The repository guard `TestRetiredMeshFacade` rejects any remaining
+consumer and verifies that no alternate facade implementation remains.
 
 ## Verification
 
 The owner suites in `backend/tests/unit/modules/media/{mesh_policy,mesh_loading,
 mesh_measurements,mesh_previews}/` retain the original policy, parser, measurement
 and archive assertions at their actual owners. Engine integration assertions from
-those suites live in `thumbnail_engine/test_processing.py`; the real-file guards
+those suites live in `backend/tests/unit/modules/media/thumbnail_engine/test_processing.py`; the real-file guards
 and reachability checks remain in
-`backend/tests/integration/modules/media/test_mesh_processing.py`.
+`backend/tests/integration/modules/media/thumbnail_engine/test_resource_recovery.py`.
 
 `backend/tests/repo/test_mesh_boundaries.py` also enforces one-way primitive
 imports, canonical data-contract imports, safe isolation entry points and the
-fixed facade inventory.
+retired facade boundary.
 
 Retained measurement and instance behavior is documented in
 [retained 3MF scenes](../retained-3mf-scenes.md).

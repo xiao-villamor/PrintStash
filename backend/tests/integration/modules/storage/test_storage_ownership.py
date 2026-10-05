@@ -10,12 +10,17 @@ import pytest
 from sqlmodel import select
 
 from app.core.time import utcnow
-from app.db.models import OwnedStorageObject, StorageObjectState
-from app.modules.storage.storage_backend.contracts import CreationReceipt
+from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
+from app.modules.storage.storage_backend.contracts import (
+    CreationReceipt,
+    ObjectIdentity,
+    StorageCapabilities,
+)
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_ownership import (
     UnsafeStorageDeleteError,
     delete_owned_key,
+    provider_ref_for_backend,
     record_creation,
     replace_owned_bytes,
     require_or_adopt_legacy_artifact,
@@ -35,13 +40,29 @@ def _receipt(key: str = "files/model.stl") -> CreationReceipt:
         device=1,
         inode=2,
         ctime_ns=3,
-        provider_ref=hashlib.sha256(
-            '{"backend":"local","namespace":"data:/tmp/vault"}'.encode()
-        ).hexdigest(),
+        provider_ref=provider_ref_for_backend(
+            _LedgerBackend(), namespace="data:/tmp/vault"
+        ),
     )
 
 
 class _LedgerBackend:
+    backend_name = "local"
+    capabilities = StorageCapabilities(
+        conditional_create=True,
+        object_identity=ObjectIdentity.INODE,
+        verified_delete=True,
+        conditional_replace=True,
+        namespace_ownership=True,
+        direct_path=True,
+    )
+
+    def namespace_for(self, key: str) -> str:
+        return "data:/tmp/vault"
+
+    def exists(self, key: str) -> bool:
+        return not self.rollback
+
     def __init__(self) -> None:
         self.matches = True
         self.adopted = False
@@ -110,7 +131,11 @@ class TestRecordCreation:
         db_session.commit()
         db_session.refresh(refreshed)
 
-        assert refreshed.id == first.id
+        assert refreshed.id != first.id
+        assert refreshed.publication_generation != first.publication_generation
+        db_session.refresh(first)
+        assert first.state is StorageObjectState.RETIRING
+        assert first.token == initial.token
         assert refreshed.backend == refreshed_receipt.backend
         assert refreshed.namespace == refreshed_receipt.namespace
         assert refreshed.key == refreshed_receipt.key
@@ -164,7 +189,10 @@ class TestRecordCreation:
         db_session.commit()
         db_session.refresh(upgraded)
 
-        assert upgraded.id == row_id
+        assert upgraded.id != row_id
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.RETIRING
+        assert row.token == "legacy-digest-token"
         assert upgraded.state is StorageObjectState.COMMITTED
         assert upgraded.key == row.key
         assert upgraded.namespace == row.namespace
@@ -341,7 +369,10 @@ class TestReplaceOwnedBytes:
         assert replacement == replacement_receipt
         assert backend.replaced[0][0] == b"new-bytes"
         row = db_session.exec(
-            select(OwnedStorageObject).where(OwnedStorageObject.key == stored.key)
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.key == stored.key,
+                OwnedStorageObject.state == StorageObjectState.COMMITTED,
+            )
         ).one()
         assert row.object_kind == "thumbnail"
         assert row.backend == replacement_receipt.backend
@@ -380,10 +411,13 @@ class TestDeleteOwnedKey:
             is expected
         )
         db_session.commit()
-        if expected:
-            assert db_session.exec(select(OwnedStorageObject)).all() == []
-        else:
-            assert db_session.exec(select(OwnedStorageObject)).one().key == stored.key
+        proof = db_session.exec(select(OwnedStorageObject)).one()
+        assert proof.key == stored.key
+        assert proof.state is StorageObjectState.RETIRING
+        assert proof.token == stored.token
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.token == stored.token
+        assert intent.status == ("completed" if expected else "blocked")
         assert backend.rollback_calls[-1] == stored
 
     def test_delete_owned_key_fails_closed_only_when_proof_is_required(
@@ -396,9 +430,16 @@ class TestDeleteOwnedKey:
         backend.rollback = OSError("delete failed")
 
         assert delete_owned_key(db_session, backend, stored.key) is False
+        required = _receipt("files/required.stl")
+        record_creation(db_session, required, object_kind="artifact")
+        db_session.commit()
         with pytest.raises(UnsafeStorageDeleteError, match="storage_delete_failed"):
-            delete_owned_key(db_session, backend, stored.key, required_proof=True)
-        assert backend.rollback_calls[-1] == stored
+            delete_owned_key(db_session, backend, required.key, required_proof=True)
+        assert backend.rollback_calls[-1] == required
+        intents = db_session.exec(select(StorageDeleteIntent)).all()
+        assert len(intents) == 2
+        assert all(intent.status == "retry" for intent in intents)
+        assert all(intent.last_error == "OSError" for intent in intents)
 
         assert delete_owned_key(db_session, backend, "unclaimed") is False
         with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
@@ -451,3 +492,60 @@ class TestSweepOrphanedPublications:
         assert result.reclaimed == 0
         db_session.refresh(row)
         assert row.state is StorageObjectState.PENDING
+
+
+class TestOrphanAdoptionProbe:
+    def test_preserves_a_concurrently_adopted_thumbnail(
+        self, db_session, make_model, make_file, monkeypatch
+    ) -> None:
+        from sqlmodel import Session
+
+        from app.db.models import File
+        from app.modules.media.thumbnail_publication import point_at
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.storage.storage_ownership import publish_bytes
+
+        artifact = make_file(make_model(), filename="pending-thumbnail.stl")
+        artifact_id = artifact.id
+        backend = get_backend()
+        data = b"immutable pending thumbnail bytes"
+        key = backend.thumbnail_variant_key(artifact_id, artifact.sha256, "a" * 64)
+        receipt = publish_bytes(db_session, backend, key, data, object_kind="thumbnail")
+        # Crash/paused publication leaves the independently durable receipt pending.
+        db_session.rollback()
+        proof = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        proof.created_at = utcnow() - timedelta(days=2)
+        db_session.add(proof)
+        db_session.commit()
+        db_session.expunge_all()
+        original_info = backend.object_info
+        adopted = False
+
+        def adopt_after_sweep_selection(candidate_key):
+            nonlocal adopted
+            info = original_info(candidate_key)
+            if candidate_key == key and not adopted:
+                adopted = True
+                with Session(db_session.get_bind()) as writer:
+                    file = writer.get(File, artifact_id)
+                    assert file is not None
+                    record_creation(writer, receipt, object_kind="thumbnail")
+                    point_at(writer, file, key)
+                    writer.commit()
+            return info
+
+        monkeypatch.setattr(backend, "object_info", adopt_after_sweep_selection)
+        sweep_orphaned_publications(db_session, backend, now=utcnow())
+        db_session.commit()
+        assert adopted
+        db_session.expire_all()
+        stored = db_session.get(File, artifact_id)
+        assert stored is not None
+        assert stored.thumbnail_path == key
+        assert backend.read_bytes(key) == data
+        current = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        assert current.state is StorageObjectState.COMMITTED
