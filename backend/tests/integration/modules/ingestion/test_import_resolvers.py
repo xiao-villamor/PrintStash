@@ -785,3 +785,116 @@ class TestUser:
             asyncio.run(
                 import_resolvers.resolve_selected_assets(url, manifest, [], context)
             )
+
+
+class TestBatchDownloadSources:
+    @pytest.mark.asyncio
+    async def test_maps_links_by_provider_identity(self, monkeypatch):
+        files = [
+            import_resolvers.ModelFile("first", "first.gcode", "gcode"),
+            import_resolvers.ModelFile("second", "second.gcode", "gcode"),
+        ]
+        queries = []
+
+        async def graphql(query, variables, url):
+            queries.append(variables)
+            return {
+                "data": {
+                    "getDownloadLink": {
+                        "output": {
+                            "files": [
+                                {
+                                    "id": "second",
+                                    "link": "https://example.com/signed-second",
+                                },
+                                {
+                                    "id": "first",
+                                    "link": "https://example.com/signed-first",
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+
+        monkeypatch.setattr(import_resolvers, "_printables_graphql", graphql)
+        sources = await import_resolvers.resolve_selected_sources(
+            "https://www.printables.com/model/42", files
+        )
+        assert queries == [
+            {
+                "printId": "42",
+                "source": "model_detail",
+                "files": [{"fileType": "gcode", "ids": ["first", "second"]}],
+            }
+        ]
+        assert all(
+            isinstance(source, import_resolvers.SelectedFileDownload)
+            for source in sources
+        )
+        assert {(source.file.file_id, source.url) for source in sources} == {
+            ("first", "https://example.com/signed-first"),
+            ("second", "https://example.com/signed-second"),
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "ids",
+        [
+            pytest.param(["first"], id="missing"),
+            pytest.param(["first", "first"], id="duplicate"),
+            pytest.param(["first", "other"], id="unknown"),
+        ],
+    )
+    async def test_refuses_invalid_provider_identity(self, monkeypatch, ids):
+        files = [
+            import_resolvers.ModelFile("first", "first.gcode", "gcode"),
+            import_resolvers.ModelFile("second", "second.gcode", "gcode"),
+        ]
+
+        async def graphql(query, variables, url):
+            return {
+                "data": {
+                    "getDownloadLink": {
+                        "output": {
+                            "files": [
+                                {"id": key, "link": "https://example.com/" + key}
+                                for key in ids
+                            ]
+                        }
+                    }
+                }
+            }
+
+        monkeypatch.setattr(import_resolvers, "_printables_graphql", graphql)
+        with pytest.raises(
+            import_resolvers.ImportError_, match="^printables_file_selection_mismatch$"
+        ):
+            await import_resolvers.resolve_selected_sources(
+                "https://www.printables.com/model/42", files
+            )
+
+    @pytest.mark.asyncio
+    async def test_keeps_combined_container_identity(self, monkeypatch):
+        files = [
+            import_resolvers.ModelFile("first", "first.gcode", "gcode"),
+            import_resolvers.ModelFile("second", "second.gcode", "gcode"),
+        ]
+
+        async def graphql(query, variables, url):
+            return {
+                "data": {
+                    "getDownloadLink": {
+                        "output": {"link": "https://example.com/selected.zip"}
+                    }
+                }
+            }
+
+        monkeypatch.setattr(import_resolvers, "_printables_graphql", graphql)
+        sources = await import_resolvers.resolve_selected_sources(
+            "https://www.printables.com/model/42", files
+        )
+        assert len(sources) == 1
+        assert isinstance(sources[0], import_resolvers.SelectedArchiveDownload)
+        assert sources[0].files == tuple(files)
+        assert sources[0].url == "https://example.com/selected.zip"

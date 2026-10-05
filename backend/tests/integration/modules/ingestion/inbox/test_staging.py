@@ -16,15 +16,22 @@ and a single model by intent. Unpacking one would turn one selection into a pile
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from printstash_core.imports import StagedAsset
 from printstash_core.imports.contracts import CaptureManifestV2, ResolvedAsset
 
 from app.core.config import _overlay
+from app.db.models import InboxItemState, JobKind
+from app.db.session import get_session_factory
 from app.modules.ingestion import inbox
+from tests.factories.ops import build_job_context
 
 STL = b"solid cube\nendsolid cube\n"
 
@@ -82,7 +89,7 @@ def downloads(monkeypatch: pytest.MonkeyPatch, staging: Path):
     """Stand in for the one egress boundary: fetching the bytes."""
 
     def serve(data: bytes, name: str) -> None:
-        async def download(_url: str) -> tuple[Path, str]:
+        async def download(_url: str, *, window_max_bytes=None) -> tuple[Path, str]:
             path = staging / name
             path.write_bytes(data)
             return path, name
@@ -92,50 +99,150 @@ def downloads(monkeypatch: pytest.MonkeyPatch, staging: Path):
     return serve
 
 
+@dataclass(frozen=True)
+class _Consumed:
+    staged_path: Path
+    bytes: bytes
+    name: str
+    result_key: str
+    source_selection_id: str | None
+    container_entry_path: str | None
+    blob_sha256: str
+
+
+@pytest.fixture
+def batch_flow(db_session, make_user, make_inbox_item, make_job):
+    """Observe each real commit, without retaining disposable staging windows."""
+
+    def create(manifest=None):
+        inbox.settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+        owner = make_user(superuser=True)
+        item = make_inbox_item(
+            owner,
+            state=InboxItemState.IMPORTING,
+            manifest=manifest.to_dict() if manifest else {"kind": "direct"},
+            source_url="https://www.printables.com/model/42",
+        )
+        job = make_job(
+            kind=JobKind.INGESTION_INBOX_IMPORT,
+            subject=f"inbox_item/{item.id}",
+            owner=owner,
+        )
+        item.job_id = job.id
+        db_session.add(item)
+        db_session.commit()
+        context = {
+            "collection_path": None,
+            "tags": None,
+            "source_url": item.source_url,
+            "owner_id": owner.id,
+        }
+        flow = inbox._InboxBatchImport(
+            item.id, context, get_session_factory(), build_job_context(job.id)
+        )
+        observed = []
+        original = flow.batch._commit
+
+        def consume(record, staged, source_url, member_title):
+            if isinstance(staged, StagedAsset):
+                snapshot = _Consumed(
+                    staged.staged_path,
+                    staged.staged_path.read_bytes(),
+                    record.spec.display_name,
+                    staged.result_key,
+                    staged.source_selection_id,
+                    staged.container_entry_path,
+                    staged.blob_sha256,
+                )
+            else:
+                path, name = staged
+                data = path.read_bytes()
+                snapshot = _Consumed(
+                    path,
+                    data,
+                    name,
+                    "self",
+                    None,
+                    None,
+                    hashlib.sha256(data).hexdigest(),
+                )
+            result = original(record, staged, source_url, member_title)
+            assert result is not None and "file_id" in result, result
+            observed.append(snapshot)
+            return result
+
+        flow.batch._commit = consume
+        return flow, observed
+
+    return create
+
+
+@pytest.fixture
+def remote_assets(batch_flow):
+    async def consume(resolved):
+        flow, observed = batch_flow(resolved.manifest)
+        await flow.remote(
+            f"{resolved.source_item_id}:{resolved.source_selection_id}",
+            resolved.source_selection_id,
+            resolved.source_filename,
+            resolved.download_url,
+            resolved,
+        )
+        return observed
+
+    return consume
+
+
+@pytest.fixture
+def local_assets(batch_flow):
+    async def consume(source, manifest, selected):
+        flow, observed = batch_flow(manifest)
+        files = {file.id: file for file in manifest.files}
+        wanted = [key for key in selected if key in files] or list(files)
+        if source.suffix == ".zip":
+            flow.archive(
+                source,
+                [files[key].name for key in wanted],
+                manifest.source.canonical_url,
+                manifest=manifest,
+            )
+        else:
+            resolved = inbox._local_resolved_asset(manifest, wanted[0])
+            spec = inbox.importer.direct_entry_spec(
+                manifest.source.canonical_url, wanted[0], resolved.source_filename
+            )
+            flow.copy(source, spec, resolved)
+        return observed
+
+    return consume
+
+
 class TestDownloadResolvedAsset:
-    def test_stages_a_plain_file_as_one_asset(self, downloads) -> None:
+    def test_stages_a_plain_file_as_one_asset(self, downloads, remote_assets) -> None:
         import asyncio
 
         downloads(STL, "cube.stl")
         manifest = _manifest([("42:cube", "cube.stl")])
 
-        assets = asyncio.run(
-            inbox._download_resolved_asset(_resolved(manifest, "42:cube", "cube.stl"))
-        )
+        assets = asyncio.run(remote_assets(_resolved(manifest, "42:cube", "cube.stl")))
 
         assert len(assets) == 1
         assert assets[0].result_key == "self"
-        assert assets[0].staged_path.read_bytes() == STL
+        assert assets[0].bytes == STL
 
-    def test_hashes_what_it_staged(self, downloads) -> None:
+    def test_hashes_what_it_staged(self, downloads, remote_assets) -> None:
         import asyncio
 
         downloads(STL, "cube.stl")
         manifest = _manifest([("42:cube", "cube.stl")])
 
-        assets = asyncio.run(
-            inbox._download_resolved_asset(_resolved(manifest, "42:cube", "cube.stl"))
-        )
+        assets = asyncio.run(remote_assets(_resolved(manifest, "42:cube", "cube.stl")))
 
         # The hash is what a later dedupe and a provenance link are keyed on.
         assert len(assets[0].blob_sha256) == 64
 
-    def test_expands_a_zip_into_one_asset_per_entry(self, downloads) -> None:
-        import asyncio
-
-        downloads(_zip_bytes({"a.stl": STL, "b.stl": STL}), "bundle.zip")
-        manifest = _manifest([("42:bundle", "bundle.zip")])
-
-        assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:bundle", "bundle.zip")
-            )
-        )
-
-        assert len(assets) == 2
-
-    def test_keeps_every_expanded_entry_pointing_at_its_selection(
-        self, downloads
+    def test_expands_a_zip_into_one_asset_per_entry(
+        self, downloads, remote_assets
     ) -> None:
         import asyncio
 
@@ -143,30 +250,42 @@ class TestDownloadResolvedAsset:
         manifest = _manifest([("42:bundle", "bundle.zip")])
 
         assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:bundle", "bundle.zip")
-            )
+            remote_assets(_resolved(manifest, "42:bundle", "bundle.zip"))
         )
 
-        # Lose this and a partial retry cannot tell which of twenty entries failed.
-        assert {asset.source_selection_id for asset in assets} == {"42:bundle"}
+        assert len(assets) == 2
 
-    def test_gives_each_expanded_entry_its_own_result_key(self, downloads) -> None:
+    def test_keeps_every_expanded_entry_pointing_at_its_selection(
+        self, downloads, remote_assets
+    ) -> None:
         import asyncio
 
         downloads(_zip_bytes({"a.stl": STL, "b.stl": STL}), "bundle.zip")
         manifest = _manifest([("42:bundle", "bundle.zip")])
 
         assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:bundle", "bundle.zip")
-            )
+            remote_assets(_resolved(manifest, "42:bundle", "bundle.zip"))
+        )
+
+        # Lose this and a partial retry cannot tell which of twenty entries failed.
+        assert {asset.source_selection_id for asset in assets} == {"42:bundle"}
+
+    def test_gives_each_expanded_entry_its_own_result_key(
+        self, downloads, remote_assets
+    ) -> None:
+        import asyncio
+
+        downloads(_zip_bytes({"a.stl": STL, "b.stl": STL}), "bundle.zip")
+        manifest = _manifest([("42:bundle", "bundle.zip")])
+
+        assets = asyncio.run(
+            remote_assets(_resolved(manifest, "42:bundle", "bundle.zip"))
         )
 
         assert len({asset.result_key for asset in assets}) == 2
 
     def test_records_where_in_the_container_each_entry_came_from(
-        self, downloads
+        self, downloads, remote_assets
     ) -> None:
         import asyncio
 
@@ -174,38 +293,34 @@ class TestDownloadResolvedAsset:
         manifest = _manifest([("42:bundle", "bundle.zip")])
 
         assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:bundle", "bundle.zip")
-            )
+            remote_assets(_resolved(manifest, "42:bundle", "bundle.zip"))
         )
 
         assert assets[0].container_entry_path == "nested/a.stl"
 
-    def test_expands_a_zip_that_is_not_named_zip(self, downloads) -> None:
+    def test_expands_a_zip_that_is_not_named_zip(
+        self, downloads, remote_assets
+    ) -> None:
         import asyncio
 
         downloads(_zip_bytes({"a.stl": STL}), "bundle.bin")
         manifest = _manifest([("42:bundle", "bundle.bin")])
 
         assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:bundle", "bundle.bin")
-            )
+            remote_assets(_resolved(manifest, "42:bundle", "bundle.bin"))
         )
 
         # Providers serve archives under all sorts of names; the content decides.
         assert assets[0].container_entry_path == "a.stl"
 
-    def test_leaves_a_3mf_whole(self, downloads) -> None:
+    def test_leaves_a_3mf_whole(self, downloads, remote_assets) -> None:
         import asyncio
 
         downloads(_zip_bytes({"3D/3dmodel.model": b"<xml/>"}), "widget.3mf")
         manifest = _manifest([("42:widget", "widget.3mf")])
 
         assets = asyncio.run(
-            inbox._download_resolved_asset(
-                _resolved(manifest, "42:widget", "widget.3mf")
-            )
+            remote_assets(_resolved(manifest, "42:widget", "widget.3mf"))
         )
 
         # A 3MF is a zip by construction and one model by intent; unpacking it
@@ -215,55 +330,63 @@ class TestDownloadResolvedAsset:
 
 
 class TestDownloadAssets:
-    def test_stages_a_plain_file(self, downloads, monkeypatch) -> None:
-        import asyncio
-
+    def test_stages_a_plain_file(self, downloads, batch_flow):
         downloads(STL, "cube.stl")
+        flow, observed = batch_flow()
+        asyncio.run(
+            flow.remote(
+                "https://example.test/cube.stl",
+                "cube.stl",
+                "cube.stl",
+                "https://example.test/cube.stl",
+            )
+        )
+        assert [asset.name for asset in observed] == ["cube.stl"]
+        assert observed[0].bytes == STL
 
-        async def no_resolution(_url: str) -> None:
-            return None
-
-        monkeypatch.setattr(inbox.import_resolvers, "resolve_page_url", no_resolution)
-
-        staged = asyncio.run(inbox._download_assets("https://example.test/cube.stl"))
-
-        assert [name for _path, name in staged] == ["cube.stl"]
-
-    def test_expands_an_archive(self, downloads, monkeypatch) -> None:
-        import asyncio
-
+    def test_expands_an_archive(self, downloads, batch_flow):
         downloads(_zip_bytes({"a.stl": STL, "b.stl": STL}), "bundle.zip")
+        flow, observed = batch_flow()
+        asyncio.run(
+            flow.remote(
+                "https://example.test/bundle.zip",
+                "bundle",
+                "bundle.zip",
+                "https://example.test/bundle.zip",
+            )
+        )
+        assert len(observed) == 2
+        assert {asset.name for asset in observed} == {"a.stl", "b.stl"}
 
-        async def no_resolution(_url: str) -> None:
-            return None
-
-        monkeypatch.setattr(inbox.import_resolvers, "resolve_page_url", no_resolution)
-
-        staged = asyncio.run(inbox._download_assets("https://example.test/bundle.zip"))
-
-        assert len(staged) == 2
-
-    def test_follows_a_page_url_to_its_download(self, downloads, monkeypatch) -> None:
-        import asyncio
-
+    def test_follows_a_page_url_to_its_download(
+        self, downloads, batch_flow, monkeypatch
+    ):
         downloads(STL, "cube.stl")
-        asked: list[str] = []
+        asked = []
 
-        async def resolve(url: str) -> str:
+        async def resolve(url):
             asked.append(url)
             return "https://cdn.example.test/real.stl"
 
         monkeypatch.setattr(inbox.import_resolvers, "resolve_page_url", resolve)
-
-        asyncio.run(inbox._download_assets("https://www.printables.com/model/42"))
-
-        # A user pastes the page they are looking at, not the file behind it.
+        flow, _ = batch_flow()
+        context = dict(
+            flow.context, manifest={"kind": "direct"}, selected=[], staging_key=None
+        )
+        asyncio.run(
+            inbox._run_import(
+                flow.item_id,
+                context,
+                flow.factory,
+                job_context=build_job_context(flow.execution.job_id),
+            )
+        )
         assert asked == ["https://www.printables.com/model/42"]
 
 
 class TestStageLocalCaptureAssets:
     def test_copies_a_single_browser_file_into_disposable_staging(
-        self, staging: Path, tmp_path: Path
+        self, staging: Path, tmp_path: Path, local_assets
     ) -> None:
         import asyncio
 
@@ -271,9 +394,7 @@ class TestStageLocalCaptureAssets:
         source.write_bytes(STL)
         manifest = _manifest([("42:cube", "cube.stl")])
 
-        assets = asyncio.run(
-            inbox._stage_local_capture_assets(source, manifest, ["42:cube"])
-        )
+        assets = asyncio.run(local_assets(source, manifest, ["42:cube"]))
 
         # A copy, not a move: the browser's own staging stays owned by the inbox
         # item until the import succeeds.
@@ -282,7 +403,7 @@ class TestStageLocalCaptureAssets:
         assert source.exists()
 
     def test_expands_a_captured_zip_into_its_declared_members(
-        self, staging: Path, tmp_path: Path
+        self, staging: Path, tmp_path: Path, local_assets
     ) -> None:
         import asyncio
 
@@ -290,14 +411,12 @@ class TestStageLocalCaptureAssets:
         source.write_bytes(_zip_bytes({"a.stl": STL, "b.stl": STL}))
         manifest = _manifest([("a.stl", "a.stl"), ("b.stl", "b.stl")])
 
-        assets = asyncio.run(
-            inbox._stage_local_capture_assets(source, manifest, ["a.stl", "b.stl"])
-        )
+        assets = asyncio.run(local_assets(source, manifest, ["a.stl", "b.stl"]))
 
         assert {asset.container_entry_path for asset in assets} == {"a.stl", "b.stl"}
 
     def test_drops_a_zip_member_the_manifest_never_declared(
-        self, staging: Path, tmp_path: Path
+        self, staging: Path, tmp_path: Path, local_assets
     ) -> None:
         import asyncio
 
@@ -305,16 +424,14 @@ class TestStageLocalCaptureAssets:
         source.write_bytes(_zip_bytes({"a.stl": STL, "surprise.stl": STL}))
         manifest = _manifest([("a.stl", "a.stl")])
 
-        assets = asyncio.run(
-            inbox._stage_local_capture_assets(source, manifest, ["a.stl"])
-        )
+        assets = asyncio.run(local_assets(source, manifest, ["a.stl"]))
 
         # The manifest is the contract; a member it does not name is not part of
         # this capture, whatever the archive happens to contain.
         assert [asset.container_entry_path for asset in assets] == ["a.stl"]
 
     def test_falls_back_to_every_file_when_the_selection_matches_none(
-        self, staging: Path, tmp_path: Path
+        self, staging: Path, tmp_path: Path, local_assets
     ) -> None:
         import asyncio
 
@@ -322,14 +439,14 @@ class TestStageLocalCaptureAssets:
         source.write_bytes(STL)
         manifest = _manifest([("42:cube", "cube.stl")])
 
-        assets = asyncio.run(
-            inbox._stage_local_capture_assets(source, manifest, ["nothing-matches"])
-        )
+        assets = asyncio.run(local_assets(source, manifest, ["nothing-matches"]))
 
         # A stale selection should import the capture, not nothing at all.
         assert len(assets) == 1
 
-    def test_refuses_browser_copy_for_withdrawn_attempt(self, staging, tmp_path):
+    def test_refuses_browser_copy_for_withdrawn_attempt(
+        self, staging, tmp_path, local_assets
+    ):
         import asyncio
 
         from app.core.cancellation import OperationCancelled, cancellation_scope
@@ -339,14 +456,14 @@ class TestStageLocalCaptureAssets:
         manifest = _manifest([("42:cube", "cube.stl")])
 
         with cancellation_scope(lambda: True), pytest.raises(OperationCancelled):
-            asyncio.run(
-                inbox._stage_local_capture_assets(source, manifest, ["42:cube"])
-            )
+            asyncio.run(local_assets(source, manifest, ["42:cube"]))
 
         assert source.read_bytes() == STL
         assert list(staging.iterdir()) == []
 
-    def test_preserves_the_digest_of_a_browser_copy(self, staging, tmp_path):
+    def test_preserves_the_digest_of_a_browser_copy(
+        self, staging, tmp_path, local_assets
+    ):
         import asyncio
         import hashlib
 
@@ -354,12 +471,10 @@ class TestStageLocalCaptureAssets:
         source.write_bytes(STL)
         manifest = _manifest([("42:cube", "cube.stl")])
 
-        assets = asyncio.run(
-            inbox._stage_local_capture_assets(source, manifest, ["42:cube"])
-        )
+        assets = asyncio.run(local_assets(source, manifest, ["42:cube"]))
 
         assert assets[0].blob_sha256 == hashlib.sha256(STL).hexdigest()
-        assert assets[0].staged_path.read_bytes() == source.read_bytes() == STL
+        assert assets[0].bytes == source.read_bytes() == STL
 
 
 class TestCopyImportSource:
@@ -378,7 +493,7 @@ class TestCopyImportSource:
 
 
 class TestStageCaptureUploadSlotAssets:
-    def test_stops_slot_copying_between_entries(self, local_storage):
+    def test_stops_slot_copying_between_entries(self, local_storage, batch_flow):
         from app.core.cancellation import OperationCancelled, cancellation_scope
         from app.modules.storage.storage_backend.runtime import get_backend
 
@@ -392,14 +507,25 @@ class TestStageCaptureUploadSlotAssets:
         second_receipt = backend.create_bytes(STL + b"second", str(second))
         manifest = _manifest([("one", "one.stl"), ("two", "two.stl")])
 
+        flow, _ = batch_flow(manifest)
+        context = dict(
+            flow.context,
+            manifest=manifest.to_dict(),
+            selected=["one", "two"],
+            staging_key=None,
+            slot_storage={"one": first_receipt.key, "two": second_receipt.key},
+        )
         with (
             cancellation_scope(lambda: bool(list(staging.glob("capture-import-*")))),
             pytest.raises(OperationCancelled),
         ):
-            inbox._stage_capture_upload_slot_assets(
-                manifest,
-                ["one", "two"],
-                {"one": first_receipt.key, "two": second_receipt.key},
+            asyncio.run(
+                inbox._run_import(
+                    flow.item_id,
+                    context,
+                    flow.factory,
+                    job_context=build_job_context(flow.execution.job_id),
+                )
             )
 
         assert backend.read_bytes(first_receipt.key) == STL

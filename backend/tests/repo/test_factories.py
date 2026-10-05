@@ -965,3 +965,31 @@ class TestGroupRegeneration:
             db_session, definitions=[JobKind.DERIVATIVES_GCODE]
         )
         assert regenerations(db_session, definitions=[JobKind.DERIVATIVES_MESH]) == {}
+
+
+class TestBuildIngestionEntry:
+    def test_freezes_a_pending_unit_for_the_job(self, db_session):
+        from app.db.models import IngestionEntryState
+        from app.modules.ingestion import batch_store
+        from app.modules.ingestion.batch_contracts import (
+            EntrySpec,
+            JobBatch,
+            LocalSource,
+        )
+
+        job = factories.build_job(db_session)
+        entry = factories.build_ingestion_entry(
+            db_session,
+            job,
+            identity="factory-frozen-source",
+            display_name="parts/tetra.stl",
+        )
+
+        records = batch_store.results(JobBatch(job.id), limit=1)
+
+        assert len(records) == 1
+        assert records[0].id == entry.id
+        assert records[0].spec == EntrySpec(
+            "factory-frozen-source", "parts/tetra.stl", LocalSource("factory"), None
+        )
+        assert records[0].state is IngestionEntryState.PENDING

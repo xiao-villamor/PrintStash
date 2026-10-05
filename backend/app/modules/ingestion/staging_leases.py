@@ -1194,6 +1194,19 @@ def job_leases(session: Session, job_id: str) -> list[StagingLease]:
     return list(session.exec(select(StagingLease).where(StagingLease.job_id == job_id)))
 
 
+def required_job_path(session: Session, job_id: str) -> Path:
+    """Resolve exactly one Job-owned file only while its received identity matches."""
+    leases = job_leases(session, job_id)
+    if not leases:
+        raise StagingLeaseNotFoundError("expected one staging lease for job")
+    if len(leases) != 1:
+        raise StagingLeaseAmbiguousError("expected one staging lease for job")
+    path = _matching_path(leases[0])
+    if path is None:
+        raise StagingLeaseError("staged path identity does not match receipt")
+    return path
+
+
 def renew_review_lease(
     session: Session, *, inbox_item_id: int, now: datetime | None = None
 ) -> StagingLease:

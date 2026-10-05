@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Publish batch Artifacts before materializing later entries. Bound disposable
+  staging by files and bytes, record each entry with its Artifact transaction,
+  and resume confirmed entries without reopening their sources. Keep partial
+  failures retryable and report unknown totals until discovery finishes.
+
 - Stop withdrawn batch imports between entries and source blocks, preserving
   committed Artifacts and durable upload sources while cleaning owned staging.
   Copy and hash browser upload bytes in one pass, and preserve cancellation when

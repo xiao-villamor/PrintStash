@@ -131,6 +131,32 @@ with legacy engine ranks or queue state it cannot verify. Upgrades drain old
 producers and restart API and workers together, as described in the
 [upgrade guide](../../UPGRADE.md#unreleased-derivative-scheduling).
 
+## Batch imports
+
+Ingestion Job Definitions consume a durable source plan through `BatchSession`.
+`batch_contracts` owns typed source identities and outcomes; `batch_store` owns
+fenced SQL persistence. Source adapters materialize one disposable window, then
+use the canonical Artifact commit before releasing that window. An
+`IngestionEntry` success commits with the File, Metadata and provenance changes;
+reusing an existing File still records a distinct source receipt.
+
+A Job owns ordinary URL/archive entries. A Pending Import owns its entries
+across replacement retry Jobs. Writers check the exact execution attempt and
+epoch, plus the Pending Import's current Job. Registration order never enters a
+new entry's identity. Retry consults confirmed receipts before source I/O.
+Discovery totals stay unknown until expansion finishes, while processed and
+successful counters advance for each entry. Source failures remain separate
+from already committed Artifacts.
+
+Each import holds at most one expanded/copied disposable file. Downloaded
+archive containers and durable upload leases retain their own existing bounds.
+Cleanup failure must stop further materialization; it does not revoke an
+Artifact already committed. Derivatives can run through their existing Jobs
+while later source entries are processed. This does not introduce a second
+queue, concurrent SQL writers or parallel downloads.
+
+See the [bounded batch validation matrix](../testing/bounded-batch-imports.md).
+
 ## Derivatives
 
 See [derivatives.md](../derivatives.md). In short: three producer groups

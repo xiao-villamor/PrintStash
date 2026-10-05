@@ -60,6 +60,7 @@ from app.modules.work.contracts import JobContext, JobOutcome
 from app.modules.work.jobs import failure_of
 
 if TYPE_CHECKING:
+    from app.modules.ingestion.batch_contracts import BatchCommitReference
     from app.modules.library.provenance import ProvenanceContext
 
 logger = get_logger(__name__)
@@ -380,6 +381,7 @@ def persist_artifact(
     session_factory: SessionFactory | None = None,
     staged_origin: StagedRemoteObject | None = None,
     auto_recommend_first_gcode: bool = True,
+    batch_commit: BatchCommitReference | None = None,
 ) -> File:
     """Persist a staged artifact onto *model*: the only Artifact-persistence path.
 
@@ -610,6 +612,10 @@ def persist_artifact(
                     )
                 )
         content_changed(session, "model", [model_id])
+        if batch_commit is not None:
+            from .batch_store import record_committed
+
+            record_committed(session, batch_commit, file_row, deduplicated=False)
         # A driver may acknowledge a committed transaction as an exception
         # (for example, a connection loss after COMMIT). From here onward the
         # blob must be preserved until a fresh session resolves the outcome.
@@ -852,6 +858,7 @@ def commit_staged_artifact(
     session_factory: SessionFactory | None = None,
     provenance_context: ProvenanceContext | None = None,
     report: Report = _no_report,
+    batch_commit: BatchCommitReference | None = None,
 ) -> CommitOutcome:
     """Commit one staged file as an Artifact, exactly once per ``ingestion_key``.
 
@@ -866,6 +873,11 @@ def commit_staged_artifact(
         ).first()
         if committed is not None:
             assert committed.id is not None
+            if batch_commit is not None:
+                from .batch_store import record_committed
+
+                record_committed(recovery, batch_commit, committed, deduplicated=False)
+                recovery.commit()
             return CommitOutcome(
                 model_id=committed.model_id,
                 file_id=committed.id,
@@ -898,6 +910,12 @@ def commit_staged_artifact(
                 if existing_file is None:
                     raise RuntimeError("captured_artifact_missing")
                 attach_existing_artifact(session, existing_file, provenance_context)
+                if batch_commit is not None:
+                    from .batch_store import record_committed
+
+                    record_committed(
+                        session, batch_commit, existing_file, deduplicated=True
+                    )
                 session.commit()
             return CommitOutcome(
                 model_id=preflight.model_id,
@@ -963,6 +981,7 @@ def commit_staged_artifact(
             provenance_context=provenance_context,
             session_factory=session_factory,
             staged_origin=artifact.staged_origin,
+            batch_commit=batch_commit,
         )
         assert file_row.id is not None
         model_id, file_id = model.id, file_row.id
@@ -972,7 +991,7 @@ def commit_staged_artifact(
         model_id=model_id,
         file_id=file_id,
         created=created,
-        deduplicated=not created,
+        deduplicated=False,
         committed_at=utcnow(),
     )
 

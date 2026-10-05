@@ -250,6 +250,14 @@ class DerivativeState(StrEnum):
     CANCELLED = "cancelled"
 
 
+class IngestionEntryState(StrEnum):
+    PENDING = "pending"
+    IMPORTED = "imported"
+    DEDUPLICATED = "deduplicated"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class IngestRequestKind(StrEnum):
     """What an accepted ingest request asks the ``ingest`` jobs to do."""
 

@@ -41,14 +41,11 @@ def _request(ctx: JobContext) -> IngestRequest:
 
 
 def _staged_path(job_id: str) -> Path:
-    with get_session_factory().scoped_session() as session:
-        leases = staging_leases.job_leases(session, job_id)
-    if not leases:
-        raise RuntimeError("staging_expired")
-    path = Path(leases[0].path)
-    if not path.exists():
-        raise RuntimeError("staging_expired")
-    return path
+    try:
+        with get_session_factory().scoped_session() as session:
+            return staging_leases.required_job_path(session, job_id)
+    except staging_leases.StagingLeaseError as exc:
+        raise RuntimeError("staging_expired") from exc
 
 
 def _typed(cls: Any, values: list[dict[str, Any]]) -> list[Any]:

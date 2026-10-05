@@ -3,7 +3,8 @@
 ``request`` records a queued Job in the caller's transaction and nudges after
 the caller commits; ``cancel`` withdraws intent from the subject before
 stopping the engine, so the reconciler cannot resurrect it; ``retry`` returns a
-failed or cancelled Job's subject to pending and queues the same Job again.
+failed, cancelled or retryable partially completed Job's subject to pending
+and queues the same Job again.
 """
 
 from __future__ import annotations
@@ -181,11 +182,17 @@ def cancel_queued(definition: JobKind, *, actor: User) -> int:
     return len(ids)
 
 
+def _retry_eligible(status: JobStatus) -> bool:
+    return status.state in {JobState.FAILED, JobState.CANCELLED} or (
+        status.state is JobState.COMPLETED and status.retryable and status.failed > 0
+    )
+
+
 def retry(job_id: str, *, actor: User) -> JobStatus:
     status = jobs.get(job_id)
     if status is None or not visible_to(status, actor):
         raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
-    if status.state not in {JobState.FAILED, JobState.CANCELLED}:
+    if not _retry_eligible(status):
         raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
     definition = catalog_module.get_catalog().definition(status.kind)
     with get_session_factory().scoped_session() as session:
@@ -198,7 +205,7 @@ def retry(job_id: str, *, actor: User) -> JobStatus:
         ).first()
         if row is None:
             raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
-        if row.state not in {JobState.FAILED, JobState.CANCELLED}:
+        if not _retry_eligible(status_of(row)):
             raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
         other = session.exec(
             select(Job.id).where(

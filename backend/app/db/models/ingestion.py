@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -25,6 +26,7 @@ from .types import (
     InboxItemResultState,
     InboxItemState,
     InboxSourceKind,
+    IngestionEntryState,
     IngestRequestKind,
 )
 
@@ -281,3 +283,84 @@ class CaptureUploadSlot(SQLModel, table=True):
     uploaded_at: Optional[datetime] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class IngestionEntry(SQLModel, table=True):
+    """Frozen batch units and incremental outcomes, independent of engine input."""
+
+    __tablename__ = "ingestion_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "(job_id IS NULL) <> (inbox_item_id IS NULL)", name="entry_owner"
+        ),
+        CheckConstraint("length(entry_key) = 64", name="entry_key_present"),
+        CheckConstraint("ordinal >= 0", name="entry_ordinal_nonnegative"),
+        CheckConstraint(
+            "size_bytes IS NULL OR size_bytes >= 0", name="entry_size_nonnegative"
+        ),
+        CheckConstraint(
+            "(state IN ('failed', 'skipped') AND error_code IS NOT NULL AND length(error_code) > 0) "
+            "OR (state NOT IN ('failed', 'skipped') AND error_code IS NULL)",
+            name="entry_diagnostic",
+        ),
+        CheckConstraint("NOT retryable OR state = 'failed'", name="entry_retryable"),
+        enum_check("state", IngestionEntryState),
+        UniqueConstraint("job_id", "entry_key", name="uq_ingestion_entry_job_key"),
+        UniqueConstraint(
+            "inbox_item_id", "entry_key", name="uq_ingestion_entry_inbox_key"
+        ),
+        Index("ix_ingestion_entries_job_page", "job_id", "id"),
+        Index("ix_ingestion_entries_inbox_page", "inbox_item_id", "id"),
+        Index(
+            "ix_ingestion_entries_job_state_order", "job_id", "state", "ordinal", "id"
+        ),
+        Index(
+            "ix_ingestion_entries_inbox_state_order",
+            "inbox_item_id",
+            "state",
+            "ordinal",
+            "id",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(
+            String(64), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
+        ),
+    )
+    inbox_item_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("inbox_items.id", ondelete="CASCADE"), nullable=True
+        ),
+    )
+    entry_key: str = Field(max_length=64)
+    identity: str = Field(sa_column=Column(Text, nullable=False))
+    display_name: str = Field(max_length=512)
+    descriptor_json: str = Field(sa_column=Column(Text, nullable=False))
+    ordinal: int = Field(default=0)
+    size_bytes: Optional[int] = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    state: IngestionEntryState = Field(
+        default=IngestionEntryState.PENDING,
+        sa_column=Column(EnumText(IngestionEntryState), nullable=False),
+    )
+    model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("models.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+    file_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+    error_code: Optional[str] = Field(default=None, max_length=128)
+    retryable: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

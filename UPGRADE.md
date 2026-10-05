@@ -1,5 +1,20 @@
 # PrintStash Upgrade Guide
 
+## Unreleased: bounded import windows
+
+Batch imports materialize one disposable entry at a time. The positive settings
+`VAULT_INGESTION_BATCH_MAX_FILES=4` and `VAULT_INGESTION_BATCH_MAX_MB=512` set
+per-import upper bounds; the sequential materializer currently uses one file.
+A selected entry larger than the byte bound is refused before extraction.
+Archive containers and durable upload sources have separate existing limits.
+
+The application migration adds an `ingestion_entries` table and indexes on
+SQLite and PostgreSQL. Existing Models, Artifacts and Jobs remain in place;
+SQLite remains the default. No database-engine conversion is required.
+Stop API and workers together before upgrading, then restart on the same image
+so every writer participates in per-entry confirmation. Back up before upgrading
+as usual. Existing reviewed ZIP validation is retained.
+
 ## Unreleased: request command capacity
 
 File acceptance now has a separate per-API-process command limit. The default

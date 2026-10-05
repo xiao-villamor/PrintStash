@@ -84,6 +84,7 @@ from .ingestion import (
 from .ingestion import (
     InboxItemResult as InboxItemResult,
 )
+from .ingestion import IngestionEntry as IngestionEntry
 from .ingestion import (
     IngestRequest as IngestRequest,
 )
@@ -332,6 +333,7 @@ from .types import (
 from .types import (
     InboxSourceKind as InboxSourceKind,
 )
+from .types import IngestionEntryState as IngestionEntryState
 from .types import (
     IngestRequestKind as IngestRequestKind,
 )

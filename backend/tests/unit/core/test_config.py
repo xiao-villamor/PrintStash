@@ -240,3 +240,25 @@ class TestInferenceResidencySettings:
         assert configured.embedding_memory_budget_fraction == 0.2
         assert configured.embedding_resident_workers == 2
         assert configured.embedding_worker_memory_mb == 768
+
+
+class TestBatchWindowSettings:
+    @pytest.mark.parametrize("field", ["ingestion_batch_max_files", "ingestion_batch_max_mb"])
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_refuses_nonpositive_window_limits(self, field, value):
+        with pytest.raises(ValidationError):
+            FrozenSettings(_env_file=None, **{field: value})
+
+    def test_has_bounded_window_defaults(self, monkeypatch):
+        monkeypatch.delenv("VAULT_INGESTION_BATCH_MAX_FILES", raising=False)
+        monkeypatch.delenv("VAULT_INGESTION_BATCH_MAX_MB", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert configured.ingestion_batch_max_files == 4
+        assert configured.ingestion_batch_max_mb == 512
+
+    def test_reads_explicit_window_limits(self, monkeypatch):
+        monkeypatch.setenv("VAULT_INGESTION_BATCH_MAX_FILES", "2")
+        monkeypatch.setenv("VAULT_INGESTION_BATCH_MAX_MB", "8")
+        configured = FrozenSettings(_env_file=None)
+        assert configured.ingestion_batch_max_files == 2
+        assert configured.ingestion_batch_max_mb == 8

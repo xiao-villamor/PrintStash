@@ -434,6 +434,9 @@ class Settings(BaseSettings):
 
     # URL + ZIP import (see modules/ingestion/importer.py).
     url_import_max_redirects: int = Field(default=5, ge=0)
+    # Disposable expanded outputs per batch; source archives retain separate caps.
+    ingestion_batch_max_files: int = Field(default=4, gt=0)
+    ingestion_batch_max_mb: int = Field(default=512, gt=0)
     max_archive_entries: int = Field(default=500, gt=0)
     max_archive_entry_mb: int = Field(default=512, gt=0)
     max_archive_uncompressed_mb: int = Field(default=2048, gt=0)

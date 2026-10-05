@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from printstash_core.imports import CaptureManifestV2, ResolvedAsset, StagedAsset
@@ -269,8 +270,9 @@ class TestBrowserCapture:
             assert context.owner_user_id is not None
             return [_stage_fixture_asset(tmp_path, manifest).resolved]
 
-        async def _fixture_stage(resolved: ResolvedAsset) -> list[StagedAsset]:
-            return [_stage_fixture_asset(tmp_path, resolved.manifest)]
+        async def _fixture_download(url: str, *, window_max_bytes: int):
+            staged = _stage_fixture_asset(tmp_path, manifest)
+            return staged.staged_path, staged.resolved.source_filename
 
         monkeypatch.setattr(
             inbox.import_resolvers, "resolve_capture_manifest", _fixture_capture
@@ -278,7 +280,7 @@ class TestBrowserCapture:
         monkeypatch.setattr(
             inbox.import_resolvers, "resolve_selected_assets", _fixture_resolved
         )
-        monkeypatch.setattr(inbox, "_download_resolved_asset", _fixture_stage)
+        monkeypatch.setattr(inbox.importer, "download_to_staging", _fixture_download)
 
         async def capture_and_import() -> dict:
             captured = await api.post(
@@ -381,22 +383,16 @@ class TestBrowserCapture:
                 for file_id in selected_ids
             ]
 
-        async def _fixture_stage(resolved: ResolvedAsset) -> list[StagedAsset]:
+        async def _fixture_download(url: str, *, window_max_bytes: int):
+            file_id = Path(urlsplit(url).path).stem
             staged = _stage_fixture_asset(tmp_path, manifest)
             staged_path = staged.staged_path.with_name(
-                f"{tmp_path.name}-{resolved.source_selection_id}.gcode"
+                f"{tmp_path.name}-{file_id}.gcode"
             )
             shutil.copyfile(staged.staged_path, staged_path)
-            if resolved.source_selection_id == "bad":
+            if file_id == "bad":
                 staged_path.write_bytes(staged_path.read_bytes() + b"\n; bad fixture\n")
-            return [
-                StagedAsset(
-                    resolved=resolved,
-                    staged_path=staged_path,
-                    result_key="self",
-                    blob_sha256=sha256_file(staged_path),
-                )
-            ]
+            return staged_path, f"{file_id}.gcode"
 
         original_commit = inbox.importer.commit_staged_artifact
         fail_bad = True
@@ -414,7 +410,7 @@ class TestBrowserCapture:
         monkeypatch.setattr(
             inbox.import_resolvers, "resolve_selected_assets", _fixture_resolved
         )
-        monkeypatch.setattr(inbox, "_download_resolved_asset", _fixture_stage)
+        monkeypatch.setattr(inbox.importer, "download_to_staging", _fixture_download)
         monkeypatch.setattr(inbox.importer, "commit_staged_artifact", _one_bad_file)
 
         captured = await api.post(

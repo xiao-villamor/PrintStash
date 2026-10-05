@@ -21,6 +21,8 @@ from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
     DerivativeState,
+    IngestRequest,
+    IngestRequestKind,
     Job,
     JobKind,
     JobState,
@@ -310,6 +312,103 @@ class TestSupersedeRestored:
 
 
 class TestRetry:
+    def test_retries_completed_partial_work_with_a_new_execution_epoch(
+        self, make_ingest_request, owner, db_session, nudged, work_engine
+    ):
+        from app.modules.work.contracts import JobOutcome
+        from app.modules.work.submission import submit
+        from tests.factories.ops import build_job_context
+
+        selection = json.dumps(
+            {
+                "files": [
+                    {"file_id": "first", "name": "first.gcode", "file_type": "gcode"}
+                ]
+            }
+        )
+        request = make_ingest_request(
+            owner,
+            kind=IngestRequestKind.URL_SELECTION,
+            source_url="https://www.printables.com/model/1",
+            selection_json=selection,
+        )
+        submit(request.job_id)
+        context = build_job_context(request.job_id)
+        context.finish(
+            JobOutcome.COMPLETED,
+            succeeded=1,
+            failed=1,
+            processed=2,
+            total=2,
+            progress=100,
+            retryable=True,
+            result={"imported": 1, "total": 2},
+        )
+        db_session.expire_all()
+        row = db_session.get(Job, request.job_id)
+        assert row is not None
+        old_epoch, old_attempts = row.execution_epoch, row.attempts
+        assert status_of(row).state is JobState.COMPLETED
+
+        status = service.retry(row.id, actor=owner)
+
+        db_session.refresh(row)
+        assert status.job_id == request.job_id
+        assert status.state is JobState.QUEUED
+        assert row.execution_epoch != old_epoch
+        assert (row.resubmits, row.finished_at, row.attempts) == (0, None, old_attempts)
+        assert context.cancelled()
+        assert nudged == [JobKind.INGESTION_URL_SELECTION]
+        retained = db_session.get(IngestRequest, request.job_id)
+        assert retained is not None and retained.selection_json == selection
+        submit(row.id)
+        db_session.refresh(row)
+        assert row.attempts == old_attempts + 1
+        assert row.submitted_epoch == row.execution_epoch
+        assert (
+            work_engine.executions[
+                execution_id(row.id, row.attempts, row.execution_epoch)
+            ].status
+            is EngineStatus.QUEUED
+        )
+
+    @pytest.mark.parametrize(
+        ("state", "retryable", "failed"),
+        [
+            (JobState.COMPLETED, True, 0),
+            (JobState.COMPLETED, False, 1),
+            (JobState.QUEUED, True, 1),
+            (JobState.RUNNING, True, 1),
+            (JobState.INTERRUPTED, True, 1),
+        ],
+        ids=[
+            "completed-success",
+            "completed-not-retryable",
+            "queued",
+            "running",
+            "interrupted",
+        ],
+    )
+    def test_refuses_completed_or_active_work_without_retry_eligibility(
+        self, make_ingest_request, owner, db_session, nudged, state, retryable, failed
+    ):
+        request = make_ingest_request(owner, state=state)
+        row = db_session.get(Job, request.job_id)
+        assert row is not None
+        row.status_json = json.dumps(
+            {"retryable": retryable, "failed": failed, "succeeded": 1}
+        )
+        db_session.add(row)
+        db_session.commit()
+        epoch = row.execution_epoch
+
+        refused = _refused(lambda: service.retry(row.id, actor=owner))
+
+        assert (refused.code, refused.kind) == ("job_not_retryable", ErrorKind.CONFLICT)
+        db_session.refresh(row)
+        assert row.state is state and row.execution_epoch == epoch
+        assert nudged == []
+
     def test_queues_the_same_job_again(
         self, db_session: Session, make_job, owner, mesh, make_derivative, nudged
     ) -> None:
@@ -373,7 +472,7 @@ class TestRetry:
         assert (status.result, status.total, status.error) == ({"scanned": 3}, 10, None)
 
     @pytest.mark.parametrize("state", [JobState.QUEUED, JobState.COMPLETED])
-    def test_only_a_failed_or_cancelled_job_can_be_retried(
+    def test_refuses_work_without_a_retryable_terminal_outcome(
         self, make_job, owner, state: JobState
     ) -> None:
         job = make_job(owner=owner, state=state)

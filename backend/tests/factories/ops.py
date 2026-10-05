@@ -791,3 +791,24 @@ def build_job_history(
             [dict(values, id=uuid4().hex) for _ in range(count - 1)],
         )
         session.commit()
+
+
+def build_ingestion_entry(session: Session, job: Job, **overrides: Any):
+    """A pending frozen unit under a real Job, ready for schema-boundary tests."""
+    from app.db.models import IngestionEntry
+    from app.modules.ingestion.batch_contracts import (
+        LocalSource,
+        encode_source_descriptor,
+    )
+
+    identity = overrides.pop("identity", f"entry-{nth('ingestion_entry')}")
+    values = {
+        "job_id": job.id,
+        "entry_key": hashlib.sha256(identity.encode()).hexdigest(),
+        "identity": identity,
+        "display_name": "part.stl",
+        "descriptor_json": encode_source_descriptor(LocalSource("factory")),
+        "ordinal": 0,
+    }
+    values.update(overrides)
+    return save(session, IngestionEntry(**values))

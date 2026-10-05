@@ -123,6 +123,7 @@ from tests.factories.ops import (
     build_failure_domain_declaration,
     build_filament_profile,
     build_ingest_request,
+    build_ingestion_entry,
     build_job,
     build_library_observation,
     build_mesh_continuation,
@@ -339,3 +340,5 @@ __all__ += [
 
 
 __all__ += ["build_search_projection_request"]
+
+__all__ += ["build_ingestion_entry"]

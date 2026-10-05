@@ -5,6 +5,8 @@ import hashlib
 import json
 import uuid
 import zipfile
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, Literal, cast
@@ -18,12 +20,12 @@ from printstash_core.imports import (
     StagedAsset,
     canonicalize_provider_url,
 )
-from printstash_core.imports.contracts import MAX_MANIFEST_BYTES
+from printstash_core.imports.contracts import MAX_MANIFEST_BYTES, CaptureFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import update as sql_update
 from sqlmodel import Session, col, select
 
-from app.core.cancellation import checkpoint
+from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.metrics import record_capture_operation
@@ -41,7 +43,9 @@ from app.db.models import (
     InboxItemResult,
     InboxItemState,
     InboxSourceKind,
+    IngestionEntryState,
     JobKind,
+    JobState,
     ModelProvenanceSource,
     StagingLease,
     StorageDeleteIntent,
@@ -55,9 +59,11 @@ from app.modules.ingestion import (
     staging_cleanup,
     staging_leases,
 )
+from app.modules.ingestion.batch_contracts import ArchiveSource, EntryRecord, EntrySpec
 from app.modules.library import source_covers
 from app.modules.media.source_cover_processing import process_source_cover_upload
 from app.modules.storage import storage
+from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.hashing import sha256_file
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
@@ -1397,7 +1403,9 @@ async def resolve(item_id: int) -> None:
         await asyncio.to_thread(_fail_item, item_id, exc, "resolve_failed")
 
 
-def _copy_import_source(source: Path, target: Path) -> str:
+def _copy_import_source(
+    source: Path, target: Path, *, max_bytes: int | None = None
+) -> str:
     """Copy a durable source into private staging while hashing its single read."""
     checkpoint(force=True)
     digest = hashlib.sha256()
@@ -1407,7 +1415,9 @@ def _copy_import_source(source: Path, target: Path) -> str:
             storage.stream_to_path(
                 incoming,
                 target,
-                max_bytes=settings.max_upload_bytes,
+                max_bytes=min(settings.max_upload_bytes, max_bytes)
+                if max_bytes is not None
+                else settings.max_upload_bytes,
                 digest=digest,
                 on_chunk=checkpoint,
             )
@@ -1417,183 +1427,6 @@ def _copy_import_source(source: Path, target: Path) -> str:
     except BaseException:
         if published:
             importer.discard_staged_files([target])
-        raise
-
-
-async def _download_assets(url: str) -> list[tuple[Path, str]]:
-    checkpoint(force=True)
-    download_url = await import_resolvers.resolve_page_url(url) or url
-    checkpoint(force=True)
-    staged, name = await importer.download_to_staging(download_url)
-    owned = [staged]
-    try:
-        checkpoint(force=True)
-        suffix = Path(name).suffix.lower()
-        if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-            entries = await asyncio.to_thread(importer.inspect_archive, staged)
-            selected = [entry.name for entry in entries if entry.file_type]
-            extracted = await asyncio.to_thread(
-                importer.extract_selected, staged, selected
-            )
-            owned.extend(path for path, _name in extracted)
-            checkpoint(force=True)
-            importer.discard_staged_files([staged])
-            return extracted
-        return [(staged, name)]
-    except BaseException:
-        importer.discard_staged_files(owned)
-        raise
-
-
-async def _download_resolved_asset(resolved: ResolvedAsset) -> list[StagedAsset]:
-    """Stage one V2 selection while retaining its identity through ZIP expansion."""
-    checkpoint(force=True)
-    staged, name = await importer.download_to_staging(resolved.download_url)
-    owned = [staged]
-    try:
-        checkpoint(force=True)
-        suffix = Path(name).suffix.lower()
-        if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-            entries = await asyncio.to_thread(importer.inspect_archive, staged)
-            extracted = await asyncio.to_thread(
-                importer.extract_selected,
-                staged,
-                [entry.name for entry in entries if entry.file_type],
-            )
-            owned.extend(path for path, _name in extracted)
-            assets: list[StagedAsset] = []
-            for entry_path, entry_name in extracted:
-                checkpoint(force=True)
-                assets.append(
-                    StagedAsset(
-                        resolved=resolved,
-                        staged_path=entry_path,
-                        result_key=_zip_result_key(
-                            resolved.source_selection_id, entry_name
-                        ),
-                        blob_sha256=sha256_file(entry_path, on_chunk=checkpoint),
-                        container_entry_path=entry_name,
-                    )
-                )
-            checkpoint(force=True)
-            importer.discard_staged_files([staged])
-            return assets
-        digest = sha256_file(staged, on_chunk=checkpoint)
-        checkpoint(force=True)
-        return [
-            StagedAsset(
-                resolved=resolved,
-                staged_path=staged,
-                result_key="self",
-                blob_sha256=digest,
-            )
-        ]
-    except BaseException:
-        importer.discard_staged_files(owned)
-        raise
-
-
-async def _stage_local_capture_assets(
-    source: Path, manifest: CaptureManifestV2, wanted: list[str]
-) -> list[StagedAsset]:
-    """Copy browser-owned staging; never transfer ownership of the durable source."""
-    checkpoint(force=True)
-    files = {file.id: file for file in manifest.files}
-    selected = [item for item in wanted if item in files] or list(files)
-
-    def resolved(file_id: str) -> ResolvedAsset:
-        file = files[file_id]
-        return ResolvedAsset(
-            manifest=manifest,
-            source_selection_id=file.id,
-            source_file_id=file.id,
-            source_filename=file.name,
-            download_url=manifest.source.canonical_url,
-            source_item_id=manifest.source.source_item_id
-            or manifest.source.canonical_url,
-        )
-
-    if source.suffix.lower() == ".zip":
-        extracted = await asyncio.to_thread(importer.extract_selected, source, selected)
-        try:
-            assets: list[StagedAsset] = []
-            for path, entry_name in extracted:
-                checkpoint(force=True)
-                if entry_name not in files:
-                    importer.discard_staged_files([path])
-                    continue
-                item = resolved(entry_name)
-                assets.append(
-                    StagedAsset(
-                        resolved=item,
-                        staged_path=path,
-                        result_key=_zip_result_key(
-                            item.source_selection_id, entry_name
-                        ),
-                        blob_sha256=sha256_file(path, on_chunk=checkpoint),
-                        container_entry_path=entry_name,
-                    )
-                )
-            checkpoint(force=True)
-            return assets
-        except BaseException:
-            importer.discard_staged_files([path for path, _name in extracted])
-            raise
-
-    item = resolved(selected[0])
-    copy = settings.incoming_dir / f"browser-{uuid.uuid4().hex}{source.suffix}"
-    digest = await asyncio.to_thread(_copy_import_source, source, copy)
-    return [
-        StagedAsset(
-            resolved=item, staged_path=copy, result_key="self", blob_sha256=digest
-        )
-    ]
-
-
-def _stage_capture_upload_slot_assets(
-    manifest: CaptureManifestV2, wanted: list[str], slot_keys: dict[str, str]
-) -> list[StagedAsset]:
-    """Copy durable slot objects into disposable staging through StorageBackend."""
-    files = {file.id: file for file in manifest.files}
-    selected = [item for item in wanted if item in files] or list(files)
-    backend = get_backend()
-    output: list[StagedAsset] = []
-    owned: list[Path] = []
-    try:
-        for file_id in selected:
-            checkpoint(force=True)
-            key = slot_keys.get(file_id)
-            if key is None:
-                raise importer.ImportError_("capture_upload_slots_incomplete")
-            file = files[file_id]
-            target = (
-                settings.incoming_dir
-                / f"capture-import-{uuid.uuid4().hex}{Path(file.name).suffix}"
-            )
-            with backend.local_path(key) as source:
-                digest = _copy_import_source(source, target)
-            owned.append(target)
-            resolved = ResolvedAsset(
-                manifest=manifest,
-                source_selection_id=file.id,
-                source_file_id=file.id,
-                source_filename=file.name,
-                download_url=manifest.source.canonical_url,
-                source_item_id=manifest.source.source_item_id
-                or manifest.source.canonical_url,
-            )
-            output.append(
-                StagedAsset(
-                    resolved=resolved,
-                    staged_path=target,
-                    result_key="self",
-                    blob_sha256=digest,
-                )
-            )
-        checkpoint(force=True)
-        return output
-    except BaseException:
-        importer.discard_staged_files(owned)
         raise
 
 
@@ -1623,6 +1456,408 @@ def run_import_job(item_id: int, job_context: JobContext) -> None:
     run_async(_run_import(item_id, context, session_factory, job_context=job_context))
 
 
+class _InboxBatchImport:
+    """Consume a Pending Import's durable selections one disposable unit at a time."""
+
+    def __init__(
+        self,
+        item_id: int,
+        context: dict[str, Any],
+        factory: SessionFactory,
+        job: JobContext,
+    ) -> None:
+        self.item_id = item_id
+        self.context = context
+        self.factory = factory
+        self.execution = JobExecution(job.job_id, job.attempt, job.execution_epoch)
+        self.failure_code: str | None = None
+        self._archive_assets: dict[str, ResolvedAsset] = {}
+        self.batch = importer.begin_batch(
+            job_context=job,
+            collection=context["collection_path"],
+            tags=context["tags"],
+            source_url=context["source_url"],
+            actor_user_id=context["owner_id"],
+            session_factory=factory,
+            inbox_item_id=item_id,
+        )
+        self.batch.begin(None)
+
+    def _acknowledge(
+        self, record: EntryRecord, selection: str | None, result_key: str | None
+    ) -> None:
+        if selection is None or result_key is None:
+            return
+        item: dict[str, object] = {
+            "name": record.spec.display_name,
+            "source_selection_id": selection,
+            "result_key": result_key,
+        }
+        if record.published:
+            item.update(
+                model_id=record.model_id,
+                file_id=record.file_id,
+                deduplicated=record.state is IngestionEntryState.DEDUPLICATED,
+            )
+        else:
+            item["error"] = record.error_code
+        with self.factory.scoped_session() as session:
+            current = registry.lock_execution(
+                session,
+                self.execution.job_id,
+                epoch=self.execution.execution_epoch,
+                attempt=self.execution.attempt,
+                states=(JobState.RUNNING,),
+            )
+            row = session.exec(
+                select(InboxItem).where(InboxItem.id == self.item_id).with_for_update()
+            ).first()
+            if (
+                current is None
+                or row is None
+                or row.job_id != self.execution.job_id
+                or row.state is not InboxItemState.IMPORTING
+            ):
+                raise OperationCancelled()
+            durable, _, _ = _record_v2_results(session, row, {"items": [item]})
+            if record.published and not durable:
+                raise RuntimeError("provenance_link_missing")
+            session.commit()
+
+    @contextmanager
+    def source(
+        self, spec: EntrySpec, resolved: ResolvedAsset | None = None
+    ) -> Iterator[None]:
+        """Isolate a source failure; cancellation remains outside Exception."""
+        try:
+            yield
+        except importer.WindowReleaseError:
+            raise
+        except Exception as exc:
+            records = self.batch.source_entries(spec.descriptor.source_id)
+            expanded = any(
+                isinstance(record.spec.descriptor, ArchiveSource) for record in records
+            )
+            pending = [
+                record.spec
+                for record in records
+                if not record.published
+                and (not expanded or isinstance(record.spec.descriptor, ArchiveSource))
+            ]
+            if records and not pending:
+                raise
+            reason = importer.import_failure_code(exc)
+            if self.failure_code is None:
+                self.failure_code = reason
+            for failed in pending or [spec]:
+                asset = self._archive_assets.get(failed.display_name, resolved)
+                key = (
+                    _zip_result_key(asset.source_selection_id, failed.display_name)
+                    if asset is not None
+                    and isinstance(failed.descriptor, ArchiveSource)
+                    else "self"
+                )
+                self.batch.decorate(
+                    failed,
+                    source_selection_id=asset.source_selection_id if asset else None,
+                    result_key=key if asset else None,
+                )
+                record = self.batch.record_failure(failed, reason)
+                self._acknowledge(
+                    record, asset.source_selection_id if asset else None, key
+                )
+
+    def _retire_expansion_placeholder(
+        self, source_id: str, resolved: ResolvedAsset | None
+    ) -> None:
+        """An expanded selection supersedes only its failed pre-download result."""
+        placeholders = [
+            record
+            for record in self.batch.source_entries(source_id)
+            if not isinstance(record.spec.descriptor, ArchiveSource)
+            and not record.published
+        ]
+        if not placeholders:
+            return
+        if resolved is not None:
+            with self.factory.scoped_session() as session:
+                current = registry.lock_execution(
+                    session,
+                    self.execution.job_id,
+                    epoch=self.execution.execution_epoch,
+                    attempt=self.execution.attempt,
+                    states=(JobState.RUNNING,),
+                )
+                row = session.exec(
+                    select(InboxItem)
+                    .where(InboxItem.id == self.item_id)
+                    .with_for_update()
+                ).first()
+                if (
+                    current is None
+                    or row is None
+                    or row.job_id != self.execution.job_id
+                    or row.state is not InboxItemState.IMPORTING
+                ):
+                    raise OperationCancelled()
+                previous = session.exec(
+                    select(InboxItemResult).where(
+                        InboxItemResult.inbox_item_id == self.item_id,
+                        InboxItemResult.source_selection_id
+                        == resolved.source_selection_id,
+                        InboxItemResult.result_key == "self",
+                    )
+                ).first()
+                if previous is not None and previous.model_id is None:
+                    session.delete(previous)
+                session.commit()
+        for record in placeholders:
+            self.batch.supersede(record.spec)
+
+    def confirmed(
+        self,
+        spec: EntrySpec,
+        resolved: ResolvedAsset | None = None,
+        result_key: str = "self",
+    ) -> bool:
+        selection = resolved.source_selection_id if resolved is not None else None
+        self.batch.decorate(
+            spec,
+            source_selection_id=selection,
+            result_key=result_key if selection is not None else None,
+        )
+        self.batch.register((spec,))
+        record = self.batch.confirmed(spec)
+        if record is None:
+            return False
+        self._acknowledge(record, selection, result_key)
+        return True
+
+    def confirmed_source(
+        self, source_id: str, resolved: ResolvedAsset | None = None
+    ) -> bool:
+        records = self.batch.source_entries(source_id)
+        if not records:
+            return False
+        reused = [
+            self.confirmed(
+                record.spec,
+                resolved,
+                _zip_result_key(resolved.source_selection_id, record.spec.display_name)
+                if resolved is not None
+                and isinstance(record.spec.descriptor, ArchiveSource)
+                else "self",
+            )
+            for record in records
+        ]
+        return all(reused)
+
+    def consume(
+        self,
+        spec: EntrySpec,
+        staged: tuple[Path, str],
+        resolved: ResolvedAsset | None = None,
+        result_key: str = "self",
+        container_entry: str | None = None,
+        digest: str | None = None,
+    ) -> None:
+        path, name = staged
+        try:
+            value: tuple[Path, str] | StagedAsset = staged
+            if resolved is not None:
+                value = StagedAsset(
+                    resolved=resolved,
+                    staged_path=path,
+                    result_key=result_key,
+                    blob_sha256=digest
+                    if digest is not None
+                    else sha256_file(path, on_chunk=checkpoint),
+                    container_entry_path=container_entry,
+                )
+            record = self.batch.consume(spec, value)
+            self._acknowledge(
+                record, resolved.source_selection_id if resolved else None, result_key
+            )
+        finally:
+            importer.discard_staged_files((path,), strict=True)
+
+    def archive(
+        self,
+        source: Path,
+        wanted: list[str],
+        source_id: str,
+        resolved: ResolvedAsset | None = None,
+        manifest: CaptureManifestV2 | None = None,
+    ) -> None:
+        captured = {}
+        if manifest is not None:
+            for file in manifest.files:
+                asset = _local_resolved_asset(manifest, file.id, file=file)
+                captured[file.id] = asset
+                captured[file.name] = asset
+            self._archive_assets = captured
+
+        def capture(spec: EntrySpec) -> tuple[ResolvedAsset | None, str]:
+            if resolved is not None:
+                return resolved, _zip_result_key(
+                    resolved.source_selection_id, spec.display_name
+                )
+            if manifest is not None:
+                asset = captured.get(spec.display_name)
+                if asset is None:
+                    raise importer.ImportError_("capture_manifest_invalid")
+                return asset, _zip_result_key(
+                    asset.source_selection_id, spec.display_name
+                )
+            return None, "self"
+
+        wanted_names = set(wanted)
+        retained = [
+            record.spec
+            for record in self.batch.source_entries(source_id)
+            if isinstance(record.spec.descriptor, ArchiveSource)
+            and (
+                not wanted_names
+                or record.spec.display_name in wanted_names
+                or record.spec.descriptor.entry_id in wanted_names
+            )
+        ]
+        if retained:
+            reused = [self.confirmed(spec, *capture(spec)) for spec in retained]
+            if all(reused):
+                return
+        specs = importer.archive_entry_specs(source, wanted, source_id)
+        if retained and set(specs) != set(retained):
+            raise importer.ImportError_("batch_snapshot_mismatch")
+        self.batch.register(specs)
+        self._retire_expansion_placeholder(source_id, resolved)
+        by_name = {spec.display_name: spec for spec in specs}
+
+        def skip(entry) -> bool:
+            spec = by_name[entry.name.replace("\\", "/")]
+            return self.confirmed(spec, *capture(spec))
+
+        with closing(
+            importer.iter_archive_entries(source, wanted, skip_entry=skip)
+        ) as entries:
+            for entry, staged in entries:
+                spec = by_name[entry.name.replace("\\", "/")]
+                asset, result_key = capture(spec)
+                self.consume(
+                    spec,
+                    staged,
+                    asset,
+                    result_key,
+                    spec.display_name if asset else None,
+                )
+
+    def copy(
+        self, source: Path, spec: EntrySpec, resolved: ResolvedAsset | None = None
+    ) -> None:
+        if self.confirmed(spec, resolved):
+            return
+        size = source.stat().st_size
+        limit = settings.ingestion_batch_max_mb * 1024 * 1024
+        if size > limit:
+            raise importer.ImportError_("batch_entry_too_large")
+        target = (
+            settings.incoming_dir
+            / f"capture-import-{uuid.uuid4().hex}{Path(spec.display_name).suffix}"
+        )
+        with CapacityManager(self.factory).hold(
+            f"inbox-window:{uuid.uuid4().hex}",
+            [
+                CapacityResource.for_path(
+                    settings.incoming_dir, size, role="Pending Import window"
+                )
+            ],
+        ):
+            try:
+                digest = _copy_import_source(source, target, max_bytes=min(size, limit))
+                if target.stat().st_size != size:
+                    raise importer.ImportError_("batch_snapshot_mismatch")
+                self.consume(spec, (target, spec.display_name), resolved, digest=digest)
+            finally:
+                importer.discard_staged_files((target,), strict=True)
+
+    async def remote(
+        self,
+        source_id: str,
+        selection: str,
+        filename: str,
+        url: str,
+        resolved: ResolvedAsset | None = None,
+    ) -> None:
+        spec = importer.direct_entry_spec(source_id, selection, filename)
+        retained = self.batch.source_entries(source_id)
+        children = [
+            record.spec
+            for record in retained
+            if isinstance(record.spec.descriptor, ArchiveSource)
+        ]
+        if children:
+            reused = [
+                self.confirmed(
+                    child,
+                    resolved,
+                    _zip_result_key(selection, child.display_name)
+                    if resolved
+                    else "self",
+                )
+                for child in children
+            ]
+            if all(reused):
+                return
+        elif any(record.key == spec.key for record in retained):
+            if self.confirmed(spec, resolved):
+                return
+        # The accepted manifest is the source intent. A response of unknown
+        # container kind becomes either one unit or frozen archive children.
+        staged, actual_name = await importer.download_to_staging(
+            url,
+            window_max_bytes=settings.ingestion_batch_max_mb * 1024 * 1024,
+        )
+        try:
+            checkpoint(force=True)
+            suffix = Path(actual_name).suffix.lower()
+            if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
+                names = [
+                    entry.name
+                    for entry in importer.inspect_archive(staged)
+                    if entry.file_type
+                ]
+                self.archive(staged, names, source_id, resolved)
+            else:
+                self.batch.register((spec,))
+                self.batch.decorate(
+                    spec,
+                    source_selection_id=selection if resolved else None,
+                    result_key="self" if resolved else None,
+                )
+                self.consume(spec, (staged, actual_name), resolved)
+        finally:
+            importer.discard_staged_files((staged,), strict=True)
+
+
+def _source_identity(source: str, selection: str) -> str:
+    return json.dumps([source, selection], separators=(",", ":"))
+
+
+def _local_resolved_asset(
+    manifest: CaptureManifestV2, file_id: str, *, file: CaptureFile | None = None
+) -> ResolvedAsset:
+    if file is None:
+        file = next(file for file in manifest.files if file.id == file_id)
+    return ResolvedAsset(
+        manifest=manifest,
+        source_selection_id=file.id,
+        source_file_id=file.id,
+        source_filename=file.name,
+        download_url=manifest.source.canonical_url,
+        source_item_id=manifest.source.source_item_id or manifest.source.canonical_url,
+    )
+
+
 async def _run_import(
     item_id: int,
     context: dict[str, Any],
@@ -1634,140 +1869,254 @@ async def _run_import(
     selected = context["selected"]
     source_url = context["source_url"]
     staging_key = context["staging_key"]
-
-    assets: list[tuple[Path, str] | StagedAsset] = []
     try:
         checkpoint(force=True)
-        v2_manifest: CaptureManifestV2 | None = None
+        flow = _InboxBatchImport(item_id, context, session_factory, job_context)
+        v2 = None
+        if manifest.get("schema_version") == 2:
+            try:
+                v2 = CaptureManifestV2.from_dict(manifest)
+            except ValueError as exc:
+                raise importer.ImportError_("capture_manifest_invalid") from exc
         kind = manifest.get("kind")
-        if manifest.get("schema_version") == 2 and context.get("slot_storage"):
-            try:
-                v2_manifest = CaptureManifestV2.from_dict(manifest)
-            except ValueError as exc:
-                raise importer.ImportError_("capture_manifest_invalid") from exc
-            assets.extend(
-                await asyncio.to_thread(
-                    _stage_capture_upload_slot_assets,
-                    v2_manifest,
-                    selected,
-                    context["slot_storage"],
+        if v2 is not None and context.get("slot_storage"):
+            files = {file.id: file for file in v2.files}
+            wanted = [file_id for file_id in selected if file_id in files] or list(
+                files
+            )
+            for file_id in wanted:
+                checkpoint(force=True)
+                resolved = _local_resolved_asset(v2, file_id, file=files[file_id])
+                spec = importer.direct_entry_spec(
+                    _source_identity(source_url, file_id),
+                    file_id,
+                    files[file_id].name,
+                    size_bytes=files[file_id].size,
                 )
+                if flow.confirmed(spec, resolved):
+                    continue
+                with flow.source(spec, resolved):
+                    key = context["slot_storage"].get(file_id)
+                    if key is None:
+                        raise importer.ImportError_("capture_upload_slots_incomplete")
+                    with get_backend().local_path(key) as source:
+                        flow.copy(source, spec, resolved)
+        elif v2 is not None and staging_key:
+            source = Path(staging_key)
+            files = {file.id: file for file in v2.files}
+            wanted = [file_id for file_id in selected if file_id in files] or list(
+                files
             )
-        elif manifest.get("schema_version") == 2 and staging_key:
-            try:
-                v2_manifest = CaptureManifestV2.from_dict(manifest)
-            except ValueError as exc:
-                raise importer.ImportError_("capture_manifest_invalid") from exc
-            staged = Path(staging_key)
-            if not staged.exists():
-                raise importer.ImportError_("staging_expired")
-            assets.extend(
-                await _stage_local_capture_assets(staged, v2_manifest, selected)
-            )
+            if source.suffix.lower() == ".zip":
+                resolved = _local_resolved_asset(v2, wanted[0], file=files[wanted[0]])
+                spec = importer.direct_entry_spec(
+                    source_url, wanted[0], files[wanted[0]].name
+                )
+                with flow.source(spec, resolved):
+                    flow.archive(
+                        source,
+                        [files[file_id].name for file_id in wanted],
+                        source_url,
+                        manifest=v2,
+                    )
+            else:
+                resolved = _local_resolved_asset(v2, wanted[0])
+                spec = importer.direct_entry_spec(
+                    source_url, resolved.source_selection_id, resolved.source_filename
+                )
+                with flow.source(spec, resolved):
+                    flow.copy(source, spec, resolved)
         elif kind == "archive":
-            entries = [entry.get("id") for entry in manifest.get("entries", [])]
-            wanted = [item for item in selected if item in entries] or entries
-            if not staging_key or not Path(staging_key).exists():
+            if not staging_key:
                 raise importer.ImportError_("staging_expired")
-            assets.extend(
-                await asyncio.to_thread(
-                    importer.extract_selected, Path(staging_key), wanted
-                )
+            entries = [entry["id"] for entry in manifest.get("entries", [])]
+            wanted = [entry for entry in selected if entry in entries] or entries
+            spec = importer.direct_entry_spec(
+                source_url, source_url, Path(staging_key).name
             )
+            with flow.source(spec):
+                flow.archive(Path(staging_key), wanted, source_url)
         elif kind == "browser_file":
             filename = manifest.get("filename")
-            if (
-                not staging_key
-                or not Path(staging_key).exists()
-                or not isinstance(filename, str)
-            ):
+            if not staging_key or not isinstance(filename, str):
                 raise importer.ImportError_("staging_expired")
-            source = Path(staging_key)
-            copy = (
-                settings.incoming_dir
-                / f"browser-{item_id}-{uuid.uuid4().hex}{source.suffix}"
-            )
-            await asyncio.to_thread(_copy_import_source, source, copy)
-            assets = [(copy, filename)]
+            spec = importer.direct_entry_spec(source_url, filename, filename)
+            with flow.source(spec):
+                flow.copy(Path(staging_key), spec)
         elif kind == "model_files":
-            files_by_id = {item["id"]: item for item in manifest.get("files", [])}
-            wanted = [item for item in selected if item in files_by_id] or list(
-                files_by_id
-            )
-            chosen = [
-                import_resolvers.ModelFile(
-                    file_id=item_id_value,
-                    name=files_by_id[item_id_value]["name"],
-                    file_type=files_by_id[item_id_value]["file_type"],
-                    size=files_by_id[item_id_value].get("size"),
-                )
-                for item_id_value in wanted
-            ]
-            if manifest.get("schema_version") == 2:
-                try:
-                    v2_manifest = CaptureManifestV2.from_dict(manifest)
-                except ValueError as exc:
-                    raise importer.ImportError_("capture_manifest_invalid") from exc
-                resolved_assets = await import_resolvers.resolve_selected_assets(
-                    source_url,
-                    v2_manifest,
-                    wanted,
-                    import_resolvers.ProviderResolutionContext(
-                        owner_user_id=context["owner_id"],
-                        session_factory=session_factory,
-                    ),
+            if v2 is not None:
+                wanted = selected or list(v2.selected_ids)
+                files = {file.id: file for file in v2.files}
+                unfinished = []
+                for file_id in wanted:
+                    resolved = _local_resolved_asset(v2, file_id, file=files[file_id])
+                    source_id = _source_identity(resolved.source_item_id, file_id)
+                    retained = flow.batch.source_entries(source_id)
+                    children = [
+                        record.spec
+                        for record in retained
+                        if isinstance(record.spec.descriptor, ArchiveSource)
+                    ]
+                    if children:
+                        reused = [
+                            flow.confirmed(
+                                spec,
+                                resolved,
+                                _zip_result_key(file_id, spec.display_name),
+                            )
+                            for spec in children
+                        ]
+                        if all(reused):
+                            continue
+                    else:
+                        spec = importer.direct_entry_spec(
+                            source_id, file_id, files[file_id].name
+                        )
+                        if any(
+                            record.key == spec.key for record in retained
+                        ) and flow.confirmed(spec, resolved):
+                            continue
+                    unfinished.append(file_id)
+                resolved_assets = (
+                    await import_resolvers.resolve_selected_assets(
+                        source_url,
+                        v2,
+                        unfinished,
+                        import_resolvers.ProviderResolutionContext(
+                            owner_user_id=context["owner_id"],
+                            session_factory=session_factory,
+                        ),
+                    )
+                    if unfinished
+                    else []
                 )
                 for resolved in resolved_assets:
                     checkpoint(force=True)
-                    assets.extend(await _download_resolved_asset(resolved))
+                    spec = importer.direct_entry_spec(
+                        _source_identity(
+                            resolved.source_item_id, resolved.source_selection_id
+                        ),
+                        resolved.source_selection_id,
+                        resolved.source_filename,
+                    )
+                    with flow.source(spec, resolved):
+                        await flow.remote(
+                            _source_identity(
+                                resolved.source_item_id, resolved.source_selection_id
+                            ),
+                            resolved.source_selection_id,
+                            resolved.source_filename,
+                            resolved.download_url,
+                            resolved,
+                        )
             else:
-                links = await import_resolvers.resolve_selected_download(
-                    source_url, chosen
+                files = {file["id"]: file for file in manifest.get("files", [])}
+                wanted = [file_id for file_id in selected if file_id in files] or list(
+                    files
                 )
-                for link in links:
-                    checkpoint(force=True)
-                    assets.extend(await _download_assets(link))
+                chosen = [
+                    import_resolvers.ModelFile(
+                        file_id=file_id,
+                        name=files[file_id]["name"],
+                        file_type=files[file_id]["file_type"],
+                        size=files[file_id].get("size"),
+                    )
+                    for file_id in wanted
+                ]
+                bundle_id = json.dumps(
+                    ["selection", source_url, sorted(file.file_id for file in chosen)],
+                    separators=(",", ":"),
+                )
+                if not flow.confirmed_source(bundle_id):
+                    unfinished = [
+                        file
+                        for file in chosen
+                        if not flow.confirmed_source(
+                            _source_identity(source_url, file.file_id)
+                        )
+                    ]
+                    downloads = (
+                        await import_resolvers.resolve_selected_sources(
+                            source_url, unfinished
+                        )
+                        if unfinished
+                        else ()
+                    )
+                    for download in downloads:
+                        checkpoint(force=True)
+                        if isinstance(download, import_resolvers.SelectedFileDownload):
+                            file = download.file
+                            spec = importer.direct_entry_spec(
+                                _source_identity(source_url, file.file_id),
+                                file.file_id,
+                                file.name,
+                            )
+                            with flow.source(spec):
+                                await flow.remote(
+                                    _source_identity(source_url, file.file_id),
+                                    file.file_id,
+                                    file.name,
+                                    download.url,
+                                )
+                        else:
+                            spec = importer.direct_entry_spec(
+                                bundle_id, bundle_id, "selection.zip"
+                            )
+                            with flow.source(spec):
+                                await flow.remote(
+                                    bundle_id, bundle_id, "selection.zip", download.url
+                                )
         elif kind == "collection":
-            members = {item["id"]: item for item in manifest.get("members", [])}
-            wanted = [item for item in selected if item in members] or list(members)
+            members = {member["id"]: member for member in manifest.get("members", [])}
+            wanted = [
+                member_id for member_id in selected if member_id in members
+            ] or list(members)
             for member_id in wanted:
                 checkpoint(force=True)
-                assets.extend(await _download_assets(members[member_id]["page_url"]))
+                member_url = members[member_id]["page_url"]
+                if flow.confirmed_source(member_url):
+                    continue
+                spec = importer.direct_entry_spec(
+                    member_url, member_id, members[member_id].get("title") or member_id
+                )
+                with flow.source(spec):
+                    link = (
+                        await import_resolvers.resolve_page_url(member_url)
+                        or member_url
+                    )
+                    await flow.remote(
+                        member_url,
+                        member_id,
+                        spec.display_name,
+                        link,
+                    )
         else:
-            assets.extend(await _download_assets(source_url))
-        await asyncio.to_thread(
-            importer.import_assets,
-            job_context=job_context,
-            staged_files=assets,
-            collection=context["collection_path"],
-            tags=context["tags"],
-            source_url=source_url,
-            actor_user_id=context["owner_id"],
-            session_factory=session_factory,
-            inbox_item_id=item_id if v2_manifest is not None else None,
-        )
+            if not flow.confirmed_source(source_url):
+                spec = importer.direct_entry_spec(
+                    source_url,
+                    source_url,
+                    manifest.get("title")
+                    or Path(urlsplit(source_url).path).name
+                    or "download",
+                )
+                with flow.source(spec):
+                    link = (
+                        await import_resolvers.resolve_page_url(source_url)
+                        or source_url
+                    )
+                    await flow.remote(
+                        source_url,
+                        source_url,
+                        spec.display_name,
+                        link,
+                    )
+        flow.batch.discovery_complete()
+        flow.batch.finish(failure_code=flow.failure_code)
         checkpoint(force=True)
-        await asyncio.to_thread(
-            _finish_import,
-            item_id,
-            JobExecution(
-                job_context.job_id, job_context.attempt, job_context.execution_epoch
-            ),
-            session_factory,
-        )
+        _finish_import(item_id, flow.execution, session_factory)
     except Exception as exc:
         job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
-        await asyncio.to_thread(
-            _fail_import, item_id, exc, session_factory, job_context
-        )
-
-    finally:
-        importer.discard_staged_files(
-            [
-                asset.staged_path if isinstance(asset, StagedAsset) else asset[0]
-                for asset in assets
-            ]
-        )
+        _fail_import(item_id, exc, session_factory, job_context)
 
 
 def begin_import(
@@ -1904,6 +2253,9 @@ def _finish_import(
             results_durable, succeeded, failed = _record_v2_results(
                 session, row, job.result if job is not None else None
             )
+            if job is not None:
+                # Legacy selections have durable batch outcomes but no V2 result rows.
+                failed = max(failed, job.failed)
             if job and job.state == "completed" and job.model_id and results_durable:
                 row.state = InboxItemState.COMPLETED
                 row.resulting_model_id = job.model_id

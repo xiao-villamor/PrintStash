@@ -22,19 +22,29 @@ import zipfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-import app.modules.ingestion.background as ingest_background
 from app.api.v1 import ingest as ingest_module
 from app.core.config import _overlay, settings
-from app.db.models import ExternalLibrary, IngestRequestKind, JobKind, JobState, User
+from app.core.url_safety import PinnedTarget
+from app.db.models import (
+    ExternalLibrary,
+    File,
+    IngestRequestKind,
+    JobKind,
+    JobState,
+    User,
+)
+from app.db.session import get_session_factory
 from app.modules.administration import runtime_config
 from app.modules.identity.auth import create_access_token
 from app.modules.ingestion import import_resolvers, importer
 from app.modules.ingestion.importer import ImportError_
+from app.modules.storage.storage_backend.runtime import get_backend
 from tests._env import use_local_storage
 from tests.factories import build_user
 from tests.integration.api.v1._ingest_assertions import drain_work
@@ -138,6 +148,69 @@ def collection_manifest(make_ingest_request, manifest_owner):
         ),
     )
     return request.job_id
+
+
+@pytest.fixture
+def selected_download_egress(monkeypatch):
+    """Stand in only for upstream metadata and bytes; production imports execute."""
+    from tests.factories.content import binary_stl
+
+    data = binary_stl(triangles=12)
+    downloads = []
+
+    async def provider_response(self, method, url, **kwargs):
+        assert method == "POST"
+        variables = kwargs["json"]["variables"]
+        if "files" in variables:
+            identities = [
+                identity for group in variables["files"] for identity in group["ids"]
+            ]
+            assert identities == ["1"]
+            payload = {
+                "data": {
+                    "getDownloadLink": {
+                        "output": {
+                            "link": "https://downloads.example.test/cube.stl",
+                            "files": [
+                                {
+                                    "id": "1",
+                                    "link": "https://downloads.example.test/cube.stl",
+                                }
+                            ],
+                        }
+                    }
+                }
+            }
+        else:
+            assert variables == {"id": "1"}
+            payload = {
+                "data": {
+                    "print": {"id": "1", "stls": [{"id": "1"}], "downloadPacks": []}
+                }
+            }
+        return httpx.Response(200, json=payload, request=httpx.Request(method, url))
+
+    def serve(request):
+        downloads.append(str(request.url))
+        assert request.url.path == "/cube.stl"
+        return httpx.Response(
+            200,
+            content=data,
+            headers={"Content-Disposition": 'attachment; filename="cube.stl"'},
+        )
+
+    monkeypatch.setattr(
+        import_resolvers.ProviderTransport, "request", provider_response
+    )
+    monkeypatch.setattr(
+        importer,
+        "_resolve_or_raise",
+        lambda url: PinnedTarget(url, "downloads.example.test", 443, "93.184.216.34"),
+    )
+    monkeypatch.setattr(
+        importer, "pinned_transport", lambda _: httpx.MockTransport(serve)
+    )
+    return data, downloads
 
 
 class TestStageUpload:
@@ -637,38 +710,41 @@ class TestSelectModelFiles:
         client: TestClient,
         auth_headers: dict[str, str],
         model_files_manifest,
+        selected_download_egress,
     ) -> None:
         use_local_storage(tmp_path)
-        staged = tmp_path / "staging" / "cube.stl"
-        staged.parent.mkdir(parents=True, exist_ok=True)
-        staged.write_bytes(_cube_stl_bytes())
-
-        async def fake_resolve(url: str, files):
-            return ["https://cdn.test/cube.stl"]
-
-        async def fake_download_and_collect(url: str):
-            return [(staged, "cube.stl")]
-
-        with (
-            patch.object(
-                import_resolvers, "resolve_selected_download", side_effect=fake_resolve
+        data, downloads = selected_download_egress
+        token = model_files_manifest()
+        with get_session_factory().scoped_session() as session:
+            baseline = {
+                file.id: file.model_dump() for file in session.exec(select(File)).all()
+            }
+        payload = _job(
+            client,
+            client.post(
+                f"/api/v1/ingest/url/files/{token}/select",
+                headers=auth_headers,
+                json={"file_ids": ["1"]},
             ),
-            patch.object(
-                ingest_background,
-                "_download_and_collect",
-                side_effect=fake_download_and_collect,
-            ),
-        ):
-            payload = _job(
-                client,
-                client.post(
-                    f"/api/v1/ingest/url/files/{model_files_manifest()}/select",
-                    headers=auth_headers,
-                    json={"file_ids": ["1"]},
-                ),
-                auth_headers,
-            )
+            auth_headers,
+        )
         assert payload["state"] == "completed", payload
+        assert (payload["processed"], payload["succeeded"], payload["failed"]) == (
+            1,
+            1,
+            0,
+        )
+        assert downloads == ["https://downloads.example.test/cube.stl"]
+        with get_session_factory().scoped_session() as session:
+            files = session.exec(select(File)).all()
+            assert {
+                file.id: file.model_dump() for file in files if file.id in baseline
+            } == baseline
+            created = [file for file in files if file.id not in baseline]
+            assert len(created) == 1
+            assert created[0].model_id == payload["model_id"]
+            assert created[0].original_filename == "cube.stl"
+            assert get_backend().read_bytes(created[0].path) == data
 
     def test_a_page_listing_is_selected_from_once(
         self, client: TestClient, auth_headers: dict[str, str], model_files_manifest
@@ -723,32 +799,40 @@ class TestSelectCollectionMembers:
         client: TestClient,
         auth_headers: dict[str, str],
         collection_manifest,
+        selected_download_egress,
     ) -> None:
         use_local_storage(tmp_path)
-        staged = tmp_path / "staging" / "cube.stl"
-        staged.parent.mkdir(parents=True, exist_ok=True)
-        staged.write_bytes(_cube_stl_bytes())
-
-        with patch.object(
-            ingest_background,
-            "_stage_members",
-            AsyncMock(
-                return_value=[
-                    importer.ResolvedGroup(
-                        source_url="https://printables.com/model/1",
-                        title="A",
-                        staged_files=[(staged, "cube.stl")],
-                    )
-                ]
+        data, downloads = selected_download_egress
+        token = collection_manifest
+        with get_session_factory().scoped_session() as session:
+            baseline = {
+                file.id: file.model_dump() for file in session.exec(select(File)).all()
+            }
+        payload = _job(
+            client,
+            client.post(
+                f"/api/v1/ingest/collection/{token}/select",
+                headers=auth_headers,
+                json={"member_ids": ["1"]},
             ),
-        ):
-            payload = _job(
-                client,
-                client.post(
-                    f"/api/v1/ingest/collection/{collection_manifest}/select",
-                    headers=auth_headers,
-                    json={"member_ids": ["1"]},
-                ),
-                auth_headers,
-            )
+            auth_headers,
+        )
         assert payload["state"] == "completed", payload
+        assert (payload["processed"], payload["succeeded"], payload["failed"]) == (
+            1,
+            1,
+            0,
+        )
+        assert downloads == ["https://downloads.example.test/cube.stl"]
+        with get_session_factory().scoped_session() as session:
+            files = session.exec(select(File)).all()
+            assert {
+                file.id: file.model_dump() for file in files if file.id in baseline
+            } == baseline
+            created = [file for file in files if file.id not in baseline]
+            assert len(created) == 1
+            assert created[0].model_id == payload["model_id"]
+            assert created[0].original_filename == "cube.stl"
+            assert get_backend().read_bytes(created[0].path) == data
+        assert payload["result"]["kind"] == "collection_import"
+        assert payload["result"]["collection"] == "Cool"
