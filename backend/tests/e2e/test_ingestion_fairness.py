@@ -88,6 +88,7 @@ class TestIngestionFairness:
         )
         assert report["staging_pending_limit"] == report["arrival_window"], report
         assert report["submitted"] > report["arrival_window"], report
+        assert report["submitted"] <= report["arrival_budget"], report
         assert report["foreground_ready"] == report["submitted"], report
         assert report["foreground_progress_during_contention"] > 0, report
         assert report["backfill_ready"] == 2, report

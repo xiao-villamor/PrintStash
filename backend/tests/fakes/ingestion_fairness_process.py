@@ -6,13 +6,16 @@ import faulthandler
 import fcntl
 import hashlib
 import json
+import math
 import os
+import sys
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.core.config import ensure_dirs, settings
 from app.core.time import utcnow
@@ -29,14 +32,19 @@ from app.db.models import (
 from app.db.session import get_session_factory
 from app.modules.media.native_process import native_capacity
 from app.modules.work import service
+from app.modules.work.jobs import status_of
 from app.runtime import native_runtime
 from tests.factories import build_file, build_model, content
 from tests.factories.geometry import three_mf
-from tests.fakes.job_engine_process import _diagnostics, _emit, _set_up
+from tests.fakes.job_engine_process import _emit, _set_up
 
 _DEADLINE_S = 110
-_MAX_UPLOADS = 80
 _WINDOW = 6
+_REFILL_INTERVAL_S = 0.1
+# Initial window plus at most one window per cadence interval. Every upload
+# also checks the original wall deadline; faster service cannot exhaust an
+# unrelated fixed count before the two backfills have had their allotted time.
+_MAX_UPLOADS = _WINDOW * (1 + math.ceil(_DEADLINE_S / _REFILL_INTERVAL_S))
 
 
 def _native_snapshot(directory: Path) -> list[dict]:
@@ -82,13 +90,48 @@ def main() -> None:
     large_active = False
     initial_foreground_pending = 0
     began = time.monotonic()
+    phase = "initial_native_pressure"
+
+    def failure_facts(reason: str) -> dict:
+        return {
+            "reason": reason,
+            "phase": phase,
+            "elapsed_seconds": time.monotonic() - began,
+            "deadline_seconds": _DEADLINE_S,
+            "deadline_remaining_seconds": deadline - time.monotonic(),
+            "submitted": len(uploads),
+            "arrival_window": _WINDOW,
+            "refill_interval_seconds": _REFILL_INTERVAL_S,
+            "arrival_budget": _MAX_UPLOADS,
+            "backfill_ids": old_ids,
+            "backfill_completion_seconds": completed_at,
+            "foreground_pending_at_backfill_completion": foreground_pending_at_completion,
+            "queued_full_capacity_backfill": queued_large,
+            "admitted_full_capacity_backfill": large_active,
+            "last_observations": observations[-3:],
+        }
+
+    @contextmanager
+    def diagnose_failure():
+        try:
+            yield
+        except BaseException as error:
+            # Emit after TestClient's teardown logs so the bounded parent tail
+            # preserves the actual progress and admission state on failure.
+            print(
+                json.dumps(failure_facts(type(error).__name__)),
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
 
     def checkpoint() -> None:
-        assert time.monotonic() < deadline, _diagnostics()
+        assert time.monotonic() < deadline, json.dumps(failure_facts("work_deadline"))
 
     def upload(client: TestClient) -> None:
-        assert len(uploads) < _MAX_UPLOADS, (
-            "bounded interactive arrival budget exhausted"
+        checkpoint()
+        assert len(uploads) < _MAX_UPLOADS, json.dumps(
+            failure_facts("bounded_interactive_arrival_budget_exhausted")
         )
         index = len(uploads)
         payload = content.binary_stl(triangles=12, offset=(float(index + 1), 0, 0))
@@ -111,26 +154,36 @@ def main() -> None:
                 queued_large |= row["state"] == "queued"
                 large_active |= row["state"] == "active"
         with get_session_factory().scoped_session() as session:
+            # The accepted Jobs expose the committed Artifact link. Observe
+            # that authority plus the seeded backfills without paginating rows.
+            ingest_jobs = session.exec(
+                select(Job).where(
+                    col(Job.kind).in_(
+                        (JobKind.INGESTION_UPLOAD, JobKind.INGESTION_ARTIFACT_UPLOAD)
+                    ),
+                    col(Job.id).in_(uploads),
+                )
+            ).all()
+            owned_file_ids = set(old_ids)
+            for job in ingest_jobs:
+                file_id = status_of(job).file_id
+                if file_id is not None:
+                    owned_file_ids.add(file_id)
             jobs = session.exec(
-                select(Job).where(Job.kind == JobKind.DERIVATIVES_MESH).limit(100)
+                select(Job).where(
+                    Job.kind == JobKind.DERIVATIVES_MESH,
+                    col(Job.subject_key).in_(
+                        [f"file/{identifier}" for identifier in owned_file_ids]
+                    ),
+                )
             ).all()
             artifacts = session.exec(
-                select(ArtifactDerivative)
-                .where(
-                    ArtifactDerivative.kind.in_(
+                select(ArtifactDerivative).where(
+                    col(ArtifactDerivative.kind).in_(
                         (DerivativeKind.METADATA, DerivativeKind.THUMBNAIL)
-                    )
+                    ),
+                    col(ArtifactDerivative.file_id).in_(owned_file_ids),
                 )
-                .limit(200)
-            ).all()
-            ingest_jobs = session.exec(
-                select(Job)
-                .where(
-                    Job.kind.in_(
-                        (JobKind.INGESTION_UPLOAD, JobKind.INGESTION_ARTIFACT_UPLOAD)
-                    )
-                )
-                .limit(100)
             ).all()
         counts: dict[int, int] = {}
         for row in artifacts:
@@ -169,7 +222,7 @@ def main() -> None:
         )
         return pending_foreground, ready_foreground
 
-    with TestClient(app) as client:
+    with diagnose_failure(), TestClient(app) as client:
         _set_up(client)
         # Saturation is only an initial arrangement. All subsequent service is
         # done by production Jobs and their actual native workers.
@@ -208,16 +261,20 @@ def main() -> None:
             initial_foreground_pending, _ready = observe()
             assert initial_foreground_pending == _WINDOW, observations[-1]
         began = time.monotonic()
+        phase = "contention"
         while len(completed_at) != len(old_ids):
             checkpoint()
             pending, _ready = observe()
+            if len(completed_at) == len(old_ids):
+                break
             while pending < _WINDOW:
                 upload(client)
                 pending += 1
-            time.sleep(0.1)
+            time.sleep(_REFILL_INTERVAL_S)
         # No new arrivals after both backfills complete. Finish every accepted
         # upload to prove that fairness did not merely strand foreground intent.
         submitted_during_contention = len(uploads)
+        phase = "foreground_drain"
         while True:
             checkpoint()
             pending, foreground_ready = observe()
@@ -231,6 +288,9 @@ def main() -> None:
         contention = [row for row in observations if row["foreground_pending"] > 0]
         _emit(
             arrival_window=_WINDOW,
+            arrival_budget=_MAX_UPLOADS,
+            refill_interval_seconds=_REFILL_INTERVAL_S,
+            deadline_seconds=_DEADLINE_S,
             initial_foreground_pending=initial_foreground_pending,
             max_foreground_pending=max(
                 row["foreground_pending"] for row in observations
