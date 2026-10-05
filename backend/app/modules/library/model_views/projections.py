@@ -8,7 +8,7 @@ from typing import Optional
 
 from printstash_core.mesh.measurements import encode_volume
 from pydantic import ValidationError
-from sqlalchemy import case, func
+from sqlalchemy import bindparam, case, func, text
 from sqlmodel import Session, select
 
 from app.core.time import ensure_utc
@@ -21,6 +21,7 @@ from app.db.models import (
     Metadata,
     Model,
     ModelStar,
+    ModelTagLink,
     Printer,
     PrinterFile,
     PrintJob,
@@ -69,7 +70,7 @@ def metadata_read(
     if raw_context:
         try:
             parsed_context = json.loads(raw_context)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             parsed_context = None
         try:
             data["native_context"] = OrcaNativeContext.model_validate(parsed_context)
@@ -140,6 +141,46 @@ def _file_reads_with_revisions(
     ]
 
 
+def _model_tag_names(session: Session, model_ids: list[int]) -> dict[int, list[str]]:
+    """Load only one card batch's tag links and labels, without Model joins."""
+    # The ORM's many-to-many selectin loader joins the Model catalog again.
+    # Stale SQLite statistics can turn that join into a whole-catalog scan.
+    # Read links and then tags by their own keys, without a parent-table join.
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite can retain a one-row ANALYZE estimate after the catalog grows,
+        # preferring a full link scan even for one Model. The composite primary
+        # key is the covering index for this lookup; pin that access path.
+        tag_links = (
+            session.execute(
+                text(
+                    "SELECT model_id, tag_id FROM model_tags "
+                    "INDEXED BY sqlite_autoindex_model_tags_1 "
+                    "WHERE model_id IN :model_ids"
+                ).bindparams(bindparam("model_ids", expanding=True)),
+                {"model_ids": model_ids},
+            )
+            .tuples()
+            .all()
+        )
+    else:
+        tag_links = session.exec(
+            select(ModelTagLink.model_id, ModelTagLink.tag_id).where(
+                ModelTagLink.model_id.in_(model_ids)  # type: ignore[union-attr]
+            )
+        ).all()
+    tags_by_model: dict[int, list[str]] = defaultdict(list)
+    if tag_links:
+        tag_ids = {tag_id for _, tag_id in tag_links}
+        names_by_id = dict(
+            session.exec(select(Tag.id, Tag.name).where(Tag.id.in_(tag_ids))).all()  # type: ignore[union-attr]
+        )
+        for model_id, tag_id in tag_links:
+            if model_id is None or tag_id is None:
+                raise ValueError("persisted_model_tag_link_missing_identity")
+            tags_by_model[model_id].append(names_by_id[tag_id])
+    return dict(tags_by_model)
+
+
 def _hydrate_list_rows(
     session: Session, user: User, rows: list[Model]
 ) -> list[ModelListItem]:
@@ -147,6 +188,7 @@ def _hydrate_list_rows(
     model_ids = [m.id for m in rows if m.id is not None]
     if not model_ids:
         return []
+    tags_by_model = _model_tag_names(session, model_ids)
     similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(
         session.exec(
@@ -298,7 +340,7 @@ def _hydrate_list_rows(
                 collection_label=labels.get(collection_name_for(model) or ""),
                 source_url=model.source_url,
                 effective_role=roles.get(model.collection_id),
-                tags=sorted(tag.name for tag in model.tags),
+                tags=sorted(tags_by_model.get(model.id, [])),
                 thumbnail_url=thumb_url(model),
                 file_count=int(file_counts.get(model.id, 0)),
                 mesh_file_id=mesh_file_ids.get(model.id),
