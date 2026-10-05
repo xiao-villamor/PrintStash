@@ -13,16 +13,19 @@ can change, and only a superuser can purge a trashed document for good.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.api.command_actor import CommandActor
 from app.api.v1 import documents as documents_router
 from app.core.config import _overlay
 from app.db.models import CollectionRole, Document, User
@@ -394,8 +397,7 @@ class TestUploadDocument:
                 name=None,
                 collection_id=None,
                 multipart_model_id=None,
-                current_user=admin,
-                session=db_session,
+                actor=CommandActor.from_user(admin),
             )
 
         assert raised.value.status_code == 413
@@ -417,8 +419,7 @@ class TestUploadDocument:
                 name=None,
                 collection_id=None,
                 multipart_model_id=None,
-                current_user=admin,
-                session=db_session,
+                actor=CommandActor.from_user(admin),
             )
 
         assert raised.value.status_code == 413
@@ -441,8 +442,7 @@ class TestUploadDocument:
                 name=None,
                 collection_id=None,
                 multipart_model_id=None,
-                current_user=admin,
-                session=db_session,
+                actor=CommandActor.from_user(admin),
             )
 
         assert raised.value.status_code == 413
@@ -1036,8 +1036,7 @@ class TestUploadDocumentImage:
             await documents_router.upload_document_image(
                 document_id=doc["id"],
                 file=oversized,
-                current_user=admin,
-                session=db_session,
+                actor=CommandActor.from_user(admin),
             )
 
         assert raised.value.status_code == 413
@@ -1132,3 +1131,134 @@ class TestGetDocumentImage:
 
         assert response.status_code == 404, response.text
         assert response.json()["detail"] == "image_not_found"
+
+
+class TestDocumentUploadExecution:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "filename,data,media_type",
+        [
+            ("guide.pdf", PDF_BYTES, "application/pdf"),
+            ("guide.md", b"# Guide", "text/markdown"),
+        ],
+    )
+    async def test_owns_upload_sessions(
+        self, app, db_session, admin_headers, filename, data, media_type
+    ):
+        from threading import get_ident
+
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/v1/documents/upload",
+                    headers=admin_headers,
+                    files={"file": (filename, data, media_type)},
+                )
+        finally:
+            override_session_factory(previous)
+        assert response.status_code == 201, response.text
+        assert factory.opened_count > 0
+        assert factory.active_count == 0
+        assert get_ident() not in factory.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_publication(
+        self, app, admin_headers, monkeypatch
+    ):
+        loop = asyncio.get_running_loop()
+        observations = []
+        publish = documents_router.publish_stream
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+
+            def delayed_publication(*args, **kwargs):
+                health = asyncio.run_coroutine_threadsafe(
+                    client.get("/api/v1/health"), loop
+                )
+                try:
+                    observations.append(health.result(timeout=2).status_code)
+                except TimeoutError:
+                    health.cancel()
+                    observations.append(None)
+                return publish(*args, **kwargs)
+
+            monkeypatch.setattr(documents_router, "publish_stream", delayed_publication)
+            response = await client.post(
+                "/api/v1/documents/upload",
+                headers=admin_headers,
+                files={"file": ("guide.pdf", PDF_BYTES, "application/pdf")},
+            )
+        assert response.status_code == 201, response.text
+        assert observations == [200]
+
+
+class TestDocumentImageExecution:
+    @pytest.mark.asyncio
+    async def test_owns_upload_sessions(
+        self, app, db_session, admin_headers, make_document
+    ):
+        from threading import get_ident
+
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        doc = make_document("Illustrated")
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    f"/api/v1/documents/{doc.id}/images",
+                    headers=admin_headers,
+                    files={"file": ("pic.png", _PNG, "image/png")},
+                )
+        finally:
+            override_session_factory(previous)
+        assert response.status_code == 201, response.text
+        assert factory.opened_count > 0
+        assert factory.active_count == 0
+        assert get_ident() not in factory.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_publication(
+        self, app, admin_headers, make_document, monkeypatch
+    ):
+        doc = make_document("Illustrated")
+        loop = asyncio.get_running_loop()
+        observations = []
+        publish = documents_router.publish_bytes
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+
+            def delayed_publication(*args, **kwargs):
+                health = asyncio.run_coroutine_threadsafe(
+                    client.get("/api/v1/health"), loop
+                )
+                try:
+                    observations.append(health.result(timeout=2).status_code)
+                except TimeoutError:
+                    health.cancel()
+                    observations.append(None)
+                return publish(*args, **kwargs)
+
+            monkeypatch.setattr(documents_router, "publish_bytes", delayed_publication)
+            response = await client.post(
+                f"/api/v1/documents/{doc.id}/images",
+                headers=admin_headers,
+                files={"file": ("pic.png", _PNG, "image/png")},
+            )
+        assert response.status_code == 201, response.text
+        assert observations == [200]

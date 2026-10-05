@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Bound file acceptance commands independently of ordinary API workers. Keep SQL
+  sessions on their creating thread, release them while streamed bodies wait,
+  revalidate credentials before publication, and finish admitted writes before
+  returning cancellation. Slow storage or engine hints leave lightweight API
+  requests responsive; accepted imports remain durable background Jobs.
+
 - Reserve interactive discovery slots beside one active backfill Job per
   derivation lane. Keep bounded indexed scans and durable backfill progress
   during uploads, dispatch admitted derivatives in FIFO order, and carry Job

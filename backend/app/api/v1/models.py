@@ -37,7 +37,6 @@ from pydantic import ValidationError
 from sqlalchemy import func
 from sqlmodel import Session, select
 from starlette.background import BackgroundTask
-from starlette.concurrency import run_in_threadpool
 
 import app.modules.library.model_views.detail as models_detail
 import app.modules.library.model_views.exports as models_exports
@@ -47,6 +46,13 @@ import app.modules.library.model_views.pagination as models_pagination
 import app.modules.library.model_views.statistics as models_statistics
 import app.modules.library.model_views.trash as models_trash
 import app.modules.printing.costing as models_costing
+from app.api.command_actor import (
+    CommandActor,
+    command_session,
+    require_command_user,
+    require_command_writer,
+)
+from app.api.command_execution import bounded_command
 from app.core.config import settings
 from app.core.security import require_auth, require_superuser, require_user
 from app.db.models import (
@@ -150,7 +156,9 @@ def _reject_retired_group_queries(request: Request) -> None:
 
 
 router = APIRouter(
-    prefix="/models", tags=["models"], dependencies=[Depends(_reject_retired_group_queries)]
+    prefix="/models",
+    tags=["models"],
+    dependencies=[Depends(_reject_retired_group_queries)],
 )
 
 
@@ -633,88 +641,90 @@ def export_library_archive(
     "/library-import",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_superuser)],
     summary="Import a portable full-library archive",
 )
+@bounded_command
 def import_library_archive(
     file: UploadFile = UploadFileParam(...),
-    current_user: User = Depends(require_superuser),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> JobAccepted:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix != ".zip":
-        raise HTTPException(status_code=400, detail="archive_zip_required")
-    settings.incoming_dir.mkdir(parents=True, exist_ok=True)
-    lease_count, staged_bytes = session.exec(
-        select(
-            func.count(StagingLease.id),
-            func.coalesce(func.sum(StagingLease.size_bytes), 0),
+    with command_session(actor) as (session, current_user):
+        if not current_user.is_superuser:
+            raise HTTPException(status_code=403, detail="admin_required")
+        suffix = Path(file.filename or "").suffix.lower()
+        if suffix != ".zip":
+            raise HTTPException(status_code=400, detail="archive_zip_required")
+        settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+        lease_count, staged_bytes = session.exec(
+            select(
+                func.count(StagingLease.id),
+                func.coalesce(func.sum(StagingLease.size_bytes), 0),
+            )
+        ).one()
+        if int(lease_count) >= settings.staging_max_pending:
+            raise HTTPException(status_code=503, detail="staging_capacity_exceeded")
+        assert current_user.id is not None
+        user_leases = session.exec(
+            select(func.count(StagingLease.id)).where(
+                StagingLease.owner_user_id == current_user.id
+            )
+        ).one()
+        if int(user_leases) >= settings.staging_max_active_per_user:
+            raise HTTPException(status_code=429, detail="staging_capacity_exceeded")
+        quota_remaining = max(
+            0,
+            settings.staging_max_gb * 1024**3 - int(staged_bytes),
         )
-    ).one()
-    if int(lease_count) >= settings.staging_max_pending:
-        raise HTTPException(status_code=503, detail="staging_capacity_exceeded")
-    assert current_user.id is not None
-    user_leases = session.exec(
-        select(func.count(StagingLease.id)).where(
-            StagingLease.owner_user_id == current_user.id
+        disk_free = shutil.disk_usage(settings.incoming_dir).free
+        writable_bytes = min(
+            quota_remaining,
+            max(0, disk_free - settings.staging_min_free_gb * 1024**3),
         )
-    ).one()
-    if int(user_leases) >= settings.staging_max_active_per_user:
-        raise HTTPException(status_code=429, detail="staging_capacity_exceeded")
-    quota_remaining = max(
-        0,
-        settings.staging_max_gb * 1024**3 - int(staged_bytes),
-    )
-    disk_free = shutil.disk_usage(settings.incoming_dir).free
-    writable_bytes = min(
-        quota_remaining,
-        max(0, disk_free - settings.staging_min_free_gb * 1024**3),
-    )
-    if writable_bytes <= 0:
-        raise HTTPException(status_code=507, detail="staging_capacity_exceeded")
-    fd, name = tempfile.mkstemp(suffix=".zip", dir=settings.incoming_dir)
-    try:
-        digest = hashlib.sha256()
-        written = 0
-        with open(fd, "wb", closefd=True) as target:
-            while chunk := file.file.read(1024 * 1024):
-                written += len(chunk)
-                if written > writable_bytes:
-                    raise ValueError("staging_capacity_exceeded")
-                target.write(chunk)
-                digest.update(chunk)
-            target.flush()
-            os.fsync(target.fileno())
-        job_id = uuid.uuid4().hex
-        work_service.request(
-            session,
-            definition=JobKind.INGESTION_LIBRARY_IMPORT,
-            subject_key=f"job/{job_id}",
-            owner_user_id=current_user.id,
-            job_id=job_id,
-        )
-        staging_leases.create_job_lease(
-            session,
-            job_id=job_id,
-            owner_user_id=current_user.id,
-            path=Path(name),
-            size_bytes=written,
-            sha256=digest.hexdigest(),
-            check_capacity=False,
-        )
-        session.commit()
-    except (ValueError, zipfile.BadZipFile) as exc:
-        session.rollback()
-        Path(name).unlink(missing_ok=True)
-        code = str(exc)
-        status_code = 507 if code == "staging_capacity_exceeded" else 400
-        raise HTTPException(status_code=status_code, detail=code) from exc
-    except Exception:
-        session.rollback()
-        Path(name).unlink(missing_ok=True)
-        raise
-    nudge(JobKind.INGESTION_LIBRARY_IMPORT)
-    return JobAccepted(job_id=job_id)
+        if writable_bytes <= 0:
+            raise HTTPException(status_code=507, detail="staging_capacity_exceeded")
+        fd, name = tempfile.mkstemp(suffix=".zip", dir=settings.incoming_dir)
+        try:
+            digest = hashlib.sha256()
+            written = 0
+            with open(fd, "wb", closefd=True) as target:
+                while chunk := file.file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > writable_bytes:
+                        raise ValueError("staging_capacity_exceeded")
+                    target.write(chunk)
+                    digest.update(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            job_id = uuid.uuid4().hex
+            work_service.request(
+                session,
+                definition=JobKind.INGESTION_LIBRARY_IMPORT,
+                subject_key=f"job/{job_id}",
+                owner_user_id=current_user.id,
+                job_id=job_id,
+            )
+            staging_leases.create_job_lease(
+                session,
+                job_id=job_id,
+                owner_user_id=current_user.id,
+                path=Path(name),
+                size_bytes=written,
+                sha256=digest.hexdigest(),
+                check_capacity=False,
+            )
+            session.commit()
+        except (ValueError, zipfile.BadZipFile) as exc:
+            session.rollback()
+            Path(name).unlink(missing_ok=True)
+            code = str(exc)
+            status_code = 507 if code == "staging_capacity_exceeded" else 400
+            raise HTTPException(status_code=status_code, detail=code) from exc
+        except Exception:
+            session.rollback()
+            Path(name).unlink(missing_ok=True)
+            raise
+        nudge(JobKind.INGESTION_LIBRARY_IMPORT)
+        return JobAccepted(job_id=job_id)
 
 
 @router.get(
@@ -941,37 +951,37 @@ def stream_model_source_cover(
 @router.put(
     "/{model_id}/provenance/{source_id}/cover",
     response_model=ModelSourceCoverRead,
-    dependencies=[Depends(require_auth)],
 )
-async def put_model_source_cover(
+@bounded_command
+def put_model_source_cover(
     model_id: int,
     source_id: int,
     file: UploadFile = UploadFileParam(...),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> ModelSourceCoverRead:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
-    _provenance_source_or_404(session, model_id, source_id)
-    data = await file.read(15 * 1024 * 1024 + 1)
-    try:
-        result = source_covers.put(
-            session,
-            get_backend(),
-            provenance_source_id=source_id,
-            actor_id=current_user.id,
-            data=data,
-            content_type=file.content_type,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
-    try:
-        session.commit()
-    except Exception:
-        session.rollback()
-        source_covers.rollback_after_commit_failure(session, get_backend(), result)
-        raise
-    session.refresh(result.cover)
-    return ModelSourceCoverRead.model_validate(result.cover)
+    with command_session(actor) as (session, current_user):
+        _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+        _provenance_source_or_404(session, model_id, source_id)
+        data = file.file.read(15 * 1024 * 1024 + 1)
+        try:
+            result = source_covers.put(
+                session,
+                get_backend(),
+                provenance_source_id=source_id,
+                actor_id=current_user.id,
+                data=data,
+                content_type=file.content_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            source_covers.rollback_after_commit_failure(session, get_backend(), result)
+            raise
+        session.refresh(result.cover)
+        return ModelSourceCoverRead.model_validate(result.cover)
 
 
 @router.delete(
@@ -1006,51 +1016,52 @@ def delete_model_source_cover(
 @router.post(
     "/{model_id}/gcode-revisions",
     response_model=ModelRead,
-    dependencies=[Depends(require_auth)],
     summary="Add a G-code revision to an existing model",
     description=(
         "Uploads a new sliced G-code artifact directly onto the target model. "
         "Manual revisions default to needs_test unless another status is provided."
     ),
 )
-async def add_gcode_revision(
+@bounded_command
+def add_gcode_revision(
     model_id: int,
     file: UploadFile = UploadFileParam(..., description="The .gcode revision file"),
     revision_label: Optional[str] = Form(None, max_length=128),
     revision_status: Optional[FileRevisionStatus] = Form(FileRevisionStatus.NEEDS_TEST),
     revision_notes: Optional[str] = Form(None, max_length=4096),
     is_recommended: bool = Form(False),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> ModelRead:
-    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="filename_required")
-
-    original_filename = Path(file.filename).name
-    suffix = Path(original_filename).suffix.lower() or ".gcode"
-    if suffix not in _GCODE_SUFFIXES:
-        raise HTTPException(status_code=400, detail="unsupported_file_type")
-
-    staged = await run_in_threadpool(_stage_gcode_upload, file, suffix)
-    try:
-        # Hashing and publishing the bytes are blocking file I/O; parsing and
-        # the thumbnail are derivatives and happen in their own Jobs.
-        await run_in_threadpool(
-            add_gcode_revision_to_model,
-            session=session,
-            model=model,
-            staged_path=staged,
-            original_filename=original_filename,
-            revision_label=revision_label,
-            revision_status=revision_status,
-            revision_notes=revision_notes,
-            is_recommended=is_recommended,
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
         )
-    except Exception:
-        staged.unlink(missing_ok=True)
-        raise
-    return _detail_or_404(session, model_id, current_user)
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="filename_required")
+
+        original_filename = Path(file.filename).name
+        suffix = Path(original_filename).suffix.lower() or ".gcode"
+        if suffix not in _GCODE_SUFFIXES:
+            raise HTTPException(status_code=400, detail="unsupported_file_type")
+
+        staged = _stage_gcode_upload(file, suffix)
+        try:
+            # Hashing and publishing the bytes are blocking file I/O; parsing and
+            # the thumbnail are derivatives and happen in their own Jobs.
+            add_gcode_revision_to_model(
+                session=session,
+                model=model,
+                staged_path=staged,
+                original_filename=original_filename,
+                revision_label=revision_label,
+                revision_status=revision_status,
+                revision_notes=revision_notes,
+                is_recommended=is_recommended,
+            )
+        except Exception:
+            staged.unlink(missing_ok=True)
+            raise
+        return _detail_or_404(session, model_id, current_user)
 
 
 @router.get(

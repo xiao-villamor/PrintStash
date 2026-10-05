@@ -35,10 +35,11 @@ from fastapi import (
 from printstash_core.files import slugify
 from sqlmodel import Session, select
 
+from app.api.command_actor import CommandActor, command_session, require_command_writer
+from app.api.command_execution import bounded_command
 from app.core.config import settings
 from app.core.errors import OperationError
 from app.core.logging import get_logger
-from app.core.security import require_auth, require_user
 from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     Collection,
@@ -48,7 +49,6 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
-from app.db.session import get_session
 from app.modules.identity import rbac
 from app.modules.ingestion import background as ingest_background
 from app.modules.ingestion import importer, orca, requests, staging_leases
@@ -195,7 +195,6 @@ def _orca_suffix(original_filename: str) -> str:
     "/orca",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Ingest a sliced G-code file from OrcaSlicer",
     description=(
         "Multipart upload from the OrcaSlicer post-processing hook. The G-code is "
@@ -206,6 +205,7 @@ def _orca_suffix(original_filename: str) -> str:
         "derivatives. Returns a job_id to poll via GET /api/v1/jobs/{job_id}."
     ),
 )
+@bounded_command
 def ingest_orca(
     file: UploadFile = UploadFileParam(..., description="The .gcode file"),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
@@ -239,110 +239,115 @@ def ingest_orca(
         None,
         description="Write the blob into this external (NAS) library instead of vault",
     ),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="filename_required")
+    with command_session(actor) as (session, current_user):
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="filename_required")
 
-    original_filename = Path(file.filename).name
-    suffix = _orca_suffix(original_filename)
-    if suffix not in {*ingest_background.GCODE_SUFFIXES, ".gcode.3mf"}:
-        raise HTTPException(status_code=400, detail="unsupported_file_type")
-    if source_hash and (
-        len(source_hash) != 64
-        or any(character not in "0123456789abcdefABCDEF" for character in source_hash)
-    ):
-        raise HTTPException(status_code=422, detail="source_hash_invalid")
-    try:
-        context = orca.parse_native_context(native_context)
-    except orca.OrcaContextError as exc:
-        raise HTTPException(status_code=422, detail=exc.code) from exc
+        original_filename = Path(file.filename).name
+        suffix = _orca_suffix(original_filename)
+        if suffix not in {*ingest_background.GCODE_SUFFIXES, ".gcode.3mf"}:
+            raise HTTPException(status_code=400, detail="unsupported_file_type")
+        if source_hash and (
+            len(source_hash) != 64
+            or any(
+                character not in "0123456789abcdefABCDEF" for character in source_hash
+            )
+        ):
+            raise HTTPException(status_code=422, detail="source_hash_invalid")
+        try:
+            context = orca.parse_native_context(native_context)
+        except orca.OrcaContextError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
 
-    resolved_source_hash = source_hash
-    attached_to_source = False
-    if context is None:
-        if strict_mapping:
-            raise HTTPException(status_code=422, detail="orca_source_metadata_required")
-        selection: dict[str, object] = {}
-    else:
-        resolution = orca.resolve_source_model(session, current_user, context)
-        if resolution.status == "matched":
-            assert resolution.model is not None
-            if source_hash and source_hash.lower() != resolution.model.hash.lower():
+        resolved_source_hash = source_hash
+        attached_to_source = False
+        if context is None:
+            if strict_mapping:
+                raise HTTPException(
+                    status_code=422, detail="orca_source_metadata_required"
+                )
+            selection: dict[str, object] = {}
+        else:
+            resolution = orca.resolve_source_model(session, current_user, context)
+            if resolution.status == "matched":
+                assert resolution.model is not None
+                if source_hash and source_hash.lower() != resolution.model.hash.lower():
+                    raise HTTPException(
+                        status_code=422, detail="orca_source_identity_conflict"
+                    )
+                resolved_source_hash = resolution.model.hash
+                attached_to_source = True
+            elif (
+                resolution.status == "not_found"
+                and context.classification == "single_object"
+            ):
+                raise HTTPException(status_code=404, detail="orca_source_not_found")
+            elif resolution.status == "ambiguous":
+                raise HTTPException(status_code=409, detail="orca_source_ambiguous")
+            elif strict_mapping:
+                detail = (
+                    "orca_multi_object_not_attachable"
+                    if context.classification == "multi_object"
+                    else "orca_source_metadata_required"
+                )
+                raise HTTPException(status_code=422, detail=detail)
+            if source_hash and not attached_to_source:
                 raise HTTPException(
                     status_code=422, detail="orca_source_identity_conflict"
                 )
-            resolved_source_hash = resolution.model.hash
-            attached_to_source = True
-        elif (
-            resolution.status == "not_found"
-            and context.classification == "single_object"
-        ):
-            raise HTTPException(status_code=404, detail="orca_source_not_found")
-        elif resolution.status == "ambiguous":
-            raise HTTPException(status_code=409, detail="orca_source_ambiguous")
-        elif strict_mapping:
-            detail = (
-                "orca_multi_object_not_attachable"
-                if context.classification == "multi_object"
-                else "orca_source_metadata_required"
-            )
-            raise HTTPException(status_code=422, detail=detail)
-        if source_hash and not attached_to_source:
-            raise HTTPException(status_code=422, detail="orca_source_identity_conflict")
-        selection = {"native_context": orca.stored_context(context)}
-        if submission_id is not None:
-            assert current_user.id is not None
-            try:
-                selection["ingestion_key"] = orca.ingestion_key(
-                    current_user.id, submission_id, context
-                )
-            except orca.OrcaContextError as exc:
-                raise HTTPException(status_code=422, detail=exc.code) from exc
-    if submission_id is not None and context is None:
-        raise HTTPException(status_code=422, detail="orca_native_context_required")
-    selection.update(
-        {
-            "revision_label": revision_label,
-            "revision_status": (
-                revision_status.value
-                if revision_status is not None
-                else FileRevisionStatus.NEEDS_TEST.value
-                if attached_to_source
-                else None
-            ),
-            "revision_notes": revision_notes,
-            "is_recommended": is_recommended,
-        }
-    )
-    _require_ingest_collection(session, current_user, collection)
-    _validate_target_library(session, target_library_id)
+            selection = {"native_context": orca.stored_context(context)}
+            if submission_id is not None:
+                assert current_user.id is not None
+                try:
+                    selection["ingestion_key"] = orca.ingestion_key(
+                        current_user.id, submission_id, context
+                    )
+                except orca.OrcaContextError as exc:
+                    raise HTTPException(status_code=422, detail=exc.code) from exc
+        if submission_id is not None and context is None:
+            raise HTTPException(status_code=422, detail="orca_native_context_required")
+        selection.update(
+            {
+                "revision_label": revision_label,
+                "revision_status": (
+                    revision_status.value
+                    if revision_status is not None
+                    else FileRevisionStatus.NEEDS_TEST.value
+                    if attached_to_source
+                    else None
+                ),
+                "revision_notes": revision_notes,
+                "is_recommended": is_recommended,
+            }
+        )
+        _require_ingest_collection(session, current_user, collection)
+        _validate_target_library(session, target_library_id)
 
-    staged, staged_size, staged_hash = _stage_upload(file, suffix)
-    return _accept_staged(
-        session,
-        kind=IngestRequestKind.UPLOAD,
-        user=current_user,
-        staged=staged,
-        size=staged_size,
-        sha256=staged_hash,
-        original_filename=original_filename,
-        model_name=orca.display_name(context, model_name, original_filename),
-        collection=collection,
-        tags=tags,
-        source_hash=resolved_source_hash,
-        file_type="gcode",
-        target_library_id=target_library_id,
-        selection=selection,
-    )
+        staged, staged_size, staged_hash = _stage_upload(file, suffix)
+        return _accept_staged(
+            session,
+            kind=IngestRequestKind.UPLOAD,
+            user=current_user,
+            staged=staged,
+            size=staged_size,
+            sha256=staged_hash,
+            original_filename=original_filename,
+            model_name=orca.display_name(context, model_name, original_filename),
+            collection=collection,
+            tags=tags,
+            source_hash=resolved_source_hash,
+            file_type="gcode",
+            target_library_id=target_library_id,
+            selection=selection,
+        )
 
 
 @router.post(
     "/model",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Ingest a source file (STL, 3MF, OBJ, STEP, DXF)",
     description=(
         "Multipart upload of a source file. The file is staged and committed as "
@@ -351,6 +356,7 @@ def ingest_orca(
         "GET /api/v1/jobs/{job_id}."
     ),
 )
+@bounded_command
 def ingest_model(
     file: UploadFile = UploadFileParam(
         ..., description="A .stl, .3mf, .obj, .step, .stp, or .dxf file"
@@ -364,41 +370,40 @@ def ingest_model(
         None,
         description="Write the blob into this external (NAS) library instead of vault",
     ),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="filename_required")
+    with command_session(actor) as (session, current_user):
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="filename_required")
 
-    original_filename = Path(file.filename).name
-    suffix = Path(original_filename).suffix.lower()
-    if suffix not in ingest_background.MESH_SUFFIXES:
-        raise HTTPException(status_code=400, detail="unsupported_file_type")
-    _require_ingest_collection(session, current_user, collection)
-    _validate_target_library(session, target_library_id)
+        original_filename = Path(file.filename).name
+        suffix = Path(original_filename).suffix.lower()
+        if suffix not in ingest_background.MESH_SUFFIXES:
+            raise HTTPException(status_code=400, detail="unsupported_file_type")
+        _require_ingest_collection(session, current_user, collection)
+        _validate_target_library(session, target_library_id)
 
-    staged, staged_size, staged_hash = _stage_upload(file, suffix)
-    return _accept_staged(
-        session,
-        kind=IngestRequestKind.UPLOAD,
-        user=current_user,
-        staged=staged,
-        size=staged_size,
-        sha256=staged_hash,
-        original_filename=original_filename,
-        model_name=_resolve_name(model_name, original_filename),
-        collection=collection,
-        tags=tags,
-        file_type=SUFFIX_TO_FILE_TYPE[suffix].value,
-        target_library_id=target_library_id,
-    )
+        staged, staged_size, staged_hash = _stage_upload(file, suffix)
+        return _accept_staged(
+            session,
+            kind=IngestRequestKind.UPLOAD,
+            user=current_user,
+            staged=staged,
+            size=staged_size,
+            sha256=staged_hash,
+            original_filename=original_filename,
+            model_name=_resolve_name(model_name, original_filename),
+            collection=collection,
+            tags=tags,
+            file_type=SUFFIX_TO_FILE_TYPE[suffix].value,
+            target_library_id=target_library_id,
+        )
 
 
 @router.post(
     "/url",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Import a model from a direct file, a model page, a collection or a .zip URL",
     description=(
         "Records the URL for a background Job that downloads it server-side "
@@ -407,40 +412,40 @@ def ingest_model(
         "whose token (the Job id) selects what to import."
     ),
 )
+@bounded_command
 def ingest_url(
     req: UrlIngestRequest,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    if not req.url or not req.url.strip():
-        raise HTTPException(status_code=400, detail="url_required")
-    try:
-        importer.validate_public_url(req.url.strip())
-    except importer.ImportError_ as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _require_ingest_collection(session, current_user, req.collection)
+    with command_session(actor) as (session, current_user):
+        if not req.url or not req.url.strip():
+            raise HTTPException(status_code=400, detail="url_required")
+        try:
+            importer.validate_public_url(req.url.strip())
+        except importer.ImportError_ as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _require_ingest_collection(session, current_user, req.collection)
 
-    assert current_user.id is not None
-    request = requests.create(
-        session,
-        kind=IngestRequestKind.URL,
-        owner_user_id=current_user.id,
-        selection={"review": req.review},
-        credential=req.thingiverse_cookie,
-        source_url=req.url.strip(),
-        collection=req.collection,
-        tags=req.tags,
-    )
-    session.commit()
-    nudge(requests.DEFINITIONS[IngestRequestKind.URL])
-    return JobAccepted(job_id=request.job_id)
+        assert current_user.id is not None
+        request = requests.create(
+            session,
+            kind=IngestRequestKind.URL,
+            owner_user_id=current_user.id,
+            selection={"review": req.review},
+            credential=req.thingiverse_cookie,
+            source_url=req.url.strip(),
+            collection=req.collection,
+            tags=req.tags,
+        )
+        session.commit()
+        nudge(requests.DEFINITIONS[IngestRequestKind.URL])
+        return JobAccepted(job_id=request.job_id)
 
 
 @router.post(
     "/archive/inspect",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Stage a ZIP archive and list its importable entries in the background",
     description=(
         "The archive is staged under a lease owned by the returned Job, which "
@@ -449,38 +454,38 @@ def ingest_url(
         "archive_id is the manifest's archive_id (the Job id)."
     ),
 )
+@bounded_command
 def inspect_archive_background(
     file: UploadFile = UploadFileParam(..., description="The .zip archive"),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="filename_required")
-    original_filename = Path(file.filename).name
-    if Path(original_filename).suffix.lower() != ".zip":
-        raise HTTPException(status_code=400, detail="unsupported_file_type")
-    staged, staged_size, staged_hash = _stage_upload(file, ".zip")
-    if not zipfile.is_zipfile(staged):
-        staged.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail="archive_invalid")
-    accepted = _accept_staged(
-        session,
-        kind=IngestRequestKind.ARCHIVE_INSPECT,
-        user=current_user,
-        staged=staged,
-        size=staged_size,
-        sha256=staged_hash,
-        original_filename=original_filename,
-    )
-    accepted.message = "archive inspection queued"
-    return accepted
+    with command_session(actor) as (session, current_user):
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="filename_required")
+        original_filename = Path(file.filename).name
+        if Path(original_filename).suffix.lower() != ".zip":
+            raise HTTPException(status_code=400, detail="unsupported_file_type")
+        staged, staged_size, staged_hash = _stage_upload(file, ".zip")
+        if not zipfile.is_zipfile(staged):
+            staged.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="archive_invalid")
+        accepted = _accept_staged(
+            session,
+            kind=IngestRequestKind.ARCHIVE_INSPECT,
+            user=current_user,
+            staged=staged,
+            size=staged_size,
+            sha256=staged_hash,
+            original_filename=original_filename,
+        )
+        accepted.message = "archive inspection queued"
+        return accepted
 
 
 @router.post(
     "/archive/{archive_id}/select",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Import selected entries from an inspected archive",
     description=(
         "Hands the inspected archive to a new Job that extracts the chosen entries "
@@ -488,150 +493,155 @@ def inspect_archive_background(
         "Collection named after the archive."
     ),
 )
+@bounded_command
 def select_archive_entries(
     archive_id: str,
     req: ArchiveSelectRequest,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    manifest_request, manifest = requests.manifest_for(
-        session, archive_id, kind="archive", user=current_user
-    )
-    if not req.names and not req.entry_ids:
-        raise HTTPException(status_code=400, detail="no_entries_selected")
-    _require_ingest_collection(session, current_user, req.collection)
-    entries = list(manifest.get("entries", []))
-    selected_names = list(req.names)
-    if req.entry_ids:
-        by_id = {entry["entry_id"]: entry["name"] for entry in entries}
-        try:
-            selected_names.extend(by_id[entry_id] for entry_id in req.entry_ids)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=400, detail="archive_entry_not_found"
-            ) from exc
-    known = {entry["name"] for entry in entries if entry.get("file_type")}
-    chosen = [name for name in dict.fromkeys(selected_names) if name in known]
-    if not chosen:
-        raise HTTPException(status_code=400, detail="no_importable_files")
-
-    assert current_user.id is not None
-    request = requests.create(
-        session,
-        kind=IngestRequestKind.ARCHIVE_SELECTION,
-        owner_user_id=current_user.id,
-        selection={"names": chosen, "archive_name": manifest.get("archive_name")},
-        collection=req.collection,
-        tags=req.tags,
-        source_url=manifest.get("source_url"),
-    )
-    try:
-        staging_leases.transfer_job_leases(
-            session, from_job_id=manifest_request.job_id, to_job_id=request.job_id
+    with command_session(actor) as (session, current_user):
+        manifest_request, manifest = requests.manifest_for(
+            session, archive_id, kind="archive", user=current_user
         )
-    except staging_leases.StagingLeaseError as exc:
-        session.rollback()
-        raise HTTPException(status_code=410, detail="archive_expired") from exc
-    requests.claim_manifest(session, manifest_request)
-    session.commit()
-    nudge(requests.DEFINITIONS[IngestRequestKind.ARCHIVE_SELECTION])
-    return JobAccepted(job_id=request.job_id)
+        if not req.names and not req.entry_ids:
+            raise HTTPException(status_code=400, detail="no_entries_selected")
+        _require_ingest_collection(session, current_user, req.collection)
+        entries = list(manifest.get("entries", []))
+        selected_names = list(req.names)
+        if req.entry_ids:
+            by_id = {entry["entry_id"]: entry["name"] for entry in entries}
+            try:
+                selected_names.extend(by_id[entry_id] for entry_id in req.entry_ids)
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=400, detail="archive_entry_not_found"
+                ) from exc
+        known = {entry["name"] for entry in entries if entry.get("file_type")}
+        chosen = [name for name in dict.fromkeys(selected_names) if name in known]
+        if not chosen:
+            raise HTTPException(status_code=400, detail="no_importable_files")
+
+        assert current_user.id is not None
+        request = requests.create(
+            session,
+            kind=IngestRequestKind.ARCHIVE_SELECTION,
+            owner_user_id=current_user.id,
+            selection={"names": chosen, "archive_name": manifest.get("archive_name")},
+            collection=req.collection,
+            tags=req.tags,
+            source_url=manifest.get("source_url"),
+        )
+        try:
+            staging_leases.transfer_job_leases(
+                session, from_job_id=manifest_request.job_id, to_job_id=request.job_id
+            )
+        except staging_leases.StagingLeaseError as exc:
+            session.rollback()
+            raise HTTPException(status_code=410, detail="archive_expired") from exc
+        requests.claim_manifest(session, manifest_request)
+        session.commit()
+        nudge(requests.DEFINITIONS[IngestRequestKind.ARCHIVE_SELECTION])
+        return JobAccepted(job_id=request.job_id)
 
 
 @router.post(
     "/url/files/{files_token}/select",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Import selected files from a multi-file model page",
     description=(
         "Downloads only the chosen files from a previously listed model page "
         "(see the model_files_manifest job result) and ingests each as its own Model."
     ),
 )
+@bounded_command
 def select_model_files(
     files_token: str,
     req: FileSelectRequest,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    try:
-        _source, manifest = requests.manifest_for(
-            session, files_token, kind="model_files", user=current_user
-        )
-    except OperationError as exc:
-        raise HTTPException(status_code=404, detail="files_not_found") from exc
-    if not req.file_ids:
-        raise HTTPException(status_code=400, detail="no_files_selected")
-    wanted = set(req.file_ids)
-    chosen = [f for f in manifest.get("files", []) if f.get("file_id") in wanted]
-    if not chosen:
-        raise HTTPException(status_code=400, detail="no_files_selected")
-    _require_ingest_collection(session, current_user, req.collection)
+    with command_session(actor) as (session, current_user):
+        try:
+            _source, manifest = requests.manifest_for(
+                session, files_token, kind="model_files", user=current_user
+            )
+        except OperationError as exc:
+            raise HTTPException(status_code=404, detail="files_not_found") from exc
+        if not req.file_ids:
+            raise HTTPException(status_code=400, detail="no_files_selected")
+        wanted = set(req.file_ids)
+        chosen = [f for f in manifest.get("files", []) if f.get("file_id") in wanted]
+        if not chosen:
+            raise HTTPException(status_code=400, detail="no_files_selected")
+        _require_ingest_collection(session, current_user, req.collection)
 
-    assert current_user.id is not None
-    request = requests.create(
-        session,
-        kind=IngestRequestKind.URL_SELECTION,
-        owner_user_id=current_user.id,
-        selection={"files": chosen},
-        source_url=manifest.get("page_url"),
-        collection=req.collection,
-        tags=req.tags,
-    )
-    requests.claim_manifest(session, _source)
-    session.commit()
-    nudge(requests.DEFINITIONS[IngestRequestKind.URL_SELECTION])
-    return JobAccepted(job_id=request.job_id)
+        assert current_user.id is not None
+        request = requests.create(
+            session,
+            kind=IngestRequestKind.URL_SELECTION,
+            owner_user_id=current_user.id,
+            selection={"files": chosen},
+            source_url=manifest.get("page_url"),
+            collection=req.collection,
+            tags=req.tags,
+        )
+        requests.claim_manifest(session, _source)
+        session.commit()
+        nudge(requests.DEFINITIONS[IngestRequestKind.URL_SELECTION])
+        return JobAccepted(job_id=request.job_id)
 
 
 @router.post(
     "/collection/{collection_token}/select",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_auth)],
     summary="Import selected members from a reviewed collection",
     description=(
         "Imports the chosen members of a previously resolved collection (see the "
         "collection_manifest job result) into the target collection."
     ),
 )
+@bounded_command
 def select_collection_members(
     collection_token: str,
     req: CollectionSelectRequest,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> JobAccepted:
-    try:
-        source, manifest = requests.manifest_for(
-            session, collection_token, kind="collection", user=current_user
+    with command_session(actor) as (session, current_user):
+        try:
+            source, manifest = requests.manifest_for(
+                session, collection_token, kind="collection", user=current_user
+            )
+        except OperationError as exc:
+            raise HTTPException(status_code=404, detail="collection_not_found") from exc
+        if not req.member_ids:
+            raise HTTPException(status_code=400, detail="no_members_selected")
+        wanted = set(req.member_ids)
+        chosen = [
+            m for m in manifest.get("members", []) if m.get("source_id") in wanted
+        ]
+        if not chosen:
+            raise HTTPException(status_code=400, detail="no_members_selected")
+        # The user cleared the parent collection when the manifest was created;
+        # re-check in case permissions changed, and allow an override parent.
+        target = (
+            ingest_background.collection_target(
+                req.collection, manifest.get("title", "")
+            )
+            if req.collection
+            else str(manifest.get("target_collection") or "")
         )
-    except OperationError as exc:
-        raise HTTPException(status_code=404, detail="collection_not_found") from exc
-    if not req.member_ids:
-        raise HTTPException(status_code=400, detail="no_members_selected")
-    wanted = set(req.member_ids)
-    chosen = [m for m in manifest.get("members", []) if m.get("source_id") in wanted]
-    if not chosen:
-        raise HTTPException(status_code=400, detail="no_members_selected")
-    # The user cleared the parent collection when the manifest was created;
-    # re-check in case permissions changed, and allow an override parent.
-    target = (
-        ingest_background.collection_target(req.collection, manifest.get("title", ""))
-        if req.collection
-        else str(manifest.get("target_collection") or "")
-    )
-    _require_ingest_collection(session, current_user, req.collection)
+        _require_ingest_collection(session, current_user, req.collection)
 
-    assert current_user.id is not None
-    request = requests.create(
-        session,
-        kind=IngestRequestKind.COLLECTION,
-        owner_user_id=current_user.id,
-        selection={"members": chosen, "target_collection": target},
-        tags=req.tags,
-    )
-    requests.claim_manifest(session, source)
-    session.commit()
-    nudge(requests.DEFINITIONS[IngestRequestKind.COLLECTION])
-    return JobAccepted(job_id=request.job_id)
+        assert current_user.id is not None
+        request = requests.create(
+            session,
+            kind=IngestRequestKind.COLLECTION,
+            owner_user_id=current_user.id,
+            selection={"members": chosen, "target_collection": target},
+            tags=req.tags,
+        )
+        requests.claim_manifest(session, source)
+        session.commit()
+        nudge(requests.DEFINITIONS[IngestRequestKind.COLLECTION])
+        return JobAccepted(job_id=request.job_id)

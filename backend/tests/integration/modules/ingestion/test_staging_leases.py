@@ -1021,3 +1021,59 @@ class TestMatchingCaptureStagingPath:
         # Fail closed: a filesystem that supports xattrs and has no marker means
         # this is a replacement, not an owned partial.
         assert staging_leases._matching_capture_staging_path(lease) is None
+
+
+class TestCaptureSpoolContext:
+    def test_closes_descriptor_after_session_expiration(
+        self, db_session, make_user, tmp_path, monkeypatch
+    ):
+        from app.core.config import _overlay
+        from app.modules.ingestion import inbox
+        from tests.integration.api.v1.inbox.conftest import slot_payload
+
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+        owner = make_user("descriptor-only-capture")
+        payload = slot_payload(b"owned bytes")
+        _item, slots = inbox.create_capture_upload_slots(db_session, owner, payload)
+        slot_id = slots[0].id
+        path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot_id)
+        with Session(db_session.get_bind()) as session:
+            context = staging_leases.open_capture_slot_staging(session, slot_id=slot_id)
+            with context as target:
+                session.expire_all()
+                session.close()
+                assert target.write(b"owned bytes") == len(b"owned bytes")
+        assert target.closed
+        assert path.read_bytes() == b"owned bytes"
+
+    def test_refuses_replaced_inode_without_truncating_foreign_bytes(
+        self, db_session, make_user, tmp_path, monkeypatch
+    ):
+        from app.core.config import _overlay
+        from app.modules.ingestion import inbox
+        from tests.integration.api.v1.inbox.conftest import slot_payload
+
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+        owner = make_user("capture-foreign-inode")
+        _item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, slot_payload(b"owned bytes")
+        )
+        slot_id = slots[0].id
+        path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot_id)
+        context = staging_leases.open_capture_slot_staging(db_session, slot_id=slot_id)
+        original = tmp_path / "original-owned-spool"
+        path.rename(original)
+        replacement = b"foreign bytes must remain intact"
+        path.write_bytes(replacement)
+        assert path.stat().st_ino != original.stat().st_ino
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError, match="capture_upload_staging_collision"
+        ):
+            with context:
+                raise AssertionError("a replaced inode must never be yielded")
+
+        assert path.read_bytes() == replacement
+        assert original.read_bytes() == b""

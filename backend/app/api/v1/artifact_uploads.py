@@ -19,12 +19,12 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
+from app.api.command_actor import CommandActor, command_session, require_command_user
+from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.ratelimit import rate_limit
-from app.core.security import require_user
 from app.core.time import utcnow
 from app.db.models import (
     ArtifactUploadPart,
@@ -36,7 +36,6 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
-from app.db.session import get_session
 from app.modules.administration import audit
 from app.modules.identity import rbac
 from app.modules.ingestion import background as ingest_background
@@ -195,7 +194,8 @@ def _require_revision_target(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(_create_limit)],
 )
-async def create_artifact_upload(
+@bounded_command
+def create_artifact_upload(
     request: ArtifactUploadCreate,
     idempotency_key: str | None = Header(
         default=None,
@@ -203,73 +203,74 @@ async def create_artifact_upload(
         max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     ),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadRead:
-    if request.size_bytes > settings.max_upload_bytes:
-        raise HTTPException(status_code=413, detail="upload_too_large")
-    _validate_purpose_file(request)
-    _require_revision_target(session, current_user, request)
-    if request.purpose != "revision":
-        _require_ingest_collection(session, current_user, request.collection)
-        _validate_target_library(session, request.target_library_id)
-    manager = _manager(session)
-    try:
-        upload = manager.create(
-            UploadRequest(
-                purpose=request.purpose,
-                target_role=request.target_role,
-                target_id=request.target_id,
-                filename=request.filename,
-                media_type=request.media_type,
-                size_bytes=request.size_bytes,
-                client_sha256=request.sha256,
-                options={
-                    "model_name": request.model_name,
-                    "collection": request.collection,
-                    "tags": request.tags,
-                    "source_hash": request.source_hash,
-                    "target_library_id": request.target_library_id,
-                    "revision_label": request.revision_label,
-                    "revision_status": request.revision_status.value
-                    if request.revision_status
-                    else None,
-                    "revision_notes": request.revision_notes,
-                    "is_recommended": request.is_recommended,
-                    "_idempotency_key": idempotency_key,
-                },
-            ),
-            current_user,
+    with command_session(actor) as (session, current_user):
+        if request.size_bytes > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+        _validate_purpose_file(request)
+        _require_revision_target(session, current_user, request)
+        if request.purpose != "revision":
+            _require_ingest_collection(session, current_user, request.collection)
+            _validate_target_library(session, request.target_library_id)
+        manager = _manager(session)
+        try:
+            upload = manager.create(
+                UploadRequest(
+                    purpose=request.purpose,
+                    target_role=request.target_role,
+                    target_id=request.target_id,
+                    filename=request.filename,
+                    media_type=request.media_type,
+                    size_bytes=request.size_bytes,
+                    client_sha256=request.sha256,
+                    options={
+                        "model_name": request.model_name,
+                        "collection": request.collection,
+                        "tags": request.tags,
+                        "source_hash": request.source_hash,
+                        "target_library_id": request.target_library_id,
+                        "revision_label": request.revision_label,
+                        "revision_status": request.revision_status.value
+                        if request.revision_status
+                        else None,
+                        "revision_notes": request.revision_notes,
+                        "is_recommended": request.is_recommended,
+                        "_idempotency_key": idempotency_key,
+                    },
+                ),
+                current_user,
+            )
+        except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+            raise _translate_error(exc) from exc
+        audit.record(
+            session,
+            action="artifact_upload.create",
+            resource_type="artifact_upload",
+            diff={
+                "session_id": upload.id,
+                "purpose": upload.purpose,
+                "mode": upload.adapter_id,
+                "bytes": upload.declared_size,
+            },
         )
-    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
-        raise _translate_error(exc) from exc
-    audit.record(
-        session,
-        action="artifact_upload.create",
-        resource_type="artifact_upload",
-        diff={
-            "session_id": upload.id,
-            "purpose": upload.purpose,
-            "mode": upload.adapter_id,
-            "bytes": upload.declared_size,
-        },
-    )
-    return _upload_read(manager, upload)
+        return _upload_read(manager, upload)
 
 
 @router.get("/{session_id}", response_model=ArtifactUploadRead)
+@bounded_command
 def get_artifact_upload(
     session_id: str,
     response: Response,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadRead:
-    response.headers["Cache-Control"] = "no-store"
-    manager = _manager(session)
-    try:
-        return _upload_read(manager, manager.get(session_id, current_user))
-    except (ArtifactUploadError, NativeMultipartError) as exc:
-        raise _translate_error(exc) from exc
+    with command_session(actor) as (session, current_user):
+        response.headers["Cache-Control"] = "no-store"
+        manager = _manager(session)
+        try:
+            return _upload_read(manager, manager.get(session_id, current_user))
+        except (ArtifactUploadError, NativeMultipartError) as exc:
+            raise _translate_error(exc) from exc
 
 
 @router.get(
@@ -277,28 +278,29 @@ def get_artifact_upload(
     response_model=ArtifactUploadPlanRead,
     dependencies=[Depends(_plan_limit)],
 )
+@bounded_command
 def get_artifact_upload_plan(
     session_id: str,
     response: Response,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadPlanRead:
-    response.headers["Cache-Control"] = "no-store"
-    manager = _manager(session)
-    try:
-        upload = manager.get(session_id, current_user)
-        plan = manager.plan(session_id, current_user)
-    except ArtifactUploadError as exc:
-        raise _translate_error(exc) from exc
-    return ArtifactUploadPlanRead(
-        session_id=upload.id,
-        mode=cast(Literal["api_chunks", "native_parts", "simple"], plan.mode),
-        chunk_size=plan.chunk_size,
-        max_parallel=plan.max_parallel,
-        upload_path=plan.upload_path,
-        uploaded_parts=[_part_read(part) for part in manager.parts(upload)],
-        expires_at=upload.expires_at,
-    )
+    with command_session(actor) as (session, current_user):
+        response.headers["Cache-Control"] = "no-store"
+        manager = _manager(session)
+        try:
+            upload = manager.get(session_id, current_user)
+            plan = manager.plan(session_id, current_user)
+        except ArtifactUploadError as exc:
+            raise _translate_error(exc) from exc
+        return ArtifactUploadPlanRead(
+            session_id=upload.id,
+            mode=cast(Literal["api_chunks", "native_parts", "simple"], plan.mode),
+            chunk_size=plan.chunk_size,
+            max_parallel=plan.max_parallel,
+            upload_path=plan.upload_path,
+            uploaded_parts=[_part_read(part) for part in manager.parts(upload)],
+            expires_at=upload.expires_at,
+        )
 
 
 @router.post(
@@ -306,31 +308,32 @@ def get_artifact_upload_plan(
     response_model=ArtifactUploadNativePartInstruction,
     dependencies=[Depends(_native_part_limit)],
 )
+@bounded_command
 def sign_artifact_upload_part(
     session_id: str,
     part_number: int,
     body: ArtifactUploadNativePartSign,
     response: Response,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadNativePartInstruction:
-    response.headers["Cache-Control"] = "no-store"
-    manager = _manager(session)
-    try:
-        url = manager.sign_native_part(
-            session_id,
-            part_number=part_number,
-            checksum_sha256=body.checksum_sha256,
-            actor=current_user,
+    with command_session(actor) as (session, current_user):
+        response.headers["Cache-Control"] = "no-store"
+        manager = _manager(session)
+        try:
+            url = manager.sign_native_part(
+                session_id,
+                part_number=part_number,
+                checksum_sha256=body.checksum_sha256,
+                actor=current_user,
+            )
+        except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
+            raise _translate_error(exc) from exc
+        checksum = base64.b64encode(bytes.fromhex(body.checksum_sha256)).decode()
+        return ArtifactUploadNativePartInstruction(
+            url=url,
+            headers={"x-amz-checksum-sha256": checksum},
+            expires_at=utcnow() + timedelta(seconds=60),
         )
-    except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
-        raise _translate_error(exc) from exc
-    checksum = base64.b64encode(bytes.fromhex(body.checksum_sha256)).decode()
-    return ArtifactUploadNativePartInstruction(
-        url=url,
-        headers={"x-amz-checksum-sha256": checksum},
-        expires_at=utcnow() + timedelta(seconds=60),
-    )
 
 
 @router.post(
@@ -338,30 +341,31 @@ def sign_artifact_upload_part(
     response_model=ArtifactUploadChunkRead,
     dependencies=[Depends(_native_part_limit)],
 )
+@bounded_command
 def record_artifact_upload_part(
     session_id: str,
     part_number: int,
     body: ArtifactUploadNativePartReceipt,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadChunkRead:
-    manager = _manager(session)
-    try:
-        part = manager.record_native_part(
-            session_id,
-            part_number=part_number,
-            size_bytes=body.size_bytes,
-            checksum_sha256=body.checksum_sha256,
-            etag=body.etag,
-            actor=current_user,
+    with command_session(actor) as (session, current_user):
+        manager = _manager(session)
+        try:
+            part = manager.record_native_part(
+                session_id,
+                part_number=part_number,
+                size_bytes=body.size_bytes,
+                checksum_sha256=body.checksum_sha256,
+                etag=body.etag,
+                actor=current_user,
+            )
+            upload = manager.get(session_id, current_user)
+        except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
+            raise _translate_error(exc) from exc
+        return ArtifactUploadChunkRead(
+            session=_upload_read(manager, upload),
+            part=_part_read(part),
         )
-        upload = manager.get(session_id, current_user)
-    except (ArtifactUploadError, NativeMultipartError, ValueError) as exc:
-        raise _translate_error(exc) from exc
-    return ArtifactUploadChunkRead(
-        session=_upload_read(manager, upload),
-        part=_part_read(part),
-    )
 
 
 @router.put(
@@ -376,8 +380,7 @@ async def put_artifact_upload_chunk(
     offset: int = Query(ge=0),
     length: int = Query(gt=0, le=CHUNK_SIZE),
     sha256: str = Query(pattern=r"^[0-9a-fA-F]{64}$"),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadChunkRead:
     declared_length = request.headers.get("content-length")
     if declared_length is not None:
@@ -394,10 +397,9 @@ async def put_artifact_upload_chunk(
             raise HTTPException(status_code=413, detail="upload_chunk_too_large")
         payload.extend(chunk)
 
-    return await run_in_threadpool(
+    return await run_command(
         _record_received_chunk,
-        session,
-        current_user,
+        actor,
         session_id,
         index,
         offset,
@@ -408,8 +410,7 @@ async def put_artifact_upload_chunk(
 
 
 def _record_received_chunk(
-    session: Session,
-    current_user: User,
+    actor: CommandActor,
     session_id: str,
     index: int,
     offset: int,
@@ -417,26 +418,27 @@ def _record_received_chunk(
     sha256: str,
     payload: bytearray,
 ) -> ArtifactUploadChunkRead:
-    manager = _manager(session)
-    try:
-        part = manager.record_chunk(
-            session_id,
-            ChunkReceipt(
-                index=index,
-                offset=offset,
-                size_bytes=length,
-                sha256=sha256.lower(),
-            ),
-            bytes(payload),
-            current_user,
+    with command_session(actor) as (session, current_user):
+        manager = _manager(session)
+        try:
+            part = manager.record_chunk(
+                session_id,
+                ChunkReceipt(
+                    index=index,
+                    offset=offset,
+                    size_bytes=length,
+                    sha256=sha256.lower(),
+                ),
+                bytes(payload),
+                current_user,
+            )
+            upload = manager.get(session_id, current_user)
+        except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+            raise _translate_error(exc) from exc
+        return ArtifactUploadChunkRead(
+            session=_upload_read(manager, upload),
+            part=_part_read(part),
         )
-        upload = manager.get(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
-        raise _translate_error(exc) from exc
-    return ArtifactUploadChunkRead(
-        session=_upload_read(manager, upload),
-        part=_part_read(part),
-    )
 
 
 @router.post(
@@ -444,141 +446,145 @@ def _record_received_chunk(
     response_model=ArtifactUploadRead,
     dependencies=[Depends(_finalize_limit)],
 )
+@bounded_command
 def finalize_artifact_upload(
     session_id: str,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> ArtifactUploadRead:
-    manager = _manager(session)
-    try:
-        pending = manager.get(session_id, current_user)
-        if pending.state in {
-            ArtifactUploadState.INGESTING,
-            ArtifactUploadState.COMPLETED,
-        }:
-            return _upload_read(manager, pending)
-        options = json.loads(pending.request_json)
-        pending_request = ArtifactUploadCreate(
-            purpose=cast(UploadPurpose, pending.purpose),
-            target_role=pending.target_role,
-            target_id=pending.target_id,
-            filename=pending.filename,
-            media_type=pending.media_type,
-            size_bytes=pending.declared_size,
-            sha256=pending.client_sha256,
-            **options,
-        )
-        _require_revision_target(
-            session,
-            current_user,
-            pending_request,
-        )
-        if pending.purpose != "revision":
-            _require_ingest_collection(session, current_user, options.get("collection"))
-            _validate_target_library(session, options.get("target_library_id"))
-        upload, verified = manager.finalize(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
-        raise _translate_error(exc) from exc
-    assert current_user.id is not None
-    # This compare-and-set claim closes the small window between verification
-    # and job creation. A concurrent finalize loses here before it can create a
-    # second Job or lease for the same immutable staged object.
-    try:
-        manager.transition(upload, ArtifactUploadState.INGESTING)
-    except ArtifactUploadError as exc:
-        current = _completed_idempotent_race(
-            exc=exc,
-            manager=manager,
-            session=session,
-            session_id=session_id,
-            current_user=current_user,
-            accepted_states={
+    with command_session(actor) as (session, current_user):
+        manager = _manager(session)
+        try:
+            pending = manager.get(session_id, current_user)
+            if pending.state in {
                 ArtifactUploadState.INGESTING,
                 ArtifactUploadState.COMPLETED,
-            },
-        )
-        if current is not None:
-            return _upload_read(manager, current)
-        raise _translate_error(exc) from exc
-    try:
-        job_id = uuid.uuid4().hex
-        work_service.request(
-            session,
-            definition=JobKind.INGESTION_ARTIFACT_UPLOAD,
-            subject_key=upload_handoff.subject_key(upload.id),
-            owner_user_id=current_user.id,
-            job_id=job_id,
-        )
-        staging_leases.create_job_lease(
-            session,
-            job_id=job_id,
-            owner_user_id=current_user.id,
-            path=verified.materialize(),
-            size_bytes=verified.size_bytes,
-            sha256=verified.sha256,
-        )
-        # One commit records the queued Job, its lease and the session's link.
-        manager.transition(upload, ArtifactUploadState.INGESTING, job_id=job_id)
-    except Exception as exc:
-        session.rollback()
-        manager.transition(
-            upload,
-            ArtifactUploadState.FAILED,
-            error_code="artifact_upload_ingestion_claim_failed",
-            retryable=True,
-        )
-        if isinstance(exc, staging_leases.StagingCapacityExceeded):
-            raise HTTPException(
-                status_code=507, detail="staging_capacity_exceeded"
-            ) from exc
-        raise
-    audit.record(
-        session,
-        action="artifact_upload.finalize",
-        resource_type="artifact_upload",
-        diff={
-            "session_id": upload.id,
-            "purpose": upload.purpose,
-            "mode": upload.adapter_id,
-            "bytes": verified.size_bytes,
-            "job_id": job_id,
-        },
-    )
-    nudge(JobKind.INGESTION_ARTIFACT_UPLOAD)
-    return _upload_read(manager, upload)
-
-
-@router.delete("/{session_id}", response_model=ArtifactUploadRead)
-def abort_artifact_upload(
-    session_id: str,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
-) -> ArtifactUploadRead:
-    manager = _manager(session)
-    try:
-        upload = manager.abort(session_id, current_user)
-    except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
-        if isinstance(exc, ArtifactUploadError):
+            }:
+                return _upload_read(manager, pending)
+            options = json.loads(pending.request_json)
+            pending_request = ArtifactUploadCreate(
+                purpose=cast(UploadPurpose, pending.purpose),
+                target_role=pending.target_role,
+                target_id=pending.target_id,
+                filename=pending.filename,
+                media_type=pending.media_type,
+                size_bytes=pending.declared_size,
+                sha256=pending.client_sha256,
+                **options,
+            )
+            _require_revision_target(
+                session,
+                current_user,
+                pending_request,
+            )
+            if pending.purpose != "revision":
+                _require_ingest_collection(
+                    session, current_user, options.get("collection")
+                )
+                _validate_target_library(session, options.get("target_library_id"))
+            upload, verified = manager.finalize(session_id, current_user)
+        except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+            raise _translate_error(exc) from exc
+        assert current_user.id is not None
+        # This compare-and-set claim closes the small window between verification
+        # and job creation. A concurrent finalize loses here before it can create a
+        # second Job or lease for the same immutable staged object.
+        try:
+            manager.transition(upload, ArtifactUploadState.INGESTING)
+        except ArtifactUploadError as exc:
             current = _completed_idempotent_race(
                 exc=exc,
                 manager=manager,
                 session=session,
                 session_id=session_id,
                 current_user=current_user,
-                accepted_states={ArtifactUploadState.ABORTED},
+                accepted_states={
+                    ArtifactUploadState.INGESTING,
+                    ArtifactUploadState.COMPLETED,
+                },
             )
             if current is not None:
                 return _upload_read(manager, current)
-        raise _translate_error(exc) from exc
-    audit.record(
-        session,
-        action="artifact_upload.abort",
-        resource_type="artifact_upload",
-        diff={
-            "session_id": upload.id,
-            "purpose": upload.purpose,
-            "mode": upload.adapter_id,
-            "bytes": upload.received_bytes,
-        },
-    )
-    return _upload_read(manager, upload)
+            raise _translate_error(exc) from exc
+        try:
+            job_id = uuid.uuid4().hex
+            work_service.request(
+                session,
+                definition=JobKind.INGESTION_ARTIFACT_UPLOAD,
+                subject_key=upload_handoff.subject_key(upload.id),
+                owner_user_id=current_user.id,
+                job_id=job_id,
+            )
+            staging_leases.create_job_lease(
+                session,
+                job_id=job_id,
+                owner_user_id=current_user.id,
+                path=verified.materialize(),
+                size_bytes=verified.size_bytes,
+                sha256=verified.sha256,
+            )
+            # One commit records the queued Job, its lease and the session's link.
+            manager.transition(upload, ArtifactUploadState.INGESTING, job_id=job_id)
+        except Exception as exc:
+            session.rollback()
+            manager.transition(
+                upload,
+                ArtifactUploadState.FAILED,
+                error_code="artifact_upload_ingestion_claim_failed",
+                retryable=True,
+            )
+            if isinstance(exc, staging_leases.StagingCapacityExceeded):
+                raise HTTPException(
+                    status_code=507, detail="staging_capacity_exceeded"
+                ) from exc
+            raise
+        audit.record(
+            session,
+            action="artifact_upload.finalize",
+            resource_type="artifact_upload",
+            diff={
+                "session_id": upload.id,
+                "purpose": upload.purpose,
+                "mode": upload.adapter_id,
+                "bytes": verified.size_bytes,
+                "job_id": job_id,
+            },
+        )
+        nudge(JobKind.INGESTION_ARTIFACT_UPLOAD)
+        return _upload_read(manager, upload)
+
+
+@router.delete("/{session_id}", response_model=ArtifactUploadRead)
+@bounded_command
+def abort_artifact_upload(
+    session_id: str,
+    actor: CommandActor = Depends(require_command_user),
+) -> ArtifactUploadRead:
+    with command_session(actor) as (session, current_user):
+        manager = _manager(session)
+        try:
+            upload = manager.abort(session_id, current_user)
+        except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+            if isinstance(exc, ArtifactUploadError):
+                current = _completed_idempotent_race(
+                    exc=exc,
+                    manager=manager,
+                    session=session,
+                    session_id=session_id,
+                    current_user=current_user,
+                    accepted_states={ArtifactUploadState.ABORTED},
+                )
+                if current is not None:
+                    return _upload_read(manager, current)
+            raise _translate_error(exc) from exc
+        audit.record(
+            session,
+            action="artifact_upload.abort",
+            resource_type="artifact_upload",
+            diff={
+                "session_id": upload.id,
+                "purpose": upload.purpose,
+                "mode": upload.adapter_id,
+                "bytes": upload.received_bytes,
+            },
+        )
+        return _upload_read(manager, upload)

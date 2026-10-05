@@ -16,10 +16,12 @@ rather than handed out as a URL, and its ETag changes when the image does.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -35,7 +37,9 @@ from app.db.models import (
     ModelSourceCover,
     ProvenanceCapture,
 )
+from app.db.session import get_session_factory, override_session_factory
 from tests.factories import build_collection, build_model, grant_collection_role
+from tests.fakes.thread_sessions import ThreadBoundSessionFactory
 
 SECRET_IN_SNAPSHOT = "must-not-be-returned"
 
@@ -697,3 +701,65 @@ class TestDeleteModelSourceCover:
         self, client: TestClient, uploaded_cover: str
     ) -> None:
         assert client.delete(uploaded_cover).status_code == 401
+
+
+class TestCoverCommandOwnership:
+    def test_upload_uses_thread_owned_sessions(
+        self,
+        client: TestClient,
+        auth_headers,
+        cover_url: str,
+        db_session: Session,
+    ) -> None:
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            response = client.put(
+                cover_url,
+                headers=auth_headers,
+                files={"file": ("owned.png", _png(), "image/png")},
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["content_type"] == "image/webp"
+            assert factory.opened_count >= 2
+            assert factory.active_count == 0
+        finally:
+            override_session_factory(previous)
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_publication(
+        self,
+        app,
+        auth_headers,
+        cover_url,
+        monkeypatch,
+    ):
+        from app.api.v1 import models as model_api
+
+        loop = asyncio.get_running_loop()
+        observations = []
+        publish = model_api.source_covers.put
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+
+            def delayed_publication(*args, **kwargs):
+                health = asyncio.run_coroutine_threadsafe(
+                    client.get("/api/v1/health"), loop
+                )
+                try:
+                    observations.append(health.result(timeout=2).status_code)
+                except TimeoutError:
+                    health.cancel()
+                    observations.append(None)
+                return publish(*args, **kwargs)
+
+            monkeypatch.setattr(model_api.source_covers, "put", delayed_publication)
+            response = await client.put(
+                cover_url,
+                headers=auth_headers,
+                files={"file": ("owned.png", _png(), "image/png")},
+            )
+        assert response.status_code == 200, response.text
+        assert observations == [200]

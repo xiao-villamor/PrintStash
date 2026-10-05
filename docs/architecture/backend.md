@@ -8,6 +8,26 @@ HTTP endpoint or persisted archive format.
 
 ## Ownership
 
+File acceptance crosses the HTTP async boundary through
+`api.command_execution`. A bounded command creates, uses and closes its SQL
+Session on one worker thread and builds its response before closing. Authentication
+returns an immutable `api.command_actor.CommandActor`; the command rechecks
+credential and current user authority inside its own Session. ORM rows and Sessions
+never cross a streamed body wait. Capture spool contexts retain only an inode
+receipt and an open descriptor.
+
+`VAULT_API_COMMAND_CONCURRENCY` bounds these commands separately from FastAPI
+ordinary workers (default 8, range 1–128 per API process). Slow SQL, storage or
+engine hints consume this capacity while lightweight requests can still progress.
+Queued cancellation starts no write; an admitted callable finishes before its
+cancellation returns. An awaited AnyIO task group joins the command worker even
+when the server cancels its native request task, preserving capacity and exact
+callable failures. This is awaited request execution; background processing
+continues through Job Definitions after durable intent is committed.
+
+The [request command matrix](../testing/api-command-execution.md) covers real
+Session ownership, streamed body waiting, credential changes and responsiveness.
+
 | Owner | Responsibilities | Public operations and contracts |
 | --- | --- | --- |
 | `library` | Models, Artifacts, G-code Revisions, taxonomy, multipart sets, provenance and trash | `commands`, `revisions`, `model_views.{listing,pagination,detail,facets,exports,statistics,trash}`, `multipart_models`, `part_options`, `provenance`, `source_covers`, `taxonomy`, `saved_views`, `trash` |

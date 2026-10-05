@@ -18,23 +18,32 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from contextlib import contextmanager
+from threading import get_ident
 
+import anyio
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlmodel import Session, select
 from starlette.requests import Request
 
+from app.api.command_actor import CommandActor
 from app.core import config
 from app.core.config import _overlay
+from app.core.time import utcnow
 from app.db.models import (
+    BrowserDevice,
     CaptureUploadSlot,
     CaptureUploadSlotState,
     InboxItem,
     InboxItemState,
     StagingLease,
+    User,
 )
+from app.db.session import get_session_factory, override_session_factory
 from app.modules.ingestion import inbox
+from tests.fakes.thread_sessions import ThreadBoundSessionFactory
 from tests.integration.api.v1.inbox.conftest import CANONICAL_URL, capture_source
 
 BODY = b"slot-owned"
@@ -92,7 +101,7 @@ def _put_request(slot_id: str, receive, *, content_length: int | None) -> Reques
     )
 
 
-def _slot_owner(session: Session, slot_id: str):
+def _slot_actor(session: Session, slot_id: str):
     """The user a slot belongs to, so the route can be called without the router."""
     from app.db.models import User
 
@@ -102,7 +111,7 @@ def _slot_owner(session: Session, slot_id: str):
     assert item is not None
     owner = session.get(User, item.owner_user_id)
     assert owner is not None
-    return owner
+    return CommandActor.from_user(owner)
 
 
 @pytest.fixture
@@ -409,8 +418,7 @@ class TestPutCaptureUploadSlot:
                 _put_request(
                     opened[0]["id"], _receives(b"slot-", b"owned"), content_length=None
                 ),
-                current_user=_slot_owner(db_session, opened[0]["id"]),
-                session=db_session,
+                actor=_slot_actor(db_session, opened[0]["id"]),
             )
         )
 
@@ -438,8 +446,7 @@ class TestPutCaptureUploadSlot:
                         _receives(b"slot-", b"owned"),
                         content_length=None,
                     ),
-                    current_user=_slot_owner(db_session, opened[0]["id"]),
-                    session=db_session,
+                    actor=_slot_actor(db_session, opened[0]["id"]),
                 )
             )
 
@@ -503,8 +510,7 @@ class TestPutCaptureUploadSlot:
                 inbox_api.put_capture_upload_slot(
                     opened[0]["id"],
                     _put_request(opened[0]["id"], _receives(BODY), content_length=None),
-                    current_user=_slot_owner(db_session, opened[0]["id"]),
-                    session=db_session,
+                    actor=_slot_actor(db_session, opened[0]["id"]),
                 )
             )
 
@@ -531,8 +537,7 @@ class TestPutCaptureUploadSlot:
                 inbox_api.put_capture_upload_slot(
                     opened[0]["id"],
                     _put_request(opened[0]["id"], _receives(BODY), content_length=None),
-                    current_user=_slot_owner(db_session, opened[0]["id"]),
-                    session=db_session,
+                    actor=_slot_actor(db_session, opened[0]["id"]),
                 )
             )
 
@@ -569,8 +574,7 @@ class TestPutCaptureUploadSlot:
             inbox_api.put_capture_upload_slot(
                 opened[0]["id"],
                 _put_request(opened[0]["id"], _receives(BODY), content_length=None),
-                current_user=_slot_owner(db_session, opened[0]["id"]),
-                session=db_session,
+                actor=_slot_actor(db_session, opened[0]["id"]),
             )
         )
 
@@ -691,7 +695,7 @@ class TestCaptureUploadExecution:
 
         _, opened = slots(user_headers("slot-responsive-sql"))
         slot_id = opened[0]["id"]
-        owner = _slot_owner(db_session, slot_id)
+        owner = _slot_actor(db_session, slot_id)
         wait_for_loop, observations = loop_handshake
         engine = db_session.get_bind()
 
@@ -704,8 +708,7 @@ class TestCaptureUploadExecution:
             uploaded = await inbox_api.put_capture_upload_slot(
                 slot_id,
                 _put_request(slot_id, _receives(BODY), content_length=None),
-                current_user=owner,
-                session=db_session,
+                actor=owner,
             )
         finally:
             event.remove(engine, "before_cursor_execute", delayed_query)
@@ -744,8 +747,7 @@ class TestCaptureUploadExecution:
         uploaded = await inbox_api.put_capture_upload_slot(
             slot_id,
             _put_request(slot_id, _receives(b"slot-", b"owned"), content_length=None),
-            current_user=_slot_owner(db_session, slot_id),
-            session=db_session,
+            actor=_slot_actor(db_session, slot_id),
         )
         slot = db_session.get(CaptureUploadSlot, slot_id)
         assert get_backend().read_bytes(slot.storage_key) == BODY
@@ -793,8 +795,7 @@ class TestCaptureUploadExecution:
         uploaded = await inbox_api.put_capture_upload_slot(
             slot_id,
             _put_request(slot_id, receive, content_length=None),
-            current_user=_slot_owner(db_session, slot_id),
-            session=db_session,
+            actor=_slot_actor(db_session, slot_id),
         )
         assert uploaded.state == CaptureUploadSlotState.UPLOADED
         assert written == BODY
@@ -824,8 +825,7 @@ class TestCaptureUploadExecution:
             await inbox_api.put_capture_upload_slot(
                 slot_id,
                 _put_request(slot_id, receive, content_length=None),
-                current_user=_slot_owner(db_session, slot_id),
-                session=db_session,
+                actor=_slot_actor(db_session, slot_id),
             )
         db_session.expire_all()
         slot = db_session.get(CaptureUploadSlot, slot_id)
@@ -847,7 +847,7 @@ class TestCaptureUploadExecution:
 
         _, opened = slots(user_headers("slot-idle-capacity"))
         slot_id = opened[0]["id"]
-        owner = _slot_owner(db_session, slot_id)
+        owner = _slot_actor(db_session, slot_id)
         limiter = to_thread.current_default_thread_limiter()
         before = limiter.total_tokens
 
@@ -865,8 +865,7 @@ class TestCaptureUploadExecution:
             uploaded = await inbox_api.put_capture_upload_slot(
                 slot_id,
                 _put_request(slot_id, receive, content_length=None),
-                current_user=owner,
-                session=db_session,
+                actor=owner,
             )
         finally:
             limiter.total_tokens = before
@@ -884,7 +883,7 @@ class TestCaptureUploadExecution:
 
         _, opened = slots(user_headers("slot-cancelled-body"))
         slot_id = opened[0]["id"]
-        owner = _slot_owner(db_session, slot_id)
+        owner = _slot_actor(db_session, slot_id)
         wait_for_loop, observations = loop_handshake
         original_open = inbox.staging_leases.open_capture_slot_staging
         contexts = []
@@ -922,8 +921,7 @@ class TestCaptureUploadExecution:
             await inbox_api.put_capture_upload_slot(
                 slot_id,
                 _put_request(slot_id, receive, content_length=None),
-                current_user=owner,
-                session=db_session,
+                actor=owner,
             )
         closed_before_cleanup = targets[0].closed
         exit_progress = list(observations)
@@ -942,3 +940,351 @@ class TestCaptureUploadExecution:
         assert db_session.exec(
             select(StagingLease).where(StagingLease.capture_upload_slot_id == slot_id)
         ).one()
+
+
+@pytest.fixture
+def capture_command_sessions(db_session):
+    previous = get_session_factory()
+    factory = ThreadBoundSessionFactory(db_session.get_bind())
+    override_session_factory(factory)
+    try:
+        yield factory
+    finally:
+        override_session_factory(previous)
+
+
+async def _asgi_capture_upload(app, headers, slot_id, body):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        return await client.put(
+            f"/api/v1/inbox/capture-upload-slots/{slot_id}",
+            headers={**headers, **OCTET},
+            content=body,
+        )
+
+
+class TestCaptureCommandOwnership:
+    @pytest.mark.asyncio
+    async def test_keeps_capture_lifecycle_sessions_owned(
+        self, app, slots, make_user, headers_for, capture_command_sessions
+    ):
+        owner = make_user("capture-owned-lifecycle", superuser=True)
+        headers = headers_for(owner)
+        item_id, opened = slots(headers)
+        response = await _asgi_capture_upload(app, headers, opened[0]["id"], BODY)
+        assert response.status_code == 200, response.text
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            finalized = await client.post(
+                f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
+            )
+            assert finalized.status_code == 200, finalized.text
+            assert finalized.json()["state"] == "review"
+            imported = await client.post(
+                f"/api/v1/inbox/{item_id}/import",
+                headers=headers,
+                json={"selected_ids": []},
+            )
+        assert imported.status_code == 200, imported.text
+        assert imported.json()["state"] == "importing"
+        assert capture_command_sessions.active_count == 0
+        assert capture_command_sessions.opened_count >= 6
+
+    @pytest.mark.asyncio
+    async def test_body_wait_holds_no_session(
+        self, app, slots, user_headers, capture_command_sessions
+    ):
+        from fastapi.concurrency import run_in_threadpool
+
+        headers = user_headers("capture-no-idle-session")
+        _, opened = slots(headers)
+        slot_id = opened[0]["id"]
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        previous_tokens = limiter.total_tokens
+        loop_thread = get_ident()
+
+        async def body():
+            assert capture_command_sessions.active_count == 0
+            assert (
+                await asyncio.wait_for(
+                    run_in_threadpool(lambda: "worker-progressed"), timeout=1
+                )
+                == "worker-progressed"
+            )
+            yield BODY
+
+        limiter.total_tokens = 1
+        try:
+            response = await _asgi_capture_upload(app, headers, slot_id, body())
+        finally:
+            limiter.total_tokens = previous_tokens
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "uploaded"
+        assert capture_command_sessions.active_count == 0
+        assert capture_command_sessions.opened_count >= 4
+        assert loop_thread not in capture_command_sessions.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_loop_responsive_during_sql_commands(
+        self,
+        app,
+        db_session,
+        slots,
+        user_headers,
+        loop_handshake,
+        capture_command_sessions,
+    ):
+        headers = user_headers("capture-worker-sql")
+        _, opened = slots(headers)
+        wait_for_loop, observations = loop_handshake
+        engine = db_session.get_bind()
+
+        def delayed_query(connection, cursor, statement, parameters, context, many):
+            if "capture_upload_slots" in statement.lower():
+                wait_for_loop()
+
+        event.listen(engine, "before_cursor_execute", delayed_query)
+        try:
+            response = await _asgi_capture_upload(app, headers, opened[0]["id"], BODY)
+        finally:
+            event.remove(engine, "before_cursor_execute", delayed_query)
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "uploaded"
+        assert observations
+        assert all(observations)
+        assert capture_command_sessions.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_keeps_loop_responsive_during_spool_writes(
+        self,
+        app,
+        db_session,
+        slots,
+        user_headers,
+        loop_handshake,
+        capture_command_sessions,
+        monkeypatch,
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        headers = user_headers("capture-worker-spool")
+        _, opened = slots(headers)
+        slot_id = opened[0]["id"]
+        wait_for_loop, observations = loop_handshake
+        original_open = inbox.staging_leases.open_capture_slot_staging
+
+        @contextmanager
+        def delayed_open(*args, **kwargs):
+            with original_open(*args, **kwargs) as target:
+
+                class Writer:
+                    def write(self, chunk):
+                        if chunk:
+                            wait_for_loop()
+                        return target.write(chunk)
+
+                yield Writer()
+
+        async def body():
+            yield b"slot-"
+            yield b"owned"
+
+        monkeypatch.setattr(
+            inbox.staging_leases, "open_capture_slot_staging", delayed_open
+        )
+        response = await _asgi_capture_upload(app, headers, slot_id, body())
+        db_session.expire_all()
+        slot = db_session.get(CaptureUploadSlot, slot_id)
+        assert slot is not None
+        assert get_backend().read_bytes(slot.storage_key) == BODY
+        assert response.status_code == 200, response.text
+        assert observations == [True, True]
+        assert capture_command_sessions.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_revalidates_user_before_publication(
+        self, app, db_session, slots, user_headers, capture_command_sessions
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        headers = user_headers("capture-auth-changed")
+        _, opened = slots(headers)
+        slot_id = opened[0]["id"]
+        owner_id = _slot_actor(db_session, slot_id).user_id
+
+        async def body():
+            assert capture_command_sessions.active_count == 0
+            owner = db_session.get(User, owner_id)
+            assert owner is not None
+            owner.auth_version += 1
+            db_session.add(owner)
+            db_session.commit()
+            yield BODY
+
+        response = await _asgi_capture_upload(app, headers, slot_id, body())
+        assert response.status_code == 401, response.text
+        assert response.json()["detail"] == "not_authenticated"
+        db_session.expire_all()
+        slot = db_session.get(CaptureUploadSlot, slot_id)
+        assert slot is not None and slot.state is CaptureUploadSlotState.PENDING
+        assert not get_backend().exists(slot.storage_key)
+        assert not inbox.staging_leases.capture_slot_staging_path(slot_id).exists()
+        assert db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot_id)
+        ).one()
+        assert capture_command_sessions.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_revalidates_browser_device_before_publication(
+        self, app, client, db_session, slots, user_headers, capture_command_sessions
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        headers = user_headers("capture-device-revoked")
+        paired = client.post("/api/v1/browser-pairings", headers=headers)
+        assert paired.status_code == 201, paired.text
+        claimed = client.post(
+            "/api/v1/browser-pairings/claim",
+            json={"code": paired.json()["code"], "name": "Capture ownership browser"},
+        )
+        assert claimed.status_code == 200, claimed.text
+        device_headers = {"Authorization": f"Bearer {claimed.json()['credential']}"}
+        _, opened = slots(device_headers)
+        slot_id = opened[0]["id"]
+        device_id = db_session.exec(select(BrowserDevice)).one().id
+
+        async def body():
+            assert capture_command_sessions.active_count == 0
+            device = db_session.get(BrowserDevice, device_id)
+            assert device is not None
+            device.revoked_at = utcnow()
+            db_session.add(device)
+            db_session.commit()
+            yield BODY
+
+        response = await _asgi_capture_upload(app, device_headers, slot_id, body())
+        assert response.status_code == 401, response.text
+        assert response.json()["detail"] == "invalid_browser_credential"
+        db_session.expire_all()
+        slot = db_session.get(CaptureUploadSlot, slot_id)
+        assert slot is not None and slot.state is CaptureUploadSlotState.PENDING
+        assert not get_backend().exists(slot.storage_key)
+        assert not inbox.staging_leases.capture_slot_staging_path(slot_id).exists()
+        assert capture_command_sessions.active_count == 0
+
+    @pytest.mark.asyncio
+    async def test_cleans_owned_spool_after_asgi_cancellation(
+        self,
+        app,
+        db_session,
+        slots,
+        user_headers,
+        capture_command_sessions,
+        monkeypatch,
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        headers = user_headers("capture-asgi-cancel")
+        _, opened = slots(headers)
+        slot_id = opened[0]["id"]
+        original_open = inbox.staging_leases.open_capture_slot_staging
+        targets = []
+
+        @contextmanager
+        def observed_open(*args, **kwargs):
+            with original_open(*args, **kwargs) as target:
+                targets.append(target)
+                yield target
+
+        async def body():
+            yield b"slot-"
+            assert capture_command_sessions.active_count == 0
+            scope.cancel()
+            await anyio.sleep(0)
+            raise AssertionError("cancelled network body must not continue")
+
+        monkeypatch.setattr(
+            inbox.staging_leases, "open_capture_slot_staging", observed_open
+        )
+        with anyio.CancelScope() as scope:
+            await _asgi_capture_upload(app, headers, slot_id, body())
+        assert scope.cancelled_caught
+        assert len(targets) == 1 and targets[0].closed
+        assert capture_command_sessions.active_count == 0
+        db_session.expire_all()
+        slot = db_session.get(CaptureUploadSlot, slot_id)
+        assert slot is not None and slot.state is CaptureUploadSlotState.PENDING
+        assert not get_backend().exists(slot.storage_key)
+        assert not inbox.staging_leases.capture_slot_staging_path(slot_id).exists()
+        assert db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot_id)
+        ).one()
+
+    @pytest.mark.asyncio
+    async def test_closes_spool_after_native_acquisition_cancellation(
+        self,
+        app,
+        db_session,
+        slots,
+        user_headers,
+        capture_command_sessions,
+        monkeypatch,
+    ):
+        from contextlib import ExitStack, suppress
+        from threading import Event
+
+        from app.api.v1 import inbox as inbox_api
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        headers = user_headers("capture-native-open-cancel")
+        _, slots_opened = slots(headers)
+        slot_id = slots_opened[0]["id"]
+        opened = Event()
+        release = Event()
+        retained = []
+        cleanup = ExitStack()
+        original = inbox_api._open_capture_spool
+
+        def observed_open(slot):
+            context, target = original(slot)
+            retained.append((context, target))
+            cleanup.callback(target.close)
+            opened.set()
+            assert release.wait(timeout=5), "test must release the owned worker"
+            return context, target
+
+        monkeypatch.setattr(inbox_api, "_open_capture_spool", observed_open)
+        request = asyncio.create_task(_asgi_capture_upload(app, headers, slot_id, BODY))
+        try:
+            assert await anyio.to_thread.run_sync(opened.wait, 5)
+            assert capture_command_sessions.active_count == 0
+            request.cancel()
+            await asyncio.sleep(0)
+            assert not request.done(), "cancellation must join the owned worker"
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(request, timeout=5)
+
+            assert len(retained) == 1
+            assert retained[0][1].closed, (
+                "acquired descriptor must close before cancellation returns"
+            )
+            assert capture_command_sessions.active_count == 0
+            db_session.expire_all()
+            slot = db_session.get(CaptureUploadSlot, slot_id)
+            assert slot is not None and slot.state is CaptureUploadSlotState.PENDING
+            assert not get_backend().exists(slot.storage_key)
+            assert not inbox.staging_leases.capture_slot_staging_path(slot_id).exists()
+            assert db_session.exec(
+                select(StagingLease).where(
+                    StagingLease.capture_upload_slot_id == slot_id
+                )
+            ).one()
+        finally:
+            release.set()
+            request.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait_for(request, timeout=5)
+            cleanup.close()

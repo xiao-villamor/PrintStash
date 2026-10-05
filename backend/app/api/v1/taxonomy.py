@@ -29,6 +29,8 @@ from sqlalchemy import select as sa_select
 from sqlmodel import Session, delete, select
 
 from app.api.artifact_responses import serve_stored_file
+from app.api.command_actor import CommandActor, command_session, require_command_writer
+from app.api.command_execution import bounded_command
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_user
@@ -489,65 +491,64 @@ def set_collection_readme(
     "/collections/{collection_id}/images",
     response_model=CollectionImageUpload,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_auth)],
     summary="Upload an image for a collection's readme",
 )
-async def upload_collection_image(
+@bounded_command
+def upload_collection_image(
     collection_id: int,
     file: UploadFile = FileParam(..., description="A PNG/JPEG/GIF/WebP image"),
-    current_user: User = Depends(require_user),
-    _: None = Depends(require_auth),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> CollectionImageUpload:
-    col = get_or_404(session, Collection, collection_id, "collection_not_found")
-    rbac.require_collection_role(session, current_user, col.id, CollectionRole.EDIT)
+    with command_session(actor) as (session, current_user):
+        col = get_or_404(session, Collection, collection_id, "collection_not_found")
+        rbac.require_collection_role(session, current_user, col.id, CollectionRole.EDIT)
 
-    ext = (
-        ("." + (file.filename or "").rsplit(".", 1)[-1].lower())
-        if "." in (file.filename or "")
-        else ""
-    )
-    media_type = _IMAGE_TYPES.get(ext)
-    if media_type is None:
-        raise HTTPException(status_code=400, detail="unsupported_image_type")
-
-    # Readme images are read fully into memory to hash — bound that with a 10MB
-    # cap (well under the model-upload cap). Check the declared size first so an
-    # oversized upload is rejected before it's buffered.
-    image_cap = min(10 * 1024 * 1024, settings.max_upload_bytes)
-    if file.size is not None and file.size > image_cap:
-        raise HTTPException(status_code=413, detail="upload_too_large")
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="empty_file")
-    if len(data) > image_cap:
-        raise HTTPException(status_code=413, detail="upload_too_large")
-
-    name = f"{hashlib.sha256(data).hexdigest()}{'.jpg' if ext == '.jpeg' else ext}"
-    backend = get_backend()
-    key = backend.collection_image_key(col.id, name)
-    receipt = None
-    try:
-        receipt = publish_bytes(
-            session,
-            backend,
-            key,
-            data,
-            object_kind="collection_image",
+        ext = (
+            ("." + (file.filename or "").rsplit(".", 1)[-1].lower())
+            if "." in (file.filename or "")
+            else ""
         )
-        session.commit()
-    except StorageCollisionError as exc:
-        session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="storage_destination_exists",
-        ) from exc
-    except Exception:
-        session.rollback()
-        if receipt is not None:
-            backend.rollback_create(receipt)
-        raise
-    return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
+        media_type = _IMAGE_TYPES.get(ext)
+        if media_type is None:
+            raise HTTPException(status_code=400, detail="unsupported_image_type")
+
+        # Readme images are read fully into memory to hash — bound that with a 10MB
+        # cap (well under the model-upload cap). Check the declared size first so an
+        # oversized upload is rejected before it's buffered.
+        image_cap = min(10 * 1024 * 1024, settings.max_upload_bytes)
+        if file.size is not None and file.size > image_cap:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+        data = file.file.read(image_cap + 1)
+        if not data:
+            raise HTTPException(status_code=400, detail="empty_file")
+        if len(data) > image_cap:
+            raise HTTPException(status_code=413, detail="upload_too_large")
+
+        name = f"{hashlib.sha256(data).hexdigest()}{'.jpg' if ext == '.jpeg' else ext}"
+        backend = get_backend()
+        key = backend.collection_image_key(col.id, name)
+        receipt = None
+        try:
+            receipt = publish_bytes(
+                session,
+                backend,
+                key,
+                data,
+                object_kind="collection_image",
+            )
+            session.commit()
+        except StorageCollisionError as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="storage_destination_exists",
+            ) from exc
+        except Exception:
+            session.rollback()
+            if receipt is not None:
+                backend.rollback_create(receipt)
+            raise
+        return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
 
 
 @router.get(

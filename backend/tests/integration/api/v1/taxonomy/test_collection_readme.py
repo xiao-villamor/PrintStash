@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+from app.api.v1 import taxonomy as taxonomy_router
 from app.core.config import _overlay
 from app.db.models import CollectionRole, User
 from app.modules.library import taxonomy
@@ -208,3 +212,66 @@ class TestHasReadme:
 
         assert renamed.status_code == 200, renamed.text
         assert renamed.json()["has_readme"] is True
+
+
+class TestCollectionImageExecution:
+    @pytest.mark.asyncio
+    async def test_owns_upload_sessions(
+        self, app, db_session, auth_headers, make_collection
+    ):
+        from threading import get_ident
+
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        collection = make_collection("Image boundary")
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    f"/api/v1/collections/{collection.id}/images",
+                    headers=auth_headers,
+                    files={"file": ("pic.png", _PNG, "image/png")},
+                )
+        finally:
+            override_session_factory(previous)
+        assert response.status_code == 201, response.text
+        assert factory.opened_count > 0
+        assert factory.active_count == 0
+        assert get_ident() not in factory.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_publication(
+        self, app, auth_headers, make_collection, monkeypatch
+    ):
+        collection = make_collection("Image boundary")
+        loop = asyncio.get_running_loop()
+        observations = []
+        publish = taxonomy_router.publish_bytes
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+
+            def delayed_publication(*args, **kwargs):
+                health = asyncio.run_coroutine_threadsafe(
+                    client.get("/api/v1/health"), loop
+                )
+                try:
+                    observations.append(health.result(timeout=2).status_code)
+                except TimeoutError:
+                    health.cancel()
+                    observations.append(None)
+                return publish(*args, **kwargs)
+
+            monkeypatch.setattr(taxonomy_router, "publish_bytes", delayed_publication)
+            response = await client.post(
+                f"/api/v1/collections/{collection.id}/images",
+                headers=auth_headers,
+                files={"file": ("pic.png", _PNG, "image/png")},
+            )
+        assert response.status_code == 201, response.text
+        assert observations == [200]

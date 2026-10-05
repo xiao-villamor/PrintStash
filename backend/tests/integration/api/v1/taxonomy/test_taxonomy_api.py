@@ -14,6 +14,7 @@ from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.api.command_actor import CommandActor
 from app.api.v1 import taxonomy as taxonomy_router
 from app.core.config import _overlay
 from app.db.models import CollectionRole, ExternalLibraryTombstone, MultipartModel
@@ -485,8 +486,7 @@ class TestCollectionImages:
             await taxonomy_router.upload_collection_image(
                 collection_id=col.id,
                 file=oversized,
-                current_user=user,
-                session=db_session,
+                actor=CommandActor.from_user(user),
             )
 
         assert raised.value.status_code == 413

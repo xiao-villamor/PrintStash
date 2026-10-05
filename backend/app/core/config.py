@@ -196,6 +196,8 @@ class Settings(BaseSettings):
     # Optional operator-supplied base URL for notification navigation links.
     public_url: str = ""
 
+    # Keep slow file commands and engine hints off the general request limiter.
+    api_command_concurrency: int = Field(default=8, ge=1, le=128)
     max_upload_mb: int = Field(default=512, gt=0)
     portable_manifest_max_mb: int = Field(default=128, gt=0)
     staging_max_pending: int = Field(default=32, gt=0)

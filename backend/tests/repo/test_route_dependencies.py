@@ -14,6 +14,7 @@ import pytest
 from fastapi import APIRouter, HTTPException
 from fastapi.routing import APIRoute
 
+from app.api.command_actor import require_capture_actor, require_command_writer
 from app.api.v1 import backup, files, inbox, jobs, models, provider_connections, work
 from app.core.browser_device_auth import require_user_or_browser_import_user
 from app.core.security import require_auth
@@ -40,7 +41,12 @@ def _has_dependency(route: APIRoute, dependency: object) -> bool:
 
 
 def _assert_read_token_is_rejected(route: APIRoute) -> None:
-    assert _has_dependency(route, require_auth)
+    assert any(
+        _has_dependency(route, guard)
+        for guard in (require_auth, require_command_writer)
+    )
+    # Both write guards reject read authority. The detached command guard also
+    # has real JWT/SQLite coverage in integration/api/test_command_actor.py.
     with pytest.raises(HTTPException, match="insufficient_scope"):
         asyncio.run(
             require_auth(
@@ -104,7 +110,13 @@ class TestRouteDependencies:
         capture_routes = {
             (route.path, next(iter(list(route.methods or set()))))
             for route in _routes(inbox.router)
-            if _has_dependency(route, require_user_or_browser_import_user)
+            if any(
+                _has_dependency(route, guard)
+                for guard in (
+                    require_user_or_browser_import_user,
+                    require_capture_actor,
+                )
+            )
         }
 
         assert capture_routes == {
@@ -116,7 +128,13 @@ class TestRouteDependencies:
             ("/inbox/browser-upload", "POST"),
         }
         assert not any(
-            _has_dependency(route, require_user_or_browser_import_user)
+            any(
+                _has_dependency(route, guard)
+                for guard in (
+                    require_user_or_browser_import_user,
+                    require_capture_actor,
+                )
+            )
             for router in (
                 models.router,
                 provider_connections.router,

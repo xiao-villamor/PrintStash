@@ -17,12 +17,26 @@ import httpx
 import pytest
 
 from app.db.models import IngestRequestKind, JobState
+from app.db.session import get_session_factory, override_session_factory
 from app.modules.storage import storage
 from tests.factories import build_user
 from tests.factories.identity import bearer
+from tests.fakes.thread_sessions import ThreadBoundSessionFactory
 
 
 class TestIngestExecution:
+    @pytest.fixture(autouse=True)
+    def _thread_owned_command_sessions(self, db_session):
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            yield factory
+            assert factory.opened_count > 0
+            assert factory.active_count == 0
+        finally:
+            override_session_factory(previous)
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "endpoint,filename,content",

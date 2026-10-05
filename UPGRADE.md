@@ -1,5 +1,16 @@
 # PrintStash Upgrade Guide
 
+## Unreleased: request command capacity
+
+File acceptance now has a separate per-API-process command limit. The default
+`VAULT_API_COMMAND_CONCURRENCY=8` accepts values from 1 through 128; add it to
+your API environment override to tune concurrent SQL and storage commands. It
+does not change background Job lane limits. A streamed request waiting for its
+next body chunk holds neither a command token nor a SQL Session.
+
+Restart the API on the new image. This change adds no database migration or
+derivative recipe; SQLite remains the default and existing data stays in place.
+
 ## Unreleased: Python 3.14
 
 Source installations of the application and shared core require Python 3.14 or

@@ -319,8 +319,7 @@ class TestArtifactUploads:
                     offset=0,
                     length=1,
                     sha256="a" * 64,
-                    current_user=None,  # type: ignore[arg-type]
-                    session=None,  # type: ignore[arg-type]
+                    actor=None,  # type: ignore[arg-type]
                 )
             )
 
@@ -344,8 +343,7 @@ class TestArtifactUploads:
                     offset=0,
                     length=1,
                     sha256="a" * 64,
-                    current_user=None,  # type: ignore[arg-type]
-                    session=None,  # type: ignore[arg-type]
+                    actor=None,  # type: ignore[arg-type]
                 )
             )
 
@@ -370,8 +368,7 @@ class TestArtifactUploads:
                     offset=0,
                     length=1,
                     sha256="a" * 64,
-                    current_user=None,  # type: ignore[arg-type]
-                    session=None,  # type: ignore[arg-type]
+                    actor=None,  # type: ignore[arg-type]
                 )
             )
 
@@ -988,3 +985,206 @@ class TestChunkExecution:
         assert uploaded.status_code == 200, uploaded.text
         assert uploaded.json()["part"]["size_bytes"] == len(payload)
         assert observations == [True]
+
+
+class TestCommandOwnership:
+    @pytest.mark.asyncio
+    async def test_closes_authentication_before_receiving_chunk_body(
+        self, app, db_session, auth_headers
+    ):
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        payload = content.ascii_stl()
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+            )
+            upload_id = created.json()["id"]
+
+            async def body():
+                assert factory.opened_count > 0
+                assert factory.active_count == 0
+                yield payload
+
+            override_session_factory(factory)
+            try:
+                response = await client.put(
+                    f"/api/v1/artifact-uploads/{upload_id}/chunks/0",
+                    params={
+                        "offset": 0,
+                        "length": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                    },
+                    headers=auth_headers,
+                    content=body(),
+                )
+            finally:
+                override_session_factory(previous)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["part"]["sha256"] == hashlib.sha256(payload).hexdigest()
+        assert factory.active_count == 0
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload_id).received_bytes == len(
+            payload
+        )
+
+    @pytest.mark.asyncio
+    async def test_creation_keeps_loop_responsive(
+        self, app, db_session, auth_headers, loop_handshake
+    ):
+        payload = content.ascii_stl()
+        wait_for_loop, observations = loop_handshake
+        engine = db_session.get_bind()
+
+        def delayed_query(connection, cursor, statement, parameters, context, many):
+            if "artifact_upload_sessions" in statement.lower() and not observations:
+                wait_for_loop()
+
+        event.listen(engine, "before_cursor_execute", delayed_query)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/v1/artifact-uploads",
+                    json=_request(payload),
+                    headers=auth_headers,
+                )
+        finally:
+            event.remove(engine, "before_cursor_execute", delayed_query)
+
+        assert response.status_code == 201, response.text
+        assert observations == [True]
+        assert db_session.get(ArtifactUploadSession, response.json()["id"]) is not None
+
+    @pytest.mark.asyncio
+    async def test_cancelled_body_preserves_empty_receipts(
+        self, app, db_session, auth_headers, local_storage
+    ):
+        import anyio
+
+        from app.core.config import settings
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        payload = content.ascii_stl()
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+            )
+            assert created.status_code == 201, created.text
+            upload_id = created.json()["id"]
+            before_paths = set(settings.staging_dir.rglob("*"))
+
+            async def body():
+                yield payload[:10]
+                assert factory.opened_count > 0
+                assert factory.active_count == 0
+                scope.cancel()
+                await anyio.sleep(0)
+                raise AssertionError("cancelled request body must not continue")
+
+            override_session_factory(factory)
+            try:
+                with anyio.CancelScope() as scope:
+                    await client.put(
+                        f"/api/v1/artifact-uploads/{upload_id}/chunks/0",
+                        params={
+                            "offset": 0,
+                            "length": len(payload),
+                            "sha256": hashlib.sha256(payload).hexdigest(),
+                        },
+                        headers=auth_headers,
+                        content=body(),
+                    )
+            finally:
+                override_session_factory(previous)
+
+        assert scope.cancelled_caught
+        assert factory.active_count == 0
+        assert set(settings.staging_dir.rglob("*")) == before_paths
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload_id).received_bytes == 0
+        assert (
+            db_session.exec(
+                select(ArtifactUploadPart).where(
+                    ArtifactUploadPart.session_id == upload_id
+                )
+            ).all()
+            == []
+        )
+
+    def test_payload_override_preserves_upload_authentication(
+        self, app, client, make_user
+    ):
+        from app.core.security import get_token_payload
+
+        owner = make_user(superuser=True)
+        payload = content.ascii_stl()
+        app.dependency_overrides[get_token_payload] = lambda: {
+            "sub": str(owner.id),
+            "auth_version": owner.auth_version,
+            "scope": "read",
+        }
+        try:
+            response = client.post("/api/v1/artifact-uploads", json=_request(payload))
+        finally:
+            del app.dependency_overrides[get_token_payload]
+
+        assert response.status_code == 201, response.text
+        assert response.json()["size_bytes"] == len(payload)
+
+    @pytest.mark.asyncio
+    async def test_revoked_token_cannot_publish_received_chunk(
+        self, app, db_session, auth_headers, monkeypatch
+    ):
+        from app.modules.identity import auth
+
+        payload = content.ascii_stl()
+        token = auth_headers["Authorization"].removeprefix("Bearer ")
+        claims = auth.verify_access_token(token)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+            )
+            upload_id = created.json()["id"]
+
+            async def body():
+                monkeypatch.setattr(auth, "ACCESS_BLOCKLIST", {claims["jti"]})
+                yield payload
+
+            response = await client.put(
+                f"/api/v1/artifact-uploads/{upload_id}/chunks/0",
+                params={
+                    "offset": 0,
+                    "length": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+                headers=auth_headers,
+                content=body(),
+            )
+
+        assert response.status_code == 401, response.text
+        assert response.json()["detail"] == "not_authenticated"
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload_id).received_bytes == 0
+        assert (
+            db_session.exec(
+                select(ArtifactUploadPart).where(
+                    ArtifactUploadPart.session_id == upload_id
+                )
+            ).all()
+            == []
+        )

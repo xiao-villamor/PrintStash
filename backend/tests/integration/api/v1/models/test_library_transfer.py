@@ -16,9 +16,11 @@ only together with the staged bytes it owns, so nothing is left pending forever.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -379,3 +381,82 @@ def _hold_one_lease(client: TestClient, auth_headers: dict[str, str]) -> None:
         files={"file": ("first.zip", _zip({"a.txt": "a"}), "application/zip")},
     )
     assert response.status_code == 202, response.text
+
+
+class TestLibraryImportExecution:
+    @pytest.mark.asyncio
+    async def test_owns_import_sessions(
+        self, app, client, auth_headers, imported_model, db_session
+    ):
+        from threading import get_ident
+
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        exported = client.get("/api/v1/models/library-archive", headers=auth_headers)
+        assert exported.status_code == 200, exported.text
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as api:
+                response = await api.post(
+                    "/api/v1/models/library-import",
+                    headers=auth_headers,
+                    files={
+                        "file": ("library.zip", exported.content, "application/zip")
+                    },
+                )
+        finally:
+            override_session_factory(previous)
+
+        assert response.status_code == 202, response.text
+        assert db_session.get(Job, response.json()["job_id"]) is not None
+        assert factory.opened_count > 0
+        assert factory.active_count == 0
+        assert get_ident() not in factory.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_staging(
+        self, app, client, auth_headers, imported_model, monkeypatch, loop_handshake
+    ):
+        from app.api.v1 import models as models_api
+
+        exported = client.get("/api/v1/models/library-archive", headers=auth_headers)
+        assert exported.status_code == 200, exported.text
+        wait_for_loop, observations = loop_handshake
+        loop = asyncio.get_running_loop()
+        fsync = models_api.os.fsync
+        health_statuses = []
+        observed_staging = False
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+
+            def delayed_staging(fd):
+                nonlocal observed_staging
+                if not observed_staging:
+                    observed_staging = True
+                    wait_for_loop()
+                    health = asyncio.run_coroutine_threadsafe(
+                        api.get("/api/v1/health"), loop
+                    )
+                    try:
+                        health_statuses.append(health.result(timeout=2).status_code)
+                    except TimeoutError:
+                        health.cancel()
+                        health_statuses.append(None)
+                return fsync(fd)
+
+            monkeypatch.setattr(models_api.os, "fsync", delayed_staging)
+            response = await api.post(
+                "/api/v1/models/library-import",
+                headers=auth_headers,
+                files={"file": ("library.zip", exported.content, "application/zip")},
+            )
+
+        assert response.status_code == 202, response.text
+        assert observations == [True]
+        assert health_statuses == [200]

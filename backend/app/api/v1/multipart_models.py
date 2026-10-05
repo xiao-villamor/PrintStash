@@ -24,6 +24,8 @@ from printstash_core.files import slugify
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, delete, select
 
+from app.api.command_actor import CommandActor, command_session, require_command_writer
+from app.api.command_execution import bounded_command
 from app.core.security import require_auth, require_user
 from app.core.time import utcnow
 from app.db.models import (
@@ -268,62 +270,64 @@ def get_multipart_model_cover(
 @router.put(
     "/{multipart_model_id}/cover",
     response_model=MultipartModelRead,
-    dependencies=[Depends(require_auth)],
     summary="Upload a multipart model cover",
 )
-async def put_multipart_model_cover(
+@bounded_command
+def put_multipart_model_cover(
     multipart_model_id: int,
     file: UploadFile = UploadFileParam(...),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> MultipartModelRead:
-    aggregate = multipart_models.require(
-        session, current_user, multipart_model_id, CollectionRole.EDIT
-    )
-    data = await file.read(MAX_SOURCE_COVER_BYTES + 1)
-    try:
-        processed = process_source_cover_upload(data, file.content_type)
-    except SourceCoverProcessingError as exc:
-        raise HTTPException(status_code=422, detail="multipart_cover_invalid") from exc
-
-    old_cover_key = _uploaded_cover_key(aggregate)
-    # The ownership ledger reserves through an independent session. Release
-    # this read-only transaction first so SQLite never has two writers waiting
-    # on the same connection while the cover publication becomes durable.
-    session.commit()
-    digest = hashlib.sha256(processed.data).hexdigest()
-    filename = f"{digest[:16]}-{uuid4().hex}.webp"
-    backend = get_backend()
-    key = backend.multipart_model_cover_key(multipart_model_id, filename)
-    receipt: CreationReceipt | None = None
-    try:
-        receipt = publish_bytes(
-            session,
-            backend,
-            key,
-            processed.data,
-            object_kind="multipart_model_cover",
-            sha256=digest,
+    with command_session(actor) as (session, current_user):
+        aggregate = multipart_models.require(
+            session, current_user, multipart_model_id, CollectionRole.EDIT
         )
-        if old_cover_key is not None:
-            _enqueue_uploaded_cover_delete(session, aggregate, key=old_cover_key)
-        aggregate.cover_filename = filename
-        aggregate.cover_content_type = processed.content_type
-        aggregate.cover_size_bytes = len(processed.data)
-        aggregate.cover_image_url = None
-        aggregate.updated_by = current_user.id
-        aggregate.updated_at = utcnow()
-        session.add(aggregate)
+        data = file.file.read(MAX_SOURCE_COVER_BYTES + 1)
+        try:
+            processed = process_source_cover_upload(data, file.content_type)
+        except SourceCoverProcessingError as exc:
+            raise HTTPException(
+                status_code=422, detail="multipart_cover_invalid"
+            ) from exc
+
+        old_cover_key = _uploaded_cover_key(aggregate)
+        # The ownership ledger reserves through an independent session. Release
+        # this read-only transaction first so SQLite never has two writers waiting
+        # on the same connection while the cover publication becomes durable.
         session.commit()
-    except Exception:
-        session.rollback()
-        if receipt is not None:
-            backend.rollback_create(receipt)
-        raise
-    if old_cover_key is not None:
-        process_storage_delete_intents()
-    session.refresh(aggregate)
-    return multipart_models.read(session, current_user, aggregate)
+        digest = hashlib.sha256(processed.data).hexdigest()
+        filename = f"{digest[:16]}-{uuid4().hex}.webp"
+        backend = get_backend()
+        key = backend.multipart_model_cover_key(multipart_model_id, filename)
+        receipt: CreationReceipt | None = None
+        try:
+            receipt = publish_bytes(
+                session,
+                backend,
+                key,
+                processed.data,
+                object_kind="multipart_model_cover",
+                sha256=digest,
+            )
+            if old_cover_key is not None:
+                _enqueue_uploaded_cover_delete(session, aggregate, key=old_cover_key)
+            aggregate.cover_filename = filename
+            aggregate.cover_content_type = processed.content_type
+            aggregate.cover_size_bytes = len(processed.data)
+            aggregate.cover_image_url = None
+            aggregate.updated_by = current_user.id
+            aggregate.updated_at = utcnow()
+            session.add(aggregate)
+            session.commit()
+        except Exception:
+            session.rollback()
+            if receipt is not None:
+                backend.rollback_create(receipt)
+            raise
+        if old_cover_key is not None:
+            process_storage_delete_intents()
+        session.refresh(aggregate)
+        return multipart_models.read(session, current_user, aggregate)
 
 
 @router.delete(

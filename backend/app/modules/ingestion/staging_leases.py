@@ -13,8 +13,8 @@ import logging
 import os
 import stat
 import uuid
-from contextlib import contextmanager
-from dataclasses import replace
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -441,7 +441,7 @@ def prepare_capture_slot_staging(session: Session, *, slot_id: str) -> Path:
         os.close(fd)
     try:
         os.setxattr(path, _CAPTURE_MARKER, slot_id.encode("ascii"))
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         # xattrs are unavailable on some supported local filesystems. The
         # durable device/inode receipt remains the portable fallback.
         pass
@@ -482,33 +482,55 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
-@contextmanager
+@dataclass(frozen=True, slots=True)
+class _CaptureSpoolReceipt:
+    path: Path
+    device: int
+    inode: int
+
+
 def open_capture_slot_staging(
     session: Session, *, slot_id: str, truncate: bool = True
-) -> Iterator[BinaryIO]:
-    """Open the exact lease-owned capture inode for request/service writes.
+) -> AbstractContextManager[BinaryIO]:
+    """Resolve one lease now, then return a descriptor-only spool context.
 
-    The lease is committed before this function is called.  Opening with
-    ``O_NOFOLLOW`` and checking both descriptor and path identity prevents a
-    replacement at the deterministic name from being accepted or removed.
-    ``truncate`` changes bytes only in the already-owned inode; it never
-    replaces the directory entry.
+    The caller owns the Session only for this synchronous resolution. The
+    returned context retains an immutable inode receipt and can be entered or
+    exited after that Session has closed, without loading detached ORM state.
     """
     lease = _capture_slot_lease(session, slot_id)
     path = capture_slot_staging_path(slot_id)
-    if lease.path != str(path) or _matching_capture_staging_path(lease) is None:
+    device, inode = lease.device, lease.inode
+    if (
+        lease.path != str(path)
+        or device is None
+        or inode is None
+        or _matching_capture_staging_path(lease) is None
+    ):
         raise StagingLeaseError("capture_upload_staging_collision")
+    return _open_capture_spool_descriptor(
+        _CaptureSpoolReceipt(path, device, inode), truncate=truncate
+    )
+
+
+@contextmanager
+def _open_capture_spool_descriptor(
+    receipt: _CaptureSpoolReceipt, *, truncate: bool
+) -> Iterator[BinaryIO]:
+    """Keep only FD/path identity across a request's network-body waits."""
+    path = receipt.path
     flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-    if truncate:
-        flags |= os.O_TRUNC
     try:
         fd = os.open(path, flags)
     except OSError as exc:
         raise StagingLeaseError("capture_upload_staging_unavailable") from exc
     try:
         opened = os.fstat(fd)
-        if opened.st_dev != lease.device or opened.st_ino != lease.inode:
+        if opened.st_dev != receipt.device or opened.st_ino != receipt.inode:
             raise StagingLeaseError("capture_upload_staging_collision")
+        # Opening must not alter a replacement inode before identity is proven.
+        if truncate:
+            os.ftruncate(fd, 0)
         with os.fdopen(fd, "wb") as target:
             fd = -1
             yield target
@@ -517,8 +539,8 @@ def open_capture_slot_staging(
         current = path.lstat()
         if (
             not stat.S_ISREG(current.st_mode)
-            or current.st_dev != lease.device
-            or current.st_ino != lease.inode
+            or current.st_dev != receipt.device
+            or current.st_ino != receipt.inode
         ):
             raise StagingLeaseError("capture_upload_staging_collision")
     finally:
@@ -748,7 +770,7 @@ def _receipt_from_json(value: str | None) -> CreationReceipt | None:
         if not isinstance(raw, dict):
             return None
         return CreationReceipt(**raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
