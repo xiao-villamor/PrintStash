@@ -98,6 +98,7 @@ dev = [
     "WsgiDAV>=4.3,<5",
     "cheroot>=11,<12",
     "ty>=0.0.1",
+    "fast-simplification>=0.2.0,<0.3",
 ]
 ai = [
     "sqlite-vec==0.1.6",

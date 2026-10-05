@@ -175,6 +175,13 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+      - name: Verify representation pilot safety contracts
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: "1"
+        run: |
+          npm ci --prefix frontend/scripts/viewer-representation-pilot --ignore-scripts --no-audit --no-fund
+          node frontend/scripts/viewer-representation-pilot/node_modules/playwright/cli.js install --with-deps chromium
+          node --test frontend/scripts/viewer-representation-pilot.test.mjs
       - name: Verify model lifecycle and backup recovery
         working-directory: frontend
         run: pnpm test:e2e:pr

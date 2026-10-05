@@ -54,6 +54,27 @@ def _api_run(
 
 
 class TestQuickGate:
+    def test_qualifies_viewer_pilot_in_browser_gate(self) -> None:
+        job = _workflow("ci.yml")["jobs"]["browser-smoke"]
+        step = next(
+            step
+            for step in job["steps"]
+            if step.get("name") == "Verify representation pilot safety contracts"
+        )
+
+        assert (
+            "npm ci --prefix frontend/scripts/viewer-representation-pilot"
+            in step["run"]
+        )
+        assert (
+            "node --test frontend/scripts/viewer-representation-pilot.test.mjs"
+            in step["run"]
+        )
+        assert "playwright/cli.js install --with-deps chromium" in step["run"]
+        assert step["env"]["PLAYWRIGHT_SKIP_BROWSER_GC"] == "1"
+        assert not step.get("continue-on-error", False)
+        assert not job.get("continue-on-error", False)
+
     def test_provisions_real_pid_namespace_qualification(self) -> None:
         steps = _workflow("ci.yml")["jobs"]["backend"]["steps"]
         provision = next(

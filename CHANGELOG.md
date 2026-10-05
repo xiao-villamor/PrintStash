@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add isolated GLB/LOD qualification tools with supervised native exports, real
+  browser memory/draw/quality measurements and protected-feature checks. Retain
+  STL after measured candidate correctness, resource and performance limits.
+
 - Publish batch Artifacts before materializing later entries. Bound disposable
   staging by files and bytes, record each entry with its Artifact transaction,
   and resume confirmed entries without reopening their sources. Keep partial
