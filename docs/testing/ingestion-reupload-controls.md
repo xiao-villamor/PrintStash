@@ -23,3 +23,18 @@ Qualification checkpoints publish accumulated errors immediately. A failed sourc
 | 13 | Unverified original supplies no proof | Error | Original failed, unverified bytes/preview or absent Artifact | Negative verdict with no SQL identity evidence | Unit | ✅ `tests/unit/scripts/test_qualify_ingestion.py::TestReuploadControl::test_rejects_unverified_original_observation` |
 
 The initial focused regression has 11 failures before the implementation. The final unit/SQL selection passes **99 cases in 5.65s**; the two invalid-cadence cases pass in **3.17s**. The actual healthy worker completes in **83.04s**, with two fresh Artifacts and one valid repeated-upload control. The first fault fixture omitted the worker's pre-created output directory and failed before application startup; after fixing that fixture, the actual injected-failure selection passes **1 case in 88.54s**. These overlapping selections are not summed. No local full, coverage or Deep CI suite was run.
+
+## E2E database startup
+
+The E2E fixture uses a private on-disk database and must install the production connection hook before schema creation. Activating WAL after readers start can fail immediately when a newly opened worker or HTTP connection attempts the journal-mode transition. Native search closes the setup session and disposes idle pooled connections after enabling the installed vector extension, before starting its worker. The base connection hook stays registered throughout the test.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 14 | Starts with WAL journaling | Happy | Fresh private E2E database | First connection reports WAL before workers start | E2E | ✅ `tests/e2e/test_database_connections.py::TestE2EDatabaseConnections::test_starts_with_wal_journaling` |
+| 15 | Commits a new connection during a reader | Edge | Open reader snapshot; separate writer connection | Writer commits while reader retains old snapshot; new observer sees committed value | E2E | ✅ `tests/e2e/test_database_connections.py::TestE2EDatabaseConnections::test_commits_a_new_connection_during_a_reader` |
+| 16 | Serves hybrid queries through HTTP | Happy | Actual HTTP app, inference fake, search worker | Indexed search returns the expected document through HTTP | E2E | ✅ `tests/e2e/test_search_generations.py::TestSearchGenerationLifecycle::test_serves_hybrid_queries_through_http` |
+| 17 | Switches to native index without reembedding | Edge | Existing generation; float32/int8/binary native index | Native generation becomes active without additional embedding calls | E2E | ✅ `tests/e2e/test_search_generations.py::TestSearchGenerationLifecycle::test_switches_to_native_index_without_reembedding` |
+
+Before the fixture correction, the two new connection regressions fail in **54.89s**: DELETE journal mode and a writer commit blocked by the reader. After correction, the focused connection/HTTP/native-index selection passes **6 cases in 14.16s**. The earlier CI E2E setup error and hosted browser shutdown remain preserved as separate failures; this focused result does not establish the full CI gate.
+
+The affected search-generation lifecycle file also passes **9 cases in 67.18s**, including continuous readers, restoration without the optional extension, and process-loss recovery. Its cases overlap the earlier focused selection; counts are not summed.
