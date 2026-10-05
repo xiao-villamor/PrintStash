@@ -69,6 +69,7 @@ from .jobs import TERMINAL_STATES, ActiveJobExists, active_job_predicate, jobs
 from .submission import execution_id, nudge, submit
 
 logger = get_logger(__name__)
+_TERMINAL_RECOVERY_BATCH = 500
 
 _MAX_LOOPS = 20
 
@@ -999,13 +1000,78 @@ def sweep_lost_passes(*, now: datetime | None = None) -> int:
     return cancelled
 
 
+def sweep_lost_terminal_attempts(*, now: datetime | None = None) -> int:
+    """Free engine slots after a terminal SQL write outlives its executor.
+
+    A Job can commit its outcome just before the engine records workflow
+    success. Normal repair only sees active Jobs, so this exact dead attempt
+    needs engine cancellation without changing its durable domain result.
+    """
+    stale = executors.stale_ids(now=now)
+    if not stale:
+        return 0
+    engine = catalog_module.get_engine()
+    candidates = [
+        execution
+        for execution in engine.active()
+        if execution.kind is ExecutionKind.JOB
+        and execution.status is EngineStatus.RUNNING
+        and execution.executor_id in stale
+    ]
+    cancelled = 0
+    # Bound every IN query while examining the entire candidate set. Missing
+    # or superseded attempts in an early batch cannot hide a later owner.
+    batch_size = min(settings.jobs_reconcile_batch, _TERMINAL_RECOVERY_BATCH)
+    for offset in range(0, len(candidates), batch_size):
+        batch = candidates[offset : offset + batch_size]
+        identifiers = {execution.execution_id.partition(":")[0] for execution in batch}
+        with get_session_factory().scoped_session() as session:
+            terminal = session.exec(
+                select(Job.id, Job.attempts, Job.execution_epoch).where(
+                    col(Job.id).in_(identifiers), col(Job.state).in_(TERMINAL_STATES)
+                )
+            ).all()
+            owned = {
+                execution_id(job_id, attempt, epoch)
+                for job_id, attempt, epoch in terminal
+            }
+        targets = [execution for execution in batch if execution.execution_id in owned]
+        if not targets:
+            continue
+        # Engine calls own no caller SQL transaction. A restarted executor may
+        # have registered or recovered this workflow since the first snapshot.
+        evidence = engine.evidence([execution.execution_id for execution in targets])
+        still_stale = executors.stale_ids(now=now)
+        for execution in targets:
+            seen = evidence.get(execution.execution_id)
+            if (
+                seen is None
+                or seen.status is not EngineStatus.RUNNING
+                or seen.executor_id != execution.executor_id
+                or seen.executor_id not in still_stale
+            ):
+                continue
+            try:
+                engine.cancel(execution.execution_id)
+                cancelled += 1
+            except Exception:  # noqa: BLE001 - the periodic sweep retries
+                logger.warning(
+                    "lost terminal attempt cancel failed",
+                    extra={"id": execution.execution_id},
+                )
+    return cancelled
+
+
 def tick() -> None:
-    """The periodic sweep: free lost passes, then nudge every source."""
+    """Free lost passes and terminal attempt wrappers, then nudge every source."""
     from .submission import nudge_all
 
     swept = sweep_lost_passes()
     if swept:
         logger.warning("cancelled %d reconcile pass(es) of a lost executor", swept)
+    terminal = sweep_lost_terminal_attempts()
+    if terminal:
+        logger.warning("cancelled %d terminal attempt(s) of a lost executor", terminal)
     nudge_all()
 
 
@@ -1035,5 +1101,6 @@ __all__ = [
     "run_pass",
     "sweep_foreign_versions",
     "sweep_lost_passes",
+    "sweep_lost_terminal_attempts",
     "tick",
 ]

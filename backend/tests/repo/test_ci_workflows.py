@@ -211,6 +211,65 @@ class TestQuickGate:
 
 
 class TestDeepSuite:
+    @pytest.mark.parametrize(
+        ("job_name", "suite_name"),
+        [
+            ("backend", "Test backend"),
+            ("backend-python314", "Run backend compatibility suite"),
+        ],
+    )
+    def test_provisions_real_pid_namespaces_for_each_full_suite(
+        self, job_name: str, suite_name: str
+    ) -> None:
+        job = _workflow("deep-ci.yml")["jobs"][job_name]
+        steps = job["steps"]
+        prepare = next(
+            step
+            for step in steps
+            if step.get("name") == "Prepare PID namespace qualification"
+        )
+        suite = next(step for step in steps if step.get("name") == suite_name)
+        cleanup = next(
+            step
+            for step in steps
+            if step.get("name") == "Remove PID namespace qualification"
+        )
+
+        assert job["runs-on"] == "ubuntu-latest"
+        assert job["defaults"]["run"]["working-directory"] == "backend"
+        assert prepare["run"] == "bash ../scripts/prepare-ci-pid-namespace.sh prepare"
+        assert "if" not in prepare
+        assert not prepare.get("continue-on-error", False)
+        assert not job.get("continue-on-error", False)
+        assert steps.index(prepare) < steps.index(suite) < steps.index(cleanup)
+        assert cleanup["if"] == "always()"
+        assert cleanup["run"] == "bash ../scripts/prepare-ci-pid-namespace.sh cleanup"
+        assert not cleanup.get("continue-on-error", False)
+
+    def test_namespace_preparation_preserves_the_host_restriction(self) -> None:
+        script = (REPO_ROOT / "scripts/prepare-ci-pid-namespace.sh").read_text()
+
+        assert "install -D -m 0755 /usr/bin/unshare" in script
+        assert 'profile printstash-ci-pid-namespace "$namespace_dir/unshare"' in script
+        assert "abi <abi/4.0>," in script
+        assert "flags=(unconfined) {\n  userns,\n}" in script
+        assert 'sudo apparmor_parser -r "$namespace_profile"' in script
+        assert 'sudo apparmor_parser -R "$namespace_profile"' in script
+        assert "sysctl" not in script
+        assert "aa-disable" not in script
+
+    def test_namespace_preparation_requires_a_successful_probe(self) -> None:
+        script = (REPO_ROOT / "scripts/prepare-ci-pid-namespace.sh").read_text()
+
+        assert "set -euo pipefail" in script
+        assert "|| true" not in script
+        probe = (
+            '"$namespace_dir/unshare" --user --map-root-user --pid --fork /usr/bin/true'
+        )
+        export = 'printf \'%s\\n\' "$namespace_dir" >> "$GITHUB_PATH"'
+        assert script.index("    fi\n    # This is mandatory") < script.index(probe)
+        assert script.index(probe) < script.index(export)
+
     def test_gates_mesh_resources_on_both_native_architectures(self):
         job = _workflow("deep-ci.yml")["jobs"]["mesh-resources"]
         rows = job["strategy"]["matrix"]["include"]

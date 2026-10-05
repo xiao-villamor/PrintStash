@@ -314,6 +314,49 @@ class TestStart:
         finally:
             work_bootstrap.stop()
 
+    def test_frees_its_predecessors_terminal_job_execution(
+        self, work_engine, work_catalog, make_work_executor, make_job, db_session
+    ) -> None:
+        from app.modules.work.submission import execution_id
+
+        previous = make_work_executor("previous-api", role="all")
+        job = make_job(
+            kind=JobKind.INGESTION_SCRATCH_CLEANUP,
+            subject="scratch_window/terminal-proof",
+            state=JobState.COMPLETED,
+            attempts=1,
+            status_json='{"retained_live_writer":true}',
+        )
+        identifier = execution_id(job.id, job.attempts, job.execution_epoch)
+        work_engine.submit(
+            JobSubmission(
+                execution_id=identifier,
+                job_id=job.id,
+                definition=job.kind,
+                subject_key=job.subject_key,
+                lane=LaneName.MAINTENANCE,
+                priority=WorkPriority.BACKFILL,
+                attempt=job.attempts,
+                routing=Deduplicated(f"{job.kind}|{job.subject_key}"),
+                execution_epoch=job.execution_epoch,
+            )
+        )
+        lost = work_engine.executions[identifier]
+        lost.status = EngineStatus.RUNNING
+        lost.executor_id = previous.executor_id
+
+        work_bootstrap.start(engine=work_engine, catalog=work_catalog, sole_api=True)
+        try:
+            assert lost.status is EngineStatus.CANCELLED
+            assert work_engine.lane_depth(LaneName.MAINTENANCE).running == 0
+            db_session.expire_all()
+            retained = db_session.get(Job, job.id)
+            assert retained is not None
+            assert retained.state is JobState.COMPLETED
+            assert retained.status_json == '{"retained_live_writer":true}'
+        finally:
+            work_bootstrap.stop()
+
     def test_a_process_without_the_api_lock_retires_nobody(
         self, work_engine, work_catalog, make_work_executor
     ) -> None:

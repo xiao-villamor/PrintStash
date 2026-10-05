@@ -206,6 +206,9 @@ jobs:
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
 
+      - name: Prepare PID namespace qualification
+        run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
+
       - name: Test backend
         # The `coverage` lane is `full` under branch coverage plus the coverage gate
         # (tests/repo/test_coverage_floors.py): aggregate and module regression
@@ -214,6 +217,10 @@ jobs:
         # rather than covered — the same suite reads 95.07% by lines and 93.35% with
         # branches, and the second number is the one that says something.
         run: ./scripts/test.sh coverage -q
+
+      - name: Remove PID namespace qualification
+        if: always()
+        run: bash ../scripts/prepare-ci-pid-namespace.sh cleanup
 
   backend-scale:
     name: Backend at supported scale (${{ matrix.measurement }} / ${{ matrix.reader }})
@@ -292,8 +299,15 @@ jobs:
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
 
+      - name: Prepare PID namespace qualification
+        run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
+
       - name: Run backend compatibility suite
         run: ./scripts/test.sh full -q
+
+      - name: Remove PID namespace qualification
+        if: always()
+        run: bash ../scripts/prepare-ci-pid-namespace.sh cleanup
   frontend-coverage:
     name: Frontend branch coverage
     runs-on: ubuntu-latest

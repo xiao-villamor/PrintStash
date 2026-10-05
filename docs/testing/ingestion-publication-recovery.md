@@ -425,6 +425,11 @@ They establish the named checks, not a full-suite or release qualification.
 | Focused foundations coverage after extraction | 135 passed in 23.29 s; eight provider-binding cases subsequently passed after correcting the configuration fixture |
 | Receipt-contract extraction, storage consumers and architecture | 147 passed in 31.02 s; cyclic, private, legacy and transport dependency lists all empty |
 | Changed-test structural checks | 288 passed; four single-behavior names corrected, conjunction-name gate then passed |
+| Terminal lost-executor recovery (reconciler/bootstrap) | 128 passed in 13.61s |
+| Unchanged real SIGKILL scratch recovery | 1 passed in 28.76s |
+| High-descriptor readiness and original CI failures | 4 passed in 7.22s |
+| Focused namespace repository checks | 5 passed in 13.61s; remote real probe pending |
+| Final backend lint and changed-file formatting | Ruff clean; 178 CI-scope/changed Python files formatted |
 | Configured backend types, lint and format | Pyright: zero errors/warnings; Ruff clean; 172 CI-scope files formatted |
 
 Fresh measurements on the frozen backend put scratch custody at **93.14% combined
@@ -440,16 +445,27 @@ fingerprint continuations. Staging, prepared and native temporary payloads were
 empty after shutdown. The sampled process-tree RSS peak was 1,270,263,808 bytes
 (107 samples); this is a sampled observation, not an instantaneous upper bound.
 
-LOAD completed 100/100 useful Artifacts at concurrency 1, 2 and 4 in 536.92,
-400.21 and 424.14 seconds. The concurrency-8 cell failed: 8 completed and 92
-received HTTP 507 because the private installation retained its default limit of
-four active staging leases for one user. Payload bytes and physical reservations
-remained within budget. That failed evidence is retained. A repeat of only cell 8
-uses an explicit private eight-lease profile, with byte, free-space, global and
-native limits unchanged. The repeat and two-hour/1000-Artifact soak remain pending.
-The host budget admits only three one-GiB workers, so the four-worker throughput
-gate is not qualified on this host. Supported amd64/arm64 resource CI checks pass;
-the complete Deep CI gate is still pending.
+LOAD completed **100/100 useful Artifacts per cell** at concurrency 1, 2 and 4
+in 536.92, 400.21 and 424.14 seconds on source `3e037c2f`. The first concurrency-8
+cell failed: eight completed and 92 received HTTP507 because the private
+installation retained its default four active staging leases per user. That
+failed evidence is retained.
+
+The selected concurrency-8 repeat passed **100/100** on source `5fd919e9` with
+an explicit private eight-lease profile; byte, free-space, global and native
+limits were unchanged. Its reviewed report records **0.153385894 useful
+Artifacts/second**, **8.33ms ASGI event-loop heartbeat p95**, and natural drain
+to zero active Jobs, leases, reservations, continuations and temporary payload.
+The host admits only **three physical one-GiB workers**, so these measurements
+do not qualify the four-worker **2.5×** throughput gate. Heartbeat measures the
+application loop, not socket latency. Different source commits and private
+profiles are recorded explicitly; no causal throughput improvement is claimed.
+The later terminal-engine recovery fix applies only to terminal attempts left
+on dead executors; it was not part of those measured source snapshots.
+
+The **7200-second /1000-useful-Artifact soak remains pending**, as do the updated
+exact-head CI gates and remote namespace qualification. Supported amd64/arm64
+resource CI checks pass; the complete Deep CI gate is still pending.
 
 ## Reproduction
 
@@ -874,7 +890,7 @@ The paired-browser fix passes all 44 capture-route cases and the actual extensio
 capture boundary against a fresh backend. Qualification argument/admission checks
 pass 63 unit cases. The browser collector and viewer/worker failure contracts pass
 32 focused frontend cases. Configured backend Pyright reports zero errors or
-warnings. These results do not replace the pending final load, soak or Deep CI.
+warnings. These results do not replace the pending full soak or exact-head Deep CI.
 
 The private eight-only LOAD control completes all eight useful Artifacts with
 one native worker, then drains naturally; its serial-worker sample deadline is
@@ -887,3 +903,41 @@ navigation before collector setup. The same responsive-navigation case passed
 once in isolation (5.5 seconds) without a code change; this records the transient
 failure rather than claiming a diagnosed fix. All three actual cancellation/HTTP
 failure contracts passed. Frontend suite hygiene passes its four checks.
+
+## Terminal engine recovery
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 369 | Frees a terminal attempt on a lost executor | Happy | Completed, failed or cancelled Job; exact current attempt running on a stale executor | Engine attempt cancelled; maintenance running count becomes zero; durable Job outcome, result, finish time, epoch and attempt remain unchanged; repeat sweep is a no-op | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_frees_a_terminal_attempt_on_a_lost_executor` |
+| 370 | Preserves executions without terminal lost-owner authority | Edge | Live, unregistered or absent executor; nonterminal or missing Job; superseded epoch or attempt; queued execution; reconcile pass | No cancellation; original engine execution status remains unchanged | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_preserves_executions_without_terminal_lost_owner_authority` |
+| 371 | Preserves an execution reassigned during inspection | Edge | Initial lost-executor snapshot; engine evidence changes to a live executor | Fresh engine ownership excludes the execution from cancellation | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_rechecks_engine_owner_before_cancelling` |
+| 372 | Preserves an executor that renews during inspection | Edge | Initial stale heartbeat; same executor renews before cancellation | Fresh executor liveness excludes the execution; engine status remains running | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_preserves_an_executor_that_renews_during_inspection` |
+| 373 | Retries a failed engine cancellation | Error | Exact terminal lost attempt; first engine cancellation raises OSError | Failure is logged; attempt remains running; later sweep cancels it successfully | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_retries_a_failed_engine_cancellation` |
+| 374 | Recovers a terminal lost attempt through the periodic tick | Happy | Terminal attempt running on a stale executor | Periodic tick cancels the attempt and frees maintenance capacity | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_periodic_tick_recovers_a_terminal_lost_attempt` |
+| 375 | Reaches an eligible terminal attempt after excluded candidates | Edge | Three nonterminal candidates precede an eligible terminal attempt; configured SQL batch size is two | Eligible tail attempt is cancelled; all three nonterminal executions remain running | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_reaches_valid_terminal_attempts_after_unowned_candidates` |
+| 376 | Closes owned SQL sessions before engine cancellation | Edge | Exact terminal lost attempt; session factory tracks active owned sessions | Engine cancellation observes zero active owned SQL sessions and cancels the exact attempt | Integration | ✅ `backend/tests/integration/modules/work/test_reconciler.py::TestSweepLostTerminalAttempts::test_closes_owned_sql_sessions_before_engine_cancellation` |
+| 377 | Recovers a predecessor terminal execution at startup | Happy | Vault owner restarts after a previous API executor left a completed scratch-cleanup Job running in the engine | Startup retires the predecessor execution and frees maintenance capacity; completed Job outcome and stored result remain unchanged | Integration | ✅ `backend/tests/integration/bootstrap/test_work.py::TestStart::test_frees_its_predecessors_terminal_job_execution` |
+
+The affected reconciler/bootstrap selection passed **128 cases in 13.61s**. The unchanged real SIGKILL scratch recovery E2E separately passed **1 case in 28.76s**. These overlapping selections are not summed. Recovery cancels only the exact terminal attempt whose current engine executor is lost, rechecking both Job authority and executor liveness without holding owned SQL sessions across engine cancellation.
+
+## Inference readiness above FD_SETSIZE
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 378 | observes ready bytes above FD_SETSIZE | Happy | actual POSIX pipe read descriptor duplicated by F_DUPFD ≥1024, one byte written | readable is true; the unchanged byte is read afterward | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestDescriptorReadiness::test_observes_ready_bytes_above_fd_setsize` |
+| 379 | bounds an unready high descriptor | Edge | actual POSIX pipe read descriptor duplicated by F_DUPFD ≥1024, writer remains open without data | zero-duration readiness check returns false without fd range error | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestDescriptorReadiness::test_bounds_an_unready_high_descriptor` |
+| 380 | parent death releases warm residency | Edge | actual warm ONNX worker; retain source pipe writer after parent death | parent report received within 10s; warm child's pidfd readable within 5s; full residency reservation reacquired | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestInferenceResidency::test_parent_death_releases_warm_residency[True]` |
+| 381 | first frame precedes retirement | Edge | actual native retirement probe with queued pressure before first request | ready stderr within 5s; stdout remains unready 0.3s; first frame produces expected vectors; worker exits 73 | Integration | ✅ `backend/tests/integration/modules/inference/local/test_residency.py::TestResidencyRetirementRace::test_new_worker_handles_its_first_frame_before_retirement` |
+
+The high-FD class and two original CI failures passed **4 cases in 7.22s** after a valid RED reproduced FD1024 rejection by select. The test readiness helper uses a context-managed DefaultSelector; production exchange already used that owner. The fixture raises only its current process soft RLIMIT_NOFILE when necessary and restores it after closing its own descriptors. POSIX absence or an insufficient hard limit is explicitly reported as platform-unavailable, never counted as a high-FD proof. Original readiness and quiet-period deadlines remain unchanged.
+
+## Scoped CI PID namespace preparation
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 382 | provisions real PID namespaces for each full suite | Happy | Deep backend coverage / Python compatibility full jobs | Every applicable job invokes the shared preparation script unconditionally before its suite, refuses ignored preparation failures, schedules scoped cleanup after its suite with always() | Repo | ✅ `backend/tests/repo/test_ci_workflows.py::TestDeepSuite::test_provisions_real_pid_namespaces_for_each_full_suite` |
+| 383 | namespace preparation preserves the host restriction | Edge | Runner requires an AppArmor user namespace exception | Policy attaches only to the copied runner-local unshare path with userns permission; dedicated profile is removed; no global sysctl or AppArmor disable appears | Repo | ✅ `backend/tests/repo/test_ci_workflows.py::TestDeepSuite::test_namespace_preparation_preserves_the_host_restriction` |
+| 384 | namespace preparation requires a successful probe | Error | Host rejects the real unshare user/PID namespace probe | Script uses fail-fast execution, runs its probe outside the AppArmor-presence conditional, exports its PATH only after the probe succeeds, provides no ignored-failure fallback | Repo | ✅ `backend/tests/repo/test_ci_workflows.py::TestDeepSuite::test_namespace_preparation_requires_a_successful_probe` |
+| 385 | shared ledger retains credit across a PID namespace | Happy | Real child process enters distinct user/PID namespace with a held native credit | Namespace identity differs from parent; live child retains the shared credit; process death permits exact reclaim | Integration | ✅ `backend/tests/integration/runtime/test_native_admission.py::TestNamespace::test_shared_ledger_retains_credit_across_pid_namespace` |
+
+Deep full-suite jobs prepare an isolated runner-local unshare executable and, when required by the runner, a dedicated per-executable AppArmor userns profile. A successful real user/PID namespace probe is required before exporting the executable directory; an always-run cleanup unloads only that profile. Host-wide restrictions and the real shared-ledger assertion remain unchanged. The focused namespace repository selection passed **5 cases in 13.61s** (19.61s wall time); the actual remote namespace/profile probe remains pending exact-head CI. The previous failing namespace report is retained.

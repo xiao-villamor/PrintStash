@@ -2,13 +2,14 @@
 
 import json
 import os
-import select
+import selectors
 import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 from printstash_core.inference import EmbeddingInput
@@ -20,6 +21,57 @@ from app.modules.inference.local import LocalEmbeddingProvider
 from app.modules.inference.worker_pool import pool
 from tests.factories.embeddings import local_embedding_assets
 from tests.paths import BACKEND_DIR
+
+
+def _readable(stream: int | BinaryIO, timeout: float) -> bool:
+    with selectors.DefaultSelector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
+        return bool(selector.select(timeout))
+
+
+@pytest.fixture
+def high_pipe():
+    fcntl = pytest.importorskip(
+        "fcntl", reason="High pipe descriptors require POSIX F_DUPFD"
+    )
+    resource = pytest.importorskip(
+        "resource", reason="High pipe descriptors require POSIX RLIMIT_NOFILE"
+    )
+    limits = resource.getrlimit(resource.RLIMIT_NOFILE)
+    soft, hard = limits
+    if hard != resource.RLIM_INFINITY and hard <= 1024:
+        pytest.skip(
+            "Host hard RLIMIT_NOFILE cannot allocate a descriptor above FD_SETSIZE"
+        )
+    raised = soft != resource.RLIM_INFINITY and soft <= 1024
+    if raised:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (1025, hard))
+    low_reader = reader = writer = None
+    try:
+        low_reader, writer = os.pipe()
+        reader = fcntl.fcntl(low_reader, fcntl.F_DUPFD, 1024)
+        assert reader >= 1024
+        yield reader, writer
+    finally:
+        for descriptor in (low_reader, reader, writer):
+            if descriptor is not None:
+                os.close(descriptor)
+        if raised:
+            resource.setrlimit(resource.RLIMIT_NOFILE, limits)
+
+
+class TestDescriptorReadiness:
+    def test_observes_ready_bytes_above_fd_setsize(self, high_pipe):
+        reader, writer = high_pipe
+        os.write(writer, b"x")
+
+        assert _readable(reader, 0)
+        assert os.read(reader, 1) == b"x"
+
+    def test_bounds_an_unready_high_descriptor(self, high_pipe):
+        reader, _writer = high_pipe
+
+        assert not _readable(reader, 0)
 
 
 @pytest.fixture
@@ -133,9 +185,7 @@ class TestInferenceResidency:
         held_input = None
         try:
             assert parent.stdout is not None
-            assert select.select([parent.stdout], [], [], 10)[0], (
-                "ONNX parent not ready"
-            )
+            assert _readable(parent.stdout, 10), "ONNX parent not ready"
             response = parent.stdout.readline()
             if not response:
                 parent.wait(timeout=5)
@@ -150,9 +200,7 @@ class TestInferenceResidency:
             )
             parent.kill()
             parent.wait(timeout=5)
-            assert select.select([child_identity], [], [], 5)[0], (
-                "warm child survived parent"
-            )
+            assert _readable(child_identity, 5), "warm child survived parent"
             context = InferenceContext.bounded(5)
             with inference_resources.reserve(checkpoint=context.remaining) as permit:
                 assert permit.resources.slots == 1
@@ -217,10 +265,10 @@ class TestResidencyRetirementRace:
         provider = resident_provider
         process = retirement_probe("first-frame", provider.directory)
         assert process.stderr is not None and process.stdout is not None
-        assert select.select([process.stderr], [], [], 5)[0]
+        assert _readable(process.stderr, 5)
         assert process.stderr.readline() == b"ready\n"
         # A new worker must wait for its first frame despite already queued pressure.
-        assert select.select([process.stdout], [], [], 0.3)[0] == []
+        assert not _readable(process.stdout, 0.3)
         request = (
             WorkerRequest(
                 config_hash=provider.space.config_hash,

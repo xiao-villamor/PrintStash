@@ -256,6 +256,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 - Interrupted downloads, archive extraction and local copies retain exact cleanup
   receipts and disk reservations; restart or retry reclaims their private workspaces
   before the next input is admitted.
+- Recover maintenance capacity when a process dies after committing a Job result
+  but before its engine execution finishes, preserving the completed outcome.
 
 ### Performance
 
