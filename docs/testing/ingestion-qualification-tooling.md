@@ -27,3 +27,5 @@ A static harness entry alone did not prevent a second cold-start reload in GitHu
 | 5 | Prepared delivery dependency graph remains fixed | Edge | Actual resolved delivery Vite configuration | Discovery is closed while downloads run | Repo | ✅ `frontend/tests/repo/delivery-config.test.ts::keeps its prepared graph fixed during downloads` |
 
 Resolved configuration assertions passed by direct invocation; that is not a Vitest-suite result. The real browser proof remains required in remote Deep CI after merge. Both failed traces remain preserved.
+
+The actual two-case resolved-configuration Vitest selection passes in the existing DOM-backed frontend test environment (2.70s). The initial Node-only annotation conflicted with the shared DOM setup; it was removed without changing that setup. No backend or native workload was run locally for this correction.

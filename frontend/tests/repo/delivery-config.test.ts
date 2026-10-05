@@ -1,5 +1,4 @@
 /** The immutable delivery proof prepares its helper before browser interaction. */
-// @vitest-environment node
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "vite";
