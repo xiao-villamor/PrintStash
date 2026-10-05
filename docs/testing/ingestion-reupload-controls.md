@@ -38,3 +38,18 @@ The E2E fixture uses a private on-disk database and must install the production 
 Before the fixture correction, the two new connection regressions fail in **54.89s**: DELETE journal mode and a writer commit blocked by the reader. After correction, the focused connection/HTTP/native-index selection passes **6 cases in 14.16s**. The earlier CI E2E setup error and hosted browser shutdown remain preserved as separate failures; this focused result does not establish the full CI gate.
 
 The affected search-generation lifecycle file also passes **9 cases in 67.18s**, including continuous readers, restoration without the optional extension, and process-loss recovery. Its cases overlap the earlier focused selection; counts are not summed.
+
+## Backup fixture integrity
+
+E2E databases also retain production foreign-key enforcement. Backup restore arrangements permanently purge their uploaded model through the real API, then assert that the payload is absent before restoring it. They no longer issue a partial raw SQL deletion that leaves referencing rows behind. This exercises restoration after a permanent purge; direct database-corruption recovery remains a separate service-level contract.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 18 | Backup restore recovers a permanently purged model | Happy | Uploaded G-code backed up, then model purged | Model absent before restore; recovered model name and exact original bytes | E2E | ✅ `tests/e2e/test_backup.py::TestBackupRestore::test_backup_wipe_restore_round_trips_through_the_real_api` |
+| 19 | Backup can be taken after restoring one | Edge | Backup restored after permanently purging its model | Second backup completes with a different backup ID | E2E | ✅ `tests/e2e/test_backup.py::TestBackupRestore::test_a_backup_can_be_taken_after_restoring_one` |
+| 20 | DXF original survives backup restore | Happy | DXF backed up, then model purged | Purged payload absent; restored download matches original bytes | E2E | ✅ `tests/e2e/test_backup.py::TestBackupRestore::test_dxf_original_survives_backup_restore` |
+| 21 | Orphaned foreign keys are refused | Error | Child referencing an absent parent in private E2E DB | Real IntegrityError; no child committed | E2E | ✅ `tests/e2e/test_database_connections.py::TestE2EDatabaseConnections::test_refuses_orphaned_foreign_keys` |
+
+CI37380569585 preserves **155 passing E2E cases and two failures in 340.66s**. Both failures occur during raw SQL preparation of backup scenarios, with foreign-key enforcement rejecting deletion of a referenced File. The browser smoke and the other fourteen test jobs succeed. No retry or constraint weakening hides these failures.
+
+The corrected backup/connection selection passes **6 cases in 21.87s**, including the three restore scenarios and actual foreign-key refusal. No local full, coverage or Deep CI was run.

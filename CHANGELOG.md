@@ -6,7 +6,8 @@
   qualification, verify versioned Artifact identities, and stop after the first
   failed mandatory control while preserving failure evidence. Configure E2E
   SQLite connections before concurrent work starts, matching production WAL
-  initialization and native-extension startup.
+  initialization and native-extension startup; prepare backup recovery through
+  permanent purge with foreign-key enforcement intact.
 
 - Keep Model card tag and similarity badge reads bounded as the SQLite catalog grows, including
   installations with stale query-planner statistics.

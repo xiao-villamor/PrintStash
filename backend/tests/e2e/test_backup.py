@@ -1,6 +1,6 @@
 """E2E: backup -> data loss -> restore, driven through the real HTTP API.
 
-``tests/test_backup_restore.py`` already exercises ``create_backup``/
+``tests/integration/modules/backups/backup/test_core.py`` exercises ``create_backup``/
 ``restore_backup`` extensively at the service-call level (including S3 and
 corrupt-archive handling). This drives the same real functions through the
 real ``/api/v1/backups`` endpoints instead, and asserts the *application*
@@ -15,9 +15,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from sqlmodel import delete
 
-from app.db.models import File, Metadata, Model
+from app.db.models import File
 from app.modules.work.jobs import jobs
 from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
 from tests.e2e._jobs import completed_job, create_backup
@@ -161,11 +160,12 @@ class TestBackupRestore:
         artifact = e2e_db.get(File, file_id)
         assert artifact is not None
         blob_path = Path(artifact.path)
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
-        e2e_db.exec(delete(File).where(File.id == file_id))
-        e2e_db.exec(delete(Model).where(Model.id == model_id))
-        e2e_db.commit()
-        blob_path.unlink()
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model_id}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(f"/api/v1/models/{model_id}/purge", headers=headers)
+        assert purged.status_code == 200, purged.text
+        assert not blob_path.exists()
 
         restored = await api.post(
             f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
@@ -198,21 +198,18 @@ class TestBackupRestore:
         listed = await api.get("/api/v1/backups", headers=headers)
         assert any(b["backup_id"] == backup_id for b in listed.json())
 
-        # Simulate real data loss: drop the DB rows and delete the blob from disk,
-        # bypassing the app entirely (a disk/DB disaster, not a soft delete).
+        # Permanently remove the model through the real API. Its cleanup removes
+        # dependent rows as production requires with foreign keys enforced.
         artifact = e2e_db.get(File, file_id)
         assert artifact is not None
         blob_path = Path(artifact.path)
         assert blob_path.is_file()
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
-        e2e_db.exec(delete(File).where(File.id == file_id))
-        e2e_db.exec(delete(Model).where(Model.id == model_id))
-        e2e_db.commit()
-        # Remove only the artifact. The enrolled root binding is durable
-        # installation identity and must survive a blob loss; deleting the
-        # whole directory would turn a disaster simulation into a root-rebind
-        # test and could poison the next E2E case.
-        blob_path.unlink()
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model_id}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(f"/api/v1/models/{model_id}/purge", headers=headers)
+        assert purged.status_code == 200, purged.text
+        # Purge removes the payload while retaining the enrolled root binding.
         assert not blob_path.exists()
 
         gone = await api.get(f"/api/v1/models/{model_id}", headers=headers)
@@ -248,11 +245,15 @@ class TestBackupRestore:
         ).json()
         artifact = e2e_db.get(File, detail["files"][0]["id"])
         assert artifact is not None
-        Path(artifact.path).unlink()
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == artifact.id))
-        e2e_db.exec(delete(File).where(File.id == artifact.id))
-        e2e_db.exec(delete(Model).where(Model.id == model["id"]))
-        e2e_db.commit()
+        blob_path = Path(artifact.path)
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model['id']}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(
+            f"/api/v1/models/{model['id']}/purge", headers=headers
+        )
+        assert purged.status_code == 200, purged.text
+        assert not blob_path.exists()
         restored = await api.post(
             f"/api/v1/backups/{created['backup_id']}/restore", headers=headers
         )

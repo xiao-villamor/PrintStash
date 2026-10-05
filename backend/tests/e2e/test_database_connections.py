@@ -4,7 +4,9 @@ A late switch from DELETE journals to WAL can fail while another connection
 holds a read transaction, before the HTTP request reaches its handler.
 """
 
+import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 
@@ -44,4 +46,24 @@ class TestE2EDatabaseConnections:
                     text("SELECT value FROM concurrency_probe")
                 ).scalar_one()
                 == 2
+            )
+
+    def test_refuses_orphaned_foreign_keys(self, e2e_db: Session):
+        engine = e2e_db.get_bind()
+        with engine.begin() as setup:
+            setup.execute(text("CREATE TABLE parent_probe (id INTEGER PRIMARY KEY)"))
+            setup.execute(
+                text(
+                    "CREATE TABLE child_probe (parent_id INTEGER REFERENCES parent_probe(id))"
+                )
+            )
+
+        with engine.begin() as writer:
+            with pytest.raises(IntegrityError, match="FOREIGN KEY constraint failed"):
+                writer.execute(text("INSERT INTO child_probe VALUES (7)"))
+
+        with engine.connect() as observer:
+            assert (
+                observer.execute(text("SELECT count(*) FROM child_probe")).scalar_one()
+                == 0
             )
