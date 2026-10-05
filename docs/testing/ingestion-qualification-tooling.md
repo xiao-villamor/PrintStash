@@ -29,3 +29,14 @@ A static harness entry alone did not prevent a second cold-start reload in GitHu
 Resolved configuration assertions passed by direct invocation; that is not a Vitest-suite result. The real browser proof remains required in remote Deep CI after merge. Both failed traces remain preserved.
 
 The actual two-case resolved-configuration Vitest selection passes in the existing DOM-backed frontend test environment (2.70s). The initial Node-only annotation conflicted with the shared DOM setup; it was removed without changing that setup. No backend or native workload was run locally for this correction.
+
+
+The backend qualification also exposed a network guard leaking from a unit test into a later E2E test. A test override and a manual guard restore used different teardown stacks; the later fixture undo reinstalled the completed test's guard. Socket boundaries now use the owning pytest monkeypatch stack, so overrides and the guard unwind in their original order. Two storage fault-injection tests use scoped contexts instead of undoing the shared fixture early. External-network restrictions and owned S3/PostgreSQL exemptions remain unchanged.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 6 | Restore a completed test's network boundary | Edge | Test overrides DNS, connect or connect_ex; unmarked, S3 and PostgreSQL resource variants | Unmarked test rejects public access; following E2E test receives original boundary for all nine combinations | Repo | ✅ `tests/repo/test_tier_guards.py::TestNetworkGuardLifecycle::test_restores_the_original_boundary_after_a_test_override` |
+| 7 | Refuse an overwriting storage provider | Error | Fault-injected provider overwrites a duplicate key | Setup refuses the provider; restored capability remains read-only | Unit | ✅ `tests/unit/modules/storage/storage_opendal/test_backend.py::TestOpenDALStorageBackend::test_setup_refuses_a_provider_that_overwrites_duplicate_keys` |
+| 8 | Retry deletion after a worker crash | Error | Worker crashes after verifying an owned deletion intent | Pending verified intent completes on retry; owned file is deleted | Integration | ✅ `tests/integration/modules/storage/test_storage_deletion.py::TestProcessStorageDeleteIntents::test_verified_intent_retries_after_worker_crash` |
+
+The subprocess regression fails against the previous guard and passes after the fix. The focused pytest selection passes **12 cases in 6.72s**, including the nine guard variants, the original pinned-DNS test and both storage fault-injection tests. This is a focused result, not a local full-suite run. The frozen sustained qualification's application and native code are unchanged.

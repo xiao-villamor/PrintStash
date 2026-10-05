@@ -690,14 +690,13 @@ class TestOpenDALStorageBackend:
                 namespace=backend.namespace_for(key),
             )
 
-        monkeypatch.setattr(backend, "create_stream", overwrite)
-
-        backend.ensure_setup()
+        with monkeypatch.context() as fault:
+            fault.setattr(backend, "create_stream", overwrite)
+            backend.ensure_setup()
 
         assert calls == 2
         assert backend.capabilities.conditional_create is False
         assert backend.probe_diagnostics["conditional_create"] is False
-        monkeypatch.undo()
         with pytest.raises(StorageConfigurationError, match="remote_storage_read_only"):
             backend.create_bytes(b"new", backend.thumbnail_key(99))
 

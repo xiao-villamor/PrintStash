@@ -523,16 +523,16 @@ class TestProcessStorageDeleteIntents:
         def crash_after_pending(*_args: object, **_kwargs: object) -> bool:
             raise KeyboardInterrupt("worker crashed")
 
-        monkeypatch.setattr(get_backend(), "rollback_create", crash_after_pending)
-        with pytest.raises(KeyboardInterrupt):
-            process_storage_delete_intents()
+        with monkeypatch.context() as fault:
+            fault.setattr(get_backend(), "rollback_create", crash_after_pending)
+            with pytest.raises(KeyboardInterrupt):
+                process_storage_delete_intents()
 
         pending = _intents(db_session)[0]
         assert pending.status == "pending"
         assert pending.quarantine_state == "pending"
         assert get_backend().exists(key)
 
-        monkeypatch.undo()
         result = process_storage_delete_intents()
 
         assert result.completed == 1
