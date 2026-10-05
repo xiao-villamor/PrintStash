@@ -312,7 +312,9 @@ class TestOutliner:
         page = _read(client, auth_headers, SEARCH, q="needle", view="organized")
         assert [row["id"] for row in page["items"]] == [model.id]
 
-    @pytest.mark.parametrize("needle", ["%", "_"], ids=["percent", "underscore"])
+    @pytest.mark.parametrize(
+        "needle", ["%", "_", "Á"], ids=["percent", "underscore", "accent"]
+    )
     def test_searches_literal_names(
         self,
         client,

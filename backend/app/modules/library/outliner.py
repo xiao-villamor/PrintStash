@@ -165,7 +165,10 @@ def _entries(
     # Administrators also need to exclude entries inside a trashed folder.
     if user.is_superuser:
         models = models.where(
-            or_(col(Model.collection_id).is_(None), col(Model.collection_id).in_(visible))
+            or_(
+                col(Model.collection_id).is_(None),
+                col(Model.collection_id).in_(visible),
+            )
         )
     if query.view == OutlinerView.MULTIPART:
         models = models.where(literal(False))
@@ -403,8 +406,8 @@ def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching
     source = select(entries)
     if searching:
         assert query.q is not None
-        needle = query.q.strip().lower()
-        source = source.where(entries.c.sort_name.contains(needle, autoescape=True))
+        needle = query.q.strip()
+        source = source.where(entries.c.name.icontains(needle, autoescape=True))
         _, subtree = _counts(entries)
         folder_ids = _folders(session, user, query, subtree)
         folders = select(
@@ -415,7 +418,7 @@ def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching
             func.lower(col(Collection.name)).label("sort_name"),
         ).where(
             col(Collection.id).in_(folder_ids),
-            func.lower(col(Collection.name)).contains(needle, autoescape=True),
+            col(Collection.name).icontains(needle, autoescape=True),
         )
         source = union_all(source, folders)
     else:

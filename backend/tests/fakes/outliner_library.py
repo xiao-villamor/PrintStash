@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -29,7 +30,13 @@ def main() -> None:
         folder = session.get(Collection, seeded.collection_ids[0])
         if folder is None:
             raise ValueError("seeded_collection_missing")
-        target = build_model(session, "Zebra paginated target", collection=folder)
+        target = build_model(
+            session,
+            "Zebra paginated target",
+            collection=folder,
+            hash=hashlib.sha256(root.name.encode()).hexdigest(),
+            slug=f"outliner-target-{root.id}",
+        )
         destination = build_collection(session, "Move destination", parent=root)
         print(
             json.dumps(

@@ -185,7 +185,10 @@ class TestOutlinerOnPostgres:
             (parent.id, 1)
         ]
 
-    def test_search_respects_collection_access(self, pg_session: Session) -> None:
+    @pytest.mark.parametrize("needle", ["%", "Á"], ids=["percent", "accent"])
+    def test_search_respects_collection_access(
+        self, pg_session: Session, needle: str
+    ) -> None:
         from app.modules.library import outliner
         from app.schemas.outliner import OutlinerQuery
 
@@ -193,9 +196,9 @@ class TestOutlinerOnPostgres:
         child = build_collection(pg_session, "Granted", parent=parent)
         viewer = build_user(pg_session)
         grant_collection_role(pg_session, viewer, child, CollectionRole.VIEW)
-        visible = build_model(pg_session, "100% visible", collection=child)
-        build_model(pg_session, "100% private", collection=parent)
-        page = outliner.search(pg_session, viewer, OutlinerQuery(q="%"))
+        visible = build_model(pg_session, f"{needle} visible", collection=child)
+        build_model(pg_session, f"{needle} private", collection=parent)
+        page = outliner.search(pg_session, viewer, OutlinerQuery(q=needle))
         assert [(row.id, row.collection_label) for row in page.items] == [
             (visible.id, "Granted")
         ]
