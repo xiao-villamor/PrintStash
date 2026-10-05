@@ -1,0 +1,141 @@
+{
+  "scope": "complete fresh guarded worker, geometry and canonical640x480WEBP; private synthetic cube STL/3MF; shared nonexclusive WSL host",
+  "gate": {
+    "minimum_complete_median_speedup": 1.1,
+    "minimum_complete_saving_ms": 50,
+    "exact_CPU_output_and_geometry": true,
+    "same_containment_and_parent_observability": true
+  },
+  "sample_counts": {
+    "sequential_per_arm_per_input": 30,
+    "alternating_confirmation_per_arm_per_input": 10,
+    "stdlib_guarded_launch": 30
+  },
+  "first_candidate_metrics_only": {
+    "decision": "declined_cost",
+    "cases": [
+      {
+        "input": "cube-binary.stl",
+        "n_per_arm": 30,
+        "baseline_ms": 2247.0704869992915,
+        "candidate_ms": 2145.569312990119,
+        "speedup": 1.0473073386138794,
+        "saving_ms": 101.50117400917225,
+        "output_hashes_equal": true,
+        "all_complete": true,
+        "baseline_engine_ms": 1420.0,
+        "candidate_engine_ms": 1378.5,
+        "candidate_outside_engine_ms": 755.5238915,
+        "passes_predeclared_cost_gate": false
+      },
+      {
+        "input": "cube-mm.3mf",
+        "n_per_arm": 30,
+        "baseline_ms": 2388.8435014960123,
+        "candidate_ms": 2337.025653992896,
+        "speedup": 1.022172562553853,
+        "saving_ms": 51.817847503116354,
+        "output_hashes_equal": true,
+        "all_complete": true,
+        "baseline_engine_ms": 1533.0,
+        "candidate_engine_ms": 1509.5,
+        "candidate_outside_engine_ms": 827.23575,
+        "passes_predeclared_cost_gate": false
+      }
+    ]
+  },
+  "final_candidate_sequential": {
+    "decision": "qualified_cost",
+    "cases": [
+      {
+        "input": "cube-binary.stl",
+        "n_per_arm": 30,
+        "baseline_ms": 2247.0704869992915,
+        "candidate_ms": 2021.4208914985647,
+        "speedup": 1.1116291992675722,
+        "saving_ms": 225.64959550072672,
+        "output_hashes_equal": true,
+        "all_complete": true,
+        "baseline_engine_ms": 1420.0,
+        "candidate_engine_ms": 1393.0,
+        "candidate_outside_engine_ms": 579.708357,
+        "passes_predeclared_cost_gate": true
+      },
+      {
+        "input": "cube-mm.3mf",
+        "n_per_arm": 30,
+        "baseline_ms": 2388.8435014960123,
+        "candidate_ms": 2000.6999905017437,
+        "speedup": 1.1940038550692091,
+        "saving_ms": 388.1435109942686,
+        "output_hashes_equal": true,
+        "all_complete": true,
+        "baseline_engine_ms": 1533.0,
+        "candidate_engine_ms": 1418.0,
+        "candidate_outside_engine_ms": 580.8873305000001,
+        "passes_predeclared_cost_gate": true
+      }
+    ]
+  },
+  "final_candidate_alternating": {
+    "cases": [
+      {
+        "input": "cube-binary.stl",
+        "n_per_arm": 10,
+        "baseline_ms": 2299.562545995286,
+        "candidate_ms": 2061.89005250053,
+        "speedup": 1.1152692371770851,
+        "saving_ms": 237.67249349475605,
+        "hashes_equal": true,
+        "all_complete": true,
+        "passes_predeclared_gate": true
+      },
+      {
+        "input": "cube-mm.3mf",
+        "n_per_arm": 10,
+        "baseline_ms": 2413.5579799985862,
+        "candidate_ms": 2171.487984502164,
+        "speedup": 1.1114765530475266,
+        "saving_ms": 242.06999549642205,
+        "hashes_equal": true,
+        "all_complete": true,
+        "passes_predeclared_gate": true
+      }
+    ],
+    "decision": "confirmed_cost"
+  },
+  "stdlib_launch": {
+    "scope": "actual admitted bootstrap+guardian+stdlib-only reply+group retirement; excludes worker module and numerical imports",
+    "n": 30,
+    "median_ms": 95.5255585
+  },
+  "decision": "adopt function-local imports at existing owners; no hot launcher or persistent parser",
+  "limitations": [
+    "exploratory medians, no p95 or whole-Job SLA",
+    "nonexclusive hardware and uncontrolled filesystem cache",
+    "outside-engine residual includes imports/spawn/framing/retirement, not pure import time",
+    "no performance qualification of large models from tiny cubes",
+    "no native-thread/fork launcher qualification"
+  ],
+  "baseline_commit": "35de3cf6407414b4bf5fee3705a502c4efc0d610",
+  "environment": {
+    "python_version": "3.14.8",
+    "platform": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "cpu_model": "AMD Ryzen 5 1600 Six-Core Processor",
+    "logical_cpu_count": 12,
+    "affinity_cpu_count": 12,
+    "host_memory_bytes": 8293695488,
+    "versions": {
+      "cadquery-ocp-novtk": "7.9.3.1.1",
+      "cascadio": "0.1.1",
+      "dbos": "3.0.0",
+      "numpy": "2.5.3",
+      "pillow": "12.3.0",
+      "printstash-core": "0.0.0",
+      "scipy": "1.18.1",
+      "trimesh": "5.1.1"
+    },
+    "performance_gate_qualified": false
+  }
+}

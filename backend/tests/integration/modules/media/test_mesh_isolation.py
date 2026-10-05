@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -22,6 +25,7 @@ from app.modules.media.fingerprints import ALGORITHM_VERSION, FingerprintResultS
 from app.modules.media.mesh_contracts import (
     GeometryNotLoaded,
     GeometryReady,
+    GeometryRefused,
     PreviewCoverage,
     SourceScanState,
     ThumbnailFailureReason,
@@ -32,7 +36,7 @@ from app.modules.media.mesh_telemetry import WorkerExitCause
 from app.modules.media.thumbnail_engine import ThumbnailEngine
 from tests.factories import content
 from tests.factories.geometry import three_mf
-from tests.paths import TESTDATA_DIR
+from tests.paths import BACKEND_DIR, TESTDATA_DIR
 
 
 def _request(path, **overrides) -> ThumbnailRequest:
@@ -733,3 +737,130 @@ class TestPreparedWorkerResult:
                 pytest.fail("replacement directory yielded")
 
         assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+
+class TestFreshWorkerDependencies:
+    @pytest.fixture(autouse=True)
+    def child_application_dependencies(self, tmp_path, monkeypatch):
+        """An external import refusal affects fresh children, never the parent."""
+        boundary = tmp_path / "child-import-boundary"
+        boundary.mkdir()
+        (boundary / "sitecustomize.py").write_text(
+            "import importlib.abc\n"
+            "import sys\n"
+            "class ParentOnlyDependencies(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, fullname, path=None, target=None):\n"
+            "        if fullname in ('app.modules.media.mesh_observability', 'sqlalchemy'):\n"
+            "            raise ImportError('parent_only_application_dependency_in_child')\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, ParentOnlyDependencies())\n"
+        )
+        monkeypatch.setenv(
+            "PYTHONPATH",
+            os.pathsep.join(
+                (str(boundary), str(BACKEND_DIR), os.environ.get("PYTHONPATH", ""))
+            ),
+        )
+        monkeypatch.setenv("OPENBLAS_NUM_THREADS", "1")
+        monkeypatch.setenv("OMP_NUM_THREADS", "1")
+        monkeypatch.setitem(_overlay, "mesh_worker_timeout_seconds", 20)
+
+    @pytest.fixture
+    def startup_source(self, tmp_path, file_type):
+        mesh = trimesh.creation.box(extents=[10, 20, 30])
+        payload = (
+            mesh.export(file_type="stl")
+            if file_type == "stl"
+            else three_mf(meshes={1: mesh})
+        )
+        source = tmp_path / f"cube.{file_type}"
+        source.write_bytes(payload)
+        return source
+
+    @pytest.mark.parametrize("file_type", ["stl", "3mf"], ids=["stl", "3mf"])
+    def test_preserves_mesh_outputs_without_parent_dependencies(
+        self, startup_source, file_type, caplog
+    ):
+        original = startup_source.read_bytes()
+        request = _request(
+            startup_source,
+            file_type=file_type,
+            include_fingerprint=False,
+            width=64,
+            height=48,
+        )
+        expected = ThumbnailEngine().generate(request)
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+        caplog.clear()
+
+        actual = mesh_isolation.generate(request)
+
+        assert isinstance(actual.geometry_outcome, GeometryReady)
+        assert actual.geometry == expected.geometry
+        assert actual.geometry == {
+            "triangle_count": 12,
+            "bbox_x_mm": 10.0,
+            "bbox_y_mm": 20.0,
+            "bbox_z_mm": 30.0,
+            "volume_mm3": 6000.0,
+        }
+        assert actual.volume == expected.volume == VolumeMeasured(6000.0)
+        assert actual.image is not None
+        assert actual.image == expected.image
+        assert actual.coverage == expected.coverage
+        assert actual.failure_reason is None
+        assert startup_source.read_bytes() == original
+        records = {
+            prefix: [
+                json.loads(record.getMessage().removeprefix(prefix + " "))
+                for record in caplog.records
+                if record.getMessage().startswith(prefix + " ")
+            ]
+            for prefix in ("mesh_admission", "mesh_supervision", "mesh_phases")
+        }
+        assert len(records["mesh_admission"]) == 1
+        assert records["mesh_admission"][0]["outcome"] == "admitted"
+        assert len(records["mesh_supervision"]) == 1
+        assert records["mesh_supervision"][0]["reply_bytes"] > 0
+        assert len(records["mesh_phases"]) == 1
+        assert records["mesh_phases"][0]["stages"]
+        assert all(
+            entry["process_id"] == os.getpid()
+            for entries in records.values()
+            for entry in entries
+        )
+
+    @pytest.mark.parametrize("file_type", ["stl", "3mf"], ids=["stl", "3mf"])
+    def test_keeps_following_work_available_after_typed_refusal(
+        self, startup_source, file_type, tmp_path
+    ):
+        malformed = tmp_path / "malformed.stl"
+        damaged = content.binary_stl(triangles=2) + b"unframed trailing bytes"
+        malformed.write_bytes(damaged)
+        original = startup_source.read_bytes()
+
+        refused = mesh_isolation.generate(
+            _request(malformed, include_fingerprint=False, width=64, height=48)
+        )
+        following = mesh_isolation.generate(
+            _request(
+                startup_source,
+                file_type=file_type,
+                include_fingerprint=False,
+                width=64,
+                height=48,
+            )
+        )
+
+        assert refused.geometry_outcome == GeometryRefused(
+            ThumbnailFailureReason.INVALID_SOURCE
+        )
+        assert refused.image is None
+        assert refused.failure_reason is ThumbnailFailureReason.INVALID_SOURCE
+        assert isinstance(following.geometry_outcome, GeometryReady)
+        assert following.volume == VolumeMeasured(6000.0)
+        assert following.geometry["triangle_count"] == 12
+        assert following.image is not None
+        assert following.failure_reason is None
+        assert malformed.read_bytes() == damaged
+        assert startup_source.read_bytes() == original

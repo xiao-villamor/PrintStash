@@ -6,8 +6,15 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import ArgumentError
 
-from app.core.config import DATA_ROOT_LAYOUT, ConfigResolver, FrozenSettings, _overlay
+from app.core.config import (
+    DATA_ROOT_LAYOUT,
+    ConfigResolver,
+    FrozenSettings,
+    _overlay,
+    _sqlite_db_path,
+)
 from app.modules.derivatives.policy import SETTINGS
 
 DATA_ROOT = Path("/srv/printstash")
@@ -243,7 +250,9 @@ class TestInferenceResidencySettings:
 
 
 class TestBatchWindowSettings:
-    @pytest.mark.parametrize("field", ["ingestion_batch_max_files", "ingestion_batch_max_mb"])
+    @pytest.mark.parametrize(
+        "field", ["ingestion_batch_max_files", "ingestion_batch_max_mb"]
+    )
     @pytest.mark.parametrize("value", [0, -1])
     def test_refuses_nonpositive_window_limits(self, field, value):
         with pytest.raises(ValidationError):
@@ -262,3 +271,33 @@ class TestBatchWindowSettings:
         configured = FrozenSettings(_env_file=None)
         assert configured.ingestion_batch_max_files == 2
         assert configured.ingestion_batch_max_mb == 8
+
+
+class TestSqliteDbPath:
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("sqlite:///library.sqlite?timeout=10", Path("library.sqlite")),
+            ("sqlite+pysqlite:////srv/library.sqlite", Path("/srv/library.sqlite")),
+            ("sqlite:///folder/library.sqlite", Path("folder/library.sqlite")),
+        ],
+        ids=["relative-query", "absolute-driver", "nested"],
+    )
+    def test_returns_the_file_path(self, url: str, expected: Path) -> None:
+        assert _sqlite_db_path(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "sqlite://",
+            "sqlite:///:memory:",
+            "postgresql+psycopg://example/db",
+        ],
+        ids=["empty", "memory", "postgres"],
+    )
+    def test_omits_non_file_database_paths(self, url: str) -> None:
+        assert _sqlite_db_path(url) is None
+
+    def test_refuses_a_malformed_sqlite_url(self) -> None:
+        with pytest.raises(ArgumentError, match="Could not parse"):
+            _sqlite_db_path("sqlite-invalid")

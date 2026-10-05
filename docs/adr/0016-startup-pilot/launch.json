@@ -1,0 +1,187 @@
+{
+  "scope": "actual admitted bootstrap+guardian+stdlib-only reply+group retirement; excludes worker module and numerical imports",
+  "n": 30,
+  "median_ms": 95.5255585,
+  "samples": [
+    {
+      "sample": 1,
+      "supervised_ms": 101.041116,
+      "peak_tree_rss_bytes": 32342016,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 2,
+      "supervised_ms": 93.972281,
+      "peak_tree_rss_bytes": 32473088,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 3,
+      "supervised_ms": 93.811425,
+      "peak_tree_rss_bytes": 32153600,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 4,
+      "supervised_ms": 93.790923,
+      "peak_tree_rss_bytes": 32538624,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 5,
+      "supervised_ms": 95.490494,
+      "peak_tree_rss_bytes": 32026624,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 6,
+      "supervised_ms": 95.028813,
+      "peak_tree_rss_bytes": 32526336,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 7,
+      "supervised_ms": 101.034313,
+      "peak_tree_rss_bytes": 32428032,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 8,
+      "supervised_ms": 95.447382,
+      "peak_tree_rss_bytes": 32223232,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 9,
+      "supervised_ms": 92.988752,
+      "peak_tree_rss_bytes": 32088064,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 10,
+      "supervised_ms": 99.43026,
+      "peak_tree_rss_bytes": 32190464,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 11,
+      "supervised_ms": 92.661006,
+      "peak_tree_rss_bytes": 32481280,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 12,
+      "supervised_ms": 97.939734,
+      "peak_tree_rss_bytes": 32399360,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 13,
+      "supervised_ms": 96.467412,
+      "peak_tree_rss_bytes": 32227328,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 14,
+      "supervised_ms": 97.901317,
+      "peak_tree_rss_bytes": 32366592,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 15,
+      "supervised_ms": 96.702612,
+      "peak_tree_rss_bytes": 32022528,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 16,
+      "supervised_ms": 102.094007,
+      "peak_tree_rss_bytes": 32149504,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 17,
+      "supervised_ms": 110.626638,
+      "peak_tree_rss_bytes": 32346112,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 18,
+      "supervised_ms": 127.922885,
+      "peak_tree_rss_bytes": 32145408,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 19,
+      "supervised_ms": 93.496037,
+      "peak_tree_rss_bytes": 32010240,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 20,
+      "supervised_ms": 93.084365,
+      "peak_tree_rss_bytes": 32256000,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 21,
+      "supervised_ms": 95.560623,
+      "peak_tree_rss_bytes": 32063488,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 22,
+      "supervised_ms": 93.404639,
+      "peak_tree_rss_bytes": 32153600,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 23,
+      "supervised_ms": 93.184768,
+      "peak_tree_rss_bytes": 32464896,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 24,
+      "supervised_ms": 94.930038,
+      "peak_tree_rss_bytes": 32358400,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 25,
+      "supervised_ms": 92.484054,
+      "peak_tree_rss_bytes": 32284672,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 26,
+      "supervised_ms": 94.342086,
+      "peak_tree_rss_bytes": 32030720,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 27,
+      "supervised_ms": 105.055322,
+      "peak_tree_rss_bytes": 32149504,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 28,
+      "supervised_ms": 98.977392,
+      "peak_tree_rss_bytes": 32157696,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 29,
+      "supervised_ms": 105.701906,
+      "peak_tree_rss_bytes": 32358400,
+      "exit": "exited_zero"
+    },
+    {
+      "sample": 30,
+      "supervised_ms": 98.6073,
+      "peak_tree_rss_bytes": 32092160,
+      "exit": "exited_zero"
+    }
+  ]
+}

@@ -20,7 +20,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.engine.url import make_url
 
 # ---------------------------------------------------------------------------
 # Shared overlay dict — written by runtime_config, read by ConfigResolver.
@@ -562,6 +561,8 @@ def _sqlite_db_path(db_url: str) -> Path | None:
     """Return the on-disk path for a sqlite URL, or ``None`` for in-memory/other."""
     if not db_url.startswith("sqlite"):
         return None
+    from sqlalchemy.engine.url import make_url
+
     database = make_url(db_url).database
     if not database or database == ":memory:":
         return None

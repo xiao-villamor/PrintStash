@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Defer parent-only metrics and database URL parsing in disposable mesh workers,
+  reducing measured small-model startup costs while preserving CPU outputs,
+  parent telemetry and guarded process cleanup.
+
 - Add isolated GLB/LOD qualification tools with supervised native exports, real
   browser memory/draw/quality measurements and protected-feature checks. Retain
   STL after measured candidate correctness, resource and performance limits.

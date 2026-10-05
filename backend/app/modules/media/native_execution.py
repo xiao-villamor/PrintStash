@@ -7,7 +7,6 @@ from time import monotonic_ns
 from printstash_core.inference import EmbeddingError
 
 from app.core.cancellation import OperationCancelled
-from app.modules.media.mesh_observability import record_admission
 from app.modules.media.mesh_telemetry import AdmissionOutcome, AdmissionStats
 from app.runtime.native_admission import NativePermit, Resources
 from app.runtime.native_runtime import admit, current_permit
@@ -25,6 +24,8 @@ def admission(
         with admit(request, capacity, checkpoint=checkpoint) as permit:
             yield permit
         return
+    from app.modules.media.mesh_observability import record_admission
+
     started = monotonic_ns()
     outcome = AdmissionOutcome.FAILED
     with ExitStack() as owned:

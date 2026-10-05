@@ -1,0 +1,17 @@
+[
+  {
+    "path": "backend/app/core/config.py",
+    "baseline_sha256": "6e2990b8e8160d5e40d68731649ae685e65606763d34946a77a9452781e4ffb0",
+    "second_candidate_sha256": "f03a3bd12d4c2d4fc62c0d8ebda5fd42004ce5b8660a408df839bfa4a3a41908"
+  },
+  {
+    "path": "backend/app/modules/media/native_execution.py",
+    "baseline_sha256": "fec0f87e436faaeeb1560aaffa3e68be600c2aae8e3373b173b6903d2cc4b82f",
+    "second_candidate_sha256": "a8591e68092df3b6dee4e9e1d3f230b4c44314d23896dd1ed2a6f8028a8f0494"
+  },
+  {
+    "path": "backend/app/modules/media/mesh_isolation.py",
+    "baseline_sha256": "28a5673af8a827f808d092d29c690cbd25835fd128aff9170bff55570c6028f7",
+    "second_candidate_sha256": "4dc0a40799089b95f022cd7f9ff6d2bb0f716e7574d282da9773258eeb0ba0e7"
+  }
+]

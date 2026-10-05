@@ -60,7 +60,6 @@ from app.modules.media.mesh_contracts import (
     encode_geometry,
 )
 from app.modules.media.mesh_facts import FingerprintFailureCode
-from app.modules.media.mesh_observability import record_phases, record_supervision
 from app.modules.media.mesh_protocol import (
     FrameDecoder,
     GeometryOutput,
@@ -587,6 +586,8 @@ def supervise_result(
             )
             if error is not None:
                 error.supervision = stats
+            from app.modules.media.mesh_observability import record_supervision
+
             record_supervision(stats)
     if cancelled is not None:
         raise MeshWorkerCancelled(stats) from cancelled
@@ -917,5 +918,7 @@ def generate(
             error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             error.supervision = reply.stats
             raise error from exc
+        from app.modules.media.mesh_observability import record_phases
+
         record_phases(result.phase_stats, reply.stats)
         return result
