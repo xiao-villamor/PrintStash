@@ -425,10 +425,20 @@ class TestReadItemsByIds:
     @pytest.mark.parametrize("statistics", ("none", "empty", "small"))
     @pytest.mark.parametrize("unrelated_tags", (False, True))
     def test_bounds_card_work_to_requested_identities(
-        self, db_session, make_user, make_model, make_tag, statistics, unrelated_tags
+        self,
+        db_session,
+        make_user,
+        make_model,
+        make_tag,
+        statistics,
+        unrelated_tags,
+        monkeypatch,
     ):
+        from app.modules.library.model_views import extensions
+        from app.modules.similarity import projections as similarity_projections
         from tests.fakes.sqlite_work import sqlite_work
 
+        monkeypatch.setattr(extensions, "_annotations", similarity_projections)
         if statistics == "empty":
             db_session.connection().exec_driver_sql("ANALYZE")
         actor = make_user(superuser=True)
@@ -447,8 +457,25 @@ class TestReadItemsByIds:
             )
         db_session.commit()
         db_session.expire_all()
-        with sqlite_work(db_session) as large:
-            after = models_listing.read_items_by_ids(db_session, actor, [target_id])
+        statements = []
+        connection = db_session.connection().connection.driver_connection
+        connection.set_trace_callback(statements.append)
+        try:
+            with sqlite_work(db_session) as large:
+                after = models_listing.read_items_by_ids(db_session, actor, [target_id])
+        finally:
+            connection.set_trace_callback(None)
+        # Explain only after removing the progress handler: diagnostics must
+        # never alter the measured instruction count. Catch planner scans even
+        # when a SQLite release shortcuts an empty candidate table at runtime.
+        model_scans = [
+            row[3]
+            for statement in statements
+            if statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for row in connection.execute("EXPLAIN QUERY PLAN " + statement).fetchall()
+            if "scan models" in row[3].lower()
+        ]
+        assert not model_scans, model_scans
         assert [row.id for row in before] == [row.id for row in after] == [target_id]
         assert before[0].tags == after[0].tags == ["Requested tag"]
         assert large.instructions <= max(1000, small.instructions * 2)

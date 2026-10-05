@@ -75,3 +75,37 @@ class TestProjections:
         db_session.add(file)
         db_session.commit()
         assert summaries(db_session, actor, [a.id, b.id]) == {}
+
+
+class TestBoundedBadgeWork:
+    def test_bounds_current_badges_to_candidate_identities(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_user,
+        make_geometry_fingerprint,
+        make_similarity_candidate,
+        make_similarity_observation,
+    ):
+        from tests.fakes.sqlite_work import sqlite_work
+
+        actor = make_user(superuser=True)
+        a, b = make_model(), make_model()
+        fa = make_geometry_fingerprint(make_file(a), state="ready")
+        fb = make_geometry_fingerprint(make_file(b), state="ready")
+        candidate = make_similarity_candidate(a, b)
+        make_similarity_observation(candidate, fa, fb)
+        target_id = a.id
+        db_session.connection().exec_driver_sql("ANALYZE")
+        db_session.expire_all()
+        with sqlite_work(db_session) as small:
+            before = summaries(db_session, actor, [target_id])
+        for index in range(1000):
+            make_model(f"Unrelated badge Model {index}")
+        db_session.commit()
+        db_session.expire_all()
+        with sqlite_work(db_session) as large:
+            after = summaries(db_session, actor, [target_id])
+        assert before == after == {target_id: {"open_candidates": 1, "confirmed": 0}}
+        assert large.instructions <= max(1000, small.instructions * 2)

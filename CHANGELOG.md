@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Keep Model card tag reads bounded as the SQLite catalog grows, including
+- Keep Model card tag and similarity badge reads bounded as the SQLite catalog grows, including
   installations with stale query-planner statistics.
 
 - Defer parent-only metrics and database URL parsing in disposable mesh workers,
