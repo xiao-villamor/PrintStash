@@ -211,6 +211,58 @@ class TestQuickGate:
 
 
 class TestDeepSuite:
+    def test_runs_compatibility_phases_independently(self) -> None:
+        job = _workflow("deep-ci.yml")["jobs"]["backend-python314"]
+
+        assert job["strategy"]["matrix"]["phase"] == ["full-ordinary", "full-resources"]
+        assert job["strategy"]["fail-fast"] is False
+        assert job["timeout-minutes"] == 60
+        assert "./scripts/test.sh ${{ matrix.phase }} -q" in _commands(job)
+        assert not job.get("continue-on-error", False)
+
+    @pytest.mark.parametrize(
+        ("lane", "expected_parallel", "expression"),
+        [
+            pytest.param(
+                "full-ordinary",
+                ["-n", "auto", "--dist", "worksteal"],
+                "not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode",
+                id="ordinary",
+            ),
+            pytest.param(
+                "full-resources",
+                [],
+                "(postgres or s3 or remote_storage or bgcode) and not coverage_gate and not scale",
+                id="resources",
+            ),
+        ],
+    )
+    def test_selects_the_full_phase_in_one_invocation(
+        self, tmp_path: Path, lane: str, expected_parallel: list[str], expression: str
+    ) -> None:
+        fake_uv = tmp_path / "uv"
+        fake_uv.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        fake_uv.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "scripts/test.sh", lane, "-q"],
+            cwd=REPO_ROOT / "backend",
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        assert result.stdout.splitlines() == [
+            "run",
+            "pytest",
+            *expected_parallel,
+            "-m",
+            expression,
+            "tests",
+            "-q",
+        ]
+
     @pytest.mark.parametrize(
         ("job_name", "suite_name"),
         [

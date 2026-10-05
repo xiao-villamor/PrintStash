@@ -29,6 +29,10 @@ Lanes
              (25,000 collections, 100,000 Models). Deep CI runs it nightly;
              every other lane deselects it. Deterministic scaling checks run
              in `pr` (tests/repo/test_read_scaling.py).
+  full-ordinary  full-suite tests without container resource markers.
+             A separate CI phase; includes slow tests.
+  full-resources full-suite container resource tests, serially.
+             A separate CI phase; each real service starts once.
   coverage   `full` under branch coverage, then the coverage gate: aggregate
              regression floor plus a per-module floor (tests/repo/test_coverage_floors.py).
              Writes term-missing, .coverage-html/index.html and coverage.json.
@@ -137,6 +141,14 @@ case "$lane" in
     fi
     uv run pytest "${parallel[@]}" -m "critical and not coverage_gate and $not_scale and $non_resource_expression" tests ${pytest_args[@]+"${pytest_args[@]}"}
     exec uv run pytest -m "critical and ($resource_expression)" tests ${pytest_args[@]+"${pytest_args[@]}"}
+    ;;
+  full-ordinary)
+    add_paths tests
+    exec uv run pytest "${parallel[@]}" -m "not coverage_gate and $not_scale and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    ;;
+  full-resources)
+    add_paths tests
+    exec uv run pytest -m "($resource_expression) and not coverage_gate and $not_scale" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   full)
     add_paths tests

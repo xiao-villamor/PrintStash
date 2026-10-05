@@ -274,11 +274,15 @@ jobs:
           -k "${{ matrix.test }} and ${{ matrix.reader }}"
 
   backend-python314:
-    name: Backend compatibility (Python 3.14.8)
+    name: Backend compatibility (Python 3.14.8 / ${{ matrix.phase }})
     runs-on: ubuntu-latest
-    # The full lane includes a serial container-contract pass after the ordinary
-    # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
+    # Give ordinary and serial container contracts independent runner budgets.
+    # Both phases remain required; one failure must not cancel the other proof.
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [full-ordinary, full-resources]
     defaults:
       run:
         working-directory: backend
@@ -303,7 +307,7 @@ jobs:
         run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
 
       - name: Run backend compatibility suite
-        run: ./scripts/test.sh full -q
+        run: ./scripts/test.sh ${{ matrix.phase }} -q
 
       - name: Remove PID namespace qualification
         if: always()

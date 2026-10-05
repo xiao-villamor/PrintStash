@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Run Python compatibility tests and external service contracts in independent
+  Deep CI jobs, preserving both required results and their execution limits.
+
 - Distinguish repeated uploads from same-Job retries in sustained ingestion
   qualification, verify versioned Artifact identities, and stop after the first
   failed mandatory control while preserving failure evidence. Configure E2E

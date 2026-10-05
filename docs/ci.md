@@ -21,6 +21,14 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
+Python compatibility runs the `full-ordinary` and `full-resources` lanes in
+independent jobs. The ordinary phase includes slow tests and retains work-stealing;
+the resource phase runs serially so each real service starts once. Their marker
+sets are disjoint and together cover the full lane, excluding the separately
+measured scale and coverage gates. Both phases must succeed; fail-fast is disabled
+so one failure preserves the other result. Each retains the 60-minute limit.
+The `full` lane and backend branch-coverage job keep their existing composition.
+
 The `scale` lane runs serially within each CI job. Four separate jobs split
 budget and growth checks by administrator and granted viewer, measuring 13
 reads apiece. Running four seeded 100,000-Model databases on one CI runner
