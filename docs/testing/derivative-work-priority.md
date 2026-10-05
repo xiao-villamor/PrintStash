@@ -179,3 +179,11 @@ separately identifies checks that actually executed successfully.
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|----------------------|----------|----------------------|-----------------------------|------|--------|
 | 1 | moving the canonical priority owner preserves the public contract | Edge | Canonical application OpenAPI document after enum extraction | Complete normalized document equals the existing snapshot, including priority values and description | Repo | ✅ `repo/test_openapi_contract.py::TestOpenapi::test_openapi_contract` |
+
+## Historical migration convergence
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 1 | historical mesh outputs survive both the pinned migration and current schema convergence | Edge | Released SQLite Files and Metadata upgraded first to the historical mesh-continuation revision, then explicitly to current head | Original facts unchanged at both boundaries; zero continuations; historical CASCADE foreign key retained; current schema has exactly empty autogenerate diff against live models | Integration | ✅ `integration/db/migrations/test_mesh_continuation.py::TestMeshContinuationMigration::test_upgrade_preserves_existing_outputs[sqlite]` |
+
+The isolated SQLite regression passed (1 test, 83.23 s). This fixes the historical test's comparison boundary: assertions at its pinned revision remain intact, and comparison with current models happens after upgrading to current head.

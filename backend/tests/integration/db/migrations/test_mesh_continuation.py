@@ -101,12 +101,6 @@ class TestMeshContinuationMigration:
                     ).scalar_one()
                     == 0
                 )
-                context = MigrationContext.configure(
-                    connection,
-                    opts={"compare_type": True, "compare_server_default": True},
-                )
-                changes = produce_migrations(context, SQLModel.metadata).upgrade_ops
-                assert changes.is_empty(), changes.as_diffs()
             keys = inspect(engine).get_foreign_keys("mesh_fingerprint_continuations")
             assert [
                 (
@@ -116,6 +110,35 @@ class TestMeshContinuationMigration:
                 )
                 for key in keys
             ] == [(["file_id"], "files", "CASCADE")]
+
+            # REVISION pins the historical output contract above. Convergence
+            # with live models requires the full current chain, not that snapshot.
+            command.upgrade(migrate._alembic_config(mesh_upgrade_url), "head")
+            with engine.connect() as connection:
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT id,path,sha256,thumbnail_path FROM files ORDER BY id"
+                        )
+                    ).all()
+                    == original_files
+                )
+                assert (
+                    connection.execute(text("SELECT * FROM metadata ORDER BY id")).all()
+                    == original_metadata
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT COUNT(*) FROM mesh_fingerprint_continuations")
+                    ).scalar_one()
+                    == 0
+                )
+                context = MigrationContext.configure(
+                    connection,
+                    opts={"compare_type": True, "compare_server_default": True},
+                )
+                changes = produce_migrations(context, SQLModel.metadata).upgrade_ops
+                assert changes.is_empty(), changes.as_diffs()
         finally:
             engine.dispose()
 
