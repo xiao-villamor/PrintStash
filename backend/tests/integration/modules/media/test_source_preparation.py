@@ -7,14 +7,48 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
+from sqlmodel import SQLModel, create_engine
 
-from app.db.session import get_session_factory, override_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+    override_session_factory,
+)
 from app.modules.media import source_preparation
 from app.modules.storage.artifact_content import ArtifactHandle, resolve
 from app.runtime import native_runtime, preparation_runtime
 from app.runtime.native_admission import AdmissionTooLarge, Resources
 from app.runtime.preparation_runtime import make_pools
 from tests.factories import detached_file
+
+
+@pytest.fixture
+def threaded_source_db(tmp_path, _patch_engine):
+    """File SQLite queues concurrent capacity writers using production pragmas."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'source-preparation.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    previous = get_session_factory()
+    factory = SQLiteSessionFactory(engine)
+    try:
+        SQLModel.metadata.create_all(engine)
+        override_session_factory(factory)
+        yield factory
+    finally:
+        override_session_factory(previous)
+        engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _source_database_before_inputs(request, _patch_engine):
+    # Autouse precedes handles/db_session; the explicit reset dependency ensures
+    # the suite's default factory cannot replace this per-test override later.
+    if "threaded_source_db" in request.fixturenames:
+        request.getfixturevalue("threaded_source_db")
 
 
 @pytest.fixture
@@ -116,7 +150,7 @@ class TestSourcePreparation:
                 pytest.fail("oversized batch admitted")
 
     def test_prepared_bytes_bound_waiting_sources(
-        self, pools, handles, monkeypatch, threaded_hub_db, db_session
+        self, pools, handles, monkeypatch, threaded_source_db, db_session
     ):
         factory = get_session_factory()
         monkeypatch.setattr(source_preparation, "capacity", lambda: Resources(2, 128))
@@ -147,7 +181,7 @@ class TestSourcePreparation:
             assert future.result(timeout=5) == bytes([2]) * 64
 
     def test_releases_io_while_native_work_retains_source_bytes(
-        self, pools, handles, threaded_hub_db, db_session
+        self, pools, handles, threaded_source_db, db_session
     ):
         factory = get_session_factory()
         copied = threading.Event()

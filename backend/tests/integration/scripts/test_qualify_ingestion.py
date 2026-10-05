@@ -659,3 +659,87 @@ class TestResourceSnapshot:
         for connection in opened:
             with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
                 connection.execute("SELECT 1")
+
+
+class TestCancellationSourceEvidence:
+    def test_reads_exact_cancelled_job_with_reclaimed_source(
+        self, make_ingest_request, make_user
+    ):
+        from app.db.models import IngestRequestKind, JobState
+        from scripts.qualify_ingestion import cancellation_source_evidence
+
+        request = make_ingest_request(
+            make_user(), kind=IngestRequestKind.UPLOAD, state=JobState.CANCELLED
+        )
+
+        evidence = cancellation_source_evidence(request.job_id, "a" * 64)
+
+        assert evidence.state == JobState.CANCELLED
+        assert evidence.artifact_count == 0
+        assert evidence.staging_lease_count == 0
+        assert evidence.scratch_window_count == 0
+        assert evidence.proves_reclaimed(request.job_id) is True
+
+    def test_rejects_an_absent_job(self):
+        from scripts.qualify_ingestion import cancellation_source_evidence
+
+        evidence = cancellation_source_evidence("missing-job", "a" * 64)
+
+        assert evidence.state is None
+        assert evidence.proves_reclaimed("missing-job") is False
+
+    @pytest.mark.parametrize("identity", ["ingestion-key", "source-sha"])
+    def test_reports_retained_source_custody(
+        self,
+        db_session,
+        tmp_path,
+        make_ingest_request,
+        make_user,
+        make_model,
+        make_file,
+        make_ingestion_scratch_window,
+        identity,
+    ):
+        import hashlib
+
+        from app.db.models import IngestRequestKind, Job, JobState
+        from app.modules.ingestion.staging_leases import create_job_lease
+        from scripts.qualify_ingestion import cancellation_source_evidence
+
+        owner = make_user()
+        request = make_ingest_request(
+            owner, kind=IngestRequestKind.UPLOAD, state=JobState.CANCELLED
+        )
+        job = db_session.get(Job, request.job_id)
+        assert job is not None
+        payload = b"cancelled control source"
+        source_sha = hashlib.sha256(payload).hexdigest()
+        assert (
+            cancellation_source_evidence(job.id, source_sha).proves_reclaimed(job.id)
+            is True
+        )
+        make_file(
+            make_model(),
+            ingestion_key=job.id if identity == "ingestion-key" else "other-key",
+            sha256=source_sha if identity == "source-sha" else "b" * 64,
+        )
+        staged = tmp_path / "cancel-control.stl"
+        staged.write_bytes(payload)
+        create_job_lease(
+            db_session,
+            job_id=job.id,
+            owner_user_id=owner.id,
+            path=staged,
+            size_bytes=len(payload),
+            sha256=source_sha,
+        )
+        db_session.commit()
+        make_ingestion_scratch_window(job=job, execution_epoch=job.execution_epoch)
+
+        evidence = cancellation_source_evidence(job.id, source_sha)
+
+        assert evidence.state == JobState.CANCELLED
+        assert evidence.artifact_count == 1
+        assert evidence.staging_lease_count == 1
+        assert evidence.scratch_window_count == 1
+        assert evidence.proves_reclaimed(job.id) is False

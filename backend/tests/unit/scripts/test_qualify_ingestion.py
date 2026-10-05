@@ -600,3 +600,188 @@ class TestMissingLoadBaselines:
         assert result["gate_passed"] is None
         assert result["qualification"] == "not_assessed_missing_baseline_cells"
         assert result["reason"] == "missing_load_baseline_cells"
+
+
+class TestCancellationControl:
+    @pytest.fixture
+    def control(self, monkeypatch, tmp_path):
+        from unittest.mock import Mock
+
+        import httpx
+
+        from app.core.time import utcnow
+        from app.db.models import JobKind, JobState, WorkPriority
+        from app.schemas.jobs import JobStatus
+        from scripts import qualify_ingestion as qualification
+
+        monkeypatch.setattr(qualification, "malformed_control", lambda *args: {})
+        monkeypatch.setattr(
+            qualification,
+            "variant",
+            lambda original, target, ordinal: target.write_bytes(b"cancel source"),
+        )
+        status = JobStatus(
+            job_id="cancel-job",
+            staging=None,
+            kind=JobKind.INGESTION_UPLOAD,
+            state=JobState.CANCELLED,
+            priority=WorkPriority.INTERACTIVE,
+            attempts=0,
+            resubmits=0,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        monkeypatch.setattr(qualification, "wait_job", lambda *args: status)
+        client = Mock()
+
+        def response(code, body):
+            return httpx.Response(
+                code, json=body, request=httpx.Request("POST", "http://test/control")
+            )
+
+        client.post.side_effect = [
+            response(202, {"job_id": "cancel-job"}),
+            response(200, {}),
+            response(410, {"detail": "job_subject_gone"}),
+        ]
+        return qualification, client, tmp_path, status, response
+
+    def test_reclaimed_cancelled_source_is_proved_without_claiming_retry(
+        self, control, monkeypatch
+    ):
+        import json
+
+        qualification, client, scratch, _, _ = control
+        monkeypatch.setattr(
+            qualification,
+            "cancellation_source_evidence",
+            lambda job_id, source_sha256: qualification.CancellationSourceEvidence(
+                job_id=job_id,
+                state="cancelled",
+                artifact_count=0,
+                staging_lease_count=0,
+                scratch_window_count=0,
+            ),
+            raising=False,
+        )
+        evidence = scratch / "cancellation-controls.jsonl"
+        result = qualification.control_run(client, scratch, 100, evidence_path=evidence)
+        cancellation = result["cancellation"]
+        assert result["cancellation_valid"] is True
+        assert cancellation["qualification"] == "cancelled_source_reclaimed"
+        assert cancellation["cancellation_proved"] is True
+        assert cancellation["retry_proved"] is False
+        rows = [json.loads(line) for line in evidence.read_text().splitlines()]
+        assert rows[-1]["cancellation"] == cancellation
+        assert cancellation["source_evidence"]["artifact_count"] == 0
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("job_id", "other-job"),
+            ("state", "completed"),
+            ("state", None),
+            ("artifact_count", 1),
+            ("staging_lease_count", 1),
+            ("scratch_window_count", 1),
+        ],
+        ids=[
+            "different-job",
+            "completed",
+            "missing-job",
+            "artifact",
+            "staging",
+            "scratch",
+        ],
+    )
+    def test_gone_retry_requires_fresh_exact_empty_custody_proof(
+        self, control, monkeypatch, field, value
+    ):
+        import json
+
+        import httpx
+
+        qualification, client, scratch, _, _ = control
+        values = dict(
+            job_id="cancel-job",
+            state="cancelled",
+            artifact_count=0,
+            staging_lease_count=0,
+            scratch_window_count=0,
+        )
+        values[field] = value
+        monkeypatch.setattr(
+            qualification,
+            "cancellation_source_evidence",
+            lambda *args: qualification.CancellationSourceEvidence(**values),
+            raising=False,
+        )
+        evidence = scratch / "cancellation-controls.jsonl"
+        with pytest.raises(httpx.HTTPStatusError):
+            qualification.control_run(client, scratch, 100, evidence_path=evidence)
+        last = json.loads(evidence.read_text().splitlines()[-1])
+        assert last["cancellation"]["retry_http_status"] == 410
+        assert last["cancellation"]["source_evidence"][field] == value
+        assert last["cancellation_valid"] is False
+
+    @pytest.mark.parametrize(
+        "code,detail", [(410, "other_gone"), (500, "server_error")]
+    )
+    def test_unrelated_retry_errors_are_journaled_before_raising(
+        self, control, code, detail
+    ):
+        import json
+
+        import httpx
+
+        qualification, client, scratch, _, response = control
+        client.post.side_effect = [
+            response(202, {"job_id": "cancel-job"}),
+            response(200, {}),
+            response(code, {"detail": detail}),
+        ]
+        evidence = scratch / "cancellation-controls.jsonl"
+        with pytest.raises(httpx.HTTPStatusError):
+            qualification.control_run(client, scratch, 100, evidence_path=evidence)
+        last = json.loads(evidence.read_text().splitlines()[-1])
+        assert last["cancellation"]["retry_response"] == {"detail": detail}
+        assert last["cancellation_valid"] is False
+
+    def test_successful_retry_still_requires_completed_job(self, control, monkeypatch):
+        from app.db.models import JobState
+
+        qualification, client, scratch, status, response = control
+        completed = status.model_copy(update={"state": JobState.COMPLETED})
+        statuses = iter([status, completed])
+        monkeypatch.setattr(qualification, "wait_job", lambda *args: next(statuses))
+        client.post.side_effect = [
+            response(202, {"job_id": "cancel-job"}),
+            response(200, {}),
+            response(200, {}),
+        ]
+        result = qualification.control_run(client, scratch, 100)
+        assert result["cancellation_valid"] is True
+        assert result["cancellation"]["cancellation_proved"] is True
+        assert result["cancellation"]["retry_proved"] is True
+        assert result["cancellation"]["retry"]["state"] == "completed"
+
+    def test_completed_before_cancel_does_not_claim_cancellation_proof(
+        self, control, monkeypatch
+    ):
+        from app.db.models import JobState
+
+        qualification, client, scratch, status, response = control
+        monkeypatch.setattr(
+            qualification,
+            "wait_job",
+            lambda *args: status.model_copy(update={"state": JobState.COMPLETED}),
+        )
+        client.post.side_effect = [
+            response(202, {"job_id": "cancel-job"}),
+            response(409, {}),
+        ]
+        result = qualification.control_run(client, scratch, 100)
+        assert result["cancellation_valid"] is True
+        assert result["cancellation"]["qualification"] == "completed_before_cancel"
+        assert result["cancellation"]["cancellation_proved"] is False
+        assert result["cancellation"]["retry_proved"] is False

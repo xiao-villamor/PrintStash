@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
+    from app.db.models import JobState
     from scripts.benchmark_environment import CgroupLimits
 
 
@@ -814,8 +815,80 @@ def malformed_control(
         malformed.unlink(missing_ok=True)
 
 
+class CancellationQualification(StrEnum):
+    CANCELLED_SOURCE_RECLAIMED = "cancelled_source_reclaimed"
+    RETRIED_COMPLETED = "retried_completed"
+    COMPLETED_BEFORE_CANCEL = "completed_before_cancel"
+
+
+@dataclass(frozen=True)
+class CancellationSourceEvidence:
+    job_id: str
+    state: JobState | None
+    artifact_count: int
+    staging_lease_count: int
+    scratch_window_count: int
+
+    def proves_reclaimed(self, expected_job_id: str) -> bool:
+        from app.db.models import JobState
+
+        return (
+            self.job_id == expected_job_id
+            and self.state == JobState.CANCELLED
+            and self.artifact_count == 0
+            and self.staging_lease_count == 0
+            and self.scratch_window_count == 0
+        )
+
+
+def cancellation_source_evidence(
+    job_id: str, source_sha256: str
+) -> CancellationSourceEvidence:
+    """Read fresh custody of this control's default-key upload in one session."""
+    from sqlalchemy import func, or_
+    from sqlmodel import select
+
+    from app.db.models import File, Job, StagingLease
+    from app.db.models.ingestion_scratch import IngestionScratchWindow
+    from app.db.session import get_session_factory
+
+    with get_session_factory().scoped_session() as session:
+        job = session.get(Job, job_id)
+        artifacts = session.exec(
+            select(func.count())
+            .select_from(File)
+            .where(or_(File.ingestion_key == job_id, File.sha256 == source_sha256))
+        ).one()
+        leases = session.exec(
+            select(func.count())
+            .select_from(StagingLease)
+            .where(StagingLease.job_id == job_id)
+        ).one()
+        windows = session.exec(
+            select(func.count())
+            .select_from(IngestionScratchWindow)
+            .where(
+                or_(
+                    IngestionScratchWindow.origin_job_id == job_id,
+                    IngestionScratchWindow.job_id == job_id,
+                )
+            )
+        ).one()
+        return CancellationSourceEvidence(
+            job_id=job_id,
+            state=job.state if job else None,
+            artifact_count=artifacts,
+            staging_lease_count=leases,
+            scratch_window_count=windows,
+        )
+
+
 def control_run(
-    client: TestClient, scratch: Path, deadline: float
+    client: TestClient,
+    scratch: Path,
+    deadline: float,
+    *,
+    evidence_path: Path | None = None,
 ) -> dict[str, object]:
     """Keep real malformed/cancel/retry observations separate from soak credits."""
     from app.db.models import JobState
@@ -823,39 +896,88 @@ def control_run(
     malformed_result = malformed_control(client, scratch, deadline, -1)
     source = scratch / "cancel-control.stl"
     variant(scratch / "corpus" / "cube-binary.stl", source, 1000000)
-    with source.open("rb") as stream:
-        accepted = client.post(
-            "/api/v1/ingest/model",
-            files={"file": (source.name, stream, "application/octet-stream")},
-        )
-    accepted.raise_for_status()
-    job_id = accepted.json()["job_id"]
-    response = client.post(f"/api/v1/jobs/{job_id}/cancel")
-    cancellation: dict[str, object] = {"http_status": response.status_code}
+    source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+    cancellation: dict[str, object] = {
+        "source_sha256": source_sha256,
+        "cancellation_proved": False,
+        "retry_proved": False,
+    }
     cancellation_valid = False
-    if response.status_code == 200:
-        cancelled = wait_job(client, job_id, deadline)
-        cancellation["job"] = cancelled.model_dump(mode="json")
-        if cancelled.state == JobState.CANCELLED:
-            retried = client.post(f"/api/v1/jobs/{job_id}/retry")
-            retried.raise_for_status()
-            retry = wait_job(client, job_id, deadline)
-            cancellation["retry"] = retry.model_dump(mode="json")
-            cancellation_valid = retry.state == JobState.COMPLETED
-    elif response.status_code == 409:
-        raced = wait_job(client, job_id, deadline)
-        cancellation["job"] = raced.model_dump(mode="json")
-        cancellation_valid = raced.state == JobState.COMPLETED
-        cancellation["qualification"] = (
-            "completed_before_cancel; cancellation not proved by this control"
-        )
-    else:
-        response.raise_for_status()
-    return {
+    try:
+        with source.open("rb") as stream:
+            accepted = client.post(
+                "/api/v1/ingest/model",
+                files={"file": (source.name, stream, "application/octet-stream")},
+            )
+        cancellation["upload_http_status"] = accepted.status_code
+        accepted.raise_for_status()
+        job_id = accepted.json()["job_id"]
+        cancellation["job_id"] = job_id
+        response = client.post(f"/api/v1/jobs/{job_id}/cancel")
+        cancellation["http_status"] = response.status_code
+        if response.status_code == 200:
+            cancelled = wait_job(client, job_id, deadline)
+            cancellation["job"] = cancelled.model_dump(mode="json")
+            if cancelled.state == JobState.CANCELLED:
+                cancellation["cancellation_proved"] = True
+                retried = client.post(f"/api/v1/jobs/{job_id}/retry")
+                cancellation["retry_http_status"] = retried.status_code
+                try:
+                    retry_response = retried.json()
+                except ValueError:
+                    retry_response = retried.text[:1024]
+                cancellation["retry_response"] = retry_response
+                if retried.status_code == 410 and retry_response == {
+                    "detail": "job_subject_gone"
+                }:
+                    evidence = cancellation_source_evidence(job_id, source_sha256)
+                    cancellation["source_evidence"] = asdict(evidence)
+                    if evidence.proves_reclaimed(job_id):
+                        cancellation["qualification"] = (
+                            CancellationQualification.CANCELLED_SOURCE_RECLAIMED
+                        )
+                        cancellation_valid = True
+                    else:
+                        retried.raise_for_status()
+                else:
+                    retried.raise_for_status()
+                    retry = wait_job(client, job_id, deadline)
+                    cancellation["retry"] = retry.model_dump(mode="json")
+                    cancellation_valid = retry.state == JobState.COMPLETED
+                    cancellation["retry_proved"] = cancellation_valid
+                    if cancellation_valid:
+                        cancellation["qualification"] = (
+                            CancellationQualification.RETRIED_COMPLETED
+                        )
+        elif response.status_code == 409:
+            raced = wait_job(client, job_id, deadline)
+            cancellation["job"] = raced.model_dump(mode="json")
+            cancellation_valid = raced.state == JobState.COMPLETED
+            if cancellation_valid:
+                cancellation["qualification"] = (
+                    CancellationQualification.COMPLETED_BEFORE_CANCEL
+                )
+        else:
+            response.raise_for_status()
+    except Exception as exc:
+        cancellation["error"] = {"type": type(exc).__name__, "message": str(exc)}
+        if evidence_path is not None:
+            journal(
+                evidence_path,
+                {
+                    "cancellation": cancellation,
+                    "cancellation_valid": False,
+                },
+            )
+        raise
+    result = {
         **malformed_result,
         "cancellation": cancellation,
         "cancellation_valid": cancellation_valid,
     }
+    if evidence_path is not None:
+        journal(evidence_path, result)
+    return result
 
 
 def run_worker(args: argparse.Namespace) -> int:
@@ -1051,6 +1173,7 @@ def run_worker(args: argparse.Namespace) -> int:
                                     workload_deadline,
                                     time.monotonic() + args.job_deadline_seconds,
                                 ),
+                                evidence_path=output / "cancellation-controls.jsonl",
                             )
                             report["controls"] = controls
                             if (
