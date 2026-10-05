@@ -7,6 +7,7 @@ the process boundary unchanged, or every model would quietly change on upgrade.
 
 from __future__ import annotations
 
+import hashlib
 import io
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from app.modules.media.mesh_telemetry import WorkerExitCause
 from app.modules.media.thumbnail_engine import ThumbnailEngine
 from tests.factories import content
 from tests.factories.geometry import three_mf
+from tests.paths import TESTDATA_DIR
 
 
 def _request(path, **overrides) -> ThumbnailRequest:
@@ -81,6 +83,37 @@ class TestGenerate:
         assert isolated.fingerprint_result == direct.fingerprint_result
         assert isolated.fingerprint_result is not None
         assert isolated.fingerprint_result.state is FingerprintResultState.READY
+
+    def test_renders_real_benchy_webp_with_its_full_source_envelope(self, monkeypatch):
+        source = TESTDATA_DIR / "benchy" / "3dbenchy.stl"
+        original_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", 640)
+        ceilings = []
+        original_command = mesh_isolation.worker_command
+
+        def command(module, arguments, budget):
+            ceilings.append(budget)
+            return original_command(module, arguments, budget)
+
+        monkeypatch.setattr(mesh_isolation, "worker_command", command)
+        result = mesh_isolation.generate(
+            _request(source, include_fingerprint=False, output_format="WEBP")
+        )
+
+        assert ceilings == [902_824_000]
+        assert result.strategy is ThumbnailStrategy.FULL
+        assert result.coverage.source_scan is SourceScanState.COMPLETE
+        assert result.coverage.preview is PreviewCoverage.COMPLETE
+        assert result.geometry["triangle_count"] == 225_706
+        assert result.fingerprint_result is None
+        assert result.failure_reason is None
+        assert result.image is not None
+        assert result.image.startswith(b"RIFF")
+        assert result.image[8:12] == b"WEBP"
+        with Image.open(io.BytesIO(result.image)) as image:
+            assert image.format == "WEBP"
+            assert image.size == (640, 480)
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == original_sha
 
     def test_finds_a_source_given_as_a_path_relative_to_the_caller(
         self, tmp_path, monkeypatch

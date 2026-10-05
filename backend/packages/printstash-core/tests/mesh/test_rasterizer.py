@@ -854,6 +854,77 @@ class TestRasteriseTriangles:
         assert painted == budget.used == 512 * 512
         assert img[10, 10].tolist() == [255, 255, 255]
 
+    def test_smaller_allocation_batches_preserve_full_frame_pixels(
+        self, monkeypatch
+    ) -> None:
+        # Two overlapping faces span the entire candidate frame. The near face
+        # varies its corner normals, so parity covers interpolation and depth.
+        tri = np.array(
+            [
+                [[0.0, 0.0, 1.0], [511.0, 0.0, 1.0], [0.0, 511.0, 1.0]],
+                [[0.0, 0.0, 0.0], [511.0, 0.0, 0.0], [0.0, 511.0, 0.0]],
+            ]
+        )
+        normals = np.array(
+            [
+                [[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            ]
+        )
+        original_tri, original_normals = tri.copy(), normals.copy()
+        tri.flags.writeable = False
+        normals.flags.writeable = False
+
+        def draw():
+            img = np.zeros((512, 512, 3), dtype=np.uint8)
+            zbuf = np.full((512, 512), np.inf)
+            budget = RasterBudget(limit=1_000_000)
+            work = rasterizer._rasterise_triangles(
+                img,
+                zbuf,
+                tri,
+                normals,
+                lambda n: (n + 1.0) / 2.0,
+                np.full(3, 255),
+                512,
+                512,
+                budget=budget,
+            )
+            return work, budget.used, img, zbuf
+
+        with monkeypatch.context() as legacy:
+            legacy.setattr(rasterizer, "_CHUNK_PIXEL_BUDGET", 250_000)
+            reference_work, reference_used, reference_img, reference_z = draw()
+
+        observed_batches = []
+        original_batches = rasterizer._pixel_batches
+
+        def observe_batches(*args, **kwargs):
+            for batch in original_batches(*args, **kwargs):
+                observed_batches.append(int(batch[4].sum()))
+                yield batch
+
+        monkeypatch.setattr(rasterizer, "_pixel_batches", observe_batches)
+        actual_work, actual_used, actual_img, actual_z = draw()
+
+        assert observed_batches
+        assert max(observed_batches) <= 125_000
+        assert sum(observed_batches) == actual_work == actual_used == 2 * 512 * 512
+        assert reference_work == reference_used == actual_work
+        assert actual_img.tobytes() == reference_img.tobytes()
+        np.testing.assert_array_equal(actual_z, reference_z)
+        y, x = np.indices((512, 512))
+        # The pixel centers lie inside this triangle exactly when x+y<=510.
+        expected_inside = x + y <= 510
+        np.testing.assert_array_equal(np.isfinite(actual_z), expected_inside)
+        assert np.all(actual_z[expected_inside] == 0.0)
+        assert np.all(actual_img[expected_inside] > 0)
+        assert np.all(actual_img[~expected_inside] == 0)
+        assert actual_img[5, 500].min() > 0
+        assert actual_img[500, 5].min() > 0
+        np.testing.assert_array_equal(tri, original_tri)
+        np.testing.assert_array_equal(normals, original_normals)
+
 
 class TestRasterBudget:
     def test_preserves_default_cumulative_pixel_budget(self) -> None:

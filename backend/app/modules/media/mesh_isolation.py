@@ -73,7 +73,15 @@ from app.modules.media.mesh_telemetry import (
     decode_phase_stats,
     encode_phase_stats,
 )
-from app.modules.media.native_budget import MeshSource, estimate_sources
+from app.modules.media.native_budget import (
+    AnalysisWork,
+    GeometryWork,
+    MeshSource,
+    RasterCodec,
+    RasterWork,
+    WorkProfile,
+    estimate_sources,
+)
 from app.modules.media.native_execution import admission
 from app.modules.media.worker_bootstrap import (
     RESOURCE_EXIT,
@@ -654,6 +662,7 @@ def _run_worker(
     spec: dict[str, Any],
     *,
     sources: tuple[MeshSource, ...],
+    work: WorkProfile,
     on_chunk: Callable[[bytes], None] | None = None,
 ) -> SupervisedReply:
     """Plan a weighted native allowance, then run one supervised worker."""
@@ -662,7 +671,7 @@ def _run_worker(
     amount = (
         existing.resources
         if existing is not None
-        else estimate_sources(capacity, sources)
+        else estimate_sources(capacity, sources, work=work)
     )
     with admission(amount, capacity, checkpoint=checkpoint) as permit:
         command = worker_command(
@@ -681,10 +690,14 @@ def _run_worker(
 
 
 def run_worker(
-    module: str, spec: dict[str, Any], *, sources: tuple[MeshSource, ...]
+    module: str,
+    spec: dict[str, Any],
+    *,
+    sources: tuple[MeshSource, ...],
+    work: WorkProfile,
 ) -> bytes:
     """Byte reply convenience for STL conversion, embedding and verification."""
-    return _run_worker(module, spec, sources=sources).payload
+    return _run_worker(module, spec, sources=sources, work=work).payload
 
 
 def read_spec(argv: list[str]) -> dict[str, Any]:
@@ -736,6 +749,20 @@ def generate(
         "output_format": request.output_format,
         "reason": request.reason,
     }
+    raster: RasterWork | None = None
+    if request.include_thumbnail:
+        width = int(request.width or settings.model_thumbnail_width)
+        height = int(request.height or round(width * 3 / 4))
+        raster = RasterWork(
+            width, height, 1, RasterCodec(request.output_format.lower())
+        )
+    work: WorkProfile = (
+        AnalysisWork(raster)
+        if request.include_fingerprint
+        else raster
+        if raster is not None
+        else GeometryWork()
+    )
     with ExitStack() as resources:
         if request.include_fingerprint and mesh_policy.canonical_suffix(
             request.path, request.file_type
@@ -763,6 +790,7 @@ def generate(
             sources=(
                 MeshSource(request.path, request.file_type or request.path.suffix),
             ),
+            work=work,
             on_chunk=receive,
         )
         try:

@@ -252,3 +252,103 @@ class TestSupervision:
             )
         assert time.monotonic() - started < 5
         assert processes[0].poll() is not None
+
+
+class TestVisualWorkAdmissionProfile:
+    @pytest.mark.parametrize("profile", ["thumbnail", "multiview"])
+    def test_visual_recipe_reserves_its_canonical_webp_work_envelope(
+        self, render_case, monkeypatch, profile
+    ):
+        from dataclasses import replace
+
+        source, recipe, processes = render_case
+        recipe = replace(recipe, profile=profile)
+        amounts = []
+        original = mesh_isolation.supervise_result
+
+        def supervise(*args, **kwargs):
+            amounts.append(kwargs["permit"].resources)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", supervise)
+        result = visual_render.render(
+            source,
+            file_type="stl",
+            recipe=recipe,
+            context=InferenceContext.bounded(20),
+        )
+
+        assert len(amounts) == 1
+        # Policy bounds all render frames by the canonical thumbnail rectangle.
+        # Additional multiview rectangles conservatively overestimate the actual
+        # 32x32 RGB planes; their cost is incremental over one qualified frame.
+        bounding_frame_count = 7 if profile == "multiview" else 1
+        expected = 640 * 1024**2 + (bounding_frame_count - 1) * 640 * 480 * 64
+        assert amounts[0].bytes == min(expected, native_process.native_capacity().bytes)
+        assert amounts[0].slots == 1
+        assert result.thumbnail is not None
+        assert len(result.thumbnail.rgb) == 32 * 32 * 3
+        assert len(result.views) == recipe.view_count
+        assert all(len(view.rgb) == 32 * 32 * 3 for view in result.views)
+        assert processes[0].poll() is not None
+
+    def test_point_recipe_reserves_analysis_without_raster_work(
+        self, render_case, monkeypatch
+    ):
+        from printstash_core.search.point_inputs import PointRecipe
+
+        source, _, processes = render_case
+        recipe = PointRecipe(encoder_space_hash="a" * 64, paired_space_hash="b" * 64)
+        amounts = []
+        original = mesh_isolation.supervise_result
+
+        def supervise(*args, **kwargs):
+            amounts.append(kwargs["permit"].resources)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", supervise)
+        result = visual_render.render(
+            source,
+            file_type="stl",
+            recipe=recipe,
+            context=InferenceContext.bounded(20),
+        )
+
+        assert len(amounts) == 1
+        assert amounts[0].bytes == min(
+            1024 * 1024**2, native_process.native_capacity().bytes
+        )
+        assert amounts[0].slots == 1
+        assert result.thumbnail is None
+        assert len(result.views) == 1
+        assert len(result.views[0].points) == 240000
+        assert processes[0].poll() is not None
+
+    def test_nested_visual_work_reuses_its_existing_admitted_envelope(
+        self, render_case, monkeypatch
+    ):
+        from app.runtime.native_admission import Resources
+        from app.runtime.native_runtime import admit
+
+        source, recipe, processes = render_case
+        capacity = native_process.native_capacity()
+        amount = Resources(1, min(1024 * 1024**2, capacity.bytes))
+        observed = []
+        original = mesh_isolation.supervise_result
+
+        def supervise(*args, **kwargs):
+            observed.append(kwargs["permit"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", supervise)
+        with admit(amount, capacity, checkpoint=lambda: None) as permit:
+            result = visual_render.render(
+                source,
+                file_type="stl",
+                recipe=recipe,
+                context=InferenceContext.bounded(20),
+            )
+        assert observed == [permit]
+        assert len(result.views) == 6
+        assert result.thumbnail is not None
+        assert processes[0].poll() is not None

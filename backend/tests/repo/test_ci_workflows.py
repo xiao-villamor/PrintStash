@@ -54,6 +54,27 @@ def _api_run(
 
 
 class TestQuickGate:
+    def test_provisions_real_pid_namespace_qualification(self) -> None:
+        steps = _workflow("ci.yml")["jobs"]["backend"]["steps"]
+        provision = next(
+            step
+            for step in steps
+            if step.get("name") == "Prepare PID namespace qualification"
+        )
+        assert provision["if"] == "matrix.suite == 'integration-platform'"
+        assert "kernel.apparmor_restrict_unprivileged_userns=0" in provision["run"]
+        assert (
+            "unshare --user --map-root-user --pid --fork /usr/bin/true"
+            in provision["run"]
+        )
+        assert not provision.get("continue-on-error", False)
+        test_index = next(
+            index
+            for index, step in enumerate(steps)
+            if step.get("name") == "Test backend once without external resources"
+        )
+        assert steps.index(provision) < test_index
+
     def test_propagates_required_job_failure(self) -> None:
         jobs = _workflow("ci.yml")["jobs"]
         gate = jobs["gate"]

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import trimesh
 
 from app.modules.media import (
@@ -127,28 +126,32 @@ class TestLoadMesh:
 
         assert mesh_loading.load_mesh(p) is None
 
-    @pytest.mark.parametrize("suffix", [".obj", ".step"], ids=["scene", "step-result"])
-    def test_declines_a_non_mesh_concatenation_result(
-        self, tmp_path, monkeypatch, suffix
-    ):
+    def test_declines_a_non_mesh_concatenation_result(self, tmp_path, monkeypatch):
         scene = trimesh.Scene()
         scene.add_geometry(trimesh.creation.box(), node_name="a")
         scene.add_geometry(trimesh.creation.box(), node_name="b")
-        path = tmp_path / ("source" + suffix)
+        path = tmp_path / "source.obj"
         path.write_bytes(b"placeholder")
         monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
-        monkeypatch.setattr(trimesh, "load_mesh", lambda *a, **k: scene)
         monkeypatch.setattr(trimesh.util, "concatenate", lambda *a, **k: object())
 
-        def completed_conversion(command, **_kwargs):
-            Path(command[-1]).write_bytes(b"converted placeholder")
-            return SimpleNamespace(
-                returncode=0, poll=lambda: 0, communicate=lambda: (b"", b"")
-            )
+        assert mesh_loading.load_mesh(path) is None
 
-        monkeypatch.setattr(mesh_loading.subprocess, "Popen", completed_conversion)
+    def test_declines_a_malformed_converted_step_artifact(self, tmp_path, monkeypatch):
+        from app.modules.media import mesh_isolation
+
+        path = tmp_path / "source.step"
+        original = b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n"
+        path.write_bytes(original)
+
+        def completed_conversion(command, **_kwargs):
+            Path(command[-1]).write_bytes(b"malformed converted mesh artifact")
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", completed_conversion)
 
         assert mesh_loading.load_mesh(path) is None
+        assert path.read_bytes() == original
 
     def test_load_mesh_scene_with_single_geometry_returns_it_directly(
         self, tmp_path: Path, monkeypatch

@@ -66,9 +66,10 @@ FLAT_MESH_THICKNESS_RATIO = PREVIEW_PROFILE.flat_thickness_ratio
 
 # Cap candidate-pixel expansion per rasteriser chunk (~tens of MB of
 # temporaries at this size).
-# Smaller batches bound dense-model temporaries without reducing the image or
-# sampling faces. Every triangle still resolves through the same z-buffer.
-_CHUNK_PIXEL_BUDGET = 250_000
+# Smaller batches leave room for candidate and winner-normal temporaries inside
+# a 512 MiB worker. This bounds allocation, without reducing cumulative work,
+# sampling faces or cropping coverage; all triangles use the same z-buffer.
+_CHUNK_PIXEL_BUDGET = 125_000
 
 
 @dataclass

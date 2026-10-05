@@ -7,7 +7,7 @@ none imports the compatibility facade or thumbnail/analysis orchestration.
 | --- | --- | --- |
 | Format routing, source estimates, loader ceilings and reclamation | `app.modules.media.mesh_policy` | `render_admission`, `render_jobs_limit`, `canonical_suffix`, `estimate_triangle_count`, `ram_triangle_cap`, `load_face_budget`, `exceeds_cap`, `reclaim_memory` |
 | Host capacity and native process memory facts | `app.modules.media.native_process` | `memory_limit_bytes`, `native_capacity`, `native_memory_budget_bytes`, `process_rss_bytes`, `process_tree_rss_bytes` |
-| Weighted source claims and loader memory costs | `app.modules.media.native_budget` | `MeshSource`, `estimate_sources`, `request`, `face_capacity` |
+| Typed work profiles, weighted source claims and loader memory costs | `app.modules.media.native_budget` | `GeometryWork`, `RasterWork`, `AnalysisWork`, `MeshSource`, `estimate_sources`, `request`, `face_capacity` |
 | Shared descriptor-owned admission | `app.runtime.native_admission`, `app.runtime.native_runtime` | `LocalResourcePool`, `NativePermit`, `Resources`, `admit`, `current_permit`, `inherit` |
 | Bounded source preparation | `app.modules.media.source_preparation`, `app.runtime.preparation_runtime` | Batch reservations, separate prepared-byte and transfer-slot pools |
 | Shared warm-model residency | `app.runtime.inference_resources` | `reserve`, `capacity`, `launch_resources`, `has_pressure` |

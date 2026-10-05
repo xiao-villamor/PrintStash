@@ -60,8 +60,10 @@ class TestInferenceResidency:
         assert pool._workers[provider._worker_key()].process.pid == process.pid
         assert process.poll() is None
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="Linux guarded child contract")
-    def test_resident_child_enforces_its_physical_memory_quota(self, resident_provider):
+    @pytest.mark.parametrize("_linux", [True] if sys.platform == "linux" else [])
+    def test_resident_child_enforces_its_physical_memory_quota(
+        self, resident_provider, _linux
+    ):
         from app.runtime import inference_resources
 
         provider = resident_provider
@@ -104,9 +106,9 @@ class TestInferenceResidency:
         assert not first.is_warm
         assert pool._workers[second._worker_key()].process.poll() is None
 
-    @pytest.mark.skipif(sys.platform != "linux", reason="Linux parent death contract")
+    @pytest.mark.parametrize("_linux", [True] if sys.platform == "linux" else [])
     def test_parent_death_releases_warm_residency(
-        self, db_session, residency, tmp_path
+        self, db_session, residency, tmp_path, _linux
     ):
         from app.runtime import inference_resources
 

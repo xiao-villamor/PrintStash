@@ -288,7 +288,12 @@ def render_stl_preview_isolated(
         address_space_bytes=limits.address_space_bytes,
     )
     from app.modules.media.mesh_isolation import MeshWorkerError, supervise_result
-    from app.modules.media.native_budget import MeshSource, estimate_sources
+    from app.modules.media.native_budget import (
+        MeshSource,
+        RasterCodec,
+        RasterWork,
+        estimate_sources,
+    )
     from app.modules.media.native_execution import admission
     from app.modules.media.worker_bootstrap import WorkerLifecycle
     from app.modules.media.worker_bootstrap import command as worker_command
@@ -299,7 +304,11 @@ def render_stl_preview_isolated(
     amount = (
         active.resources
         if active is not None
-        else estimate_sources(capacity, (MeshSource(path, "stl"),))
+        else estimate_sources(
+            capacity,
+            (MeshSource(path, "stl"),),
+            work=RasterWork(int(width), int(height), 1, RasterCodec.PNG),
+        )
     )
     with (
         admission(amount, capacity, checkpoint=checkpoint) as permit,

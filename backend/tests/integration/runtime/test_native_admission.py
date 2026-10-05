@@ -540,14 +540,10 @@ class TestNamespace:
             timeout=5,
             check=False,
         )
-        if probe.returncode != 0 and (
-            "Operation not permitted" in probe.stderr
-            or "Permission denied" in probe.stderr
-        ):
-            pytest.skip(
-                "host denies user/PID namespace creation (unshare EPERM/EACCES)"
-            )
-        assert probe.returncode == 0, probe.stderr
+        assert probe.returncode == 0, (
+            "PID namespace qualification requires unshare user/PID namespaces; "
+            "configure the Linux test host to allow namespace creation: " + probe.stderr
+        )
         pool = LocalResourcePool(tmp_path)
         amount = Resources(1, 100)
         launcher = None

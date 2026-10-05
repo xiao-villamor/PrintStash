@@ -1,12 +1,13 @@
 """Queue telemetry describes resource admission, even when work never starts."""
 
 import json
+import logging
 
 import pytest
 from printstash_core.inference import EmbeddingError
 
 from app.core.cancellation import OperationCancelled
-from app.modules.media import native_execution
+from app.modules.media import mesh_observability, native_execution
 from app.runtime import native_runtime
 from app.runtime.native_admission import LocalResourcePool, Resources
 
@@ -30,6 +31,11 @@ def pool(tmp_path):
 
 
 class TestAdmissionTelemetry:
+    @pytest.fixture(autouse=True)
+    def capture_admission_log(self, caplog):
+        # Capture the INFO contract independently of preceding app log setup.
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+
     def test_excludes_work_time_from_queue_duration(self, pool, caplog, monkeypatch):
         moments = iter([100, 140])
         monkeypatch.setattr(native_execution, "monotonic_ns", lambda: next(moments))

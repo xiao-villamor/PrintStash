@@ -274,6 +274,9 @@ class TestWorkerBenchmark:
         (child_cwd / ".env").write_text(
             "VAULT_MODEL_THUMBNAIL_WIDTH=1280\n"
             "VAULT_JOBS_DERIVE_NATIVE_CONCURRENCY=invalid\n"
+            "VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION=invalid\n"
+            "VAULT_EMBEDDING_RESIDENT_WORKERS=invalid\n"
+            "VAULT_EMBEDDING_WORKER_MEMORY_MB=invalid\n"
         )
         private_cwd = tmp_path / "private"
         private_cwd.mkdir()
@@ -289,13 +292,18 @@ configure_private_vault(private / "vault")
 os.chdir(private)
 from app.core.config import settings
 export_private_settings(settings)
+from app.runtime.native_runtime import admit
+from app.runtime.native_admission import Resources
+from app.modules.media.native_process import native_capacity
+with admit(Resources(1, 1), native_capacity(), checkpoint=lambda: None) as permit:
+    private_ledger = str(permit.path.parent)
 from app.modules.media import mesh_isolation
 mesh_isolation.application_file = sys.argv[2]
 from scripts.benchmark_native import measure_worker
 manifest = build_contract_corpus(private / "inputs")
 entry = next(item for item in manifest.fixtures if item.filename == "cube-binary.stl")
 sample = measure_worker(private / "inputs" / entry.filename, InputIdentity(entry.filename, entry.sha256, entry.input_bytes, 1))
-print(json.dumps({"sample": asdict(sample), "width": settings.model_thumbnail_width}))
+print(json.dumps({"sample": asdict(sample), "width": settings.model_thumbnail_width, "native_ledger": private_ledger}))
 """
         result = subprocess.run(
             [sys.executable, "-c", probe, str(private_cwd), str(marker)],
@@ -319,6 +327,10 @@ print(json.dumps({"sample": asdict(sample), "width": settings.model_thumbnail_wi
             round(report["width"] * 3 / 4),
         ]
         assert report["width"] != 1280
+        assert (
+            Path(report["native_ledger"])
+            == private_cwd / "vault" / "runtime" / "native"
+        )
 
     def test_reports_real_worker_costs(self, worker_benchmark_report):
         sample = worker_benchmark_report["samples"][0]

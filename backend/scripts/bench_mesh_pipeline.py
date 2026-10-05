@@ -66,7 +66,13 @@ def export_private_settings(settings: ConfigResolver) -> None:
         else:
             serialized = json.dumps(value, allow_nan=False)
         os.environ["VAULT_" + name.upper()] = serialized
+    from app.bootstrap.native_resources import configure as configure_native_resources
     from app.modules.media.mesh_policy import render_jobs_limit
+
+    # Worker-only benchmarks never enter the application's lifespan. Compose
+    # the same resource owners explicitly under the exported private vault.
+    private_root = Path(os.environ["VAULT_DATA_ROOT"])
+    configure_native_resources(private_root)
 
     # None means an adaptive limit, so exporting no value would allow the
     # child's .env to replace that policy. Pin the resolved private limit.

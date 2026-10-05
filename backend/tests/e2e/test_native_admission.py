@@ -117,10 +117,8 @@ class TestNativeAdmission:
             == 2
         )
 
-    @pytest.mark.skipif(
-        sys.platform != "linux", reason="Linux native memory qualification"
-    )
-    def test_mixed_stl_workers_share_weighted_capacity(self, tmp_path, workers):
+    @pytest.mark.parametrize("_linux", [True] if sys.platform == "linux" else [])
+    def test_mixed_stl_workers_share_weighted_capacity(self, tmp_path, workers, _linux):
         start, _queued = workers
         counts = (2, 300000)
         sources = tuple(tmp_path / f"mixed-{count}.stl" for count in counts)

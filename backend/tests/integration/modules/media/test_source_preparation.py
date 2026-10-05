@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from app.db.session import get_session_factory, override_session_factory
 from app.modules.media import source_preparation
 from app.modules.storage.artifact_content import ArtifactHandle, resolve
 from app.runtime import native_runtime, preparation_runtime
@@ -114,7 +115,10 @@ class TestSourcePreparation:
             with source_preparation.prepare_sources(handles):
                 pytest.fail("oversized batch admitted")
 
-    def test_prepared_bytes_bound_waiting_sources(self, pools, handles, monkeypatch):
+    def test_prepared_bytes_bound_waiting_sources(
+        self, pools, handles, monkeypatch, threaded_hub_db, db_session
+    ):
+        factory = get_session_factory()
         monkeypatch.setattr(source_preparation, "capacity", lambda: Resources(2, 128))
         queued = threading.Event()
         copied = threading.Event()
@@ -130,6 +134,7 @@ class TestSourcePreparation:
         monkeypatch.setattr(source_preparation, "checkpoint", check)
 
         def prepare_second():
+            override_session_factory(factory)
             with source_preparation.prepare_sources((handles[1],)) as paths:
                 copied.set()
                 return paths[0].read_bytes()
@@ -141,12 +146,16 @@ class TestSourcePreparation:
                 assert not copied.is_set()
             assert future.result(timeout=5) == bytes([2]) * 64
 
-    def test_releases_io_while_native_work_retains_source_bytes(self, pools, handles):
+    def test_releases_io_while_native_work_retains_source_bytes(
+        self, pools, handles, threaded_hub_db, db_session
+    ):
+        factory = get_session_factory()
         copied = threading.Event()
         native_done = threading.Event()
         native_amount = Resources(1, 100)
 
         def second():
+            override_session_factory(factory)
             with source_preparation.prepare_sources((handles[1],)) as paths:
                 copied.set()
                 with native_runtime.admit(

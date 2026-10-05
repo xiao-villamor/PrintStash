@@ -664,7 +664,7 @@ class TestLocalRootSafetyBranches:
             raise OSError("copy failed")
 
         monkeypatch.setattr(
-            "app.modules.storage.storage_backend.io.shutil.copyfileobj", fail_copy
+            "printstash_core.files.storage.shutil.copyfileobj", fail_copy
         )
         with pytest.raises(OSError, match="copy failed"):
             backend.create_bytes(b"backup", str(key))
@@ -997,7 +997,7 @@ class TestLocalRootSafetyBranches:
             ),
         )
         monkeypatch.setattr(
-            "app.modules.storage.storage_backend.io.shutil.copyfileobj",
+            "printstash_core.files.storage.shutil.copyfileobj",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("copy failed")),
         )
         with pytest.raises(OSError, match="copy failed"):

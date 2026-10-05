@@ -18,7 +18,13 @@ from app.modules.media import mesh_isolation, native_process
 from app.modules.media.geometry_analysis import VisualViews
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_telemetry import WorkerExitCause
-from app.modules.media.native_budget import MeshSource, estimate_sources
+from app.modules.media.native_budget import (
+    AnalysisWork,
+    MeshSource,
+    RasterCodec,
+    RasterWork,
+    estimate_sources,
+)
 from app.modules.media.native_execution import admission
 from app.modules.media.visual_worker import MAX_REPLY
 from app.modules.media.worker_bootstrap import WorkerLifecycle
@@ -45,7 +51,25 @@ def render(
     amount = (
         existing.resources
         if existing is not None
-        else estimate_sources(capacity, (MeshSource(path, file_type),))
+        else estimate_sources(
+            capacity,
+            (MeshSource(path, file_type),),
+            work=(
+                AnalysisWork()
+                if isinstance(recipe, PointRecipe)
+                else RasterWork(
+                    # Every visual recipe encodes one canonical WEBP thumbnail.
+                    # Multiview adds raw square planes; this rectangle bounds
+                    # both sizes conservatively without a second startup floor.
+                    width=640,
+                    height=max(480, recipe.image_size),
+                    frames=recipe.view_count + 1
+                    if recipe.profile == "multiview"
+                    else 1,
+                    codec=RasterCodec.WEBP,
+                )
+            ),
+        )
     )
     with admission(amount, capacity, checkpoint=remaining) as permit:
         try:

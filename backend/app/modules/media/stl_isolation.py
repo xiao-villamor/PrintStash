@@ -20,7 +20,7 @@ from app.modules.media import mesh_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.mesh_policy import canonical_suffix
-from app.modules.media.native_budget import MeshSource
+from app.modules.media.native_budget import GeometryWork, MeshSource
 
 SIZE_MAGIC = b"STL1"
 NOTHING_MAGIC = b"NONE"
@@ -80,6 +80,7 @@ def to_stl_bytes(path: Path, *, file_type: str | None = None) -> bytes | None:
                 "app.modules.media.stl_worker",
                 spec,
                 sources=(MeshSource(path, file_type or path.suffix),),
+                work=GeometryWork(),
             )
         )
         if size is None:

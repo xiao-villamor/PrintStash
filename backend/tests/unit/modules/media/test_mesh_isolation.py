@@ -175,17 +175,18 @@ class TestSupervise:
 
         assert raised.value.reason is ThumbnailFailureReason.WORKER_FAILED
 
-    def test_refuses_a_reply_larger_than_the_frame_limit(self, monkeypatch):
-        monkeypatch.setattr(mesh_isolation, "MAX_REPLY_BYTES", 1024)
-
+    def test_refuses_a_reply_larger_than_the_frame_limit(self):
         with pytest.raises(MeshWorkerError) as raised:
-            supervise(
+            mesh_isolation.supervise_result(
                 _child("import sys; sys.stdout.buffer.write(b'x' * 100000)"),
                 memory_budget=512 * MB,
                 timeout_seconds=30,
+                reply_limit=1024,
             )
 
         assert raised.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+        assert raised.value.supervision.exit_cause.value == "reply_limit"
 
 
 class TestSuperviseAfterEof:
