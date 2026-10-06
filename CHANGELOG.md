@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify batch session lifecycle, frozen snapshots and result context against
+  real durable receipts, including refusal of incomplete artifact commit results.
+
 - Verify retained scene measurements preserve finite dimensions when closed
   resources collapse or numeric volume aggregation exceeds its representable range.
 
