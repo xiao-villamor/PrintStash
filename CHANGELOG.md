@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify search generation proposal provider, visual profile and aggregation
+  rejection contracts directly at the public schema boundary.
+
 - Measure whole-host native fairness in the mandatory serial resource phase,
   retaining real workers, branch coverage and the existing timing budgets.
 
