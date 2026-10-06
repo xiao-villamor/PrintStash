@@ -1,5 +1,7 @@
 """Only the current input lease may publish analysis, even across sessions."""
 
+from copy import deepcopy
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -258,3 +260,137 @@ class TestFingerprintPublication:
 
         assert state == "ready"
         assert len(db_session.exec(select(GeometryFingerprint)).all()) == 2
+
+
+class TestPublicationBoundaries:
+    def test_publishes_precomputed_analysis_in_caller_transaction(
+        self, db_session, make_model, make_file, extracted
+    ):
+        from app.modules.ingestion.extensions import MeshFingerprintPublished
+
+        model = make_model()
+        original_name = model.name
+        file = make_file(model)
+        model.name = "Caller transaction update"
+        db_session.add(model)
+        db_session.flush()
+        outcome = fingerprints.publish_precomputed_in_transaction(
+            db_session, file, extracted
+        )
+        assert outcome == MeshFingerprintPublished(FingerprintResultState.READY)
+        rows = db_session.exec(select(GeometryFingerprint)).all()
+        assert [row.component_index for row in rows] == [0, 1]
+        assert all(row.state == "ready" for row in rows)
+        db_session.rollback()
+        with Session(db_session.get_bind()) as fresh:
+            assert fresh.exec(select(GeometryFingerprint)).all() == []
+            assert fresh.get(File, file.id) is not None
+            assert fresh.get(type(model), model.id).name == original_name
+
+    def test_defers_precomputed_analysis_to_active_owner(
+        self, db_session, make_model, make_file, extracted
+    ):
+        from app.core.time import ensure_utc
+        from app.modules.ingestion.extensions import MeshFingerprintDeferred
+
+        file = make_file(make_model())
+        claimed = fingerprints.claim(db_session, file)
+        row = db_session.get(GeometryFingerprint, claimed[0])
+        expiry = ensure_utc(row.lease_expires_at)
+        outcome = fingerprints.publish_precomputed_in_transaction(
+            db_session, file, extracted
+        )
+        assert outcome == MeshFingerprintDeferred(expiry)
+        db_session.refresh(row)
+        assert row.lease_token == claimed[1]
+        assert row.state == "pending"
+        assert row.attempts == 1
+        assert len(db_session.exec(select(GeometryFingerprint)).all()) == 1
+        db_session.rollback()
+
+    def test_reuses_complete_precomputed_analysis(
+        self, db_session, make_model, make_file, extracted
+    ):
+        from app.modules.ingestion.extensions import MeshFingerprintPublished
+
+        file = make_file(make_model())
+        assert fingerprints.publish_precomputed(db_session, file, extracted) == "ready"
+        before = [
+            (row.id, row.attempts)
+            for row in db_session.exec(select(GeometryFingerprint)).all()
+        ]
+        outcome = fingerprints.publish_precomputed_in_transaction(
+            db_session, file, extracted
+        )
+        assert outcome == MeshFingerprintPublished(FingerprintResultState.READY)
+        db_session.commit()
+        with Session(db_session.get_bind()) as fresh:
+            assert [
+                (row.id, row.attempts)
+                for row in fresh.exec(select(GeometryFingerprint)).all()
+            ] == before
+
+    def test_refuses_changed_precomputed_algorithm(
+        self, db_session, make_model, make_file, extracted
+    ):
+        file = make_file(make_model())
+        changed = replace(extracted, algorithm_version="different-recipe")
+        with pytest.raises(
+            ValueError, match="precomputed_fingerprint_algorithm_changed"
+        ):
+            fingerprints.publish_precomputed_in_transaction(db_session, file, changed)
+        assert db_session.exec(select(GeometryFingerprint)).all() == []
+
+    def test_rejects_detached_publication_authority(self, db_session, extracted):
+        from app.modules.ingestion.extensions import MeshFingerprintRejected
+        from tests.factories.library import detached_file
+
+        file = detached_file()
+        assert (
+            fingerprints.publish_precomputed_in_transaction(db_session, file, extracted)
+            == MeshFingerprintRejected()
+        )
+        assert not fingerprints.publish_in_transaction(
+            db_session, file, extracted, fingerprint_id=1, token="absent-authority"
+        )
+        assert db_session.exec(select(GeometryFingerprint)).all() == []
+
+    @pytest.mark.parametrize("kind", ["oversized", "nonfinite"], ids=str)
+    def test_rolls_back_invalid_descriptor_metadata(
+        self, db_session, make_model, make_file, extracted, kind
+    ):
+        file = make_file(make_model())
+        claimed = fingerprints.claim(db_session, file)
+        values = deepcopy(extracted.records[0].values)
+        values["recipe"] = {
+            "invalid": "x" * fingerprints.JSON_LIMIT
+            if kind == "oversized"
+            else float("nan")
+        }
+        invalid = replace(
+            extracted,
+            records=(
+                replace(extracted.records[0], values=values),
+                *extracted.records[1:],
+            ),
+        )
+        with pytest.raises(ValueError):
+            fingerprints.publish(
+                db_session, file, invalid, fingerprint_id=claimed[0], token=claimed[1]
+            )
+        with Session(db_session.get_bind()) as fresh:
+            rows = fresh.exec(select(GeometryFingerprint)).all()
+            assert len(rows) == 1
+            assert rows[0].id == claimed[0]
+            assert rows[0].state == "pending"
+            assert rows[0].lease_token == claimed[1]
+            assert rows[0].attempts == 1
+            assert rows[0].metrics_json == "{}"
+        assert fingerprints.publish(
+            db_session, file, extracted, fingerprint_id=claimed[0], token=claimed[1]
+        )
+        with Session(db_session.get_bind()) as fresh:
+            rows = fresh.exec(select(GeometryFingerprint)).all()
+            assert len(rows) == 2
+            assert all(row.state == "ready" for row in rows)
+            assert all(row.lease_token is None for row in rows)

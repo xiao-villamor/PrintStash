@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify fingerprint publication preserves active caller transactions and leases,
+  rejecting detached authority, changed recipes and invalid descriptor metadata.
+
 - Verify STL publication readers preserve buffered byte semantics and cancellation,
   refusing nonregular output and unavailable or mismatched source storage.
 
