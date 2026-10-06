@@ -952,3 +952,19 @@ Remaining M9 debt discovered by read-only tracing, not dynamically reproduced or
 Current Config/OIDC closing source review also verified the pre-setup provider catalogue remains public metadata and the connection list is superuser-only; this is preparation for a later owner, not a migration in this commit. Bounded read-only preparation inspected complete RemoteStorageConnections (including all command/confirmation paths), its complete19-case UI mirror, complete7-case connection client mirror, the existing real hosted WebDAV preset headline, StorageConnection DTO/aStorageConnection fixture, state worker SetupEntry catalogue lifetime and optional config signal port, and backend storage/providers and storage-connections endpoint contracts. Proposed next manifest and source-only gaps were sent to root: persistent rows/catalogue error vs empty and Retry, canonical cancellable reads, local transient secret commands, authoritative DTO/204 publication and draft/session/disposal fences. No new test or production file was edited for that preparation. Existing Backup/ExternalLibraries/StorageConfig/SetupChoice/Migration catalogue/connection callers were traced as remaining consumers, without expanding their full surfaces.
 
 Closing static fixture correction: the full typed VaultConfigRead is not assignable to the wire helper's index-signature WireValue. Used the existing json(fullDTO) Response helper with typed fetchMock instead of an assertion/cast. The complete config client mirror14 passed2.50s afterward; full app/UI/domain typecheck passed with the final helper. Source behavior and real browser remain unchanged. All16 owned paths have been formatted; final owned format/diff and lint checks close this checkpoint. M9 Config/OIDC rows O1–O39 are ✅; remaining storage/backup hypotheses are explicitly outside that closure.
+
+
+### Config/OIDC integrated qualification
+
+Integration commit `ee6e3558` preserves both the existing Setup endpoint cancellation
+regressions and the Multipart detail query import. Full app/UI/domain type checking
+and frontend lint passed. The combined eight-file run finished with **326 passed,
+two failed** in 121.78s. Both failures exceeded the unchanged 5s test deadline: the
+production dependency graph scan and the authoritative configuration ACK case.
+There was no reported assertion mismatch. Running those same two tests unchanged,
+serially, passed both in 5.77s (77 unrelated cases excluded). This confirms the
+isolated contracts; it does **not** convert the combined run into a passing gate.
+The combined integration result remains incomplete until a later applicable gate
+confirms it. No test timeout or production behavior was changed to obtain the
+isolated result. Concurrent host load is a possible contributor, not an established
+root cause.
