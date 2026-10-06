@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify import resolver selection identities reject malformed provider responses
+  while preserving stable errors and redacting private transport data.
+
 - Verify durable ingestion receipt writer authority, result pagination and canonical
   File confirmation through real SQLite contracts.
 

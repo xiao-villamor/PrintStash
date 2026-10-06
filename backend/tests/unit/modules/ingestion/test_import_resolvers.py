@@ -772,3 +772,174 @@ class TestResolveSelectedAssets:
             ("first", "https://files.test/first.stl"),
             ("second", "https://files.test/second.stl"),
         ]
+
+
+class TestSelectionBoundaries:
+    @pytest.mark.parametrize(
+        "file,url,code",
+        [
+            (None, "https://files.test/a.stl", "selected_file_required"),
+            (
+                r.ModelFile("", "a.stl", "stl"),
+                "https://files.test/a.stl",
+                "selected_file_required",
+            ),
+            (r.ModelFile("a", "a.stl", "stl"), "", "selected_download_url_required"),
+            (r.ModelFile("a", "a.stl", "stl"), 1, "selected_download_url_required"),
+        ],
+        ids=["missing-file", "empty-id", "empty-url", "nontext-url"],
+    )
+    def test_refuses_invalid_selected_file(self, file, url, code):
+        with pytest.raises(ValueError, match=code):
+            r.SelectedFileDownload(file, url)
+
+    @pytest.mark.parametrize(
+        "files,url,code",
+        [
+            ([], "https://files.test/a.zip", "selected_files_required"),
+            ((), "https://files.test/a.zip", "selected_files_required"),
+            ((None,), "https://files.test/a.zip", "selected_file_required"),
+            (
+                (r.ModelFile("", "a.stl", "stl"),),
+                "https://files.test/a.zip",
+                "selected_file_required",
+            ),
+            (
+                (r.ModelFile("a", "a.stl", "stl"), r.ModelFile("a", "b.stl", "stl")),
+                "https://files.test/a.zip",
+                "duplicate_selected_file",
+            ),
+            ((r.ModelFile("a", "a.stl", "stl"),), "", "selected_download_url_required"),
+        ],
+        ids=["list", "empty", "missing-file", "empty-id", "duplicate-id", "empty-url"],
+    )
+    def test_refuses_invalid_selected_archive(self, files, url, code):
+        with pytest.raises(ValueError, match=code):
+            r.SelectedArchiveDownload(files, url)
+
+    @pytest.mark.parametrize(
+        "files",
+        [
+            [],
+            [r.ModelFile("a", "a.stl", "stl"), r.ModelFile("a", "b.stl", "stl")],
+            [r.ModelFile("", "a.stl", "stl")],
+        ],
+        ids=["empty", "duplicate", "empty-id"],
+    )
+    def test_refuses_invalid_selection_identity(self, files):
+        with pytest.raises(ImportError_, match="printables_file_selection_mismatch"):
+            r._selected_downloads({"link": "https://files.test/a.zip"}, files)
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            {},
+            [None],
+            [{"id": 1, "link": "https://files.test/a.stl"}],
+            [{"id": "unknown", "link": "https://files.test/a.stl"}],
+            [
+                {"id": "a", "link": "https://files.test/a.stl"},
+                {"id": "a", "link": "https://files.test/a.stl"},
+            ],
+        ],
+        ids=["nonlist", "nondict", "numeric-id", "unselected-id", "duplicate-id"],
+    )
+    def test_refuses_malformed_selected_response(self, entries):
+        file = r.ModelFile("a", "a.stl", "stl")
+        with pytest.raises(ImportError_, match="printables_file_selection_mismatch"):
+            r._selected_downloads({"files": entries}, [file])
+
+    @pytest.mark.parametrize("link", [None, "", 1], ids=["null", "empty", "numeric"])
+    def test_refuses_missing_selected_link(self, link):
+        with pytest.raises(ImportError_, match="printables_resolve_failed"):
+            r._selected_downloads(
+                {"files": [{"id": "a", "link": link}]},
+                [r.ModelFile("a", "a.stl", "stl")],
+            )
+
+    def test_refuses_incomplete_selected_response(self):
+        files = [r.ModelFile("a", "a.stl", "stl"), r.ModelFile("b", "b.stl", "stl")]
+        with pytest.raises(ImportError_, match="printables_file_selection_mismatch"):
+            r._selected_downloads(
+                {"files": [{"id": "a", "link": "https://files.test/a.stl"}]}, files
+            )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            None,
+            [],
+            {"data": []},
+            {"data": {"getDownloadLink": []}},
+            {"data": {"getDownloadLink": {"output": []}}},
+        ],
+        ids=["null", "list", "data-list", "result-list", "output-list"],
+    )
+    async def test_refuses_malformed_download_envelope(self, payload):
+        with patch.object(r, "_printables_graphql", AsyncMock(return_value=payload)):
+            with pytest.raises(ImportError_, match="printables_resolve_failed"):
+                await r.resolve_selected_sources(
+                    "https://www.printables.com/model/3161-x",
+                    [r.ModelFile("a", "a.stl", "stl")],
+                )
+
+    @pytest.mark.asyncio
+    async def test_refuses_unsupported_selected_provider(self):
+        with pytest.raises(ImportError_, match="file_selection_unsupported"):
+            await r.resolve_selected_sources(
+                "https://example.test/model/1", [r.ModelFile("a", "a.stl", "stl")]
+            )
+
+    @pytest.mark.asyncio
+    async def test_redacts_unexpected_selected_source_failure(self, caplog):
+        with patch.object(
+            r,
+            "_printables_graphql",
+            AsyncMock(side_effect=RuntimeError("token=upstream-secret")),
+        ):
+            with caplog.at_level(
+                logging.WARNING, logger="app.modules.ingestion.import_resolvers"
+            ):
+                with pytest.raises(ImportError_, match="printables_resolve_failed"):
+                    await r.resolve_selected_sources(
+                        "https://www.printables.com/model/3161-x?token=query-secret",
+                        [r.ModelFile("a", "a.stl", "stl")],
+                    )
+        assert "upstream-secret" not in caplog.text
+        assert "query-secret" not in caplog.text
+        assert "RuntimeError" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_capture_metadata(self):
+        with patch.object(
+            r, "_printables_graphql", AsyncMock(return_value={"data": {"print": None}})
+        ):
+            with pytest.raises(ImportError_, match="printables_capture_invalid"):
+                await r.resolve_capture_manifest(
+                    "https://www.printables.com/model/3161-x"
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [200, 500], ids=["invalid-json", "http-error"])
+    async def test_redacts_invalid_graphql_response(self, status, caplog):
+        response = httpx.Response(
+            status,
+            content=b"private-provider-body",
+            request=httpx.Request("POST", r._PRINTABLES_GRAPHQL),
+        )
+        transport = AsyncMock()
+        transport.request.return_value = response
+        with patch.object(r, "ProviderTransport", return_value=transport):
+            with caplog.at_level(
+                logging.WARNING, logger="app.modules.ingestion.import_resolvers"
+            ):
+                with pytest.raises(ImportError_, match="printables_resolve_failed"):
+                    await r._printables_graphql(
+                        "query",
+                        {},
+                        "https://www.printables.com/model/3161-x?token=query-secret",
+                    )
+        assert "private-provider-body" not in caplog.text
+        assert "query-secret" not in caplog.text
+        assert response.is_closed
