@@ -326,7 +326,7 @@ describe("asset leases and admission", () => {
     other.release();
   });
 
-  it("disposes active and queued assets on scope retirement", async () => {
+  it("disposes private assets on scope retirement", async () => {
     const response = Promise.withResolvers<Response>();
     vi.mocked(fetch).mockReturnValue(response.promise);
     const leases = Array.from({ length: 6 }, (_, i) => acquireAssetUrl(`/lease/session-${i}`));
@@ -342,54 +342,56 @@ describe("asset leases and admission", () => {
   });
 });
 
-it("starts current scope work before an old aborted response settles", async () => {
-  const previous = Promise.withResolvers<Response>();
-  vi.mocked(fetch)
-    .mockReturnValueOnce(previous.promise)
-    .mockReturnValueOnce(previous.promise)
-    .mockReturnValueOnce(previous.promise)
-    .mockReturnValueOnce(previous.promise);
-  const old = Array.from({ length: 4 }, (_, i) => acquireAssetUrl(`/lease/old-${i}`));
-  const outcomes = old.map((lease) => lease.url.catch((error: Error) => error));
-  window.dispatchEvent(new Event("printstash:auth-changed"));
-  const current = acquireAssetUrl("/lease/current");
-  try {
-    expect(fetch).toHaveBeenCalledTimes(5);
-    await expect(current.url).resolves.toBeTruthy();
-  } finally {
-    previous.resolve(new Response("obsolete"));
-    current.release();
-    await Promise.all(outcomes);
-  }
-});
+describe("private asset scope", () => {
+  it("starts current scope work before an old aborted response settles", async () => {
+    const previous = Promise.withResolvers<Response>();
+    vi.mocked(fetch)
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(previous.promise)
+      .mockReturnValueOnce(previous.promise);
+    const old = Array.from({ length: 4 }, (_, i) => acquireAssetUrl(`/lease/old-${i}`));
+    const outcomes = old.map((lease) => lease.url.catch((error: Error) => error));
+    window.dispatchEvent(new Event("printstash:auth-changed"));
+    const current = acquireAssetUrl("/lease/current");
+    try {
+      expect(fetch).toHaveBeenCalledTimes(5);
+      await expect(current.url).resolves.toBeTruthy();
+    } finally {
+      previous.resolve(new Response("obsolete"));
+      current.release();
+      await Promise.all(outcomes);
+    }
+  });
 
-it("reports leased and inactive encoded bytes separately", async () => {
-  const lease = acquireAssetUrl("/lease/stats");
-  await lease.url;
-  expect(getAssetCacheStats()).toMatchObject({
-    liveBytes: 9,
-    inactiveBytes: 0,
-    inactiveEntries: 0,
+  it("reports encoded byte ownership separately", async () => {
+    const lease = acquireAssetUrl("/lease/stats");
+    await lease.url;
+    expect(getAssetCacheStats()).toMatchObject({
+      liveBytes: 9,
+      inactiveBytes: 0,
+      inactiveEntries: 0,
+    });
+    lease.release();
+    expect(getAssetCacheStats()).toMatchObject({
+      liveBytes: 0,
+      inactiveBytes: 9,
+      inactiveEntries: 1,
+    });
   });
-  lease.release();
-  expect(getAssetCacheStats()).toMatchObject({
-    liveBytes: 0,
-    inactiveBytes: 9,
-    inactiveEntries: 1,
-  });
-});
 
-it("excludes referenced image bytes from inactive eviction", async () => {
-  vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
-  const mounted = acquireAssetUrl("/lease/byte-mounted");
-  const url = await mounted.url;
-  for (let i = 0; i < 5; i++) await getCachedAssetUrl(`/lease/byte-pressure-${i}`);
-  expect(revoked).not.toContain(url);
-  expect(peekCachedAssetUrl("/lease/byte-mounted")).toBe(url);
-  expect(getAssetCacheStats()).toMatchObject({
-    liveBytes: 8 * 1024 * 1024,
-    inactiveBytes: 32 * 1024 * 1024,
-    inactiveEntries: 4,
+  it("excludes referenced image bytes from inactive eviction", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
+    const mounted = acquireAssetUrl("/lease/byte-mounted");
+    const url = await mounted.url;
+    for (let i = 0; i < 5; i++) await getCachedAssetUrl(`/lease/byte-pressure-${i}`);
+    expect(revoked).not.toContain(url);
+    expect(peekCachedAssetUrl("/lease/byte-mounted")).toBe(url);
+    expect(getAssetCacheStats()).toMatchObject({
+      liveBytes: 8 * 1024 * 1024,
+      inactiveBytes: 32 * 1024 * 1024,
+      inactiveEntries: 4,
+    });
+    mounted.release();
   });
-  mounted.release();
 });
