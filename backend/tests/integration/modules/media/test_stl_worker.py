@@ -23,14 +23,16 @@ from tests.factories.three_mf_pilot import load_case
 def run_worker(tmp_path, monkeypatch):
     destination = tmp_path / "reply"
 
-    def execute(source, *, file_type):
+    def execute(source, *, file_type, expected_sha256=None):
         output = tmp_path / "mesh.stl"
         spec = {
             "overrides": {},
             "path": str(source),
             "file_type": file_type,
             "output_directory": str(tmp_path),
-            "expected_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "expected_sha256": expected_sha256
+            if expected_sha256 is not None
+            else hashlib.sha256(source.read_bytes()).hexdigest(),
         }
         # An owned descriptor stands in for stdout; main still duplicates and
         # redirects it itself, exactly as in the actual child process.
@@ -222,3 +224,95 @@ class TestConvert:
 
         assert error.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
         assert not destination.exists()
+
+
+class TestWorkerBoundaries:
+    @pytest.mark.parametrize(
+        "coordinate", [float("nan"), float("inf")], ids=["nan", "infinity"]
+    )
+    def test_refuses_nonfinite_source_facets(self, coordinate):
+        mesh = tetrahedron()
+        mesh.vertices[0, 0] = coordinate
+        before = mesh.vertices.tobytes(), mesh.faces.tobytes()
+        with pytest.raises(MeshWorkerError) as raised:
+            stl_worker._validate_float32_facets(mesh)
+        assert raised.value.reason is ThumbnailFailureReason.INVALID_SOURCE
+        assert (mesh.vertices.tobytes(), mesh.faces.tobytes()) == before
+
+    def test_refuses_stream_write_above_real_ceiling(self, tmp_path):
+        destination = tmp_path / "ceiling.bin"
+        chunk = b"x" * (1024 * 1024)
+        try:
+            with destination.open("wb") as stream:
+                output = stl_worker._CappedSTLOutput(stream)
+                for _ in range(stl_worker.MAX_STL_BYTES // len(chunk)):
+                    assert output.write(chunk) == len(chunk)
+                output.flush()
+                assert destination.stat().st_size == stl_worker.MAX_STL_BYTES
+                with pytest.raises(MeshWorkerError) as raised:
+                    output.write(b"x")
+                assert raised.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+                assert output.written == stl_worker.MAX_STL_BYTES
+                assert destination.stat().st_size == stl_worker.MAX_STL_BYTES
+            output.flush()
+        finally:
+            destination.unlink(missing_ok=True)
+
+    def test_refuses_changed_source_digest(self, tmp_path, run_worker):
+        source = tmp_path / "source.obj"
+        trimesh.creation.box().export(source, file_type="obj")
+        original = source.read_bytes()
+        wrong = "0" * 64
+        assert hashlib.sha256(original).hexdigest() != wrong
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="obj", expected_sha256=wrong)
+        assert raised.value.reason is ThumbnailFailureReason.SOURCE_CHANGED
+        assert source.read_bytes() == original
+        assert not (tmp_path / "mesh.stl").exists()
+
+    def test_reports_missing_source_storage(self, tmp_path, run_worker):
+        source = tmp_path / "missing.obj"
+        assert not source.exists()
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="obj", expected_sha256="0" * 64)
+        assert raised.value.reason is ThumbnailFailureReason.STORAGE
+        assert not (tmp_path / "mesh.stl").exists()
+
+    def test_reports_source_disappearance_after_export(
+        self, tmp_path, run_worker, monkeypatch
+    ):
+        source = tmp_path / "source.obj"
+        trimesh.creation.box().export(source, file_type="obj")
+        export = trimesh.Trimesh.export
+
+        def external_export(mesh, *, file_obj, file_type):
+            result = export(mesh, file_obj=file_obj, file_type=file_type)
+            source.unlink()
+            return result
+
+        monkeypatch.setattr(trimesh.Trimesh, "export", external_export)
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="obj")
+        assert raised.value.reason is ThumbnailFailureReason.STORAGE
+        assert not source.exists()
+        assert (tmp_path / "mesh.stl").stat().st_size == 684
+
+    def test_refuses_source_mutation_after_export(
+        self, tmp_path, run_worker, monkeypatch
+    ):
+        source = tmp_path / "source.obj"
+        trimesh.creation.box().export(source, file_type="obj")
+        original = source.read_bytes()
+        export = trimesh.Trimesh.export
+
+        def external_export(mesh, *, file_obj, file_type):
+            result = export(mesh, file_obj=file_obj, file_type=file_type)
+            source.write_bytes(original + b"\n# changed-source\n")
+            return result
+
+        monkeypatch.setattr(trimesh.Trimesh, "export", external_export)
+        with pytest.raises(MeshWorkerError) as raised:
+            run_worker(source, file_type="obj")
+        assert raised.value.reason is ThumbnailFailureReason.SOURCE_CHANGED
+        assert source.read_bytes() == original + b"\n# changed-source\n"
+        assert (tmp_path / "mesh.stl").stat().st_size == 684

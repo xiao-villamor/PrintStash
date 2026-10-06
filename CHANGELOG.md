@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify viewer STL conversion refuses nonfinite facets, excess streamed output
+  and changed or missing source identities before reporting success.
+
 - Verify prepared mesh resource identity and immutable detached buffers refuse
   incoherent evidence before native analysis.
 
