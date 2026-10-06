@@ -55,15 +55,33 @@ function parseHiddenFields(raw: string): ReadonlySet<MetadataFieldId> | null {
   return new Set(METADATA_FIELDS.map((field) => field.id).filter((id) => stored.get(id) === false));
 }
 
+// Preferences are browser-local; failed persistence retains this document's choice.
+let documentChoice: { value: MetadataPreferences; pending: boolean } | null = null;
+
 export function readMetadataPreferences(): MetadataPreferences {
-  if (!("localStorage" in globalThis)) return DEFAULT_METADATA_PREFERENCES;
-  const raw = globalThis.localStorage.getItem(METADATA_PREFERENCE_STORAGE_KEY);
-  if (!raw) return DEFAULT_METADATA_PREFERENCES;
-  const hidden = parseHiddenFields(raw);
-  if (hidden === null) return DEFAULT_METADATA_PREFERENCES;
-  return preferencesFrom((field) => !hidden.has(field));
+  if (!("localStorage" in globalThis)) return { ...DEFAULT_METADATA_PREFERENCES };
+  if (documentChoice?.pending) return { ...documentChoice.value };
+  let raw: string | null;
+  try {
+    raw = globalThis.localStorage.getItem(METADATA_PREFERENCE_STORAGE_KEY);
+  } catch {
+    return { ...(documentChoice?.value ?? DEFAULT_METADATA_PREFERENCES) };
+  }
+  const hidden = raw ? parseHiddenFields(raw) : null;
+  const value =
+    hidden === null ? DEFAULT_METADATA_PREFERENCES : preferencesFrom((field) => !hidden.has(field));
+  documentChoice = { value: { ...value }, pending: false };
+  return { ...value };
 }
 
 export function writeMetadataPreferences(preferences: MetadataPreferences): void {
-  window.localStorage.setItem(METADATA_PREFERENCE_STORAGE_KEY, JSON.stringify(preferences));
+  if (!("window" in globalThis)) return;
+  const raw = JSON.stringify(preferences);
+  documentChoice = { value: { ...preferences }, pending: true };
+  try {
+    window.localStorage.setItem(METADATA_PREFERENCE_STORAGE_KEY, raw);
+    documentChoice.pending = false;
+  } catch {
+    // Optional storage must not discard the user's current display choice.
+  }
 }
