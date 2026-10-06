@@ -222,3 +222,32 @@ describe("auth read isolation", () => {
     expect(getUser()?.id).toBe(9);
   });
 });
+
+describe("entry endpoint cancellation", () => {
+  it.each([
+    { label: "providers", send: (signal: AbortSignal) => getAuthProviders({ signal }) },
+    {
+      label: "login",
+      send: (signal: AbortSignal) =>
+        login({ username: "maker", password: "password", remember_me: false }, { signal }),
+    },
+    { label: "identity", send: (signal: AbortSignal) => getMe({ signal }) },
+    { label: "logout", send: (signal: AbortSignal) => logout({ signal }) },
+  ])("aborts the $label authentication endpoint", async ({ send }) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+
+    const pending = send(caller.signal);
+    caller.abort();
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ acknowledged: true })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});

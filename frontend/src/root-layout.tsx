@@ -1,3 +1,4 @@
+import { usePathname } from "@/lib/navigation";
 import { Outlet } from "react-router-dom";
 
 import { AppShell } from "@/components/app-shell";
@@ -10,8 +11,9 @@ import { AuthProvider } from "@/lib/auth-provider";
  * wrap every page; AppShell decides chrome vs chromeless from the pathname.
  */
 export default function RootLayout() {
+  const pathname = usePathname();
   return (
-    <AuthProvider>
+    <AuthProvider boundary={pathname === "/login" || pathname === "/setup" ? "entry" : "private"}>
       <SetupGate>
         <AppShell>
           <Outlet />

@@ -1,4 +1,4 @@
-import { getJson, sendJson } from "@/lib/api/request";
+import { getJson, sendJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import {
   SetupRequest,
   SetupResponse,
@@ -12,23 +12,36 @@ import {
   StorageRootRole,
 } from "@/types";
 
-export function getSetupStatus(): Promise<SetupStatus> {
-  return getJson<SetupStatus>("/api/v1/setup/status", { fresh: true });
+export function getSetupStatus(options?: GetJsonOptions): Promise<SetupStatus> {
+  return getJson<SetupStatus>("/api/v1/setup/status", options);
 }
 
-export function getStorageProviders(): Promise<StorageProvider[]> {
-  return getJson<StorageProvider[]>("/api/v1/storage/providers");
+export function getStorageProviders(options?: GetJsonOptions): Promise<StorageProvider[]> {
+  return getJson<StorageProvider[]>("/api/v1/storage/providers", options);
 }
 
-export function beginSetup(): Promise<{ csrf: string; expires_in: number }> {
-  return sendJson("/api/v1/setup/session", "POST", {});
+export function beginSetup(options?: {
+  signal?: AbortSignal;
+}): Promise<{ csrf: string; expires_in: number }> {
+  return requestApi("/api/v1/setup/session", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
+  });
 }
 
 export function checkSetupStorage(
   body: SetupStorageRequest,
   csrf: string,
+  options?: { signal?: AbortSignal },
 ): Promise<SetupStorageCheck> {
-  return sendJson("/api/v1/setup/check-storage", "POST", body, { "X-PrintStash-Setup-CSRF": csrf });
+  return requestApi("/api/v1/setup/check-storage", {
+    method: "POST",
+    headers: { ...jsonHeaders(), "X-PrintStash-Setup-CSRF": csrf },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
 }
 
 /**
@@ -39,9 +52,16 @@ export function prepareSetupStorage(body: SetupStorageRequest = {}): Promise<Set
   return sendJson("/api/v1/setup/prepare-storage", "POST", body);
 }
 
-export function completeSetup(body: SetupRequest, csrf: string): Promise<SetupResponse> {
-  return sendJson<SetupResponse>("/api/v1/setup", "POST", body, {
-    "X-PrintStash-Setup-CSRF": csrf,
+export function completeSetup(
+  body: SetupRequest,
+  csrf: string,
+  options?: { signal?: AbortSignal },
+): Promise<SetupResponse> {
+  return requestApi<SetupResponse>("/api/v1/setup", {
+    method: "POST",
+    headers: { ...jsonHeaders(), "X-PrintStash-Setup-CSRF": csrf },
+    body: JSON.stringify(body),
+    signal: options?.signal,
   });
 }
 

@@ -623,3 +623,79 @@ Recovery correction evidence: the initial targeted lane was red6failed/3passed (
 Final focused gate passed79tests3files: work panel55, work owner20 and unchanged suite hygiene4. Full app/UI/domain typecheck, full frontend lint, full formatting683files and git diff --check passed. The previous endpoint mirrors were unchanged and were not repeated. No new browser/coverage/performance/CI qualification is claimed.
 
 The two admin reads share presentation authority: a current403/404 from either suppresses both cached projections and takes precedence over a transient error from the other read. No global identity or cache mutation was added. Query remains the one read/scheduler owner. Transient failures preserve successful snapshots. The Job presentation is a closed ready/loading/unavailable union, so a confirmed empty queue requires a successful Job snapshot. The private inner view is keyed by scope and authority availability; denial removes confirmations/drafts and aborts its pending caller lifetime immediately, and authorized recovery creates fresh local state. This extends the manually inspected BackgroundWork owner/component and both test ledger entries above; no additional production/config paths changed.
+
+
+## M1/M9 authentication and setup entry plan (before tests)
+
+Public credential entries retain their own view through the intentional login transition; private composition still retires on every session version. Caller cancellation stays active through each HTTP/body stage. Setup captures command inputs before waiting, validates its entry after every stage, and retains current lost-acknowledgement recovery without running it after cancellation.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 199 | preserves the entry form while login verifies identity | Edge | entry boundary, deferred identity | typed fields retained through credential transition | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::preserves the entry form while login verifies identity` |
+| 200 | completes local sign-in through the real entry composition | Happy | RootLayout/Login, cookie endpoints valid | verified identity and private destination rendered | Frontend unit | ✅ `frontend/src/__tests__/root-layout.test.tsx::completes local sign-in through the real entry composition` |
+| 201 | discards a superseded credential response | Edge | first token deferred; newer sign-in | old token cannot request identity or replace newer user | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::discards a superseded credential response` |
+| 202 | aborts identity verification with its login caller | Edge | token accepted, pending identity, caller abort | wire aborted, no stored user | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::aborts identity verification with its login caller` |
+| 203 | discards an aborted identity refresh | Edge | pending refresh, caller abort | no identity publication or session clearing | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::discards an aborted identity refresh` |
+| 204 | aborts bootstrap identity when its provider leaves | Edge | stored metadata, pending identity, unmount | caller signal aborted, no late publication | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::aborts bootstrap identity when its provider leaves` |
+| 205 | aborts providers when the Login entry leaves | Edge | provider response pending, unmount | wire abort, no stale provider presentation | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::aborts providers when the Login entry leaves` |
+| 206 | suppresses navigation from a disposed OIDC entry | Edge | refresh pending; navigate away | late refresh cannot return to private route | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::suppresses navigation from a disposed OIDC entry` |
+| 207 | aborts sign-in when the entry route leaves | Edge | login pending, leave route | signal aborted; no late stored identity/navigation | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::aborts sign-in when the entry route leaves` |
+| 208 | aborts the $label authentication endpoint | Edge | provider/login/identity/logout body pending | caller abort rejects late body; cookie transport retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/auth.test.ts::aborts the $label authentication endpoint` |
+| 209 | aborts the $label setup endpoint | Edge | status/catalog/session/check/complete pending | caller abort rejects late body; CSRF retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/config.test.ts::aborts the $label setup endpoint` |
+| 210 | stops setup bootstrap after its session stage is disposed | Edge | beginSetup deferred, unmount | no next catalog request | Frontend unit | ❌ missing |
+| 211 | stops a disposed storage check before sending its payload | Edge | check's beginSetup deferred, unmount | check endpoint not invoked | Frontend unit | ❌ missing |
+| 212 | stops a disposed setup command before account creation | Edge | create's beginSetup deferred, unmount | complete endpoint not invoked | Frontend unit | ❌ missing |
+| 213 | discards late setup completion after entry disposal | Edge | create deferred; unmount | no task reset, stored login or navigation | Frontend unit | ❌ missing |
+| 214 | skips lost-ack recovery for an aborted setup command | Edge | completion rejects after caller abort | no recovery status request | Frontend unit | ❌ missing |
+| 215 | fences late setup recovery after entry disposal | Edge | lost ack; recovery status deferred, unmount | no reset, login offer or navigation | Frontend unit | ❌ missing |
+| 216 | holds setup fields until bootstrap preparation succeeds | Edge | catalog/session pending | no premature account/storage editing | Frontend unit | ❌ missing |
+| 217 | recovers setup bootstrap without losing a draft | Error | current bootstrap failure followed by explicit retry | retryable error, current form recovery preserved | Frontend unit | ❌ missing |
+| 218 | holds a new navigation until its setup probe completes | Edge | previous gate accepted, next path probe pending | previous ready state cannot admit new entry | Frontend unit | ❌ missing |
+| 219 | aborts a superseded setup gate probe | Edge | old path probe pending, new path | old request aborted, old redirect ignored | Frontend unit | ❌ missing |
+| 220 | aborts a setup gate probe when its view leaves | Edge | pending status; unmount | body cancellation, no stale redirect | Frontend unit | ❌ missing |
+
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 221 | retries unavailable login providers while retaining local sign-in | Error | providers503 then200 | failure visible, local login usable, explicit provider retry succeeds | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::retries unavailable login providers while retaining local sign-in` |
+| 222 | rejects duplicate credential submissions | Edge | two form events before pending login settles | one credential command | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::rejects duplicate credential submissions` |
+
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 223 | shares login methods between mounted entries | Happy | two Query consumers | one provider wire read; both display response | Frontend unit | ✅ `frontend/src/features/auth/__tests__/entry.test.tsx::shares login methods between mounted entries` |
+
+
+M1/M9 prerequisite checkpoint evidence (Login/auth/transport only): eight endpoint cancellation cases were red; the catalog variant initially had a missing test import and was first assessed after the transport edit, so no red catalog result is claimed. Four AuthProvider lifetime cases were red, while superseded token/session behavior was already fenced. All five Login lifetime/recovery cases were red. The existing mock credential expectation needed the newly forwarded signal; it was updated without weakening its payload assertion. The real RootLayout headline was first assessed after the initial boundary implementation and passed; the entry-remount defect was reproduced separately by the provider draft test. The new provider Query sharing case was also first assessed after implementation.
+
+Qualification passed101tests6files (Login, real RootLayout composition, auth provider/context and two endpoint mirrors), then the sharing mirror and hygiene passed5tests2files. Full app/UI/domain typecheck, full frontend lint, full formatting686files and git diff --check passed. Existing auth-state private-remount and genuine401 tests remain in that gate. No browser, coverage, CI or performance result is inferred. Setup and SetupGate rows210–220 remain explicitly planned for the following increment; this checkpoint does not qualify them.
+
+AuthProvider's explicit boundary defaults to private; only exact Login/Setup routes retain entry children across their intentional credential transition. Active HTTP stages combine caller/session fencing with provider disposal; listeners release when an operation settles. The verified identity is published only after the final fence, and its intentional identity event is not treated as stale success. OIDC/form callbacks discard disposed entries; local commands reject duplicate submission. Login methods belong to Query, dispose on the last subscriber, and support explicit failure retry while local login stays usable. Bootstrap/setup endpoint transports retain same-origin cookies and the existing setup-CSRF header; they do not use public Share's credentials-omit adapter.
+
+### M1/M9 entry manually inspected paths (prerequisite checkpoint)
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/lib/auth-provider.tsx` | Full source: bootstrap observation, staged login/getMe, refresh/logout, explicit private/entry boundary, provider epoch/active-command cleanup, caller cancellation and verified publication. |
+| `frontend/src/lib/__tests__/auth-provider.test.tsx` | Full mirror: existing private retirement/state/metadata/contracts and every new entry/caller/disposal case. |
+| `frontend/src/lib/auth-context.ts` | Full context/port: optional login/refresh caller signal; defaults retain compatibility. |
+| `frontend/src/lib/__tests__/auth-context.test.tsx` | Full mirror: first-run same-tab login and logout propagation; unchanged and included. |
+| `frontend/src/root-layout.tsx` | Full composition: exact Login/Setup entry mode, unchanged provider/gate/chrome ordering. |
+| `frontend/src/__tests__/root-layout.test.tsx` | Full new mirror: real cookie login and delayed identity body through RootLayout/Login, verified private destination. |
+| `frontend/src/pages/login.tsx` | Full page: OIDC landing, expiry/localized credential errors, Query methods/read recovery, duplicate command admission and caller/view cancellation. |
+| `frontend/src/pages/__tests__/login.test.tsx` | Full mirror: retained login/provider/localization contracts and new unmount/route/duplicate/read-recovery cases. |
+| `frontend/src/features/auth/entry.ts` | Full Query option factory: provider wire signal, no background/focus/reconnect polling and last-observer disposal. |
+| `frontend/src/features/auth/__tests__/entry.test.tsx` | Full new mirror: shared providers response and one recorded wire read. |
+| `frontend/src/lib/api/auth.ts` | Full source: optional signal only for providers/login/logout/getMe; admin/key writers untouched for feature worker. |
+| `frontend/src/lib/api/__tests__/auth.test.ts` | Full mirror: original wire/failure/auth contracts plus four endpoint cancellation variants. |
+| `frontend/src/lib/api/config.ts` | Full source: setup/status/catalog/session/check/complete signal support, same CSRF/payload; Settings/config/preparation writers untouched. |
+| `frontend/src/lib/api/__tests__/config.test.ts` | Full mirror: existing config/release/enrollment/preparation wire checks plus five entry endpoint cancellation variants. |
+| `frontend/src/router.tsx` | Full route table: Share outside RootLayout, Login/Setup inside; unchanged. |
+| `frontend/src/pages/setup.tsx` | Full source audit: multi-await command/recovery publication, bootstrap readiness and mutable draft boundary; next increment, no edits in prerequisite. |
+| `frontend/src/pages/__tests__/setup.test.tsx` | Account/storage/recovery test sections reviewed; next increment. |
+| `frontend/src/components/setup-gate.tsx` | Full source audit: path probe/accepted-entry decision/storage-auth dependency; next increment, no edits yet. |
+| `frontend/src/components/__tests__/setup-gate.test.tsx` | Full mirror: configured/unconfigured/storage-owner/unreachable policy retained for next increment. |
+| `frontend/src/components/setup-storage-choice.tsx` | Full caller audit: private prepare-storage workflow; not assigned/edited in this checkpoint. |
+| `frontend/src/components/setup-folder.tsx` | Full caller audit: config/source/scan/waiter chain; not assigned/edited in this checkpoint. |
+| `frontend/src/lib/setup-storage.ts` | Full payload/error mapper: CSRF/setup failure recovery language retained. |
+| `frontend/src/lib/navigation.ts` | Full React Router shim: memoized callbacks and pathname changes. |

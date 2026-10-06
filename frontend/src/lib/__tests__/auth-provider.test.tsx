@@ -25,7 +25,7 @@ import { useState } from "react";
 
 import { AuthProvider } from "@/lib/auth-provider";
 import { useAuth, type AuthApi } from "@/lib/auth-context";
-import { clearLogin, storeLogin } from "@/lib/auth-store";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import type { UserRead } from "@/types";
 
 function aUser(over: Partial<UserRead> = {}): UserRead {
@@ -249,11 +249,14 @@ describe("AuthProvider", () => {
       screen.getByRole("button", { name: "sign in" }).click();
 
       await waitFor(() =>
-        expect(api.login).toHaveBeenCalledWith({
-          username: "maker",
-          password: "hunter2",
-          remember_me: false,
-        }),
+        expect(api.login).toHaveBeenCalledWith(
+          {
+            username: "maker",
+            password: "hunter2",
+            remember_me: false,
+          },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -410,5 +413,139 @@ describe("auth transition boundaries", () => {
     expect(window.localStorage.getItem("printstash.user")).toBeNull();
     await act(async () => me.resolve(aUser()));
     expect(screen.getByText("signed in as maker")).toBeVisible();
+  });
+});
+
+describe("authentication entry lifetime", () => {
+  it("preserves the entry form while login verifies identity", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: () => me.promise });
+    function Entry() {
+      const { login } = useAuth();
+      const [draft, setDraft] = useState("");
+      return (
+        <>
+          <input
+            aria-label="Entry draft"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button onClick={() => void login("maker", "password").catch(() => {})}>
+            Verify entry
+          </button>
+        </>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Entry draft"), { target: { value: "Current entry" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify entry" }));
+
+    expect(screen.getByLabelText("Entry draft")).toHaveValue("Current entry");
+    await act(async () => me.resolve(aUser()));
+  });
+
+  it("discards a superseded credential response", async () => {
+    const token = Promise.withResolvers<Awaited<ReturnType<AuthApi["login"]>>>();
+    const api = stubApi({
+      login: vi
+        .fn<AuthApi["login"]>()
+        .mockReturnValueOnce(token.promise)
+        .mockResolvedValue({ access_token: "new-token", token_type: "bearer" }),
+    });
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Probe />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "sign in" }));
+    await screen.findByText("signed in as maker");
+
+    await act(async () => token.resolve({ access_token: "old-token", token_type: "bearer" }));
+
+    expect(api.getMe).toHaveBeenCalledTimes(1);
+    expect(getUser()?.username).toBe("maker");
+  });
+
+  it("aborts identity verification with its login caller", async () => {
+    const caller = new AbortController();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise) });
+    function Entry() {
+      const { login } = useAuth();
+      return (
+        <button
+          onClick={() => void login("maker", "password", false, caller.signal).catch(() => {})}
+        >
+          Verify entry
+        </button>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Verify entry" }));
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(1));
+
+    caller.abort();
+    await act(async () => me.resolve(aUser()));
+
+    expect(getUser()).toBeNull();
+    expect(vi.mocked(api.getMe).mock.calls[0]?.[0]?.signal?.aborted).toBe(true);
+  });
+
+  it("discards an aborted identity refresh", async () => {
+    const caller = new AbortController();
+    withStoredSession();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({
+      getMe: vi
+        .fn<AuthApi["getMe"]>()
+        .mockResolvedValueOnce(aUser())
+        .mockReturnValueOnce(me.promise),
+    });
+    function Entry() {
+      const { refresh } = useAuth();
+      return (
+        <button onClick={() => void refresh(caller.signal).catch(() => {})}>Refresh entry</button>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh entry" }));
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(2));
+
+    caller.abort();
+    await act(async () => me.reject(new Error("late failure")));
+
+    expect(getUser()?.username).toBe("maker");
+  });
+
+  it("aborts bootstrap identity when its provider leaves", async () => {
+    withStoredSession();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise) });
+    const view = render(
+      <AuthProvider api={api}>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    view.unmount();
+    await act(async () => me.resolve(aUser({ username: "late" })));
+
+    expect(vi.mocked(api.getMe).mock.calls[0]?.[0]?.signal?.aborted).toBe(true);
+    expect(getUser()?.username).toBe("maker");
   });
 });

@@ -23,6 +23,7 @@ import {
   getHealthDetails,
   getLatestRelease,
   getSetupStatus,
+  getStorageProviders,
   getVaultConfig,
   updateVaultConfig,
 } from "@/lib/api/config";
@@ -161,5 +162,43 @@ describe("browser preparation contracts", () => {
     respondWith({ ready: true, checks: [] });
     await prepareSetupStorage({ storage_backend: "local" });
     expect(lastBody()).toEqual({ storage_backend: "local" });
+  });
+});
+
+describe("entry endpoint cancellation", () => {
+  it.each([
+    { label: "status", send: (signal: AbortSignal) => getSetupStatus({ signal }) },
+    { label: "catalog", send: (signal: AbortSignal) => getStorageProviders({ signal }) },
+    { label: "session", send: (signal: AbortSignal) => beginSetup({ signal }) },
+    {
+      label: "check",
+      send: (signal: AbortSignal) =>
+        checkSetupStorage({ storage_provider: "local" }, "automatic-proof", { signal }),
+    },
+    {
+      label: "complete",
+      send: (signal: AbortSignal) =>
+        completeSetup(
+          { username: "maker", password: "password", storage_provider: "local" },
+          "automatic-proof",
+          { signal },
+        ),
+    },
+  ])("aborts the $label setup endpoint", async ({ send }) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+
+    const pending = send(caller.signal);
+    caller.abort();
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ acknowledged: true })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });

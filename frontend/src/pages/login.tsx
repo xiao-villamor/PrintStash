@@ -4,7 +4,9 @@ import { userMessage } from "@/lib/errors";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { loginProvidersOptions } from "@/features/auth/entry";
 import { Navigate } from "react-router-dom";
 import { useRouter } from "@/lib/navigation";
 import { AlertCircle, Clock3, ShieldCheck } from "lucide-react";
@@ -17,9 +19,8 @@ import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
 import { consumeSessionExpired } from "@/lib/auth";
-import { getAuthProviders, oidcLoginUrl } from "@/lib/api";
+import { oidcLoginUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import type { AuthProvidersRead } from "@/types";
 
 /** What the OIDC redirect back to /login is telling us, read once from the URL. */
 type OidcCallback = "none" | "success" | "failed";
@@ -40,7 +41,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [remember_me, setremember_me] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [providers, setProviders] = useState<AuthProvidersRead | null>(null);
+  const providerRead = useQuery(loginProvidersOptions());
+  const providers = providerRead.data;
+  const view = useRef<AbortController | null>(null);
+  const submitting = useRef(false);
   const [sessionExpired] = useState(consumeSessionExpired);
   // The redirect outcome is fixed by the URL we mounted on, so it is read once
   // rather than re-derived (router.replace below rewrites the query string).
@@ -54,23 +58,25 @@ export default function LoginPage() {
   const error = formError ?? (ssoFailed ? t("auth.ssoFailed") : null);
 
   useEffect(() => {
-    let alive = true;
-    void getAuthProviders()
-      .then((value) => {
-        if (alive) setProviders(value);
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
+    const controller = new AbortController();
+    view.current = controller;
+    return () => controller.abort(new DOMException("login_entry_disposed", "AbortError"));
   }, []);
 
   useEffect(() => {
     if (oidcCallback !== "success") return;
-    void refresh()
-      .then(() => router.replace("/"))
-      .catch(() => setSsoFailed(true))
-      .finally(() => setBusy(false));
+    const controller = new AbortController();
+    void refresh(controller.signal)
+      .then(() => {
+        if (!controller.signal.aborted) router.replace("/");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSsoFailed(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBusy(false);
+      });
+    return () => controller.abort(new DOMException("oidc_entry_disposed", "AbortError"));
   }, [oidcCallback, refresh, router]);
 
   if (user) {
@@ -79,20 +85,25 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const controller = view.current;
+    if (!controller || controller.signal.aborted || submitting.current || busy) return;
+    submitting.current = true;
     setFormError(null);
     setSsoFailed(false);
     setBusy(true);
     try {
-      await login(username, password, remember_me);
-      router.replace("/");
-    } catch (err: any) {
-      if (err.message?.includes("401")) {
+      await login(username, password, remember_me, controller.signal);
+      if (!controller.signal.aborted) router.replace("/");
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      if (err instanceof Error && err.message.includes("401")) {
         setFormError(t("auth.invalid"));
       } else {
         setFormError(userMessage(err));
       }
     } finally {
-      setBusy(false);
+      submitting.current = false;
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
 
@@ -200,6 +211,16 @@ export default function LoginPage() {
               </Button>
             </form>
 
+            {providerRead.error && (
+              <div className="mt-5 space-y-3">
+                <p role="alert" className="text-sm text-destructive">
+                  {userMessage(providerRead.error)}
+                </p>
+                <Button type="button" variant="outline" onClick={() => void providerRead.refetch()}>
+                  {uiText("Retry")}
+                </Button>
+              </div>
+            )}
             {providers?.oidc_enabled && (
               <div className="mt-5 space-y-4">
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">

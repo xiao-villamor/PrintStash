@@ -1,4 +1,12 @@
-import { getJson, getUrl, sendAction, sendJson } from "@/lib/api/request";
+import {
+  getJson,
+  getUrl,
+  sendAction,
+  sendJson,
+  requestApi,
+  jsonHeaders,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import {
   ApiKeyCreateResponse,
   ApiKeyRead,
@@ -11,24 +19,36 @@ import {
   UserUpdate,
 } from "@/types";
 
-export function getAuthProviders(): Promise<AuthProvidersRead> {
-  return getJson<AuthProvidersRead>("/api/v1/auth/providers");
+export function getAuthProviders(options?: GetJsonOptions): Promise<AuthProvidersRead> {
+  return getJson<AuthProvidersRead>("/api/v1/auth/providers", options);
 }
 
 export function oidcLoginUrl(): string {
   return getUrl("/api/v1/auth/oidc/login");
 }
 
-export function login(body: LoginRequest): Promise<TokenResponse> {
-  return sendJson<TokenResponse>("/api/v1/auth/login", "POST", body);
+export function login(
+  body: LoginRequest,
+  options?: { signal?: AbortSignal },
+): Promise<TokenResponse> {
+  return requestApi<TokenResponse>("/api/v1/auth/login", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
 }
 
-export function logout(): Promise<void> {
-  return sendAction("/api/v1/auth/logout", "POST");
+export function logout(options?: { signal?: AbortSignal }): Promise<void> {
+  return requestApi<void>("/api/v1/auth/logout", {
+    method: "POST",
+    headers: jsonHeaders(),
+    signal: options?.signal,
+  });
 }
 
-export function getMe(): Promise<UserRead> {
-  return getJson<UserRead>("/api/v1/auth/me");
+export function getMe(options?: GetJsonOptions): Promise<UserRead> {
+  return getJson<UserRead>("/api/v1/auth/me", options);
 }
 
 export function listApiKeys(): Promise<ApiKeyRead[]> {
