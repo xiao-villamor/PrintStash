@@ -1,3 +1,4 @@
+/** Verifies production worker delivery and private-cache isolation through real browser requests. */
 import { expect, test, type Page } from "@playwright/test";
 import type { Server } from "node:http";
 
