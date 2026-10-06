@@ -1122,7 +1122,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     });
   }, [refreshAuth]);
   const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
-    onRefresh: refresh,
+    onRefresh: () => reading.refresh(refresh),
     onAuthorityRetired,
   });
   const refreshRequired = authority.refreshRequired || modelQuery.refreshRequired;
@@ -1153,7 +1153,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [browseReady, error, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
-  const readingStatus = useLibraryReadingPosition(
+  const reading = useLibraryReadingPosition(
     snapshot?.entry,
     viewMode,
     startupContent,
@@ -2025,7 +2025,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
         <main
           ref={startupContent}
-          aria-busy={readingStatus === "restoring"}
+          aria-busy={reading.status === "restoring"}
           className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
@@ -2692,7 +2692,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             />
           ) : (
             <div className="flex-1 flex flex-col bg-background">
-              {readingStatus === "reset" && (
+              {reading.status === "reset" && (
                 <p
                   role="status"
                   className="mx-6 mt-4 rounded-md border border-border bg-muted p-3 text-sm"

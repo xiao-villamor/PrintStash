@@ -178,3 +178,57 @@ neighbor moved under the pointer; comparison now uses the same unhovered state
 without changing product motion. The five-file navigation/grid/hygiene gate
 passed185tests68.60s before the one-line breadcrumb fix; its affected18cases were
 then rerun as above. No production performance improvement is asserted.
+
+## Explicit refresh reconstruction
+
+Refresh restarts from page one using the new server revision, while retaining a
+bounded reading bookmark. Its completion must not restore a retired route/session.
+Browser activation invokes the real Refresh button without moving focus/scroll,
+so the assertion isolates its reading contract from where the toolbar is placed.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | bounds explicit refresh when its anchor is available | Edge | Two pages read; new revision inserts an earlier result | Same visible anchor offset; new second cursor only, no unvisited third page | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::bounds explicit refresh when its anchor is available` |
+| 2 | bounds explicit refresh when its anchor is removed | Error | Two pages read; new revision removes captured anchor | Clear reset notice after bounded reconstruction | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::bounds explicit refresh when its anchor is removed` |
+| 3 | bounds explicit refresh when its anchor is stale | Error | New first page; continuation returns 409 | Clear reset notice; no third-page search | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::bounds explicit refresh when its anchor is stale` |
+| 4 | ignores refresh restoration after navigation retires its entry | Edge | Refresh awaits response; route changed | New entry does not inherit old scroll/page demand | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::ignores refresh restoration after navigation retires its entry` |
+| 5 | ignores refresh restoration after session retirement | Edge | Refresh awaits response; auth changes | No old bookmark resurrected | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::ignores refresh restoration after session retirement` |
+| 6 | ignores refresh restoration after layout change | Edge | Refresh awaits response; grid changes to list | List offset and page demand stay independent | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::ignores refresh restoration after layout change` |
+| 7 | ignores completion of a superseded refresh | Edge | Two refreshes finish out of order | Only latest bookmark restores after its own completion | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::ignores completion of a superseded refresh` |
+| 8 | resets reading position when refresh replacement rejects | Error | First replacement fails before data is ready | Reset status and zero offsets; no continuation | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::resets reading position when refresh replacement rejects` |
+
+The three browser regressions were confirmed red before this checkpoint: the
+available anchor moved from −118px to 0px, while removed/stale anchors lacked the
+reset notice. Refresh now snapshots the existing reading metadata before replacing
+the query, then uses the same bounded reconstruction as history restoration.
+Route, layout, session and newer-operation fences retire late completions; no
+remote-data cache or timer was added. The focused three-case browser run passed
+in 38.0s; the hook's 10 cases passed in 6.19s.
+
+An initial concurrent regression run recorded 179 passed / 2 failed across 181 Vitest
+cases: an unrelated PWA spec contract header (fixed by its owner) and the existing
+mesh-upload dialog's 5000ms timeout. Its browser run recorded 14 passed / 1 failed: the
+existing mobile-grid history test exceeded its 30000ms total near Back navigation,
+before its geometry assertions. The timeout artifact was retained locally. These
+are recorded failures, not green runs; serial confirmation uses unchanged limits
+and assertions.
+
+This closes only the explicit Refresh reading-position checkpoint, not M5 as a
+whole. A separate source-review finding remains unverified: Refresh replaces browse
+pages but does not refetch the folder-page or selected-folder projections, so a
+Model ingestion/deletion may leave displayed folder counts stale. That projection
+freshness question is outside this checkpoint's reading-position contract.
+
+Serial browser confirmation passed all 15 navigation cases in 2.1m, including the
+mobile-grid case in 12.4s. That case also passed alone in 11.9s (15.7s total).
+The unchanged mesh-upload case passed alone in 1.45s (12.09s total; 154 cases
+excluded by the name filter). No timeout, assertion or production code changed
+between the concurrent failures and these confirmations. Full lint, formatting
+(730 files) and app/UI/domain typechecks passed after the capture callback's
+required dependency was made explicit.
+
+Final serial affected gate: all 181 tests passed across reading-position,
+navigation-state, ModelGrid and suite-hygiene (4 files, 102.47s). All eight rows
+above now have named assertions. The earlier timeouts did not reproduce in the
+isolated checks or the serial complete affected gates; they remain documented as
+observed timing failures rather than claimed product fixes.

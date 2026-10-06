@@ -1,7 +1,7 @@
 /** A Library history entry owns its nested reading offsets for one session. */
 import "@testing-library/jest-dom/vitest";
-import { useRef } from "react";
-import { Link, Route, Routes, useNavigate } from "react-router-dom";
+import { useRef, useState } from "react";
+import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
@@ -77,7 +77,7 @@ function FolderLibrary() {
   const entry = useLibraryEntry("/?type=all", ready);
   const main = useRef<HTMLElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const status = useLibraryReadingPosition(entry, "grid", main, list, ready, {
+  const { status } = useLibraryReadingPosition(entry, "grid", main, list, ready, {
     ready,
     models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
     folders: {
@@ -147,3 +147,105 @@ it.each([false, true])(
     expect(requests.every((request) => request.url.includes("cursor=second"))).toBe(true);
   },
 );
+
+function RefreshLibrary({ replace }: { replace: () => Promise<void> }) {
+  const location = useLocation();
+  const entry = useLibraryEntry(location.pathname, true);
+  const [layout, setLayout] = useState<LibraryLayout>("grid");
+  const [pages, setPages] = useState(2);
+  const [failed, setFailed] = useState(false);
+  const main = useRef<HTMLElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const reading = useLibraryReadingPosition(entry, layout, main, list, true, {
+    ready: !failed,
+    models: {
+      count: pages,
+      more: true,
+      pending: false,
+      failed: false,
+      next: () => setPages((count) => count + 1),
+    },
+    folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+  });
+  return (
+    <main ref={main}>
+      <output aria-label="Reading status">{reading.status}</output>
+      <output aria-label="Loaded pages">{pages}</output>
+      <button
+        onClick={() =>
+          void reading
+            .refresh(async () => {
+              setPages(1);
+              await replace();
+            })
+            .catch(() => setFailed(true))
+        }
+      >
+        Refresh
+      </button>
+      <button onClick={() => setLayout("list")}>List layout</button>
+      <Link to="/another">Another Library</Link>
+    </main>
+  );
+}
+
+describe("Explicit Library refresh", () => {
+  it.each([
+    {
+      label: "navigation retires its entry",
+      retire: () => fireEvent.click(screen.getByRole("link", { name: "Another Library" })),
+    },
+    { label: "session retirement", retire: () => act(() => clearLogin()) },
+    {
+      label: "layout change",
+      retire: () => fireEvent.click(screen.getByRole("button", { name: "List layout" })),
+    },
+  ])("ignores refresh restoration after $label", async ({ retire }) => {
+    const response = Promise.withResolvers<void>();
+    renderApp(<RefreshLibrary replace={() => response.promise} />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 240;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("restoring");
+    retire();
+    main.scrollTop = 35;
+    await act(async () => response.resolve());
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("ready");
+    expect(screen.getByLabelText("Loaded pages")).toHaveTextContent("1");
+    expect(main.scrollTop).toBe(35);
+  });
+
+  it("ignores completion of a superseded refresh", async () => {
+    const first = Promise.withResolvers<void>();
+    const latest = Promise.withResolvers<void>();
+    let next = first.promise;
+    renderApp(<RefreshLibrary replace={() => next} />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 240;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    main.scrollTop = 80;
+    next = latest.promise;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    main.scrollTop = 0;
+    await act(async () => first.resolve());
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("restoring");
+    expect(main.scrollTop).toBe(0);
+    expect(screen.getByLabelText("Loaded pages")).toHaveTextContent("1");
+    await act(async () => latest.resolve());
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("ready");
+    expect(main.scrollTop).toBe(80);
+    expect(screen.getByLabelText("Loaded pages")).toHaveTextContent("1");
+  });
+
+  it("resets reading position when refresh replacement rejects", async () => {
+    const response = Promise.withResolvers<void>();
+    renderApp(<RefreshLibrary replace={() => response.promise} />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 240;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => response.reject(new Error("replacement unavailable")));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+    expect(main.scrollTop).toBe(0);
+    expect(screen.getByLabelText("Loaded pages")).toHaveTextContent("1");
+  });
+});

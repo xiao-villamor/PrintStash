@@ -257,3 +257,82 @@ for (const { layout, kind } of [
       .toBeCloseTo(before, 0);
   });
 }
+
+for (const recovery of ["available", "removed", "stale"] as const) {
+  test(`bounds explicit refresh when its anchor is ${recovery}`, async ({ page }) => {
+    await page.clock.install();
+    const first = Array.from({ length: 20 }, (_, index) =>
+      aModelListItem({ id: 100 + index, name: `First ${index}` }),
+    );
+    const second = Array.from({ length: 20 }, (_, index) =>
+      aModelListItem({ id: 200 + index, name: `Second ${index}` }),
+    );
+    let changed = false;
+    let removed: number | null = null;
+    const refreshed: (string | null)[] = [];
+    await page.route("**/api/v1/models/browse/revision", (route) =>
+      route.fulfill({
+        json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
+      }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      if (changed) refreshed.push(cursor);
+      if (changed && cursor && recovery === "stale")
+        return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
+      const models = cursor
+        ? second
+        : changed
+          ? [aModelListItem({ id: 999, name: "Inserted" }), ...first]
+          : first;
+      return route.fulfill({
+        json: {
+          items: models
+            .filter((model) => !(changed && model.id === removed))
+            .map((model) => ({ kind: "model", model })),
+          total: 60,
+          next_cursor: cursor ? "unvisited-third" : changed ? "second-new" : "second-old",
+          browse_revision: changed ? "r2" : "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?c=maraio&type=all&sort=name-asc");
+    await page.getByRole("button", { name: "Load more", exact: true }).click();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: /Second 10/ })
+      .first()
+      .scrollIntoViewIfNeeded();
+    const bookmark = await page.getByRole("main").evaluate((main) => {
+      const bounds = main.getBoundingClientRect();
+      const anchor = Array.from(main.querySelectorAll<HTMLElement>("[data-library-entry]")).find(
+        (node) => {
+          const rect = node.getBoundingClientRect();
+          return rect.bottom > bounds.top && rect.top < bounds.bottom;
+        },
+      );
+      if (!anchor?.dataset.libraryEntry) throw new Error("No visible reading anchor");
+      return { key: anchor.dataset.libraryEntry, top: anchor.getBoundingClientRect().top };
+    });
+    if (recovery === "removed") removed = Number(bookmark.key.split("/").at(-1));
+    changed = true;
+    await page.clock.fastForward(31_000);
+    const refresh = page.getByRole("button", { name: "Refresh library", exact: true });
+    await expect(refresh).toBeVisible();
+    // Activate the actual control without locator auto-scroll changing the reading bookmark.
+    await refresh.evaluate((button: HTMLButtonElement) => button.click());
+    if (recovery === "available") {
+      const anchor = page.locator(`[data-library-entry="${bookmark.key}"]`).first();
+      await expect
+        .poll(async () => anchor.evaluate((node) => node.getBoundingClientRect().top))
+        .toBeCloseTo(bookmark.top, 0);
+    } else
+      await expect(
+        page.getByText(
+          "Your previous reading position could not be restored. Showing the start of this view.",
+        ),
+      ).toBeVisible();
+    expect(refreshed).toEqual([null, "second-new"]);
+  });
+}
