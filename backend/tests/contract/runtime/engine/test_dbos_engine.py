@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from dbos import DBOS
-from sqlalchemy import create_engine
+from sqlalchemy import Column, Integer, MetaData, Table, create_engine
 from sqlmodel import select
 
 from app.db.models import Job, JobState, LaneName, WorkPriority
@@ -160,6 +160,35 @@ def _recover_legacy_job(harness):
     )
     assert result.submitted == 1
     harness.settle()
+
+
+@pytest.mark.postgres
+class TestPostgresReset:
+    def test_preserves_application_data(self):
+        url, schema = system_database_url(fresh_postgres_database("reset_scope"))
+        database = create_engine(url)
+        # The engine shares a PostgreSQL database with application tables.
+        # This independent table represents persisted application data outside
+        # its disposable schema, without importing another domain's entities.
+        application = Table(
+            "application_reset_probe",
+            MetaData(),
+            Column("id", Integer, primary_key=True),
+            schema="public",
+        )
+        try:
+            application.create(database)
+            with database.begin() as connection:
+                connection.execute(application.insert().values(id=7))
+            with running_engine((url, schema)) as harness:
+                harness.engine.reset()
+                with database.connect() as connection:
+                    assert connection.execute(application.select()).scalars().all() == [
+                        7
+                    ]
+                harness.engine.launch(listen_lanes=[])
+        finally:
+            database.dispose()
 
 
 class TestSdkUpgrade:

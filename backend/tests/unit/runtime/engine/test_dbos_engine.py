@@ -427,3 +427,13 @@ class TestFifoPostgresStartup:
             engine._require_fifo_queues_drained()
 
         assert disposed == [True]
+
+
+class TestReset:
+    def test_refuses_postgres_without_a_system_schema(self, monkeypatch):
+        engine = _engine()
+        engine.url = "postgresql+psycopg://vault:pw@db:5432/vault"
+        monkeypatch.setattr(engine, "shutdown", lambda: None)
+
+        with pytest.raises(ValueError, match="engine_requires_system_schema"):
+            engine.reset()

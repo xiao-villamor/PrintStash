@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reset PostgreSQL work-engine state by removing only its DBOS schema, preserving
+  application tables in the shared database and rebuilding the reconciler schedule.
+
 - Run Python compatibility tests and external service contracts in independent
   Deep CI jobs, preserving both required results and their execution limits.
 

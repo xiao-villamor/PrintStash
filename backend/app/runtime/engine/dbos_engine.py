@@ -35,6 +35,7 @@ from dbos import (
 from dbos import error as dbos_error
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
+from sqlalchemy.schema import DropSchema
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -515,7 +516,22 @@ class DbosJobEngine(JobEngine):
         """Discard the system database. The engine must be relaunched after."""
         was_launched = self._launched
         self.shutdown()
-        DBOS.reset_system_database(system_database_url=self.url, schema=self.schema)
+        if make_url(self.url).get_backend_name() == "sqlite":
+            DBOS.reset_system_database(system_database_url=self.url)
+        else:
+            if self.schema is None:
+                raise ValueError("engine_requires_system_schema")
+            # DBOS's destructive reset drops the entire PostgreSQL database,
+            # including authoritative application tables. Only our system
+            # schema is disposable. Transactional DDL propagates any failure.
+            database = create_engine(self.url, connect_args={"connect_timeout": 5})
+            try:
+                with database.begin() as connection:
+                    connection.execute(
+                        DropSchema(self.schema, cascade=True, if_exists=True)
+                    )
+            finally:
+                database.dispose()
         if was_launched:
             logger.warning("engine state discarded; relaunch required")
 
