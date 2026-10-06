@@ -129,7 +129,7 @@ function useQueryApi(): QueryApi {
 function collectionReadmeOptions(api: QueryApi, collectionId: number) {
   return queryOptions<string | null>({
     queryKey: queryKeys.collectionReadme(collectionId),
-    queryFn: async () => (await api.getCollectionReadme(collectionId)).readme,
+    queryFn: async ({ signal }) => (await api.getCollectionReadme(collectionId, { signal })).readme,
   });
 }
 
@@ -142,8 +142,8 @@ export function useCollectionChildren(parentId: number | null, options?: { enabl
   const api = useQueryApi();
   return useInfiniteQuery({
     queryKey: queryKeys.collectionChildren(parentId),
-    queryFn: ({ pageParam }: { pageParam: string | null }) =>
-      api.listCollectionChildren(parentId, pageParam),
+    queryFn: ({ pageParam, signal }) =>
+      api.listCollectionChildren(parentId, pageParam, undefined, { signal }),
     initialPageParam: null,
     getNextPageParam: (page: CollectionPage) => page.next_cursor,
     enabled: options?.enabled ?? true,
@@ -155,9 +155,9 @@ export function useCollectionLookup(path: string | null) {
   const api = useQueryApi();
   return useQuery<CollectionLookupRead>({
     queryKey: queryKeys.collectionLookup(path),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       if (path === null || path === "") throw new Error("Collection lookup requires a path");
-      return api.lookupCollection(path);
+      return api.lookupCollection(path, { signal });
     },
     enabled: path !== null && path !== "",
     placeholderData: keepPreviousData,
@@ -169,9 +169,9 @@ export function useCollectionLookupById(id: number | null) {
   const api = useQueryApi();
   return useQuery<CollectionLookupRead>({
     queryKey: queryKeys.collectionLookupById(id),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       if (id === null) throw new Error("Collection lookup requires an id");
-      return api.lookupCollectionById(id);
+      return api.lookupCollectionById(id, { signal });
     },
     enabled: id !== null,
   });
@@ -189,8 +189,8 @@ export function useCollectionSearch(
   const api = useQueryApi();
   return useInfiniteQuery({
     queryKey: queryKeys.collectionSearch(query, minRole),
-    queryFn: ({ pageParam }: { pageParam: string | null }) =>
-      api.searchCollections(query, minRole, pageParam),
+    queryFn: ({ pageParam, signal }) =>
+      api.searchCollections(query, minRole, pageParam, undefined, { signal }),
     initialPageParam: null,
     getNextPageParam: (page: CollectionPage) => page.next_cursor,
     enabled: options?.enabled ?? true,

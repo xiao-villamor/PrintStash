@@ -416,7 +416,7 @@ export function jsonHeaders(): Record<string, string> {
 
 /**
  * Compatibility bridge for endpoint clients awaiting feature-owned reconciliation.
- * There is no transport cache. Remove this adapter with the final I10 cutover.
+ * There is no transport cache. Remove this adapter with the final M10 cutover.
  */
 export function invalidateApiCache(path?: string): void {
   if (path === undefined) void queryClient.invalidateQueries();
@@ -439,7 +439,7 @@ export function requestMutation<T>(
 
 export interface GetJsonOptions {
   signal?: AbortSignal;
-  /** Compatibility only: JSON transport always reads the network. Remove in I10. */
+  /** Compatibility only: JSON transport always reads the network. Remove in M10. */
   fresh?: boolean;
 }
 

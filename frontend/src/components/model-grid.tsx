@@ -1127,10 +1127,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             string | null
           >({
             queryKey: folderKey,
-            queryFn: ({ pageParam }: { pageParam: string | null }) =>
+            queryFn: ({ pageParam, signal }) =>
               searchQuery === undefined
-                ? listCollectionChildren(parentId, pageParam)
-                : searchCollections(searchQuery, "view", pageParam),
+                ? listCollectionChildren(parentId, pageParam, undefined, { signal })
+                : searchCollections(searchQuery, "view", pageParam, undefined, { signal }),
             initialPageParam: null,
             getNextPageParam: (page: CollectionPage) => page.next_cursor,
             staleTime: Infinity,

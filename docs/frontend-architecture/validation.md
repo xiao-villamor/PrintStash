@@ -2,7 +2,8 @@
 
 Status: implementation qualification in progress. M2 rows 1–5 have reviewed
 assertions and qualified executions, consolidated in the
-[M2 closure record](../frontend-m2-closure-validation.md). Other rows remain the
+[M2 closure record](../frontend-m2-closure-validation.md). M1 rows 28–31 are qualified in the
+[M1 closure record](../frontend-m1-closure-validation.md). Other rows remain the
 original requirements pending reconciliation with their feature validation records;
 `❌ missing` means no accepted reference has yet been attached here, not that no
 test exists anywhere. This is not an assertion-by-assertion audit of the whole
@@ -44,10 +45,10 @@ each case must have the same assertion shape; otherwise split the row.
 | 25  | denies an edit after permission revocation               | Error    | edit permission revoked before save              | 403 and unchanged persisted user-editable state                 | Integration     | ❌ missing |
 | 26  | does not replace dirty fields on background read         | Edge     | dirty form receives newer server response        | draft remains intact                                            | Frontend unit   | ❌ missing |
 | 27  | reconciles a lost save acknowledgement                   | Edge     | commit succeeds but response is lost             | explicit current-state recovery without blind overwrite         | Playwright real | ❌ missing |
-| 28  | rejects a read from a previous session                   | Error    | session changes during headers or body           | old entity data never reaches the new session                   | Frontend unit   | ❌ missing |
-| 29  | ignores a previous session mutation completion           | Error    | session changes before write acknowledgement     | new session state remains untouched                             | Frontend unit   | ❌ missing |
-| 30  | ignores a previous session unauthorized response         | Error    | late old-session 401                             | new authenticated session remains active                        | Frontend unit   | ❌ missing |
-| 31  | discards protected bytes from a previous session         | Error    | logout during blob/stream completion             | old bytes never displayed or retained for next identity         | Frontend unit   | ❌ missing |
+| 28  | rejects a read from a previous session                   | Error    | session changes during headers or body           | old entity data never reaches the new session                   | Frontend unit   | ✅ `src/lib/api/__tests__/request.test.ts::rejects old-session response bodies for $label` |
+| 29  | ignores a previous session mutation completion           | Error    | session changes before write acknowledgement     | new session state remains untouched                             | Frontend unit   | ✅ `src/lib/api/__tests__/request.test.ts::rejects retired mutation acknowledgements for $label` |
+| 30  | ignores a previous session unauthorized response         | Error    | late old-session 401                             | new authenticated session remains active                        | Frontend unit   | ✅ `src/lib/api/__tests__/request.test.ts::ignores unauthorized bodies from retired sessions` |
+| 31  | discards protected bytes from a previous session         | Error    | logout during blob/stream completion             | old bytes never displayed or retained for next identity         | Frontend unit   | ✅ `src/lib/api/__tests__/request.test.ts::rejects old-session response bodies for $label` |
 | 32  | restores Back to the same reading position               | Happy    | paged list then detail then Back                 | same entry identity and nested scroll anchor                    | Playwright real | ❌ missing |
 | 33  | restores separate history entries independently          | Edge     | same URL visited at different positions          | Back/Forward use the matching entry position                    | Playwright      | ❌ missing |
 | 34  | falls back when the saved anchor is gone                 | Edge     | anchor deleted or cache unavailable              | bounded documented restoration without endless requests         | Playwright      | ❌ missing |

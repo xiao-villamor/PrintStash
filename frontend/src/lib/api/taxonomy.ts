@@ -24,22 +24,38 @@ export function listCollectionChildren(
   parentId: number | null,
   cursor: string | null = null,
   limit = 200,
+  options: GetJsonOptions = {},
 ): Promise<CollectionPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (parentId !== null) params.set("parent_id", String(parentId));
   if (cursor !== null) params.set("cursor", cursor);
-  return getJson<CollectionPage>(`/api/v1/collections/children?${params}`, { fresh: true });
+  return getJson<CollectionPage>(`/api/v1/collections/children?${params}`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 /** The collection at `path` with its visible ancestors, root first. */
-export function lookupCollection(path: string): Promise<CollectionLookupRead> {
+export function lookupCollection(
+  path: string,
+  options: GetJsonOptions = {},
+): Promise<CollectionLookupRead> {
   const params = new URLSearchParams({ path });
-  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, { fresh: true });
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 /** Resolve a previously saved collection id without walking the tree. */
-export function lookupCollectionById(id: number): Promise<CollectionLookupRead> {
-  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?id=${id}`, { fresh: true });
+export function lookupCollectionById(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<CollectionLookupRead> {
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?id=${id}`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 /** Collections whose name contains `query`, held at `minRole` or above. */
@@ -48,10 +64,14 @@ export function searchCollections(
   minRole: CollectionRole = "view",
   cursor: string | null = null,
   limit = 20,
+  options: GetJsonOptions = {},
 ): Promise<CollectionPage> {
   const params = new URLSearchParams({ q: query, min_role: minRole, limit: String(limit) });
   if (cursor !== null) params.set("cursor", cursor);
-  return getJson<CollectionPage>(`/api/v1/collections/search?${params}`, { fresh: true });
+  return getJson<CollectionPage>(`/api/v1/collections/search?${params}`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 export function createCollection(payload: CollectionCreate): Promise<CollectionRead> {
@@ -75,8 +95,14 @@ export function replaceCollectionTags(id: number, tags: string[]): Promise<Colle
   return sendJson<CollectionRead>(`/api/v1/collections/${id}/tags`, "PUT", { tags });
 }
 
-export function getCollectionReadme(id: number): Promise<{ readme: string | null }> {
-  return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, { fresh: true });
+export function getCollectionReadme(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<{ readme: string | null }> {
+  return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 export function setCollectionReadme(

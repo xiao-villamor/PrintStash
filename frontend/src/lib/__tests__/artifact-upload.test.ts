@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelArtifactUpload,
+  isArtifactUploadActive,
   pauseArtifactUpload,
   rememberedArtifactUploads,
   resumeArtifactUpload,
@@ -363,4 +364,85 @@ describe("retired upload unauthorized failure", () => {
     expect(await outcome).toMatchObject({ name: "AbortError" });
     expect(getUser()?.id).toBe(9);
   });
+});
+
+/** Callback delivery belongs inside the transfer's cleanup boundary. */
+describe("upload session callback lifetime", () => {
+  it.each(["upload", "resume"] as const)(
+    "releases the %s transfer when its session callback retires authentication",
+    async (mode) => {
+      const id = `retired-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const file = new File(["12345678"], "part.stl");
+      const options = { api, digest, onSession: () => clearLogin() };
+      try {
+        const pending =
+          mode === "upload"
+            ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+            : resumeArtifactUpload(id, file, options);
+        await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+        expect(isArtifactUploadActive(id)).toBe(false);
+        expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+      } finally {
+        pauseArtifactUpload(id);
+      }
+    },
+  );
+
+  it.each(["upload", "resume"] as const)(
+    "releases the %s transfer when its session callback fails",
+    async (mode) => {
+      const id = `failed-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const failure = new Error("callback failed");
+      const file = new File(["12345678"], "part.stl");
+      const options = {
+        api,
+        digest,
+        onSession: () => {
+          throw failure;
+        },
+      };
+      try {
+        const pending =
+          mode === "upload"
+            ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+            : resumeArtifactUpload(id, file, options);
+        await expect(pending).rejects.toBe(failure);
+        expect(isArtifactUploadActive(id)).toBe(false);
+        expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+      } finally {
+        pauseArtifactUpload(id);
+      }
+    },
+  );
+
+  it.each(["upload", "resume"] as const)(
+    "allows the %s session callback to pause its transfer",
+    async (mode) => {
+      const id = `paused-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const file = new File(["12345678"], "part.stl");
+      const options = {
+        api,
+        digest,
+        onSession: (id: string) => {
+          expect(pauseArtifactUpload(id)).toBe(true);
+        },
+      };
+      const pending =
+        mode === "upload"
+          ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+          : resumeArtifactUpload(id, file, options);
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(isArtifactUploadActive(id)).toBe(false);
+      expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+    },
+  );
 });

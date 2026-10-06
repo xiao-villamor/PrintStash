@@ -82,13 +82,9 @@ export interface UploadOptions {
 const activeControllers = new Map<string, AbortController>();
 
 function controlledOptions(id: string, options: UploadOptions): UploadOptions {
-  if (options.signal) {
-    options.onSession?.(id);
-    return options;
-  }
+  if (options.signal) return options;
   const controller = new AbortController();
   activeControllers.set(id, controller);
-  options.onSession?.(id);
   return { ...options, signal: controller.signal };
 }
 
@@ -229,8 +225,9 @@ export async function uploadArtifact(
     transport.assertCurrent();
     rememberArtifactUpload(session.id);
     const controlled = controlledOptions(session.id, { ...options, digest });
-    transport.assertCurrent();
     try {
+      options.onSession?.(session.id);
+      transport.assertCurrent();
       return await transfer(session, file, controlled);
     } finally {
       releaseController(session.id, controlled.signal);
@@ -253,8 +250,9 @@ export async function resumeArtifactUpload(
     request.assertCurrent();
     rememberArtifactUpload(id);
     const controlled = controlledOptions(id, options);
-    request.assertCurrent();
     try {
+      options.onSession?.(id);
+      request.assertCurrent();
       return await transfer(session, file, controlled);
     } finally {
       releaseController(id, controlled.signal);

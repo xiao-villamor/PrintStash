@@ -66,8 +66,7 @@ import type {
 import { aCollectionNode, aPrinter, aVaultConfig } from "@/test-support/factories";
 
 // The hooks are thin, but they encode two real contracts worth locking down:
-// (1) every shared read passes `{ fresh: true }` so TanStack Query — not the
-// legacy in-memory cache in request.ts — is the single source of truth, and
+// (1) shared reads preserve their endpoint parameters and Query ownership, and
 // (2) usePrinters honours `enabled` so non-admins don't fetch a list they
 // can't use.
 //
@@ -229,12 +228,16 @@ describe("taxonomy hooks", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(stubs.listCollectionChildren).toHaveBeenCalledTimes(1);
-    expect(stubs.listCollectionChildren).toHaveBeenCalledWith(null, null);
+    expect(stubs.listCollectionChildren).toHaveBeenCalledWith(null, null, undefined, {
+      signal: expect.any(AbortSignal),
+    });
     expect(result.current.data?.pages[0].items).toEqual([first]);
     await act(async () => {
       await result.current.fetchNextPage();
     });
-    expect(stubs.listCollectionChildren).toHaveBeenNthCalledWith(2, null, "next");
+    expect(stubs.listCollectionChildren).toHaveBeenNthCalledWith(2, null, "next", undefined, {
+      signal: expect.any(AbortSignal),
+    });
     await waitFor(() => expect(result.current.data?.pages[1]?.items).toEqual([second]));
   });
 
@@ -256,7 +259,9 @@ describe("taxonomy hooks", () => {
     const { result } = renderHook(() => useCollectionLookup("parts"), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(stubs.lookupCollection).toHaveBeenCalledTimes(1);
-    expect(stubs.lookupCollection).toHaveBeenCalledWith("parts");
+    expect(stubs.lookupCollection).toHaveBeenCalledWith("parts", {
+      signal: expect.any(AbortSignal),
+    });
     expect(result.current.data?.collection.path).toBe("parts");
   });
 
@@ -266,14 +271,16 @@ describe("taxonomy hooks", () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(stubs.searchCollections).toHaveBeenCalledTimes(1);
-    expect(stubs.searchCollections).toHaveBeenCalledWith("bracket", "edit", null);
+    expect(stubs.searchCollections).toHaveBeenCalledWith("bracket", "edit", null, undefined, {
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("resolves a saved collection by id", async () => {
     const { result } = renderHook(() => useCollectionLookupById(1), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.collection.id).toBe(1);
-    expect(stubs.lookupCollectionById).toHaveBeenCalledWith(1);
+    expect(stubs.lookupCollectionById).toHaveBeenCalledWith(1, { signal: expect.any(AbortSignal) });
   });
 
   it("leaves id lookup idle without a collection", () => {
@@ -512,7 +519,7 @@ describe("folder navigation", () => {
     const { result } = renderHook(() => useCollectionReadme(5), { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current.data).toBe("# Rack"));
-    expect(stubs.getCollectionReadme).toHaveBeenCalledWith(5);
+    expect(stubs.getCollectionReadme).toHaveBeenCalledWith(5, { signal: expect.any(AbortSignal) });
   });
 
   it("does not request a readme while disabled", async () => {
@@ -622,5 +629,48 @@ describe("canonical Vault configuration reader", () => {
     });
     await waitFor(() => expect(result.current.every((query) => query.isSuccess)).toBe(true));
     expect(stubs.getVaultConfig).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("collection query cancellation", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { label: "children", useRead: () => useCollectionChildren(null) },
+    { label: "path lookup", useRead: () => useCollectionLookup("parts") },
+    { label: "id lookup", useRead: () => useCollectionLookupById(1) },
+    { label: "search", useRead: () => useCollectionSearch("bracket", "edit") },
+    { label: "README", useRead: () => useCollectionReadme(1) },
+  ])("aborts the obsolete collection HTTP read: $label", async ({ useRead }) => {
+    const headers = Promise.withResolvers<Response>();
+    const fetchMock = vi.fn<typeof fetch>().mockReturnValue(headers.promise);
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderHook(
+      () => {
+        useRead();
+      },
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    );
+    try {
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const signal = fetchMock.mock.calls[0][1]?.signal;
+      expect(signal?.aborted).toBe(false);
+      await act(() => client.cancelQueries());
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      view.unmount();
+      client.clear();
+      // Complete the held boundary even on the unfixed path; no work leaks
+      // into the next parameter case. Cancellation must precede these headers.
+      headers.resolve(new Response(null, { status: 204 }));
+      await headers.promise;
+    }
   });
 });
