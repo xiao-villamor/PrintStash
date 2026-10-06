@@ -211,8 +211,23 @@ export function importPrintJobsFromPrinter(
   );
 }
 
-export function updateModel(id: number, payload: ModelUpdate): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload);
+/** Legacy callers are migrated incrementally; remove the optional version in M4. */
+export function updateModel(
+  id: number,
+  payload: ModelUpdate,
+  editVersion?: number,
+): Promise<ModelRead> {
+  return sendJson<ModelRead>(
+    `/api/v1/models/${id}`,
+    "PATCH",
+    payload,
+    editVersion === undefined
+      ? {}
+      : {
+          "If-Match": `"model-${id}-v${editVersion}"`,
+          "X-PrintStash-Edit-Contract": "conditional-v1",
+        },
+  );
 }
 
 export function deleteModel(id: number): Promise<void> {

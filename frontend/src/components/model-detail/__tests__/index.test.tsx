@@ -301,6 +301,142 @@ describe("ModelDetail", () => {
   });
 
   describe("editing", () => {
+    it("preserves a Model draft on edit conflict", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(
+        await screen.findByText(
+          "This item changed elsewhere. Your draft has been kept. Review the latest version before saving again.",
+        ),
+      ).toBeVisible();
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Review latest version" }));
+      expect(await screen.findByRole("dialog", { name: "Latest saved version" })).toHaveTextContent(
+        "Other editor",
+      );
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("saves a retained Model draft only after explicit version review", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+      let version: string | null = null;
+      app.route({
+        "PATCH /api/v1/models/1": (_url, init) => {
+          version = new Headers(init?.headers).get("If-Match");
+          return json(aModel({ name: "My draft", edit_version: 8 }));
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+
+      expect(await screen.findByText("My draft")).toBeVisible();
+      expect(version).toBe('"model-1-v7"');
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("replaces a Model draft with the reviewed version", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Use latest version" }));
+
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Other editor");
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("keeps a conflicted Model draft when review is dismissed", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Keep my draft" }));
+
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("requires another review when a reviewed version becomes stale", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("prevents retry after review reveals lost edit access", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ effective_role: "view", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      expect(
+        screen.getByRole("button", { name: "Save my draft against this version" }),
+      ).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
     it("offers direct tag editing in the header", async () => {
       renderDetail();
 

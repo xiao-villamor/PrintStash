@@ -1,5 +1,8 @@
 "use client";
 
+import { ApiError } from "@/lib/errors";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { Modal } from "@/components/ui/modal";
 import { SubjectCaption } from "@/components/subject-caption";
 import { ModelSearchAction } from "@/components/model-search-action";
 
@@ -36,6 +39,7 @@ import {
   deleteModel,
   deleteTag,
   getAssetUrl,
+  getModel,
   getModelPrinterFiles,
   getModelPrintJobs,
   starModel,
@@ -150,6 +154,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [model, setModel] = useState(initialModel);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editBaseVersion, setEditBaseVersion] = useState(initialModel.edit_version);
+  const [editConflict, setEditConflict] = useState(false);
+  const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
@@ -309,6 +317,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   function enterEdit() {
+    setEditBaseVersion(model.edit_version);
+    setEditConflict(false);
+    setReviewedModel(null);
     setEditName(model.name);
     setEditDescription(model.description || "");
     setEditSourceUrl(model.source_url || "");
@@ -322,28 +333,71 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   function cancelEdit() {
+    setEditConflict(false);
+    setReviewedModel(null);
     setEditing(false);
   }
 
-  async function saveEdit() {
-    if (!editName.trim()) return;
+  async function saveEdit(version = editBaseVersion) {
+    if (!editName.trim() || saving || !canEditModel || reviewedModel?.effective_role === "view")
+      return;
+    const session = getSessionVersion();
     setSaving(true);
     try {
-      const updated = await updateModel(model.id, {
-        name: editName.trim() || undefined,
-        description: editDescription.trim() || undefined,
-        source_url: editSourceUrl.trim() || null,
-        collection: editCollection,
-        tags: editTags.length ? editTags : undefined,
-      });
+      const updated = await updateModel(
+        model.id,
+        {
+          name: editName.trim() || undefined,
+          description: editDescription.trim() || undefined,
+          source_url: editSourceUrl.trim() || null,
+          collection: editCollection,
+          tags: editTags.length ? editTags : undefined,
+        },
+        version,
+      );
+      requireSessionVersion(session);
       setModel(updated);
+      setEditConflict(false);
+      setReviewedModel(null);
       setEditing(false);
       toast.success(uiText("Model updated"));
     } catch (e) {
-      toast.error(e);
+      if (session !== getSessionVersion()) return;
+      if (e instanceof ApiError && e.status === 412) {
+        setEditConflict(true);
+        setReviewedModel(null);
+      } else toast.error(e);
     } finally {
-      setSaving(false);
+      if (session === getSessionVersion()) setSaving(false);
     }
+  }
+
+  async function reviewLatest() {
+    const session = getSessionVersion();
+    setReviewing(true);
+    try {
+      const latest = await getModel(model.id);
+      requireSessionVersion(session);
+      setReviewedModel(latest);
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    } finally {
+      if (session === getSessionVersion()) setReviewing(false);
+    }
+  }
+
+  function useReviewedVersion() {
+    if (!reviewedModel) return;
+    setModel(reviewedModel);
+    setEditBaseVersion(reviewedModel.edit_version);
+    setEditName(reviewedModel.name);
+    setEditDescription(reviewedModel.description ?? "");
+    setEditSourceUrl(reviewedModel.source_url ?? "");
+    setEditCollection(reviewedModel.collection ?? "");
+    setEditCollectionLabel(reviewedModel.collection_label);
+    setEditTags([...reviewedModel.tags]);
+    setEditConflict(false);
+    setReviewedModel(null);
   }
 
   function editToggleTag(name: string) {
@@ -524,6 +578,59 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           onClose={() => setTagDialogOpen(false)}
           onSaved={(nextTags) => setModel((current) => ({ ...current, tags: nextTags }))}
         />
+        {editing && editConflict && (
+          <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
+            <p>{uiText("library.editConflict")}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void reviewLatest()}
+              loading={reviewing}
+            >
+              {uiText("library.reviewLatest")}
+            </Button>
+          </div>
+        )}
+        <Modal
+          open={reviewedModel !== null}
+          onClose={() => setReviewedModel(null)}
+          title={uiText("library.latestVersion")}
+        >
+          {reviewedModel && (
+            <div className="space-y-4">
+              <dl className="space-y-2">
+                <dt className="font-semibold">{uiText("Name")}</dt>
+                <dd>{reviewedModel.name}</dd>
+                <dt className="font-semibold">{uiText("Description")}</dt>
+                <dd className="whitespace-pre-wrap">{reviewedModel.description ?? "—"}</dd>
+                <dt className="font-semibold">{uiText("Collection")}</dt>
+                <dd>{reviewedModel.collection_label ?? "—"}</dd>
+                <dt className="font-semibold">{uiText("Tags")}</dt>
+                <dd>{reviewedModel.tags.join(", ") || "—"}</dd>
+                <dt className="font-semibold">{uiText("Source URL")}</dt>
+                <dd>{reviewedModel.source_url ?? "—"}</dd>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => setReviewedModel(null)}>
+                  {uiText("library.keepDraft")}
+                </Button>
+                <Button variant="outline" onClick={useReviewedVersion}>
+                  {uiText("library.useLatest")}
+                </Button>
+                <Button
+                  loading={saving}
+                  disabled={
+                    reviewedModel.effective_role !== "edit" &&
+                    reviewedModel.effective_role !== "admin"
+                  }
+                  onClick={() => void saveEdit(reviewedModel.edit_version)}
+                >
+                  {uiText("library.retryDraft")}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
         {/* Detail Header */}
         <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
           <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
@@ -601,7 +708,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <Button variant="outline" size="sm" onClick={cancelEdit}>
                   {uiText("Cancel")}
                 </Button>
-                <Button size="sm" onClick={saveEdit} loading={saving} disabled={!editName.trim()}>
+                <Button
+                  size="sm"
+                  onClick={() => void saveEdit()}
+                  loading={saving}
+                  disabled={!editName.trim() || editConflict || !canEditModel}
+                >
                   {!saving && <Check className="h-4 w-4" />}{" "}
                   {saving ? uiText("Saving…") : uiText("Save")}
                 </Button>

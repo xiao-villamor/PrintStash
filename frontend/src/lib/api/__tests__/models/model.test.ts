@@ -54,6 +54,16 @@ describe("getModel", () => {
 });
 
 describe("updateModel", () => {
+  it("sends the editor's Model version", async () => {
+    respondWith({ id: 1, edit_version: 8 });
+
+    await updateModel(1, { name: "Renamed" }, 7);
+
+    const headers = new Headers(lastCall().init?.headers);
+    expect(headers.get("If-Match")).toBe('"model-1-v7"');
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+  });
+
   it("PATCHes only what changed", async () => {
     respondWith({ id: 1 });
 

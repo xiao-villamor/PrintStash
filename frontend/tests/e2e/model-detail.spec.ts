@@ -24,6 +24,52 @@ import type { ModelRead } from "../../src/types/models";
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("reviews a conflicting Model before intentional retry", async ({ page }) => {
+    let conflicted = false;
+    let saved = false;
+    const versions: (string | undefined)[] = [];
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (route.request().method() === "PATCH") {
+        versions.push(route.request().headers()["if-match"]);
+        if (!conflicted) {
+          conflicted = true;
+          await route.fulfill({ status: 412, json: { detail: "edit_conflict" } });
+          return;
+        }
+        saved = true;
+      }
+      const response = await route.fetch({ method: "GET" });
+      // SAFETY: this route reads the repository's complete ModelRead mock fixture.
+      const model = (await response.json()) as ModelRead;
+      await route.fulfill({
+        json: {
+          ...model,
+          name: saved ? "My browser draft" : conflicted ? "Other editor" : model.name,
+          edit_version: saved ? 8 : conflicted ? 7 : 1,
+        },
+      });
+    });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByPlaceholder("Model name").fill("My browser draft");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+
+    await expect(page.getByPlaceholder("Model name")).toHaveValue("My browser draft");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
+      "Other editor",
+    );
+    expect(versions).toEqual(['"model-1-v1"']);
+    await page.getByRole("button", { name: "Save my draft against this version" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "My browser draft", exact: true }),
+    ).toBeVisible();
+    expect(versions).toEqual(['"model-1-v1"', '"model-1-v7"']);
+  });
+
   test("restores a trashed source within its original Model", async ({ page }) => {
     let removed = false;
     let original: ModelRead | null = null;
