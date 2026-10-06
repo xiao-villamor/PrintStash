@@ -20,6 +20,9 @@
  */
 
 import "@testing-library/jest-dom/vitest";
+import { StrictMode } from "react";
+import { createTask, listTasks, resetTasksForNewSetup } from "@/lib/task-center";
+import { storeLogin } from "@/lib/auth-store";
 import { screen, waitFor } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +73,39 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("preserves recovery across StrictMode shell mount", async () => {
+    const user = adminSession().user;
+    if (!user) throw new Error("missing_admin_fixture");
+    storeLogin("", user);
+    createTask({ title: "Recoverable upload", uploadSessionId: "recovery" });
+    const view = renderApp(
+      <StrictMode>
+        <AppShell>
+          <WhereAmI />
+        </AppShell>
+      </StrictMode>,
+      {
+        routes: {
+          "GET /api/v1/inbox": json([]),
+          "GET /api/v1/models/stats": json({ model_count: 0, file_count: 0, total_size_bytes: 0 }),
+        },
+      },
+    );
+    try {
+      await screen.findByText("at /");
+      expect(listTasks()).toMatchObject([
+        { title: "Recoverable upload", uploadSessionId: "recovery" },
+      ]);
+      view.unmount();
+      expect(listTasks()).toMatchObject([
+        { title: "Recoverable upload", uploadSessionId: "recovery" },
+      ]);
+    } finally {
+      view.unmount();
+      resetTasksForNewSetup();
+    }
+  });
+
   it("refreshes the vault when selected ZIP files finish importing", async () => {
     renderShell();
     await screen.findByText("at /");

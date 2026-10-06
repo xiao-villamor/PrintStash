@@ -23,6 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { adminSession, memberSession } from "@/test-support/render";
 import { aJob } from "@/test-support/factories";
 import { uiMessage } from "@/lib/locale";
 import { aSimilarityRun } from "@/test-support/similarity";
@@ -56,10 +57,13 @@ class FakeEventSocket implements EventSocket {
 }
 
 let socket: FakeEventSocket;
+let stopTaskScope: () => void = () => {};
 
 /** Fresh module instance, wired to the stubbed job source and events socket. */
 async function loadTaskCenter(): Promise<TaskCenter> {
+  stopTaskScope();
   const taskCenter = await import("@/lib/task-center");
+  stopTaskScope = taskCenter.startTaskCenterSessionScope();
   const events = await import("@/lib/events");
   socket = new FakeEventSocket();
   events.setEventSocketFactory(async () => socket);
@@ -78,10 +82,15 @@ beforeEach(async () => {
   localStorage.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+  const auth = await import("@/lib/auth-store");
+  const user = adminSession().user;
+  if (!user) throw new Error("missing_admin_fixture");
+  auth.storeLogin("", user, { silent: true });
   tc = await loadTaskCenter();
 });
 
 afterEach(() => {
+  stopTaskScope();
   vi.useRealTimers();
 });
 
@@ -596,6 +605,7 @@ describe("groupUploadJobs", () => {
   });
 
   it("removes a duplicate pending row persisted by an older client", async () => {
+    localStorage.setItem("printstash:task-owner:v1", "1");
     localStorage.setItem(
       "printstash:import-tasks:v1",
       JSON.stringify([
@@ -1440,5 +1450,289 @@ describe("policy cancellation", () => {
     });
     expect(completion).not.toHaveBeenCalled();
     stop();
+  });
+});
+
+describe("private task scope", () => {
+  it("retains recovery for the same verified owner", async () => {
+    tc.createTask({ title: "Private upload", uploadSessionId: "recovery", status: "running" });
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toMatchObject([
+      { title: "Private upload", uploadSessionId: "recovery" },
+    ]);
+  });
+
+  it.each(["legacy", "mismatched"])("discards %s persisted tasks", async (owner) => {
+    tc.createTask({ title: "Old private label", uploadSessionId: "private-recovery" });
+    if (owner === "legacy") localStorage.removeItem("printstash:task-owner:v1");
+    else localStorage.setItem("printstash:task-owner:v1", "2");
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
+    expect(localStorage.getItem("printstash:import-tasks:v1")).toBeNull();
+  });
+
+  it.each(["identity", "access", "logout"])(
+    "retires private history on %s change",
+    async (change) => {
+      const auth = await import("@/lib/auth-store");
+      tc.trackImportJob("dismissed", "Private label");
+      listJobs.mockResolvedValue([aJob({ job_id: "dismissed", state: "completed" })]);
+      await tc.syncImportJobs();
+      tc.clearCompletedTasks();
+      tc.createTask({ title: "Private upload", uploadSessionId: "private-recovery" });
+      if (change === "access") auth.retirePrivateSessionScope();
+      else if (change === "logout") auth.clearLogin();
+      else {
+        const user = memberSession().user;
+        if (!user) throw new Error("missing_member_fixture");
+        auth.storeLogin("", user);
+      }
+      expect(tc.listTasks()).toEqual([]);
+      for (const key of [
+        "printstash:import-tasks:v1",
+        "printstash:dismissed-import-jobs:v1",
+        "printstash:emitted-import-terminals:v1",
+      ])
+        expect(localStorage.getItem(key)).toBeNull();
+      if (change === "logout") {
+        const user = adminSession().user;
+        if (!user) throw new Error("missing_admin_fixture");
+        auth.storeLogin("", user);
+      }
+      listJobs.mockResolvedValue([aJob({ job_id: "dismissed", state: "running" })]);
+      await tc.syncImportJobs();
+      expect(tc.listTasks()).toMatchObject([{ jobId: "dismissed", status: "running" }]);
+      const waiting = tc.waitForImportJob("dismissed");
+      const rejected = waiting.catch((error: Error) => error);
+      auth.retirePrivateSessionScope();
+      await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    },
+  );
+
+  it("rejects a retired completion waiter", async () => {
+    listJobs.mockImplementation(() => new Promise(() => {}));
+    const waiting = tc.waitForImportJob("pending");
+    const rejected = waiting.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("rejects late source publication after retirement", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    tc.trackImportJob("old", "Old private label");
+    const completed = vi.fn<(job: JobStatus) => void>();
+    const stop = tc.subscribeImportJobCompletions(completed);
+    const syncing = tc.syncImportJobs();
+    const rejected = syncing.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    deliver([aJob({ job_id: "old", state: "completed" })]);
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+    expect(completed).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("coalesces concurrent snapshots within a scope", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const first = tc.syncImportJobs();
+    const second = tc.syncImportJobs();
+    expect(first).toBe(second);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    deliver([]);
+    await Promise.all([first, second]);
+  });
+
+  it("keeps a newer flight after an old finalizer", async () => {
+    let oldDeliver: (jobs: JobStatus[]) => void = () => {};
+    let newDeliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          oldDeliver = resolve;
+        }),
+    );
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          newDeliver = resolve;
+        }),
+    );
+    const first = tc.syncImportJobs();
+    const rejected = first.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    const newer = tc.syncImportJobs();
+    oldDeliver([]);
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.syncImportJobs()).toBe(newer);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    newDeliver([]);
+    await newer;
+  });
+
+  it("fences reentrant terminal subscribers", async () => {
+    const auth = await import("@/lib/auth-store");
+    tc.trackImportJob("terminal", "Private label");
+    const stopFirst = tc.subscribeImportJobCompletions(() => auth.retirePrivateSessionScope());
+    const second = vi.fn<(job: JobStatus) => void>();
+    const stopSecond = tc.subscribeImportJobCompletions(second);
+    listJobs.mockResolvedValue([aJob({ job_id: "terminal", state: "completed" })]);
+    await expect(tc.syncImportJobs()).rejects.toMatchObject({ name: "AbortError" });
+    expect(second).not.toHaveBeenCalled();
+    expect(tc.listTasks()).toEqual([]);
+    stopFirst();
+    stopSecond();
+  });
+
+  it("freezes both source readers for each snapshot", async () => {
+    tc.trackSimilarityRun(aSimilarityRun({ id: 42, state: "running" }));
+    const original = vi
+      .fn<(id: number) => Promise<SimilarityRun>>()
+      .mockResolvedValue(aSimilarityRun({ id: 42, state: "completed" }));
+    const replacement = vi
+      .fn<(id: number) => Promise<SimilarityRun>>()
+      .mockResolvedValue(aSimilarityRun({ id: 42, state: "failed" }));
+    tc.setSimilarityRunSource(original);
+    listJobs.mockImplementationOnce(async () => {
+      tc.setSimilarityRunSource(replacement);
+      tc.setJobSource(async () => [aJob({ job_id: "replacement", state: "running" })]);
+      return [];
+    });
+    await tc.syncImportJobs();
+    expect(original).toHaveBeenCalledWith(42);
+    expect(replacement).not.toHaveBeenCalled();
+    expect(tc.listTasks()).toMatchObject([{ similarityRunId: 42, status: "completed" }]);
+  });
+
+  it("fences cached terminal delivery across retirement", async () => {
+    tc.trackImportJob("cached", "Private label");
+    listJobs.mockResolvedValue([aJob({ job_id: "cached", state: "completed" })]);
+    await tc.syncImportJobs();
+    const auth = await import("@/lib/auth-store");
+    const waiting = tc.waitForImportJob("cached");
+    const rejected = waiting.catch((error: Error) => error);
+    auth.retirePrivateSessionScope();
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+  });
+
+  it("shares a snapshot between completion waiters", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const first = tc.waitForImportJob("shared");
+    const second = tc.waitForImportJob("shared");
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    deliver([aJob({ job_id: "shared", state: "completed" })]);
+    await expect(first).resolves.toMatchObject({ job_id: "shared" });
+    await expect(second).resolves.toMatchObject({ job_id: "shared" });
+  });
+
+  it("rejects late Similarity Run publication", async () => {
+    let deliver: (run: SimilarityRun) => void = () => {};
+    tc.trackSimilarityRun(aSimilarityRun({ id: 43, state: "running" }));
+    getSimilarityRun.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const syncing = tc.syncImportJobs();
+    const rejected = syncing.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    deliver(aSimilarityRun({ id: 43, state: "completed" }));
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("suppresses anonymous snapshot admission after logout", async () => {
+    const stop = tc.startImportJobSync();
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      (await import("@/lib/auth-store")).clearLogin();
+      listJobs.mockResolvedValue([
+        aJob({ job_id: "old-private", label: "Secret label", state: "running" }),
+      ]);
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await tc.syncImportJobs();
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      expect(tc.listTasks()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("preserves a newer poll across old retirement finalization", async () => {
+    let oldDeliver: (jobs: JobStatus[]) => void = () => {};
+    let newDeliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          oldDeliver = resolve;
+        }),
+    );
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          newDeliver = resolve;
+        }),
+    );
+    const stop = tc.startImportJobSync();
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      (await import("@/lib/auth-store")).retirePrivateSessionScope();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      oldDeliver([aJob({ job_id: "old-private", state: "running" })]);
+      await vi.advanceTimersByTimeAsync(0);
+      socket.deliver({ type: "resync" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      newDeliver([]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(listJobs).toHaveBeenCalledTimes(3);
+      expect(tc.listTasks()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("retirement survives unavailable browser storage", async () => {
+    tc.createTask({ title: "Private label" });
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    try {
+      (await import("@/lib/auth-store")).retirePrivateSessionScope();
+      expect(tc.listTasks()).toEqual([]);
+      expect(localStorage.getItem("printstash:task-owner:v1")).toBe("null");
+    } finally {
+      remove.mockRestore();
+    }
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
   });
 });

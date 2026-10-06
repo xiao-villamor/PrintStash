@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { I18nProvider } from "@/lib/i18n";
 import { registerPwa } from "@/lib/pwa";
+import { startTaskCenterSessionScope } from "@/lib/task-center";
 
 import "@/fonts.css";
 import "@/globals.css";
@@ -18,6 +19,9 @@ const ReactQueryDevtools = import.meta.env.DEV
       })),
     )
   : null;
+
+const stopTaskScope = startTaskCenterSessionScope();
+import.meta.hot?.dispose(stopTaskScope);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

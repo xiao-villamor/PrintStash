@@ -15,7 +15,7 @@ import { Localized } from "@/components/ui/localized";
 import { DeferredDialog } from "@/components/deferred-dialog";
 import { lazyImport } from "@/lib/lazy-component";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
-import { resetTasksForNewSetup, subscribeImportJobCompletions } from "@/lib/task-center";
+import { subscribeImportJobCompletions } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { uiText } from "@/lib/locale";
 import { refreshVaultAfterIngest } from "@/lib/query-client";
@@ -34,13 +34,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const chromeless = CHROMELESS_PREFIXES.some((p) => pathname.startsWith(p));
   const isVault = pathname === "/";
   const [archiveJobId, setArchiveJobId] = useState<string | null>(null);
-  const sessionId = user?.id;
-  useEffect(() => {
-    if (sessionId === undefined) return;
-    // Drop shared snapshots and invalidate in-flight responses when the owner changes.
-    return resetTasksForNewSetup;
-  }, [sessionId]);
-
   useEffect(() => subscribeArchiveReviewRequests(setArchiveJobId), []);
 
   useEffect(
