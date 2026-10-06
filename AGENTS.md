@@ -23,6 +23,17 @@ only when the user explicitly asks for subagents in the current request. Task
 size, cross-stack scope, and repository profiles are not authorization to
 delegate.
 
+## Task completion
+
+For every task that changes repository files, do not stop or declare the task
+complete until all changes belonging to that task are committed with the
+repository's configured identity, pushed to the remote, included in a pull
+request, and the PR's required CI checks are green for its latest commit.
+Continue fixing failed checks and waiting for running checks until that condition
+is met. A local deployment or passing local tests alone does not complete a task.
+Include only task-owned changes; preserve unrelated work from other tasks.
+Report the PR URL, final commit and verified CI result when handing off.
+
 ## Layout
 - `backend/` FastAPI + SQLModel + Alembic. Capability owners in `backend/app/modules/`, composition in `bootstrap/`, process coordination in `runtime/`; HTTP in `api/`, tables in `db/models/`. Boundaries: `docs/architecture/backend.md`. Tests in `backend/tests` mirror these owners.
 - Background work: the engine-agnostic model in `backend/app/modules/work/` (Jobs, definitions, sources, reconciler, fences, events), Artifact derivatives in `modules/derivatives/`, engines in `runtime/engine/` (DBOS; inline for tests), composition in `bootstrap/work.py`, the worker process in `app/worker.py`.
