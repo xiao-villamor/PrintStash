@@ -581,3 +581,267 @@ describe("rich capture authentication boundary", () => {
     ]);
   });
 });
+
+describe("capture acknowledgement ownership", () => {
+  const validSlot = {
+    id: "slot-a",
+    role: "file",
+    source_file_id: "part",
+    filename: "part.stl",
+    media_type: "model/stl",
+    size_bytes: 1,
+    sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+  };
+  const invalidSlots = "PrintStash returned invalid capture upload slots.";
+
+  function captureWithAcknowledgement(
+    acknowledgement: Response | Promise<Response>,
+    options: {
+      signal?: AbortSignal;
+      cleanup?: (signal: AbortSignal | null | undefined) => Promise<Response>;
+      cover?: boolean;
+    } = {},
+  ) {
+    const requests: { url: string; method: string; authorization: string | null }[] = [];
+    const outcome = captureRichFiles({
+      vault: "https://vault-a.example.com",
+      authorization: "test-credential-a",
+      sourceUrl: "https://www.printables.com/model/9",
+      captureSource: {
+        provider: "printables",
+        canonical_url: "https://www.printables.com/model/9",
+        source_item_id: "9",
+        source_revision: null,
+        adapter_version: "browser-visible-v1",
+        tags: [],
+        fields: {},
+      },
+      files: [{ id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" }],
+      ...(options.cover
+        ? {
+            cover: {
+              id: "cover",
+              file: new Blob(["x"]),
+              filename: "cover.png",
+              mediaType: "image/png",
+            },
+          }
+        : {}),
+      signal: options.signal,
+      fetchImpl: async (input, init = {}) => {
+        const url = String(input);
+        requests.push({
+          url,
+          method: init.method ?? "GET",
+          authorization: new Headers(init.headers).get("Authorization"),
+        });
+        if (url.endsWith("/capture-upload-slots")) return acknowledgement;
+        if (init.method === "DELETE")
+          return options.cleanup
+            ? options.cleanup(init.signal)
+            : new Response(null, { status: 204 });
+        if (init.method === "PUT") return new Response(null, { status: 204 });
+        if (url.endsWith("/capture-upload-finalize"))
+          return Response.json({ id: 44, state: "review" });
+        throw new Error("Unexpected capture request");
+      },
+    });
+    return { outcome, requests };
+  }
+
+  it.each([
+    { label: "missing", body: { item: { id: 44 } } },
+    { label: "null", body: { item: { id: 44 }, slots: null } },
+    { label: "object", body: { item: { id: 44 }, slots: {} } },
+    { label: "too few", body: { item: { id: 44 }, slots: [] } },
+    { label: "too many", body: { item: { id: 44 }, slots: [validSlot, validSlot] } },
+  ])("dismisses owned receipts with malformed slot lists: $label", async ({ body }) => {
+    const { outcome, requests } = captureWithAcknowledgement(Response.json(body));
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.map(({ method }) => method)).toEqual(["POST", "DELETE"]);
+    expect(requests[1]?.url).toBe("https://vault-a.example.com/api/v1/inbox/44/capture-upload");
+  });
+
+  it.each([
+    { label: "null", slot: null },
+    { label: "primitive", slot: 7 },
+    { label: "missing id", slot: { ...validSlot, id: undefined } },
+    { label: "empty id", slot: { ...validSlot, id: "" } },
+    { label: "blank id", slot: { ...validSlot, id: " " } },
+    { label: "unknown role", slot: { ...validSlot, role: "thumbnail" } },
+    { label: "wrong source id", slot: { ...validSlot, source_file_id: "other" } },
+    { label: "wrong filename", slot: { ...validSlot, filename: "other.stl" } },
+    { label: "wrong media type", slot: { ...validSlot, media_type: "other" } },
+    { label: "wrong size", slot: { ...validSlot, size_bytes: 2 } },
+    { label: "wrong hash", slot: { ...validSlot, sha256: "other" } },
+  ])("dismisses owned receipts with malformed slot members: $label", async ({ slot }) => {
+    const { outcome, requests } = captureWithAcknowledgement(
+      Response.json({ item: { id: 44 }, slots: [slot] }),
+    );
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.map(({ method }) => method)).toEqual(["POST", "DELETE"]);
+  });
+
+  it.each([
+    { label: "null payload", body: null },
+    { label: "missing item", body: { slots: [validSlot] } },
+    { label: "null item", body: { item: null, slots: [validSlot] } },
+    { label: "missing id", body: { item: {}, slots: [validSlot] } },
+    ...["44", null, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1].map((id) => ({
+      label: `id ${id}`,
+      body: { item: { id }, slots: [validSlot] },
+    })),
+  ])("rejects uncertain receipts without dismissal: $label", async ({ body }) => {
+    const { outcome, requests } = captureWithAcknowledgement(Response.json(body));
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.map(({ method }) => method)).toEqual(["POST"]);
+  });
+
+  it("rejects unreadable acknowledgement bodies without dismissal", async () => {
+    const { outcome, requests } = captureWithAcknowledgement(new Response("unreadable JSON"));
+    await expect(outcome).rejects.toBeInstanceOf(SyntaxError);
+    expect(requests.map(({ method }) => method)).toEqual(["POST"]);
+  });
+
+  it.each([
+    { label: "forbidden", cleanup: async () => new Response(null, { status: 403 }) },
+    { label: "server failure", cleanup: async () => new Response(null, { status: 500 }) },
+    {
+      label: "network failure",
+      cleanup: async () => {
+        throw new Error("Cleanup network failure");
+      },
+    },
+  ])("preserves validation failure when cleanup fails: $label", async ({ cleanup }) => {
+    const { outcome, requests } = captureWithAcknowledgement(
+      Response.json({ item: { id: 44 }, slots: [] }),
+      { cleanup },
+    );
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.map(({ method }) => method)).toEqual(["POST", "DELETE"]);
+  });
+
+  it("bounds malformed-ACK dismissal", async () => {
+    vi.useFakeTimers();
+    try {
+      let cleanupEntered!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        cleanupEntered = resolve;
+      });
+      let cleanupSignal: AbortSignal | null | undefined;
+      const { outcome } = captureWithAcknowledgement(
+        Response.json({ item: { id: 44 }, slots: [] }),
+        {
+          cleanup: (signal) => {
+            cleanupSignal = signal;
+            cleanupEntered();
+            return new Promise<Response>(() => {});
+          },
+        },
+      );
+      const rejected = expect(outcome).rejects.toThrow(invalidSlots);
+      // Waiting for cleanup with a bounded expectation keeps the red run from
+      // hanging when the original implementation fails before starting it.
+      await vi.waitFor(() => expect(cleanupSignal).toBeDefined());
+      await entered;
+      await vi.advanceTimersByTimeAsync(CAPTURE_CLEANUP_TIMEOUT_MS);
+      await rejected;
+      expect(cleanupSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("binds malformed-ACK dismissal to its original connection", async () => {
+    const { outcome, requests } = captureWithAcknowledgement(
+      Response.json({ item: { id: 44 }, slots: [] }),
+    );
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.filter(({ method }) => method === "DELETE")).toEqual([
+      {
+        url: "https://vault-a.example.com/api/v1/inbox/44/capture-upload",
+        method: "DELETE",
+        authorization: "Bearer test-credential-a",
+      },
+    ]);
+  });
+
+  it.each(["headers", "body"])(
+    "ignores late creation acknowledgements after retirement: %s",
+    async (phase) => {
+      const controller = new AbortController();
+      let releaseHeaders!: (response: Response) => void;
+      const headers = new Promise<Response>((resolve) => {
+        releaseHeaders = resolve;
+      });
+      let body!: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(value) {
+          body = value;
+        },
+      });
+      const { outcome, requests } = captureWithAcknowledgement(
+        phase === "headers" ? headers : new Response(stream),
+        { signal: controller.signal },
+      );
+      const rejected = expect(outcome).rejects.toThrow("aborted");
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      controller.abort();
+      await rejected;
+      const payload = { item: { id: 44 }, slots: [validSlot] };
+      if (phase === "headers") releaseHeaders(Response.json(payload));
+      else {
+        body.enqueue(new TextEncoder().encode(JSON.stringify(payload)));
+        body.close();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requests.map(({ method }) => method)).toEqual(["POST"]);
+    },
+  );
+
+  it("accepts a mixed file and cover acknowledgement", async () => {
+    const { outcome, requests } = captureWithAcknowledgement(
+      Response.json({
+        item: { id: 44 },
+        slots: [
+          {
+            ...validSlot,
+            id: "cover-a",
+            role: "cover",
+            source_file_id: null,
+            filename: "cover.png",
+            media_type: "image/png",
+          },
+          validSlot,
+        ],
+      }),
+      { cover: true },
+    );
+    await expect(outcome).resolves.toEqual({ id: 44, state: "review" });
+    expect(requests.filter(({ method }) => method === "PUT").map(({ url }) => url)).toEqual([
+      "https://vault-a.example.com/api/v1/inbox/capture-upload-slots/slot-a",
+      "https://vault-a.example.com/api/v1/inbox/capture-upload-slots/cover-a",
+    ]);
+  });
+
+  it("rejects reused upload slot identities", async () => {
+    const { outcome, requests } = captureWithAcknowledgement(
+      Response.json({
+        item: { id: 44 },
+        slots: [
+          validSlot,
+          {
+            ...validSlot,
+            role: "cover",
+            source_file_id: null,
+            filename: "cover.png",
+            media_type: "image/png",
+          },
+        ],
+      }),
+      { cover: true },
+    );
+    await expect(outcome).rejects.toThrow(invalidSlots);
+    expect(requests.map(({ method }) => method)).toEqual(["POST", "DELETE"]);
+  });
+});
