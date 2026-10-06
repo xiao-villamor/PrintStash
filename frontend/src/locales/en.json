@@ -4208,5 +4208,7 @@
   "settings.accountHandoffFailed": "The key was created, but extension setup could not be stored. Copy the key before leaving.",
   "settings.accessPrintersFailed": "Printers could not be loaded.",
   "settings.accessPrinterFailed": "Access for {name} could not be loaded.",
-  "settings.accessPrinterLoading": "Loading access for {name}…"
+  "settings.accessPrinterLoading": "Loading access for {name}…",
+  "settings.configLoadFailed": "Configuration could not be loaded.",
+  "stats.costUnavailable": "Cost unavailable"
 }

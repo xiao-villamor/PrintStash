@@ -49,6 +49,7 @@ import {
   useOutlinerModels,
   useTags,
   useVaultStats,
+  useVaultConfig,
   type QueryApi,
 } from "@/lib/queries";
 import type {
@@ -62,7 +63,7 @@ import type {
   TagRead,
   VaultStatsRead,
 } from "@/types";
-import { aCollectionNode, aPrinter } from "@/test-support/factories";
+import { aCollectionNode, aPrinter, aVaultConfig } from "@/test-support/factories";
 
 // The hooks are thin, but they encode two real contracts worth locking down:
 // (1) every shared read passes `{ fresh: true }` so TanStack Query — not the
@@ -80,6 +81,7 @@ const stubs = {
   lookupCollectionById: vi.fn<QueryApi["lookupCollectionById"]>(),
   searchCollections: vi.fn<QueryApi["searchCollections"]>(),
   getModelFacets: vi.fn<QueryApi["getModelFacets"]>(),
+  getVaultConfig: vi.fn<QueryApi["getVaultConfig"]>(),
   getVaultStats: vi.fn<QueryApi["getVaultStats"]>(),
   listFilamentProfiles: vi.fn<QueryApi["listFilamentProfiles"]>(),
   listModelPage: vi.fn<QueryApi["listModelPage"]>(),
@@ -208,6 +210,7 @@ beforeEach(() => {
   stubs.listPrinterProfiles.mockResolvedValue([printerProfile]);
   stubs.listFilamentProfiles.mockResolvedValue([filamentProfile]);
   stubs.getVaultStats.mockResolvedValue(vaultStats);
+  stubs.getVaultConfig.mockResolvedValue(aVaultConfig());
   stubs.listModelPage.mockResolvedValue(emptyPage);
 });
 
@@ -597,5 +600,27 @@ describe("folder navigation", () => {
     await act(() => result.current.modelList(filters, 60, "date-desc"));
 
     expect(stubs.listModelPage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("canonical Vault configuration reader", () => {
+  it("retains default enabled behavior through the injected reader", async () => {
+    const { result } = renderHook(() => useVaultConfig(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(stubs.getVaultConfig).toHaveBeenCalledWith({
+      fresh: true,
+      signal: expect.any(AbortSignal),
+    });
+  });
+  it("does not read administrator configuration while disabled", () => {
+    renderHook(() => useVaultConfig({ enabled: false }), { wrapper: wrapper() });
+    expect(stubs.getVaultConfig).not.toHaveBeenCalled();
+  });
+  it("shares one request between configuration consumers", async () => {
+    const { result } = renderHook(() => [useVaultConfig(), useVaultConfig()], {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.every((query) => query.isSuccess)).toBe(true));
+    expect(stubs.getVaultConfig).toHaveBeenCalledTimes(1);
   });
 });

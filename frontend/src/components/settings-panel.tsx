@@ -16,6 +16,7 @@ import {
   useAdminUserCommand,
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
+import { useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
   collectionAccessOptions,
@@ -140,7 +141,7 @@ import type {
 } from "@/lib/api";
 import type { StorageConnection } from "@/types";
 import { useAuth } from "@/lib/auth-context";
-import { usePrinters, useVaultStats } from "@/lib/queries";
+import { usePrinters, useVaultStats, useVaultConfig } from "@/lib/queries";
 import {
   DEFAULT_METADATA_PREFERENCES,
   METADATA_FIELDS,
@@ -592,6 +593,9 @@ export function SettingsPanel() {
       setPrinterAccessUserId("");
       setAccessPrinterId("");
       setPrinterAccessRole("view");
+      setAutoMarkKnownGood(null);
+      setCurrency(null);
+      setModelThumbnailWidth(null);
     });
     return () => {
       accountLive.current = false;
@@ -617,14 +621,25 @@ export function SettingsPanel() {
   const [gcDigestConfirmation, setGcDigestConfirmation] = useState("");
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
-  const [autoMarkKnownGood, setAutoMarkKnownGood] = useState(true);
+  const remoteConfig = useVaultConfig({
+    enabled: !!user?.is_superuser && ["design", "previews"].includes(activeSection),
+    retry: false,
+  });
+  const configCommand = useVaultConfigCommand();
+  const configDenied =
+    remoteConfig.isError && [401, 403, 404].includes(parseApiError(remoteConfig.error).status);
+  const remoteConfigData = configDenied ? undefined : remoteConfig.data;
+  const [autoMarkChoice, setAutoMarkKnownGood] = useState<boolean | null>(null);
+  const autoMarkKnownGood = autoMarkChoice ?? remoteConfigData?.auto_mark_known_good ?? false;
   const [autoMarkBusy, setAutoMarkBusy] = useState(false);
-  const [currency, setCurrency] = useState("USD");
+  const [currencyChoice, setCurrency] = useState<string | null>(null);
+  const currency = currencyChoice ?? remoteConfigData?.currency ?? "";
   const [currencyBusy, setCurrencyBusy] = useState(false);
   // Each reader falls back to its defaults when there is no `window`, so these are
   // safe as lazy initialisers on the server as well as in the browser.
   const [previewPreferences, setPreviewPreferences] = useState(readPreviewPreferences);
-  const [modelThumbnailWidth, setModelThumbnailWidth] = useState(640);
+  const [thumbnailChoice, setModelThumbnailWidth] = useState<number | null>(null);
+  const modelThumbnailWidth = thumbnailChoice ?? remoteConfigData?.model_thumbnail_width ?? 640;
   const [previewBusy, setPreviewBusy] = useState<"quality" | "rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
@@ -870,64 +885,46 @@ export function SettingsPanel() {
     }
   }, [activeSection, loadBackups]);
 
-  useEffect(() => {
-    if (activeSection !== "design" || !user) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (!cancelled) {
-          setAutoMarkKnownGood(cfg.auto_mark_known_good ?? true);
-          setCurrency(cfg.currency ?? "USD");
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, user]);
-
-  useEffect(() => {
-    if (activeSection !== "previews" || !user?.is_superuser) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (cancelled) return;
-        setModelThumbnailWidth(cfg.model_thumbnail_width);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, user]);
-
   async function saveAutoMarkKnownGood(next: boolean) {
+    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+      return;
+    const session = getSessionVersion();
     setAutoMarkKnownGood(next);
     setAutoMarkBusy(true);
     try {
-      await updateVaultConfig({ auto_mark_known_good: next });
+      await configCommand.mutateAsync({ session, payload: { auto_mark_known_good: next } });
+      if (!accountCurrent(session)) return;
+      setAutoMarkKnownGood(null);
       toast.success(
         next ? uiText("Auto-mark known good enabled.") : uiText("Auto-mark known good disabled."),
       );
-    } catch (e) {
-      setAutoMarkKnownGood(!next);
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) {
+        setAutoMarkKnownGood(null);
+        toast.error(error);
+      }
     } finally {
-      setAutoMarkBusy(false);
+      if (accountCurrent(session)) setAutoMarkBusy(false);
     }
   }
-
   async function saveCurrency(next: string) {
-    const prev = currency;
+    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+      return;
+    const session = getSessionVersion();
     setCurrency(next);
     setCurrencyBusy(true);
     try {
-      await updateVaultConfig({ currency: next });
-      toast.success(uiText("Currency set to {value1}.", { value1: String(next) }));
-    } catch (e) {
-      setCurrency(prev);
-      toast.error(e);
+      await configCommand.mutateAsync({ session, payload: { currency: next } });
+      if (!accountCurrent(session)) return;
+      setCurrency(null);
+      toast.success(uiText("Currency set to {value1}.", { value1: next }));
+    } catch (error) {
+      if (accountCurrent(session)) {
+        setCurrency(null);
+        toast.error(error);
+      }
     } finally {
-      setCurrencyBusy(false);
+      if (accountCurrent(session)) setCurrencyBusy(false);
     }
   }
 
@@ -939,17 +936,23 @@ export function SettingsPanel() {
   }
 
   async function saveModelThumbnailWidth(next: ModelThumbnailWidth) {
-    const previous = modelThumbnailWidth;
+    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+      return;
+    const session = getSessionVersion();
     setModelThumbnailWidth(next);
     setPreviewBusy("quality");
     try {
-      await updateVaultConfig({ model_thumbnail_width: next });
+      await configCommand.mutateAsync({ session, payload: { model_thumbnail_width: next } });
+      if (!accountCurrent(session)) return;
+      setModelThumbnailWidth(null);
       toast.success(uiText("Model image quality updated for new previews."));
-    } catch (e) {
-      setModelThumbnailWidth(previous);
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) {
+        setModelThumbnailWidth(null);
+        toast.error(error);
+      }
     } finally {
-      setPreviewBusy(null);
+      if (accountCurrent(session)) setPreviewBusy(null);
     }
   }
 
@@ -3714,6 +3717,18 @@ export function SettingsPanel() {
 
             {activeSection === "design" && (
               <div className="space-y-6 animate-panel-in">
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
+                {user?.is_superuser && remoteConfig.isPending && (
+                  <p role="status">{t("Loading…")}</p>
+                )}
+
                 <SettingsCard
                   icon={Printer}
                   title={uiText("Printer cards")}
@@ -3778,7 +3793,13 @@ export function SettingsPanel() {
                       role="switch"
                       aria-label={uiText("Auto-mark known good on successful print")}
                       aria-checked={autoMarkKnownGood}
-                      disabled={!user || autoMarkBusy}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        autoMarkBusy ||
+                        configCommand.isPending
+                      }
                       onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                         autoMarkKnownGood ? "bg-primary" : "bg-outline-variant"
@@ -3809,7 +3830,13 @@ export function SettingsPanel() {
                       id="display-currency"
                       value={currency}
                       onChange={(event) => saveCurrency(event.target.value)}
-                      disabled={!user || currencyBusy}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        currencyBusy ||
+                        configCommand.isPending
+                      }
                       className={`${INPUT} max-w-xs`}
                     >
                       {CURRENCY_OPTIONS.map((opt) => (
@@ -3974,6 +4001,18 @@ export function SettingsPanel() {
 
             {activeSection === "previews" && (
               <div className="space-y-6 animate-panel-in">
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
+                {user?.is_superuser && remoteConfig.isPending && (
+                  <p role="status">{t("Loading…")}</p>
+                )}
+
                 <SettingsCard
                   icon={Eye}
                   title={uiText("Interactive previews")}
@@ -4046,7 +4085,13 @@ export function SettingsPanel() {
                             selectedOption(MODEL_THUMBNAIL_WIDTHS, Number(event.target.value)),
                           )
                         }
-                        disabled={!user?.is_superuser || previewBusy !== null}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          previewBusy !== null ||
+                          configCommand.isPending
+                        }
                         className={INPUT}
                       >
                         {modelThumbnailWidth !== 320 &&

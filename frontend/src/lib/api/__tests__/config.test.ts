@@ -28,6 +28,8 @@ import {
   updateVaultConfig,
 } from "@/lib/api/config";
 import { invalidateApiCache } from "@/lib/api/request";
+import { aVaultConfig } from "@/test-support/factories";
+import { json } from "@/test-support/render";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -71,19 +73,22 @@ describe("completeSetup", () => {
 
 describe("getVaultConfig", () => {
   it("reads the current vault configuration", async () => {
-    respondWith({ storage_backend: "local" });
+    const config = aVaultConfig({ currency: "EUR" });
+    fetchMock.mockResolvedValueOnce(json(config));
 
-    await getVaultConfig();
+    expect(await getVaultConfig()).toEqual(config);
 
     expectRequest("/api/v1/config");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
 });
 
 describe("updateVaultConfig", () => {
   it("PUTs a change", async () => {
-    respondWith({ storage_backend: "s3" });
+    const acknowledged = aVaultConfig({ storage_backend: "s3" });
+    fetchMock.mockResolvedValueOnce(json(acknowledged));
 
-    await updateVaultConfig({ storage_backend: "s3" });
+    expect(await updateVaultConfig({ storage_backend: "s3" })).toEqual(acknowledged);
 
     expectRequest("/api/v1/config", "PUT");
     expect(lastBody()).toEqual({ storage_backend: "s3" });
@@ -200,5 +205,23 @@ describe("entry endpoint cancellation", () => {
     expect(lastCall().init.signal?.aborted).toBe(true);
     finish(new Response(JSON.stringify({ acknowledged: true })));
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("configuration caller cancellation", () => {
+  it("cancels an active configuration read", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const read = getVaultConfig({ signal: controller.signal });
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

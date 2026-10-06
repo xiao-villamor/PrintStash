@@ -1799,11 +1799,15 @@ describe("SettingsPanel", () => {
 
     it("remembers the known-good choice", async () => {
       const user = userEvent.setup();
-      renderSettings({ at: "/settings?section=design" });
+      renderSettings({
+        at: "/settings?section=design",
+        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, auto_mark_known_good: true }) },
+      });
 
       const toggle = await screen.findByRole("switch", {
         name: "Auto-mark known good on successful print",
       });
+      await waitFor(() => expect(toggle).toBeEnabled());
       await user.click(toggle);
 
       expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -2689,5 +2693,36 @@ describe("Settings resource access recovery", () => {
     await within(card).findByRole("alert");
     expect(within(card).getByRole("button", { name: "Grant" })).toBeDisabled();
     expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+});
+
+describe("Settings remote configuration recovery", () => {
+  it.each(["design", "previews"])("blocks unavailable remote settings in %s", async (section) => {
+    const app = renderSettings({
+      at: `/settings?section=${section}`,
+      routes: { "GET /api/v1/config": json({ detail: "unavailable" }, 503) },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Configuration could not be loaded.",
+    );
+    const name = section === "design" ? "Display currency" : "Model image quality";
+    expect(screen.getByLabelText(name)).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    app.route({ "GET /api/v1/config": json(VAULT_CONFIG) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByLabelText(name)).toBeEnabled());
+  });
+  it("shows the acknowledged normalized currency instead of the sent choice", async () => {
+    const app = renderSettings({
+      at: "/settings?section=design",
+      routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, currency: "GBP" }) },
+    });
+    const choice = await screen.findByLabelText("Display currency");
+    await waitFor(() => expect(choice).toBeEnabled());
+    await userEvent.selectOptions(choice, "EUR");
+    await waitFor(() => expect(choice).toHaveValue("GBP"));
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.includes("/api/v1/config")),
+    ).toHaveLength(1);
   });
 });

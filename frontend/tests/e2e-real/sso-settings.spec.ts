@@ -21,8 +21,15 @@ test.describe("SSO settings", () => {
   }) => {
     const displayName = `e2e-sso-${Date.now()}`;
 
+    const configReads: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "GET" && new URL(request.url()).pathname === "/api/v1/config")
+        configReads.push(request.url());
+    });
     await page.goto("/settings?section=sso");
     await expect(page.getByRole("heading", { name: "OpenID Connect" })).toBeVisible();
+    const initialConfigReads = configReads.length;
+    expect(initialConfigReads).toBeGreaterThan(0);
 
     await page.getByLabel("Issuer URL").fill("https://auth.example.test/application/o/printstash");
     await page.getByLabel("Client ID").fill("printstash-e2e");
@@ -36,6 +43,9 @@ test.describe("SSO settings", () => {
       ),
       page.getByRole("button", { name: "Save SSO settings" }).click(),
     ]);
+
+    await expect(page.getByLabel("Client secret", { exact: true })).toHaveValue("");
+    expect(configReads).toHaveLength(initialConfigReads);
 
     // Reload: settings persisted, and the secret field never comes back prefilled
     // with the real value — only a "configured" placeholder.
@@ -73,11 +83,16 @@ test.describe("SSO settings", () => {
     // login page for other specs stays local-only.
     await page.goto("/settings?section=sso");
     await page.getByRole("checkbox", { name: "Enable SSO login" }).click();
+    await page.getByRole("checkbox", { name: "Clear stored client secret", exact: true }).click();
     await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
       ),
       page.getByRole("button", { name: "Save SSO settings" }).click(),
     ]);
+    await expect(page.getByLabel("Client secret", { exact: true })).toHaveAttribute(
+      "placeholder",
+      "Optional for public clients",
+    );
   });
 });

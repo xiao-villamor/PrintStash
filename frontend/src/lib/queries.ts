@@ -1,4 +1,5 @@
 import { multipartDetailOptions } from "@/features/library/multipart";
+import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
 import { printStatisticsOptions } from "@/lib/queries/statistics";
 import { markStartup } from "@/lib/startup-timing";
@@ -61,7 +62,6 @@ import type {
   SpoolmanStatus,
   SpoolRead,
   TagRead,
-  VaultConfigRead,
   VaultStatsRead,
 } from "@/types";
 
@@ -362,12 +362,10 @@ export function usePrintStatistics(period: StatsPeriod) {
   return useQuery(printStatisticsOptions(period, api.getPrintStatistics));
 }
 
-export function useVaultConfig() {
+export function useVaultConfig(options?: { enabled?: boolean; retry?: false }) {
   const api = useQueryApi();
-  return useQuery<VaultConfigRead>({
-    queryKey: queryKeys.vaultConfig,
-    queryFn: () => api.getVaultConfig(),
-  });
+  const read = { ...vaultConfigOptions(api.getVaultConfig), enabled: options?.enabled ?? true };
+  return useQuery(options?.retry === false ? { ...read, retry: false } : read);
 }
 
 export function useSpoolmanStatus(options?: { enabled?: boolean }) {

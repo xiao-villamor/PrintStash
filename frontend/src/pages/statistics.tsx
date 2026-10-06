@@ -1,3 +1,4 @@
+import { useAuth } from "@/lib/auth-context";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -343,9 +344,15 @@ function RankingCard({
   );
 }
 
-function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; currency: string }) {
+function TimeSeriesCard({
+  stats,
+  currency,
+}: {
+  stats: PrintStatisticsRead;
+  currency: string | null;
+}) {
   useUiLocale();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const [metric, setMetric] = useState<Metric>("cost");
   const [chartType, setChartType] = useState<ChartType>("area");
 
@@ -363,7 +370,9 @@ function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; curre
   const localizedMetricLabel = translateUiText(locale, metricLabel);
   const formatValue = (v: number) =>
     metric === "cost"
-      ? formatCurrency(v, currency)
+      ? currency === null
+        ? t("stats.costUnavailable")
+        : formatCurrency(v, currency)
       : metric === "filament"
         ? formatFilament(v)
         : String(Math.round(v));
@@ -421,53 +430,59 @@ function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; curre
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        <ResponsiveContainer width="100%" height={260}>
-          {chartType === "area" ? (
-            <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
-                  <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              {grid}
-              {xAxis}
-              {yAxis}
-              {tooltip(CURSOR_LINE)}
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke={ACCENT}
-                strokeWidth={2}
-                fill="url(#metricFill)"
-                activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-              />
-            </AreaChart>
-          ) : chartType === "line" ? (
-            <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              {grid}
-              {xAxis}
-              {yAxis}
-              {tooltip(CURSOR_LINE)}
-              <Line
-                type="monotone"
-                dataKey="value"
-                stroke={ACCENT}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-              />
-            </LineChart>
-          ) : (
-            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              {grid}
-              {xAxis}
-              {yAxis}
-              {tooltip(CURSOR_FILL)}
-              <Bar dataKey="value" fill={ACCENT} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          )}
-        </ResponsiveContainer>
+        {metric === "cost" && currency === null ? (
+          <p role="status" className="py-12 text-center text-sm text-muted-foreground">
+            {t("stats.costUnavailable")}
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            {chartType === "area" ? (
+              <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
+                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                {grid}
+                {xAxis}
+                {yAxis}
+                {tooltip(CURSOR_LINE)}
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={ACCENT}
+                  strokeWidth={2}
+                  fill="url(#metricFill)"
+                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                />
+              </AreaChart>
+            ) : chartType === "line" ? (
+              <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                {grid}
+                {xAxis}
+                {yAxis}
+                {tooltip(CURSOR_LINE)}
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke={ACCENT}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                />
+              </LineChart>
+            ) : (
+              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                {grid}
+                {xAxis}
+                {yAxis}
+                {tooltip(CURSOR_FILL)}
+                <Bar dataKey="value" fill={ACCENT} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            )}
+          </ResponsiveContainer>
+        )}
       </CardContent>
     </Card>
   );
@@ -479,11 +494,11 @@ function StatsContent({
   visibleWidgets,
 }: {
   stats: PrintStatisticsRead;
-  currency: string;
+  currency: string | null;
   visibleWidgets: Set<WidgetId>;
 }) {
   useUiLocale();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   if (stats.total_prints === 0) {
     return (
       <Card className="animate-panel-in">
@@ -526,7 +541,11 @@ function StatsContent({
         <MetricCard
           icon={Coins}
           label={uiText("Total cost")}
-          value={formatCurrency(stats.total_cost, currency)}
+          value={
+            currency === null
+              ? t("stats.costUnavailable")
+              : formatCurrency(stats.total_cost, currency)
+          }
         />
         <MetricCard
           icon={Boxes}
@@ -606,13 +625,14 @@ function StatsContent({
 
 export default function StatisticsPage() {
   useUiLocale();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
+  const { user } = useAuth();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
   const { data, isLoading, isError, refetch } = usePrintStatistics(period);
-  const { data: config } = useVaultConfig();
-  const currency = config?.currency ?? "USD";
+  const config = useVaultConfig({ enabled: !!user?.is_superuser, retry: false });
+  const currency = config.isError ? null : (config.data?.currency ?? null);
 
   function toggleWidget(id: WidgetId) {
     setVisibleWidgets((current) => {
@@ -680,6 +700,14 @@ export default function StatisticsPage() {
         }
       />
 
+      {user?.is_superuser && config.isError && (
+        <div role="alert" className="flex items-center gap-2 text-sm">
+          <p>{t("settings.configLoadFailed")}</p>
+          <Button variant="outline" onClick={() => void config.refetch()}>
+            {t("Retry")}
+          </Button>
+        </div>
+      )}
       {isLoading && (
         <div className="animate-panel-in py-16 text-center text-sm text-muted-foreground">
           {translateUiText(locale, "Loading statistics…")}

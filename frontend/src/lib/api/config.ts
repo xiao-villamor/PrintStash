@@ -65,8 +65,8 @@ export function completeSetup(
   });
 }
 
-export function getVaultConfig(): Promise<VaultConfigRead> {
-  return getJson<VaultConfigRead>("/api/v1/config");
+export function getVaultConfig(options: GetJsonOptions = {}): Promise<VaultConfigRead> {
+  return getJson<VaultConfigRead>("/api/v1/config", { ...options, fresh: true });
 }
 
 export function getHealthDetails<T>(): Promise<T> {
@@ -95,6 +95,14 @@ export function getLatestRelease(refresh = false): Promise<ReleaseStatus> {
   return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, { fresh: true });
 }
 
-export function updateVaultConfig(body: VaultConfigUpdate): Promise<VaultConfigRead> {
-  return sendJson<VaultConfigRead>("/api/v1/config", "PUT", body);
+export function updateVaultConfig(
+  body: VaultConfigUpdate,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<VaultConfigRead> {
+  return requestApi<VaultConfigRead>("/api/v1/config", {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
