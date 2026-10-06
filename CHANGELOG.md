@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify mesh output frame boundaries reject malformed flags, incoherent evidence,
+  oversized payloads and invalid fingerprint records before publication.
+
 - Verify preparation resource lifecycle rejects malformed recovery identities,
   preserves failed cleanup ownership and enforces source-before-native ordering.
 

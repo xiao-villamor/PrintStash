@@ -781,3 +781,174 @@ class TestClosedSchemas:
         )
         with pytest.raises(MeshProtocolError):
             tuple(decoder.feed(_forge(FrameKind.FINAL, 0, raw)))
+
+
+class TestOutputBoundaries:
+    @pytest.mark.parametrize(
+        "flag",
+        ["include_geometry", "include_thumbnail", "include_fingerprint"],
+        ids=str,
+    )
+    def test_rejects_nonboolean_request_flags(self, flag):
+        request = ThumbnailRequest(Path("mesh"), **{flag: 1})
+        with pytest.raises(MeshProtocolError, match="invalid_output_boolean"):
+            FrameDecoder(request)
+
+    @pytest.mark.parametrize(
+        "chunk",
+        [bytearray(b"MSH2"), "MSH2", None],
+        ids=["mutable-bytes", "text", "null"],
+    )
+    def test_rejects_nonbytes_stream_chunks(self, chunk):
+        decoder = FrameDecoder(ThumbnailRequest(Path("mesh")))
+        with pytest.raises(MeshProtocolError, match="invalid_output_chunk"):
+            tuple(decoder.feed(chunk))
+        with pytest.raises(MeshProtocolError, match="incomplete_mesh_output"):
+            decoder.finish()
+
+    @pytest.mark.parametrize(
+        "outcome,error",
+        [
+            (None, "invalid_output_geometry_outcome"),
+            (GeometryRefused("unknown"), "invalid_output_geometry_reason"),
+        ],
+        ids=["unknown-outcome", "unknown-reason"],
+    )
+    def test_rejects_invalid_geometry_outcomes(self, geometry, outcome, error):
+        with pytest.raises(MeshProtocolError, match=error):
+            replace(geometry, outcome=outcome)
+
+    @pytest.mark.parametrize("coverage", [None, {}], ids=["missing", "untyped"])
+    def test_rejects_geometry_coverage_without_evidence(self, geometry, coverage):
+        with pytest.raises(MeshProtocolError, match="invalid_geometry_coverage"):
+            replace(geometry, coverage=coverage)
+
+    def test_rejects_assessed_volume_on_refused_geometry(self, geometry):
+        with pytest.raises(
+            MeshProtocolError, match="refused_geometry_has_assessed_volume"
+        ):
+            replace(
+                geometry,
+                geometry=dict.fromkeys(geometry.geometry),
+                outcome=GeometryRefused(ThumbnailFailureReason.NO_GEOMETRY),
+                volume=VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+            )
+
+    @pytest.mark.parametrize(
+        "change,error",
+        [
+            ({"strategy": "full"}, "invalid_output_strategy"),
+            ({"coverage": None}, "invalid_output_coverage"),
+            ({"image": None}, "invalid_refused_thumbnail"),
+        ],
+        ids=["untyped-strategy", "missing-coverage", "incomplete-refusal"],
+    )
+    def test_rejects_invalid_thumbnail_contracts(self, thumbnail, change, error):
+        with pytest.raises(MeshProtocolError, match=error):
+            replace(thumbnail, **change)
+
+    @pytest.mark.parametrize(
+        "change,error",
+        [
+            ({"fingerprint": {}}, "invalid_final_fingerprint"),
+            ({"phase_stats": []}, "invalid_final_phase_stats"),
+            ({"coverage": None}, "invalid_output_coverage"),
+        ],
+        ids=["untyped-fingerprint", "untyped-telemetry", "missing-coverage"],
+    )
+    def test_rejects_invalid_final_contracts(self, final, change, error):
+        with pytest.raises(MeshProtocolError, match=error):
+            replace(final, **change)
+
+    @pytest.mark.parametrize(
+        "state",
+        [FingerprintResultState.READY, FingerprintResultState.PARTIAL],
+        ids=lambda s: s.value,
+    )
+    def test_rejects_fingerprint_coverage_mismatch(self, state_final):
+        with pytest.raises(MeshProtocolError, match="fingerprint_requires"):
+            replace(state_final, coverage=_GEOMETRY_COVERAGE)
+
+    @pytest.mark.parametrize(
+        "location,value",
+        [
+            ("algorithm_version", ""),
+            ("algorithm_version", "v" * 129),
+            ("algorithm_version", 1),
+            ("records", {}),
+            ("records", [{}] * 4098),
+            ("component_index", 4097),
+            ("instance_count", 0),
+            ("instance_count", 2049),
+            ("values", []),
+            ("instances", {}),
+            ("instances", [1]),
+        ],
+        ids=[
+            "empty-version",
+            "long-version",
+            "untyped-version",
+            "untyped-records",
+            "too-many-records",
+            "component-limit",
+            "zero-instances",
+            "instance-limit",
+            "untyped-values",
+            "untyped-instances",
+            "invalid-instance",
+        ],
+    )
+    def test_rejects_invalid_fingerprint_record_limits(self, final, location, value):
+        raw = json.loads(encode_frame(final, sequence=0)[17:])
+        fingerprint = raw["fingerprint"]
+        if location in {"algorithm_version", "records"}:
+            fingerprint[location] = value
+        else:
+            fingerprint["records"][0][location] = value
+        decoder = FrameDecoder(
+            ThumbnailRequest(
+                Path("mesh"),
+                include_geometry=False,
+                include_thumbnail=False,
+                include_fingerprint=True,
+            )
+        )
+        with pytest.raises(MeshProtocolError, match="invalid_mesh_output"):
+            tuple(decoder.feed(_forge(FrameKind.FINAL, 0, raw)))
+        with pytest.raises(MeshProtocolError, match="incomplete_mesh_output"):
+            decoder.finish()
+
+    def test_rejects_unknown_frame_type(self):
+        with pytest.raises(MeshProtocolError, match="unknown_output_frame"):
+            encode_frame(None, sequence=0)
+
+    @pytest.mark.parametrize("kind", ["final-metadata", "thumbnail-payload"], ids=str)
+    def test_rejects_encoded_frames_over_byte_budget(
+        self, thumbnail, fingerprint, kind
+    ):
+        if kind == "final-metadata":
+            record = FingerprintRecord(
+                0, 1, {"payload": "x" * mesh_protocol.MAX_STREAM_BYTES}, ()
+            )
+            output = FingerprintFinal(
+                replace(fingerprint, records=(record,)), (), 1, None, _PREVIEW_COVERAGE
+            )
+        else:
+            output = replace(thumbnail, image=b"x" * mesh_protocol.MAX_STREAM_BYTES)
+        with pytest.raises(MeshProtocolError, match="output_frame_too_large"):
+            encode_frame(output, sequence=0)
+
+    def test_rejects_unrequested_geometry_frame(self, geometry):
+        raw = json.loads(encode_frame(geometry, sequence=0)[17:])
+        raw["outcome"] = {"state": "not_requested"}
+        decoder = FrameDecoder(ThumbnailRequest(Path("mesh")))
+        with pytest.raises(MeshProtocolError, match="invalid_mesh_output"):
+            tuple(decoder.feed(_forge(FrameKind.GEOMETRY, 0, raw)))
+        with pytest.raises(MeshProtocolError, match="incomplete_mesh_output"):
+            decoder.finish()
+
+    def test_rejects_measurements_on_refused_geometry(self, geometry):
+        with pytest.raises(MeshProtocolError, match="refused_output_has_geometry"):
+            replace(
+                geometry, outcome=GeometryRefused(ThumbnailFailureReason.NO_GEOMETRY)
+            )
