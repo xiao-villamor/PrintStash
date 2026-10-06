@@ -28,6 +28,7 @@ from app.modules.ingestion.batch_contracts import (
 )
 from app.modules.work import service
 from app.modules.work.contracts import JobExecution
+from tests.factories import detached_file
 from tests.factories.ops import build_job_context
 
 
@@ -243,3 +244,146 @@ class TestLegacyCandidates:
 
         with pytest.raises(ValueError, match="entry_identity_version_invalid"):
             requests.identity_scheme(request)
+
+
+class TestStoreBoundaries:
+    def test_refuses_another_jobs_batch(self, execution, spec, make_job):
+        ctx, actor = execution
+        other = make_job(owner=actor, subject="other-batch")
+        with pytest.raises(OperationCancelled):
+            batch_store.freeze_entries(ctx, JobBatch(other.id), (spec,))
+        assert batch_store.results(JobBatch(other.id), limit=1) == ()
+        assert batch_store.results(JobBatch(ctx.job_id), limit=1) == ()
+
+    @pytest.mark.parametrize(
+        "state",
+        [InboxItemState.CAPTURED, InboxItemState.COMPLETED],
+        ids=["captured", "completed"],
+    )
+    def test_refuses_inactive_inbox_owner(
+        self, execution, spec, make_inbox_item, state
+    ):
+        ctx, actor = execution
+        item = make_inbox_item(actor, state=state, job_id=ctx.job_id)
+        owner = InboxBatch(item.id)
+        with pytest.raises(OperationCancelled):
+            batch_store.freeze_entries(ctx, owner, (spec,))
+        assert batch_store.results(owner, limit=1) == ()
+
+    def test_refuses_unknown_entry_outcome(self, execution, spec):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        original = batch_store.freeze_entries(ctx, owner, (spec,))
+        with pytest.raises(LookupError, match="batch_entry_missing"):
+            batch_store.record_outcome(
+                ctx, owner, "absent-entry", Skipped("unsupported")
+            )
+        assert batch_store.results(owner, limit=1) == original
+
+    @pytest.mark.parametrize(
+        "limit,cursor",
+        [(0, 0), (1001, 0), (True, 0), (1.0, 0), (1, -1), (1, True), (1, "0")],
+        ids=[
+            "zero",
+            "over-ceiling",
+            "boolean-limit",
+            "float-limit",
+            "negative-cursor",
+            "boolean-cursor",
+            "text-cursor",
+        ],
+    )
+    def test_refuses_invalid_result_page(self, execution, spec, limit, cursor):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        original = batch_store.freeze_entries(ctx, owner, (spec,))
+        with pytest.raises(ValueError, match="invalid_entry_page"):
+            batch_store.results(owner, limit=limit, after_id=cursor)
+        assert batch_store.results(owner, limit=1) == original
+
+    def test_refuses_confirmation_for_unknown_receipt(
+        self, execution, spec, make_model, make_file
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        original = batch_store.freeze_entries(ctx, owner, (spec,))
+        file = make_file(make_model())
+        ref = BatchCommitReference(
+            owner,
+            original[0].id + 1,
+            JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch),
+        )
+        with get_session_factory().scoped_session() as session:
+            with pytest.raises(LookupError, match="batch_entry_missing"):
+                batch_store.record_committed(session, ref, file, deduplicated=False)
+        assert batch_store.results(owner, limit=1) == original
+
+    def test_refuses_confirmation_for_unpersisted_file(self, execution, spec):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        original = batch_store.freeze_entries(ctx, owner, (spec,))
+        ref = BatchCommitReference(
+            owner,
+            original[0].id,
+            JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch),
+        )
+        file = detached_file()
+        assert file.id is None
+        with get_session_factory().scoped_session() as session:
+            with pytest.raises(RuntimeError, match="batch_file_not_persisted"):
+                batch_store.record_committed(session, ref, file, deduplicated=False)
+        assert batch_store.results(owner, limit=1) == original
+
+    def test_preserves_reconciled_success(self, execution, spec, make_model, make_file):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        file = make_file(make_model(), ingestion_key=row.ingestion_key)
+        first = batch_store.reconcile(ctx, owner, row.key)
+        assert first.file_id == file.id
+        assert first.model_id == file.model_id
+        assert first.state is IngestionEntryState.IMPORTED
+        assert batch_store.reconcile(ctx, owner, row.key) == first
+
+    def test_excludes_claimed_legacy_commit(
+        self, execution, spec, make_model, make_file
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        claimed = make_file(make_model(), ingestion_key=f"{ctx.job_id[:40]}:claimed")
+        unclaimed = make_file(
+            make_model(), ingestion_key=f"{ctx.job_id[:40]}:unclaimed"
+        )
+        batch_store.record_outcome(
+            ctx, owner, row.key, Imported(claimed.model_id, claimed.id)
+        )
+        candidates = batch_store.legacy_candidates(ctx, owner)
+        assert len(candidates) == 1
+        assert candidates[0].ingestion_key == unclaimed.ingestion_key
+        assert candidates[0].sha256 == unclaimed.sha256
+
+    @pytest.mark.parametrize(
+        "deduplicated", [False, True], ids=["imported", "deduplicated"]
+    )
+    def test_records_canonical_confirmation(
+        self, execution, spec, make_model, make_file, deduplicated
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        file = make_file(make_model())
+        ref = BatchCommitReference(
+            owner, row.id, JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch)
+        )
+        with get_session_factory().scoped_session() as session:
+            batch_store.record_committed(session, ref, file, deduplicated=deduplicated)
+            session.commit()
+        result = batch_store.results(owner, limit=1)[0]
+        assert result.file_id == file.id
+        assert result.model_id == file.model_id
+        assert result.state is (
+            IngestionEntryState.DEDUPLICATED
+            if deduplicated
+            else IngestionEntryState.IMPORTED
+        )
