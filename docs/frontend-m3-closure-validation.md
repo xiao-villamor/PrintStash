@@ -128,3 +128,17 @@ Renaming them to those behaviors preserves every assertion. The targeted naming
 gate now passes (8.20 s); the original broad run still records its naming failure.
 The changed matrix references in the server contract record follow the new names.
 PostgreSQL and tail-page measurements remain pending; M3 is not closed.
+
+## Browser continuation gate
+
+The existing browser flow asserts an explicit refresh from a changed revision,
+but does not attempt or assert the availability of continuation while changed.
+Strengthen that same behavior with the unavailable Load more control so the master
+requirement has an observable browser assertion.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 12 | refreshes a changed library deliberately | Edge | Existing page has continuation, authority announces a new revision | Load more unavailable until refresh; original card retained; replacement starts without cursor | Playwright | ✅ `tests/e2e/vault.spec.ts::refreshes a changed library deliberately` |
+
+Browser continuation acceptance passed in Chromium (1/1, 14.3 s). App/UI/domain
+type checks and the changed component/test lint and formatting checks passed.

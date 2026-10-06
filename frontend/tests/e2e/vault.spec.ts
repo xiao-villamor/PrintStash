@@ -54,6 +54,7 @@ test.describe("vault route", () => {
     });
     await page.goto("/");
     await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Load more", exact: true })).toBeVisible();
     const initialReads = browseRequests.length;
     changed = true;
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
@@ -63,6 +64,7 @@ test.describe("vault route", () => {
     ).toBeVisible();
     await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
     expect(browseRequests).toHaveLength(initialReads);
+    await expect(page.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Refresh library" }).click();
 
