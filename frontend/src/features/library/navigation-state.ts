@@ -9,7 +9,16 @@ export type LibraryEntry = Readonly<{
   session: number;
   index: number | null;
 }>;
-const entries = new Map<string, LibraryEntry>();
+export type LibraryLayout = "grid" | "list";
+export interface LibraryReadingPosition {
+  main: number;
+  list: number | null;
+}
+interface RegisteredEntry {
+  entry: LibraryEntry;
+  positions: Partial<Record<LibraryLayout, LibraryReadingPosition>>;
+}
+const entries = new Map<string, RegisteredEntry>();
 const MAX_HISTORY_ENTRIES = 64;
 const stop = onAuthChange(() => entries.clear());
 if (import.meta.hot) import.meta.hot.dispose(stop);
@@ -40,7 +49,11 @@ export function useLibraryEntry(href: string, ready: boolean) {
   );
   useLayoutEffect(() => {
     if (!ready || session !== current) return;
-    entries.set(entry.key, entry);
+    const previous = entries.get(entry.key);
+    entries.set(entry.key, {
+      entry,
+      positions: previous?.entry.href === entry.href ? previous.positions : {},
+    });
     if (entries.size > MAX_HISTORY_ENTRIES) entries.delete(entries.keys().next().value!);
   }, [entry, ready, session, current]);
   return entry;
@@ -55,8 +68,25 @@ export function knownOrigin(state: unknown): LibraryEntry | undefined {
     typeof state.libraryOrigin !== "string"
   )
     return undefined;
-  const entry = entries.get(state.libraryOrigin);
+  const entry = entries.get(state.libraryOrigin)?.entry;
   return entry?.session === getSessionVersion() ? entry : undefined;
 }
 
 // oxlint-enable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters
+
+/** Reading metadata shares the bounded, session-owned entry lifetime. */
+export function readLibraryPosition(entry: LibraryEntry, layout: LibraryLayout) {
+  const registered = entries.get(entry.key);
+  if (entry.session !== getSessionVersion() || registered?.entry.href !== entry.href) return;
+  return registered.positions[layout];
+}
+
+export function saveLibraryPosition(
+  entry: LibraryEntry,
+  layout: LibraryLayout,
+  position: LibraryReadingPosition,
+) {
+  const registered = entries.get(entry.key);
+  if (entry.session !== getSessionVersion() || registered?.entry.href !== entry.href) return;
+  registered.positions[layout] = position;
+}

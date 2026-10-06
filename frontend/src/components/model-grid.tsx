@@ -1,5 +1,6 @@
 "use client";
 
+import { useLibraryReadingPosition } from "@/features/library/reading-position";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
 import {
@@ -1148,6 +1149,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     else if (error !== null) settleStartup("cards", "failed");
   }, [browseReady, error, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
+  const listContent = useRef<HTMLDivElement>(null);
+  useLibraryReadingPosition(
+    snapshot?.entry,
+    viewMode,
+    startupContent,
+    listContent,
+    snapshot !== null && docView === "models" && !authority.authorizationChanged,
+  );
   useStartupThumbnails(startupContent, browseReady);
   const thumbnails = useLibraryThumbnails(
     visibleModels,
@@ -2820,7 +2829,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   />
                 </div>
               ) : (
-                <div key="list" className="flex-1 overflow-y-auto animate-panel-in">
+                <div
+                  key="list"
+                  ref={listContent}
+                  className="flex-1 overflow-y-auto animate-panel-in"
+                >
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
                       <span className="w-10 flex-shrink-0">{uiText("Thumb")}</span>

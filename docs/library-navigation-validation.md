@@ -63,8 +63,8 @@ Implementation order: first qualify exact source links and snapshot identity, th
 | 2 | returns a Multipart set to its exact Library entry | Happy | Open Multipart then detail Back | Same URL and history entry | Browser | ✅ |
 | 3 | preserves native modified-link navigation | Edge | Ctrl/Meta/middle/new-tab interaction | Native click remains unhandled for Ctrl/Meta/middle; usable encoded return URL | Component | ✅ |
 | 4 | retains a displayed snapshot's return target during navigation | Edge | A displayed while B remains pending | A card returns to A; labels/cards remain coherent | Component | ✅ |
-| 5 | restores the grid's nested reading position | Happy | Scroll, detail, Back/Forward | Same visible entity and offset | Browser | ❌ |
-| 6 | restores list layout independently | Happy | List scroll then detail Back | List reading position restored | Browser | ❌ |
+| 5 | restores the grid's nested reading position | Happy | Cached grid, scroll, detail, Back/Forward on desktop/mobile | Same visible entity and container offsets | Browser | ✅ |
+| 6 | restores list layout independently | Happy | Cached list, scroll, detail, Back/Forward on desktop/mobile | List reading position restored | Browser | ✅ |
 | 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ❌ |
 | 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Feature/browser | ❌ |
 | 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ❌ |
@@ -79,3 +79,13 @@ This matrix is the pre-implementation contract. No scroll/history acceptance is 
 Model and Multipart detail now reuse the immediate originating history entry on an ordinary Back click, preserving the complete canonical URL. A retained result uses its settled snapshot identity while a different route is loading. Unknown/deep links use a validated same-origin Library fallback. Only the bounded entry registry is implemented here; scroll metadata and restoration remain pending.
 
 Both browser cases failed before the link change (Model lost filters; Multipart pushed a new entry) and passed afterward: 2 Chromium cases in 12.7s. The link and entry mirrors passed 16 cases in 5.37s; the prior grid gate passed all 154 cases, including the retained-snapshot return target. App/UI/domain typecheck and lint passed. The session-retirement regression failed before the mount-session fence and passed afterward; row 10 remains open because full restoration/DOM retirement has not been exercised. JSDOM reports its expected unsupported native-document navigation for the three unhandled modified-click cases. No scroll or performance improvement is claimed.
+
+## Qualified increment: cached reading position
+
+The entry registry now owns a pair of numeric scroll offsets per layout. A feature hook observes the actual main/list containers, saves offsets on scroll and before link navigation, then restores on a settled entry's mount. These listeners do constant work per event; they do not inspect every card or introduce a timer, server-data copy, or another fetch cache. The same bounded registry clears on auth/access-scope retirement and rejects late writes from a retired view.
+
+The desktop grid/list regressions both failed before implementation: returning placed the selected entity 3,626px and 1,343px away from its original viewport position respectively in those fixtures. Both passed after implementation (12.6s). The expanded four desktop/mobile cases then passed in 35.1s, asserting the exact original container offsets and the selected entity's viewport position after UI Back and browser Forward/Back.
+
+This increment depends on Query retaining the rendered pages. Cache-eviction reconstruction, semantic anchors for deleted/reordered results, confirmed favourite removal and rapid route races remain separate open matrix rows. Pixel offsets alone do not close those contracts, and no production performance improvement is claimed.
+
+The final affected navigation/entry/reading/grid/caption/hygiene gate passed 184 cases across six files in 98.95s. App/UI/domain typecheck, lint, format:check (715 files), and whitespace checks passed. The reading mirror also asserts that a retired view cannot rewrite offsets for the next session; full private-DOM/browser retirement remains open in row 10.
