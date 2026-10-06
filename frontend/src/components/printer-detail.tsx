@@ -41,6 +41,7 @@ import {
   syncPrinterFiles,
   updatePrinter,
 } from "@/lib/api";
+import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
@@ -177,95 +178,177 @@ export function PrinterDetailPage({
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lifetime = useRef(0);
 
   async function loadJobs() {
+    const version = lifetime.current;
     try {
-      setJobs(await listPrinterJobs(printerId));
+      const next = await listPrinterJobs(printerId);
+      if (version === lifetime.current) setJobs(next);
     } catch (e) {
-      console.warn("Failed to load jobs:", e);
+      if (version === lifetime.current) console.warn("Failed to load jobs:", e);
     }
   }
 
   async function loadPrinterFiles() {
+    const version = lifetime.current;
     try {
-      setPrinterFiles(await listPrinterFiles(printerId));
+      const next = await listPrinterFiles(printerId);
+      if (version === lifetime.current) setPrinterFiles(next);
     } catch (e) {
-      console.warn("Failed to load printer files:", e);
+      if (version === lifetime.current) console.warn("Failed to load printer files:", e);
     }
   }
 
   async function loadPrinter() {
+    const version = lifetime.current;
     try {
-      setPrinter(await getPrinter(printerId));
+      const next = await getPrinter(printerId);
+      if (version === lifetime.current) setPrinter(next);
     } catch (e: any) {
-      setError(e.message);
+      if (version === lifetime.current) setError(e.message);
     }
   }
 
   async function loadDiagnostics() {
+    const version = lifetime.current;
     setCheckingDiagnostics(true);
     try {
-      setDiagnostics(await getPrinterDiagnostics(printerId));
+      const next = await getPrinterDiagnostics(printerId);
+      if (version === lifetime.current) setDiagnostics(next);
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setCheckingDiagnostics(false);
+      if (version === lifetime.current) setCheckingDiagnostics(false);
     }
   }
 
   async function loadMoonrakerConfig() {
+    const version = lifetime.current;
     if (printer?.provider !== "moonraker" && initialPrinter?.provider !== "moonraker") return;
     setLoadingConfig(true);
     try {
-      setMoonrakerConfig(await getMoonrakerConfig(printerId));
+      const next = await getMoonrakerConfig(printerId);
+      if (version === lifetime.current) setMoonrakerConfig(next);
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setLoadingConfig(false);
-    }
-  }
-
-  async function connect() {
-    try {
-      const ws = await openPrinterWS(printerId);
-      wsRef.current = ws;
-      ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => {
-        setWsConnected(false);
-        if (reconnectRef.current) clearTimeout(reconnectRef.current);
-        reconnectRef.current = setTimeout(connect, 3000);
-      };
-      ws.onerror = () => {};
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === "snapshot") {
-            setSnapshot(msg.data || {});
-          } else if (msg.type === "update") {
-            setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
-          }
-          const state = msg?.data?.print_stats?.state;
-          if (state) loadJobs();
-        } catch {
-          /* ignore */
-        }
-      };
-    } catch (e: any) {
-      setError(uiText("WS error: {value1}", { value1: String(e.message) }));
+      if (version === lifetime.current) setLoadingConfig(false);
     }
   }
 
   useEffect(() => {
-    // Server-rendered pages pass the printer down; WS keeps it live after that.
-    if (!initialPrinter || initialPrinter.id !== printerId) loadPrinter();
-    loadJobs();
-    loadPrinterFiles();
-    connect();
+    let disposed = false;
+    let generation = 0;
+    let socket: WebSocket | null = null;
+    let controller: AbortController | null = null;
+    let reconnect: ReturnType<typeof setTimeout> | null = null;
+
+    function retire() {
+      generation += 1;
+      lifetime.current += 1;
+      controller?.abort();
+      controller = null;
+      if (reconnect !== null) clearTimeout(reconnect);
+      reconnect = null;
+      const previous = socket;
+      socket = null;
+      if (previous) {
+        previous.onopen = null;
+        previous.onclose = null;
+        previous.onmessage = null;
+        previous.onerror = null;
+        previous.close();
+      }
+    }
+
+    async function connect() {
+      if (disposed || !isLoggedIn()) return;
+      const version = generation;
+      const ticket = new AbortController();
+      controller = ticket;
+      try {
+        const ws = await openPrinterWS(printerId, ticket.signal);
+        if (disposed || version !== generation) {
+          ws.close();
+          return;
+        }
+        controller = null;
+        socket = ws;
+        const current = () => !disposed && version === generation && socket === ws;
+        ws.onopen = () => {
+          if (current()) setWsConnected(true);
+        };
+        ws.onclose = () => {
+          if (!current()) return;
+          socket = null;
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          setWsConnected(false);
+          reconnect = setTimeout(() => {
+            reconnect = null;
+            void connect();
+          }, 3000);
+        };
+        ws.onerror = () => {};
+        ws.onmessage = (ev) => {
+          if (!current()) return;
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === "snapshot") {
+              setSnapshot(msg.data || {});
+            } else if (msg.type === "update") {
+              setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
+            }
+            if (msg?.data?.print_stats?.state) void loadJobs();
+          } catch {
+            /* Ignore malformed frames. */
+          }
+        };
+      } catch (e) {
+        if (disposed || version !== generation) return;
+        controller = null;
+        setError(
+          uiText("WS error: {value1}", { value1: String(e instanceof Error ? e.message : e) }),
+        );
+      }
+    }
+
+    function reload() {
+      void loadPrinter();
+      void loadJobs();
+      void loadPrinterFiles();
+      void connect();
+    }
+
+    retire();
+    setSnapshot({});
+    setWsConnected(false);
+    setPrinter(initialPrinter?.id === printerId ? initialPrinter : null);
+    if (!initialPrinter || initialPrinter.id !== printerId) void loadPrinter();
+    void loadJobs();
+    void loadPrinterFiles();
+    void connect();
+    const stopAuth = onAuthChange(() => {
+      retire();
+      setSnapshot({});
+      setJobs([]);
+      setPrinterFiles([]);
+      setPrinter(null);
+      setDiagnostics(null);
+      setMoonrakerConfig(null);
+      setCheckingDiagnostics(false);
+      setLoadingConfig(false);
+      setWsConnected(false);
+      setError(null);
+      if (isLoggedIn()) reload();
+    });
     return () => {
-      if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      wsRef.current?.close();
+      disposed = true;
+      stopAuth();
+      retire();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printerId]);

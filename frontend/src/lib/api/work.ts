@@ -1,4 +1,4 @@
-import { getJson, sendJson } from "@/lib/api/request";
+import { getJson, jsonHeaders, requestApi, sendJson } from "@/lib/api/request";
 import type { DerivativeRead, WorkOverview } from "@/types";
 
 /** Lanes, definitions, executors and recent failures (administrators only). */
@@ -50,6 +50,13 @@ export function retryDerivative(fileId: number, kind: string): Promise<Derivativ
 }
 
 /** A one-use ticket for `/api/v1/events/ws`; an access token never goes in a URL. */
-export function createEventsTicket(): Promise<{ ticket: string; expires_in: number }> {
-  return sendJson("/api/v1/events/ticket", "POST", {});
+export function createEventsTicket(
+  signal?: AbortSignal,
+): Promise<{ ticket: string; expires_in: number }> {
+  return requestApi("/api/v1/events/ticket", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal,
+  });
 }

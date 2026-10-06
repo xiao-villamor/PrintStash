@@ -16,6 +16,8 @@
  */
 
 import { createEventsTicket } from "@/lib/api/work";
+import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
+import { withSessionRequest } from "@/lib/session-transport";
 import { getWsUrl } from "@/lib/api/request";
 import type { DerivativeState, JobState } from "@/types";
 
@@ -43,26 +45,41 @@ export interface EventSocket {
   close(): void;
 }
 
-export type EventSocketFactory = () => Promise<EventSocket>;
+export type EventSocketFactory = (signal: AbortSignal) => Promise<EventSocket>;
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
-async function openEventSocket(): Promise<EventSocket> {
-  const { ticket } = await createEventsTicket();
-  const ws = new WebSocket(getWsUrl(`/api/v1/events/ws?ticket=${encodeURIComponent(ticket)}`));
-  const adapter: EventSocket = {
-    onopen: null,
-    onclose: null,
-    onmessage: null,
-    send: (data) => ws.send(data),
-    close: () => ws.close(),
-  };
-  ws.onopen = () => adapter.onopen?.();
-  ws.onclose = () => adapter.onclose?.();
-  // The server only sends text frames.
-  ws.onmessage = (event) => adapter.onmessage?.({ data: String(event.data) });
-  return adapter;
+async function openEventSocket(signal: AbortSignal): Promise<EventSocket> {
+  let closeOpened = () => {};
+  try {
+    return await withSessionRequest(async (request) => {
+      const { ticket } = await createEventsTicket(request.signal);
+      request.assertCurrent();
+      const ws = new WebSocket(getWsUrl(`/api/v1/events/ws?ticket=${encodeURIComponent(ticket)}`));
+      closeOpened = () => ws.close();
+      const adapter: EventSocket = {
+        onopen: null,
+        onclose: null,
+        onmessage: null,
+        send: (data) => ws.send(data),
+        close: () => {
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onmessage = null;
+          ws.close();
+        },
+      };
+      ws.onopen = () => adapter.onopen?.();
+      ws.onclose = () => adapter.onclose?.();
+      // The server only sends text frames.
+      ws.onmessage = (event) => adapter.onmessage?.({ data: String(event.data) });
+      return adapter;
+    }, signal);
+  } catch (error) {
+    closeOpened();
+    throw error;
+  }
 }
 
 let socketFactory: EventSocketFactory = openEventSocket;
@@ -71,6 +88,9 @@ const followed = new Map<string, number>();
 let socket: EventSocket | null = null;
 let open = false;
 let connecting = false;
+let generation = 0;
+let ticketController: AbortController | null = null;
+let stopAuth: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let failures = 0;
 
@@ -79,14 +99,18 @@ export function setEventSocketFactory(factory: EventSocketFactory): void {
   disconnect();
   socketFactory = factory;
   failures = 0;
+  void connect();
 }
 
 function isBrowser(): boolean {
   return "window" in globalThis;
 }
 
-function deliver(notice: EventNotice): void {
-  for (const listener of listeners) listener(notice);
+function deliver(notice: EventNotice, current: () => boolean): void {
+  for (const listener of listeners) {
+    if (!current()) return;
+    listener(notice);
+  }
 }
 
 function parse(data: string): EventNotice | null {
@@ -111,7 +135,7 @@ function send(message: { subscribe: string } | { unsubscribe: string }): void {
 }
 
 function scheduleReconnect(): void {
-  if (reconnectTimer !== null || listeners.size === 0) return;
+  if (reconnectTimer !== null || listeners.size === 0 || !isLoggedIn()) return;
   const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * 2 ** failures);
   failures += 1;
   reconnectTimer = setTimeout(() => {
@@ -121,33 +145,45 @@ function scheduleReconnect(): void {
 }
 
 async function connect(): Promise<void> {
-  if (socket || connecting || listeners.size === 0 || !isBrowser()) return;
+  if (socket || connecting || listeners.size === 0 || !isBrowser() || !isLoggedIn()) return;
+  const version = generation;
+  const controller = new AbortController();
+  ticketController = controller;
   connecting = true;
   let next: EventSocket;
   try {
-    next = await socketFactory();
+    next = await socketFactory(controller.signal);
   } catch {
+    if (version !== generation) return;
+    ticketController = null;
     connecting = false;
     scheduleReconnect();
     return;
   }
-  connecting = false;
-  if (listeners.size === 0) {
+  if (version !== generation) {
     next.close();
     return;
   }
+  ticketController = null;
+  connecting = false;
   socket = next;
+  const current = () => version === generation && socket === next;
   next.onopen = () => {
+    if (!current()) return;
     open = true;
     failures = 0;
     for (const channel of followed.keys()) send({ subscribe: channel });
   };
   next.onmessage = (event) => {
+    if (!current()) return;
     const notice = parse(event.data);
-    if (notice) deliver(notice);
+    if (notice) deliver(notice, current);
   };
   next.onclose = () => {
-    if (socket !== next) return;
+    if (!current()) return;
+    next.onopen = null;
+    next.onclose = null;
+    next.onmessage = null;
     socket = null;
     open = false;
     scheduleReconnect();
@@ -155,6 +191,10 @@ async function connect(): Promise<void> {
 }
 
 function disconnect(): void {
+  generation += 1;
+  ticketController?.abort();
+  ticketController = null;
+  connecting = false;
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -162,17 +202,34 @@ function disconnect(): void {
   const current = socket;
   socket = null;
   open = false;
-  current?.close();
+  if (current) {
+    current.onopen = null;
+    current.onclose = null;
+    current.onmessage = null;
+    current.close();
+  }
 }
 
 /** Hear every notice this tab receives; the socket lives while anyone listens. */
 export function subscribeEvents(listener: EventListener): () => void {
   if (!isBrowser()) return () => {};
   listeners.add(listener);
+  stopAuth ??= onAuthChange(() => {
+    disconnect();
+    failures = 0;
+    void connect();
+  });
   void connect();
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     listeners.delete(listener);
-    if (listeners.size === 0) disconnect();
+    if (listeners.size === 0) {
+      disconnect();
+      stopAuth?.();
+      stopAuth = null;
+    }
   };
 }
 
@@ -198,7 +255,10 @@ export function followModel(modelId: number, listener: EventListener): () => voi
   const count = followed.get(channel) ?? 0;
   followed.set(channel, count + 1);
   if (count === 0) send({ subscribe: channel });
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     unsubscribe();
     const remaining = (followed.get(channel) ?? 1) - 1;
     if (remaining > 0) {

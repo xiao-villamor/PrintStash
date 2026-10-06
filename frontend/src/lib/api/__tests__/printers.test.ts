@@ -47,6 +47,7 @@ import {
   updatePrinterManualMaterialState,
   updatePrinterPermission,
 } from "@/lib/api/printers";
+import { clearLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -308,5 +309,50 @@ describe("openPrinterWS", () => {
     // goes in the query string — which is why it is short-lived and single-use.
     expectRequest("/api/v1/printers/3/ws-ticket", "POST");
     expect(sockets[0]).toContain("/api/v1/printers/3/ws?ticket=abc");
+  });
+});
+
+/** A ticket authorizes only the session and page lifetime that requested it. */
+describe("printer ticket lifetimes", () => {
+  it("does not open a retired printer ticket", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const sockets: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          sockets.push(url);
+        }
+      },
+    );
+    const pending = openPrinterWS(3);
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    headers.resolve(new Response('{"ticket":"old","expires_in":30}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(sockets).toEqual([]);
+  });
+
+  it("cancels an abandoned printer ticket", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const sockets: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          sockets.push(url);
+        }
+      },
+    );
+    const controller = new AbortController();
+    const pending = openPrinterWS(3, controller.signal);
+    const outcome = pending.catch((error: Error) => error);
+    controller.abort();
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    headers.resolve(new Response('{"ticket":"old","expires_in":30}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(sockets).toEqual([]);
   });
 });

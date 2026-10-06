@@ -22,6 +22,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearLogin, storeLogin } from "@/lib/auth-store";
 import { PrinterDetailPage } from "@/components/printer-detail";
 import { aPrinter, printerAccess, printerCapabilities } from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -45,6 +46,7 @@ interface LiveSnapshot {
  */
 class FakeSocket {
   static latest: FakeSocket | null = null;
+  static instances: FakeSocket[] = [];
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -53,9 +55,10 @@ class FakeSocket {
 
   constructor() {
     FakeSocket.latest = this;
+    FakeSocket.instances.push(this);
   }
 
-  close() {}
+  close = vi.fn<() => void>(() => this.onclose?.());
   send() {}
 }
 
@@ -129,6 +132,7 @@ function renderPrinter(options: RenderAppOptions & { printer?: PrinterRead } = {
 beforeEach(() => {
   window.localStorage.clear();
   FakeSocket.latest = null;
+  FakeSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeSocket);
 });
 
@@ -773,5 +777,115 @@ describe("PrinterDetailPage", () => {
 
       expect(await screen.findByText("Printer busy.")).toBeInTheDocument();
     });
+  });
+});
+
+/** Connection cleanup takes effect before close events or deferred tickets can reconnect. */
+describe("printer page connection lifetimes", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  async function settle() {
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+  }
+
+  it("does not reconnect a disposed printer page", async () => {
+    const page = renderPrinter();
+    await settle();
+    expect(FakeSocket.instances).toHaveLength(1);
+    page.unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(
+      page.requestsWithMethod("POST").filter(({ url }) => url.includes("ws-ticket")),
+    ).toHaveLength(1);
+  });
+
+  it("rejects an abandoned printer page ticket", async () => {
+    const ticket = Promise.withResolvers<Response>();
+    const page = renderPrinter({
+      routes: { "POST /api/v1/printers/4/ws-ticket": () => ticket.promise },
+    });
+    await settle();
+    page.unmount();
+    ticket.resolve(json({ ticket: "obsolete", expires_in: 60 }));
+    await settle();
+    expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it("ignores old printer snapshot callbacks after a switch", async () => {
+    const page = renderPrinter();
+    await settle();
+    const oldMessage = FakeSocket.latest?.onmessage;
+    page.route({
+      "GET /api/v1/printers/8/jobs": json([]),
+      "GET /api/v1/printers/8/files": json([]),
+      "GET /api/v1/printers/8/diagnostics": json({ provider: "moonraker", checks: [] }),
+      "GET /api/v1/printers/8/config": json({ config: "" }),
+      "POST /api/v1/printers/8/ws-ticket": json({ ticket: "fresh", expires_in: 60 }),
+    });
+    page.rerender(
+      <PrinterDetailPage printerId={8} initialPrinter={aPrinter({ id: 8, name: "Prusa" })} />,
+    );
+    await settle();
+    act(() =>
+      oldMessage?.({
+        data: JSON.stringify({
+          type: "snapshot",
+          data: { print_stats: { state: "printing", filename: "obsolete.gcode" } },
+        }),
+      }),
+    );
+    expect(screen.queryAllByText("obsolete.gcode")).toHaveLength(0);
+    page.unmount();
+  });
+
+  it("reauthorizes the printer socket on a new login", async () => {
+    const page = renderPrinter();
+    await settle();
+    const first = FakeSocket.instances[0];
+    act(() => {
+      clearLogin();
+      storeLogin("", { id: 9, username: "next", email: null, is_superuser: false });
+    });
+    await settle();
+    expect(first?.close).toHaveBeenCalledOnce();
+    expect(FakeSocket.instances).toHaveLength(2);
+    const current = FakeSocket.instances[1];
+    act(() =>
+      current?.onmessage?.({
+        data: JSON.stringify({
+          type: "snapshot",
+          data: { print_stats: { filename: "current.gcode" } },
+        }),
+      }),
+    );
+    expect(screen.getAllByText("current.gcode")).not.toHaveLength(0);
+    page.unmount();
+  });
+
+  it("stops printer callbacks on logout", async () => {
+    const page = renderPrinter();
+    await settle();
+    const socket = FakeSocket.latest;
+    act(() =>
+      socket?.onmessage?.({
+        data: JSON.stringify({
+          type: "snapshot",
+          data: { print_stats: { state: "printing", filename: "private.gcode" } },
+        }),
+      }),
+    );
+    expect(screen.getAllByText(/private.gcode/)).not.toHaveLength(0);
+    act(() => clearLogin());
+    expect(socket?.close).toHaveBeenCalledOnce();
+    expect(screen.queryAllByText("private.gcode")).toHaveLength(0);
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(
+      page.requestsWithMethod("POST").filter(({ url }) => url.includes("ws-ticket")),
+    ).toHaveLength(1);
+    page.unmount();
   });
 });

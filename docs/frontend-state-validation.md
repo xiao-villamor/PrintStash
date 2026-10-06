@@ -112,3 +112,47 @@ A verified current request failure that retires authentication is carried unchan
 | 34 | ignores a retired upload's unauthorized response | Error | upload creation headers deferred; new login; old401 | AbortError; new user preserved | Frontend unit | ✅ `frontend/src/lib/__tests__/artifact-upload.test.ts::ignores a retired upload's unauthorized response` |
 
 Browser followup evidence: scope red **4 failed / 1 passed**; genuine nested upload401 red **1 failed / 10 passed**. Final followup: **107 passed (6 files)**; app/UI/domain typecheck green; lint zero diagnostics; format:check green.
+
+## Socket lifetime requirements
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 35 | closes an abandoned connection after listeners return | Edge | old factory pending; unsubscribe; new subscribe | old socket closed; new socket delivers | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::closes an abandoned connection after listeners return` |
+| 36 | ignores callbacks from a disposed event connection | Error | old handlers saved; new connection active | no notice/reconnect from old handlers | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::ignores callbacks from a disposed event connection` |
+| 37 | does not retry a failed abandoned factory | Error | old factory rejects after disposal | zero stale retry timers | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::does not retry a failed abandoned factory` |
+| 38 | retires the active event socket on logout | Edge | socket active; logout | socket closed; no new ticket while signed out | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::retires the active event socket on logout` |
+| 39 | reauthorizes event channels after login | Happy | logout/login; persistent listeners | new ticket/socket; subscribed channel; resync delivered | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::reauthorizes event channels after login` |
+| 40 | keeps Model follow cleanup idempotent | Edge | two followers; one unsubscribe twice | remaining follower keeps channel | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::keeps Model follow cleanup idempotent` |
+| 41 | does not open a retired printer ticket | Error | ticket pending; account changes | no WebSocket construction | Frontend unit | ✅ `frontend/src/lib/api/__tests__/printers.test.ts::does not open a retired printer ticket` |
+| 42 | cancels an abandoned printer ticket | Error | ticket pending; caller aborts | network signal aborted; no socket | Frontend unit | ✅ `frontend/src/lib/api/__tests__/printers.test.ts::cancels an abandoned printer ticket` |
+| 43 | does not reconnect a disposed printer page | Error | unmount emits socket close | no further ws-ticket request | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::does not reconnect a disposed printer page` |
+| 44 | rejects an abandoned printer page ticket | Edge | unmount with ticket pending | no live socket created | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::rejects an abandoned printer page ticket` |
+| 45 | ignores old printer snapshot callbacks after a switch | Error | printer A callback saved; printer B active | B state remains unchanged | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::ignores old printer snapshot callbacks after a switch` |
+| 46 | stops printer callbacks on logout | Edge | active printer socket; auth retirement | socket closes; snapshot clears; no reconnect | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::stops printer callbacks on logout` |
+
+| 47 | aborts the events ticket request | Error | pending ticket; caller abort | fetch signal aborted; late result rejected | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::aborts the events ticket request` |
+| 48 | rejects a late events ticket after session retirement | Error | pending ticket; auth retirement | late ticket is never returned | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::rejects a late events ticket after session retirement` |
+
+M7 baseline red: events/printer API **7 failed / 48 passed (2 files)**; printer page lifetime **4 failed / 43 skipped (1 file)**. The retired printer ticket already passes with M1; the other new cases expose connection-owner gaps.
+
+| 49 | cancels the ticket when its last subscriber leaves | Error | default events factory ticket pending; unsubscribe | HTTP aborted; no socket or retry from late response | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::cancels the ticket when its last subscriber leaves` |
+| 50 | reauthorizes the printer socket on a new login | Happy | same printer page; logout then different verified identity | old socket closed; new ticketed socket delivers current snapshot | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::reauthorizes the printer socket on a new login` |
+
+| 51 | stops a notice delivery when a listener retires the session | Edge | earlier subscriber logs out during a frame | later subscriber never receives retired frame | Frontend unit | ✅ `frontend/src/lib/__tests__/events.test.ts::stops a notice delivery when a listener retires the session` |
+
+M7 validation: **166 passed (6 files)**, including the prior request/session transport regression suites. App/UI/domain typecheck green; lint zero diagnostics; repository frontend formatting green. Ticket-specific baseline red **1 failed / 11 passed** (caller signal propagation missing, late-session rejection already protected by M1). New additional cancellation/reauthorization/during-delivery tests were added after implementation, not represented as baseline-red evidence. No browser, performance, coverage or CI claim in this socket checkpoint.
+
+M7 manual review additions:
+
+| Exact path | Symbols / notes inspected |
+|---|---|
+| `frontend/src/lib/events.ts` | default ticket factory/adapter; connection generation, retry timer, auth subscriber cleanup, per-listener delivery fence, Model reference counts |
+| `frontend/src/lib/api/work.ts` | createEventsTicket POST body/headers; caller signal; ordinary Work action contracts preserved |
+| `frontend/src/lib/api/printers.ts` | openPrinterWS ticket creation, constructed-socket cleanup and session fence |
+| `frontend/src/components/printer-detail.tsx` | initial snapshot/read ownership; effect disposal, auth retirement, socket handlers/reconnect, protected diagnostics/config reads |
+| `frontend/src/lib/__tests__/events.test.ts` | fake/default factory paths; drops/backoff/refollow/resync; pending disposal; auth transitions; idempotent cleanup |
+| `frontend/src/lib/api/__tests__/work.test.ts` | existing Work DTO assertions; ticket caller cancellation and late response |
+| `frontend/src/lib/api/__tests__/printers.test.ts` | live endpoint wire contracts; retired/caller-abandoned tickets |
+| `frontend/src/components/__tests__/printer-detail.test.tsx` | controls/config/job/material behavior; realistic close callbacks; unmount/switch/account connection races |
+
+The sole printer socket connection owner is PrinterDetailPage. Other event subscribers (task-center, thumbnail/preview/derivative hooks, background-work panel, gcode-viewer) were inventoried by search, not claimed as manually audited in this checkpoint. Their subscription cleanup API remains unchanged.

@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 import {
   cancelQueuedJobs,
@@ -120,5 +121,37 @@ describe("createEventsTicket", () => {
     await expect(createEventsTicket()).resolves.toEqual({ ticket: "t-1", expires_in: 30 });
 
     expectRequest("/api/v1/events/ticket", "POST");
+  });
+});
+
+describe("events ticket lifetime", () => {
+  it("aborts the events ticket request", async () => {
+    const controller = new AbortController();
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = createEventsTicket(controller.signal);
+    controller.abort();
+    expect(lastCall().init?.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ ticket: "late", expires_in: 30 })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects a late events ticket after session retirement", async () => {
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = createEventsTicket();
+    clearLogin();
+    finish(new Response(JSON.stringify({ ticket: "late", expires_in: 30 })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });

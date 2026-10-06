@@ -1,8 +1,11 @@
+import { withSessionRequest } from "@/lib/session-transport";
 import {
   getJson,
   GetJsonOptions,
   getWsUrl,
   requestMutation,
+  requestApi,
+  jsonHeaders,
   sendAction,
   sendJson,
 } from "@/lib/api/request";
@@ -170,11 +173,23 @@ export function listPrinterJobs(id: number, limit = 50): Promise<PrintJobRead[]>
   return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`);
 }
 
-export async function openPrinterWS(id: number): Promise<WebSocket> {
-  const { ticket } = await sendJson<{ ticket: string; expires_in: number }>(
-    `/api/v1/printers/${id}/ws-ticket`,
-    "POST",
-    {},
-  );
-  return new WebSocket(getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`));
+export async function openPrinterWS(id: number, signal?: AbortSignal): Promise<WebSocket> {
+  let closeOpened = () => {};
+  try {
+    return await withSessionRequest(async (request) => {
+      const { ticket } = await requestApi<{ ticket: string; expires_in: number }>(
+        `/api/v1/printers/${id}/ws-ticket`,
+        { method: "POST", headers: jsonHeaders(), body: "{}", signal: request.signal },
+      );
+      request.assertCurrent();
+      const ws = new WebSocket(
+        getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`),
+      );
+      closeOpened = () => ws.close();
+      return ws;
+    }, signal);
+  } catch (error) {
+    closeOpened();
+    throw error;
+  }
 }

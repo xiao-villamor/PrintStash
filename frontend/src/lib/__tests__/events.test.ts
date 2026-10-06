@@ -11,6 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearLogin, storeLogin } from "@/lib/auth-store";
 import type { EventNotice, EventSocket } from "@/lib/events";
 
 type Events = typeof import("@/lib/events");
@@ -40,12 +41,28 @@ class FakeSocket implements EventSocket {
 }
 
 let events: Events;
+let stops: (() => void)[] = [];
+
+function subscribe(listener: (notice: EventNotice) => void): () => void {
+  const stop = events.subscribeEvents(listener);
+  stops.push(stop);
+  return stop;
+}
+
+function follow(modelId: number, listener: (notice: EventNotice) => void): () => void {
+  const stop = events.followModel(modelId, listener);
+  stops.push(stop);
+  return stop;
+}
+
 let sockets: FakeSocket[];
 const opened = vi.fn<() => Promise<EventSocket>>();
 
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
+  stops = [];
+  storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
   sockets = [];
   opened.mockReset();
   opened.mockImplementation(async () => {
@@ -58,6 +75,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  for (const stop of stops) stop();
+  vi.clearAllTimers();
   vi.useRealTimers();
 });
 
@@ -72,7 +91,7 @@ async function connected(): Promise<FakeSocket> {
 describe("subscribeEvents", () => {
   it("delivers each notice the server sends", async () => {
     const heard = vi.fn<(notice: EventNotice) => void>();
-    events.subscribeEvents(heard);
+    subscribe(heard);
     const socket = await connected();
 
     socket.frame(
@@ -95,16 +114,16 @@ describe("subscribeEvents", () => {
   });
 
   it("shares one connection between listeners", async () => {
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
     await connected();
 
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
   it("closes the connection when the last listener leaves", async () => {
-    const first = events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
-    const second = events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    const first = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const second = subscribe(vi.fn<(notice: EventNotice) => void>());
     const socket = await connected();
 
     first();
@@ -119,7 +138,7 @@ describe("subscribeEvents", () => {
     { label: "a frame that is not JSON", frame: "not json" },
   ])("ignores $label", async ({ frame }) => {
     const heard = vi.fn<(notice: EventNotice) => void>();
-    events.subscribeEvents(heard);
+    subscribe(heard);
     const socket = await connected();
 
     socket.frame(frame);
@@ -128,7 +147,7 @@ describe("subscribeEvents", () => {
   });
 
   it("reconnects after the connection drops", async () => {
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
     const first = await connected();
 
     first.drop();
@@ -139,7 +158,7 @@ describe("subscribeEvents", () => {
 
   it("backs off while the server stays unreachable", async () => {
     opened.mockRejectedValue(new Error("offline"));
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
     await vi.advanceTimersByTimeAsync(0);
     expect(opened).toHaveBeenCalledTimes(1);
 
@@ -153,7 +172,7 @@ describe("subscribeEvents", () => {
   });
 
   it("closes a connection that opens after the last listener left", async () => {
-    const stop = events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
     stop();
 
     await vi.advanceTimersByTimeAsync(0);
@@ -163,7 +182,7 @@ describe("subscribeEvents", () => {
   });
 
   it("stops reconnecting once nobody listens", async () => {
-    const stop = events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
     const socket = await connected();
     socket.drop();
 
@@ -176,7 +195,7 @@ describe("subscribeEvents", () => {
 
 describe("followModel", () => {
   it("subscribes to the Model's channel once the socket is open", async () => {
-    events.followModel(3, vi.fn<(notice: EventNotice) => void>());
+    follow(3, vi.fn<(notice: EventNotice) => void>());
     const socket = await connected();
 
     expect(socket.sent()).toEqual([JSON.stringify({ subscribe: "model:3" })]);
@@ -184,7 +203,7 @@ describe("followModel", () => {
 
   it("hears only its own Model's derivatives", async () => {
     const heard = vi.fn<(notice: EventNotice) => void>();
-    events.followModel(3, heard);
+    follow(3, heard);
     const socket = await connected();
 
     socket.frame(
@@ -212,7 +231,7 @@ describe("followModel", () => {
 
   it("hears a resync", async () => {
     const heard = vi.fn<(notice: EventNotice) => void>();
-    events.followModel(3, heard);
+    follow(3, heard);
     const socket = await connected();
 
     socket.frame(JSON.stringify({ type: "resync" }));
@@ -221,7 +240,7 @@ describe("followModel", () => {
   });
 
   it("follows the Model again on a new connection", async () => {
-    events.followModel(3, vi.fn<(notice: EventNotice) => void>());
+    follow(3, vi.fn<(notice: EventNotice) => void>());
     const first = await connected();
     first.drop();
     await vi.advanceTimersByTimeAsync(1_000);
@@ -233,9 +252,9 @@ describe("followModel", () => {
   });
 
   it("unsubscribes when the last view of the Model leaves", async () => {
-    const first = events.followModel(3, vi.fn<(notice: EventNotice) => void>());
-    const second = events.followModel(3, vi.fn<(notice: EventNotice) => void>());
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    const first = follow(3, vi.fn<(notice: EventNotice) => void>());
+    const second = follow(3, vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
     const socket = await connected();
 
     first();
@@ -262,6 +281,7 @@ describe("the default connection", () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    FakeWebSocket.last = null;
     // The ticket comes from the real API client over a stubbed network.
     vi.stubGlobal(
       "fetch",
@@ -280,10 +300,25 @@ describe("the default connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("cancels the ticket when its last subscriber leaves", async () => {
+    const ticket = Promise.withResolvers<Response>();
+    const fetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(
+      () => ticket.promise,
+    );
+    vi.stubGlobal("fetch", fetch);
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
+    stop();
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    ticket.resolve(new Response(JSON.stringify({ ticket: "old", expires_in: 30 })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeWebSocket.last).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("relays frames from a ticketed events socket", async () => {
     const heard = vi.fn<(notice: EventNotice) => void>();
-    events.subscribeEvents(heard);
-    events.followModel(3, vi.fn<(notice: EventNotice) => void>());
+    subscribe(heard);
+    follow(3, vi.fn<(notice: EventNotice) => void>());
     await vi.advanceTimersByTimeAsync(0);
     const ws = FakeWebSocket.last!;
 
@@ -296,7 +331,7 @@ describe("the default connection", () => {
   });
 
   it("closes the underlying socket when nobody listens", async () => {
-    const stop = events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
     await vi.advanceTimersByTimeAsync(0);
     const ws = FakeWebSocket.last!;
     ws.onopen?.();
@@ -307,7 +342,7 @@ describe("the default connection", () => {
   });
 
   it("reconnects when the underlying socket closes", async () => {
-    events.subscribeEvents(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
     await vi.advanceTimersByTimeAsync(0);
     const first = FakeWebSocket.last!;
     first.onopen?.();
@@ -316,5 +351,99 @@ describe("the default connection", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(FakeWebSocket.last).not.toBe(first);
+  });
+});
+
+/** Disposing a connection invalidates its pending factory, handlers and reconnect timer. */
+describe("event connection lifetimes", () => {
+  it("closes an abandoned connection after listeners return", async () => {
+    const obsolete = Promise.withResolvers<EventSocket>();
+    opened.mockReturnValueOnce(obsolete.promise);
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
+    stop();
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    const old = new FakeSocket();
+    obsolete.resolve(old);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(old.close).toHaveBeenCalledOnce();
+    expect(sockets).toHaveLength(1);
+    sockets[0].open();
+    sockets[0].frame('{"type":"resync"}');
+    expect(heard).toHaveBeenCalledWith({ type: "resync" });
+  });
+
+  it("ignores callbacks from a disposed event connection", async () => {
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const old = await connected();
+    const oldMessage = old.onmessage;
+    const oldClose = old.onclose;
+    stop();
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    await connected();
+    oldMessage?.({ data: '{"type":"resync"}' });
+    oldClose?.();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(heard).not.toHaveBeenCalled();
+    expect(opened).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a failed abandoned factory", async () => {
+    const obsolete = Promise.withResolvers<EventSocket>();
+    opened.mockReturnValueOnce(obsolete.promise);
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
+    stop();
+    const fresh = subscribe(vi.fn<(notice: EventNotice) => void>());
+    await connected();
+    obsolete.reject(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(0);
+    fresh();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(opened).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops a notice delivery when a listener retires the session", async () => {
+    subscribe(() => clearLogin());
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    const socket = await connected();
+    socket.frame('{"type":"resync"}');
+    expect(heard).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledOnce();
+  });
+
+  it("retires the active event socket on logout", async () => {
+    subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+    clearLogin();
+    expect(socket.close).toHaveBeenCalledOnce();
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(opened).toHaveBeenCalledOnce();
+  });
+
+  it("reauthorizes event channels after login", async () => {
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    follow(3, heard);
+    const first = await connected();
+    clearLogin();
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    const current = await connected();
+    expect(current).not.toBe(first);
+    expect(current.sent()).toEqual(['{"subscribe":"model:3"}']);
+    current.frame('{"type":"resync"}');
+    expect(heard).toHaveBeenCalledWith({ type: "resync" });
+  });
+
+  it("keeps Model follow cleanup idempotent", async () => {
+    const first = follow(3, vi.fn<(notice: EventNotice) => void>());
+    follow(3, vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+    first();
+    first();
+    expect(socket.sent()).not.toContain('{"unsubscribe":"model:3"}');
   });
 });
