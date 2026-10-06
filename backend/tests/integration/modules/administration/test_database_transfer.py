@@ -293,7 +293,7 @@ class TestLibraryContractTransfer:
     @pytest.mark.parametrize(
         "provisioned", [False, True], ids=["empty-schema", "fresh-bootstrap"]
     )
-    def test_copies_authority_and_edit_versions_without_trigger_interference(
+    def test_preserves_versioned_library_through_database_transfer(
         self, databases, provisioned
     ):
         from app.db.models import Model, ModelTagLink, MultipartModel, MultipartPart
@@ -384,7 +384,7 @@ class TestLibraryContractTransfer:
                 == 1
             )
 
-    def test_failed_copy_preserves_bootstrap_authority_and_live_triggers(
+    def test_rolls_back_failed_transfer_to_guarded_bootstrap(
         self, databases, monkeypatch
     ):
         from app.modules.administration import database_transfer

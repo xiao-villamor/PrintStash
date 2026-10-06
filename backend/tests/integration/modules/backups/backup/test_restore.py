@@ -87,7 +87,7 @@ class TestRestoredLibraryAuthority:
                 session.exec(select(RestoreMarker)).one().backup_id == "restore-epoch"
             )
 
-    def test_failed_marker_transaction_preserves_previous_epoch_and_marker(
+    def test_rolls_back_failed_marker_publication_atomically(
         self, backup_env: BackupEnv
     ) -> None:
         with backup_env.new_session() as session:

@@ -1,13 +1,152 @@
 """Fresh and upgraded databases enforce transactional catalog/edit versions."""
 
 import pytest
-from sqlalchemy import text
+from printstash_core.search.passages import SearchSubject, SubjectType
+from sqlalchemy import and_, select, text, update
+from sqlmodel import Session, SQLModel
 
+from app.core.errors import OperationError
 from app.db.library_contracts_v1 import BROWSE_TABLES
-from app.modules.library.model_views.browse import _revision
+from app.db.models import User
+from app.modules.library import commands, multipart_models, provenance
+from app.modules.library.model_views.browse import _revision, page_items
+from app.schemas.library_browse import BrowseQuery
+from app.schemas.multipart_models import MultipartChoiceWrite, MultipartPartWrite
+from tests.factories import (
+    identity,
+    library,
+    ops,
+    printers,
+    search,
+    similarity,
+    vault_migrations,
+)
+from tests.factories import provenance as provenance_fixtures
+
+
+@pytest.fixture
+def catalog_writer(db_session: Session, table: str) -> User:
+    """Persist one valid target of a catalog writer through existing builders."""
+    user = identity.build_user(db_session, superuser=True)
+    folder = library.build_collection(db_session)
+    first = library.build_model(db_session, "Anchor")
+    second = library.build_model(db_session, "Tail")
+    group = library.build_multipart_model(db_session)
+    artifact = library.build_file(db_session, first)
+    tag = library.build_tag(db_session)
+    printer = printers.build_printer(db_session)
+    source = provenance_fixtures.build_provenance_source(db_session, first)
+    passage = search.build_search_passage(
+        db_session, SearchSubject(SubjectType.MODEL, first.id)
+    )
+
+    def parts():
+        return multipart_models.replace_parts(
+            db_session,
+            user,
+            group,
+            [
+                MultipartPartWrite(
+                    name="Body", choices=[MultipartChoiceWrite(model_id=first.id)]
+                )
+            ],
+        )
+
+    seeders = {
+        "models": lambda: first,
+        "multipart_models": lambda: group,
+        "multipart_parts": parts,
+        "multipart_model_choices": parts,
+        "collections": lambda: folder,
+        "tags": lambda: tag,
+        "model_tags": lambda: library.tag_model(db_session, first, tag),
+        "collection_tags": lambda: library.tag_collection(db_session, folder, tag),
+        "file_tags": lambda: library.tag_file(db_session, artifact, tag),
+        "multipart_model_tags": lambda: library.tag_multipart_model(
+            db_session, group, tag
+        ),
+        "model_stars": lambda: commands.star_model(first.id, user, db_session),
+        "multipart_model_stars": lambda: library.build_multipart_model_star(
+            db_session, user, group
+        ),
+        "files": lambda: artifact,
+        "metadata": lambda: library.build_metadata(db_session, artifact),
+        "print_jobs": lambda: printers.build_print_job(db_session, artifact),
+        "printer_files": lambda: printers.build_printer_file(
+            db_session, printer, file=artifact
+        ),
+        "printers": lambda: printer,
+        "documents": lambda: ops.build_document(db_session),
+        "collection_permissions": lambda: identity.grant_collection_role(
+            db_session, user, folder
+        ),
+        "users": lambda: user,
+        "model_provenance_sources": lambda: source,
+        "model_provenance_fields": lambda: provenance.set_user_override(
+            db_session,
+            provenance_source_id=source.id,
+            field_name="title",
+            value="Override",
+        ),
+        "model_source_covers": lambda: provenance_fixtures.build_cover(
+            db_session, source
+        ),
+        "similarity_candidates": lambda: similarity.build_similarity_candidate(
+            db_session, first, second
+        ),
+        "similarity_review_decisions": lambda: similarity.build_similarity_decision(
+            db_session,
+            similarity.build_similarity_candidate(db_session, first, second),
+            user,
+        ),
+        "search_passages": lambda: passage,
+        "search_lexical_postings": lambda: search.build_search_lexical_posting(
+            db_session, passage
+        ),
+        "search_lexical_terms": lambda: search.build_search_lexical_term(db_session),
+        "search_lexical_state": lambda: search.build_search_lexical_state(db_session),
+        "index_generations": lambda: similarity.build_index_generation(
+            db_session, similarity.build_embedding_space(db_session)
+        ),
+        "user_search_preferences": lambda: search.build_user_search_preferences(
+            db_session, user
+        ),
+        "vault_generations": lambda: vault_migrations.build_vault_generation(
+            db_session, vault_migrations.build_vault_migration(db_session)
+        ),
+    }
+    assert set(seeders) == set(BROWSE_TABLES)
+    seeders[table]()
+    db_session.commit()
+    return user
 
 
 class TestInstall:
+    @pytest.mark.parametrize("table", BROWSE_TABLES, ids=BROWSE_TABLES)
+    def test_rejects_continuation_after_each_catalog_dependency_writer(
+        self, db_session: Session, table: str, catalog_writer: User
+    ):
+        page = page_items(db_session, catalog_writer, BrowseQuery(limit=1))
+        assert page.next_cursor is not None
+        target = SQLModel.metadata.tables[table]
+        keys = list(target.primary_key.columns)
+        row = db_session.execute(select(*keys).limit(1)).one()
+        identity = and_(*(key == value for key, value in zip(keys, row, strict=True)))
+        # The contract conservatively observes every committed writer, including
+        # no-op updates. All PKs and real FK/check constraints remain in force.
+        result = db_session.execute(
+            update(target).where(identity).values({keys[0].name: keys[0]})
+        )
+        assert result.rowcount == 1
+        db_session.commit()
+
+        with pytest.raises(OperationError, match="browse_refresh_required"):
+            page_items(
+                db_session,
+                catalog_writer,
+                BrowseQuery(limit=1, cursor=page.next_cursor),
+            )
+
     @pytest.mark.parametrize("table", BROWSE_TABLES, ids=BROWSE_TABLES)
     def test_covers_every_dependency_writer(self, db_session, table):
         rows = db_session.execute(

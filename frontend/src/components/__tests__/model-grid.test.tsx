@@ -1784,25 +1784,102 @@ describe("ModelBrowser", () => {
       expect(screen.queryAllByRole("checkbox", { name: /^Select / })).toHaveLength(0);
     });
 
-    it("selects every model the current filters match", async () => {
-      // The toolbar acts on ids, so "select all matching" has to fetch the ids
-      // the filters resolve to rather than the page the user can see.
+    it.each([
+      { label: "selects every model through valid browse pages", emptyMiddle: false },
+      { label: "selects models beyond an empty continuation page", emptyMiddle: true },
+    ])("$label", async ({ emptyMiddle }) => {
       const user = userEvent.setup();
+      const first = aModelListItem({ id: 1, name: "Benchy" });
+      const later = aModelListItem({ id: 2, name: "Cube" });
+      const group = aMultipartSet();
+      let selecting = false;
       const { requests } = renderVault({
-        models: [
-          aModelListItem({ id: 1, name: "Benchy" }),
-          aModelListItem({ id: 2, name: "Cube" }),
-        ],
+        models: [first],
+        routes: {
+          "GET /api/v1/models/browse": (url) => {
+            const params = new URL(url, "http://test").searchParams;
+            // BrowseQuery independently defines this wire limit. The stand-in
+            // must reject requests the actual FastAPI endpoint would reject.
+            const limit = Number(params.get("limit"));
+            if (limit < 1 || limit > 100) return json({ detail: "invalid_limit" }, 422);
+            const cursor = params.get("cursor");
+            const empty = selecting && emptyMiddle && cursor === "next";
+            return json({
+              items: empty
+                ? []
+                : cursor
+                  ? [{ kind: "model", model: later }]
+                  : [
+                      { kind: "model", model: first },
+                      { kind: "multipart", multipart: group },
+                    ],
+              total: 3,
+              next_cursor: empty ? "last" : cursor ? null : "next",
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            });
+          },
+        },
       });
       await screen.findByText("Benchy");
       await openLibraryTools();
       await user.click(screen.getByRole("button", { name: "Select" }));
+      selecting = true;
+      await user.click(screen.getByRole("button", { name: /Select all matching models/ }));
 
+      expect(await screen.findAllByText("2 selected")).not.toHaveLength(0);
+      const pages = requests().filter((call) => call.url.includes("/models/browse?"));
+      expect(
+        pages.some(
+          (call) =>
+            new URL(call.url, "http://test").searchParams.get("cursor") ===
+            (emptyMiddle ? "last" : "next"),
+        ),
+      ).toBe(true);
+      expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeChecked();
+    });
+
+    it("preserves selection when continuation becomes stale", async () => {
+      const user = userEvent.setup();
+      const models = [
+        aModelListItem({ id: 1, name: "Benchy" }),
+        aModelListItem({ id: 2, name: "Cube" }),
+      ];
+      let selecting = false;
+      const { requests } = renderVault({
+        models,
+        routes: {
+          "GET /api/v1/models/browse": (url) => {
+            const params = new URL(url, "http://test").searchParams;
+            const limit = Number(params.get("limit"));
+            if (limit < 1 || limit > 100) return json({ detail: "invalid_limit" }, 422);
+            if (params.has("cursor")) return json({ detail: "browse_refresh_required" }, 409);
+            return json({
+              items: (selecting ? models.slice(0, 1) : models).map((model) => ({
+                kind: "model",
+                model,
+              })),
+              total: 2,
+              next_cursor: selecting ? "stale" : null,
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            });
+          },
+        },
+      });
+      await selectBoth(user);
+      selecting = true;
       await user.click(screen.getByRole("button", { name: /Select all matching models/ }));
 
       await waitFor(() =>
-        expect(requests().some((call) => call.url.includes("limit=500"))).toBe(true),
+        expect(requests().some((call) => call.url.includes("cursor=stale"))).toBe(true),
       );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /Select all matching models/ })).toBeEnabled(),
+      );
+      expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "Select Cube" })).toBeChecked();
+      expect(screen.getAllByText("2 selected")).not.toHaveLength(0);
     });
   });
 
@@ -2530,6 +2607,39 @@ describe("ModelBrowser", () => {
   });
 
   describe("pagination", () => {
+    it("retries a failed continuation without discarding read pages", async () => {
+      const user = userEvent.setup();
+      const first = aModelListItem({ id: 1, name: "Already read" });
+      const later = aModelListItem({ id: 2, name: "Next page" });
+      let rateLimited = true;
+      renderVault({
+        models: [first],
+        routes: {
+          "GET /api/v1/models/browse": (url) => {
+            const continuation = new URL(url, "http://test").searchParams.has("cursor");
+            if (continuation && rateLimited) return json({ detail: "rate_limited" }, 429);
+            return json({
+              items: [{ kind: "model", model: continuation ? later : first }],
+              total: 2,
+              next_cursor: continuation ? null : "next",
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            });
+          },
+        },
+      });
+      expect(await screen.findByText("Already read")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      expect(await screen.findByText("[429] rate_limited")).toBeVisible();
+      expect(screen.getByText("Already read")).toBeVisible();
+      expect(screen.queryByText("Next page")).not.toBeInTheDocument();
+      rateLimited = false;
+      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      expect(await screen.findByText("Next page")).toBeVisible();
+      expect(screen.getByText("Already read")).toBeVisible();
+      expect(screen.queryByText("[429] rate_limited")).not.toBeInTheDocument();
+    });
+
     it("keeps a wide folder level to one page until more is requested", async () => {
       const user = userEvent.setup();
       const first = aCollectionNode();

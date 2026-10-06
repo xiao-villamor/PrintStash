@@ -12,6 +12,12 @@ TIED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 class TestBrowseModels:
+    def test_denies_unauthenticated_library_browsing(self, client):
+        response = client.get(BROWSE)
+
+        assert response.status_code == 401
+        assert "items" not in response.json()
+
     def test_returns_mixed_cards(
         self, client, auth_headers, make_model, make_multipart_model
     ):
@@ -664,7 +670,7 @@ class TestBrowseAccessRevision:
 
 
 class TestBrowseThumbnails:
-    def test_deduplicates_and_preserves_requested_order(
+    def test_returns_thumbnails_in_first_occurrence_order(
         self, client, auth_headers, make_model
     ):
         first = make_model()
@@ -702,7 +708,7 @@ class TestBrowseThumbnails:
         response = client.get(BROWSE + "/thumbnails", params={"model_id": 1})
         assert response.status_code == 401, response.text
 
-    def test_omits_missing_trashed_and_unreadable_models(
+    def test_returns_only_visible_live_model_thumbnails(
         self, client, make_user, headers_for, make_collection, make_model, grant_role
     ):
         user = make_user()

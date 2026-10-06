@@ -1228,7 +1228,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const all: ModelListItem[] = [];
       let cursor: string | undefined;
       do {
-        const page = await listLibraryPage({ ...browseParams, limit: 500, cursor });
+        const page = await listLibraryPage({ ...browseParams, cursor });
         all.push(...page.items.flatMap((item) => (item.kind === "model" ? [item.model] : [])));
         cursor = page.next_cursor ?? undefined;
       } while (cursor !== undefined);
