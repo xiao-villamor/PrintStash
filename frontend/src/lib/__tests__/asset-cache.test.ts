@@ -89,7 +89,10 @@ describe("assetCache", () => {
     window.dispatchEvent(new Event("printstash:auth-changed"));
     const newRead = getCachedAssetUrl(path);
     previous.resolve(new Response("previous owner"));
-    expect(await oldOutcome).toEqual(new Error("request_session_changed"));
+    expect(await oldOutcome).toMatchObject({
+      name: "AbortError",
+      message: "request_session_changed",
+    });
     expect(getCachedAssetUrl(path)).toBe(newRead);
     current.resolve(new Response("current owner"));
     expect(await newRead).toBe(created[0]);

@@ -1,4 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
+import { onAuthChange } from "@/lib/auth-store";
 
 import type { CollectionRole } from "@/types";
 
@@ -27,6 +28,9 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// Authentication retires private Query state independently of HTTP imports.
+onAuthChange(() => queryClient.clear());
 
 // ---------------------------------------------------------------------------
 // Query keys — one factory, mirroring the backend resource roots so keys stay

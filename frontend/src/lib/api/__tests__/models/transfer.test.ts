@@ -21,6 +21,7 @@ import {
   downloadModelExport,
   importLibraryArchive,
 } from "@/lib/api/models";
+import { clearLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastCall, respondWith } from "../_wire";
@@ -127,5 +128,33 @@ describe("importLibraryArchive", () => {
 
     expectRequest("/api/v1/models/library-import", "POST");
     expect(lastCall().init.body).toBeInstanceOf(FormData);
+  });
+});
+
+/** Browser save is publication of protected bytes and must be fenced after body consumption. */
+describe("download session isolation", () => {
+  it.each([
+    { label: "export", download: () => downloadModelExport("json") },
+    { label: "archive", download: () => downloadLibraryArchive() },
+  ])("never saves retired $label bytes", async ({ download }) => {
+    const body = Promise.withResolvers<Uint8Array>();
+    const response = new Response(
+      new ReadableStream({
+        async start(controller) {
+          controller.enqueue(await body.promise);
+          controller.close();
+        },
+      }),
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    const { clicked, revoked } = stubBrowserSave();
+    const pending = download();
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+    clearLogin();
+    body.resolve(new TextEncoder().encode("private bytes"));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(clicked).toEqual([]);
+    expect(revoked).toEqual([]);
   });
 });

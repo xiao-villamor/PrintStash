@@ -1,12 +1,4 @@
-import {
-  authHeaders,
-  getJson,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
-  sendAction,
-  sendJson,
-} from "@/lib/api/request";
+import { getJson, requestMutation, sendAction, sendJson } from "@/lib/api/request";
 import type {
   ModelProvenancePatch,
   ModelProvenanceRead,
@@ -36,13 +28,11 @@ export async function putModelSourceCover(
   const form = new FormData();
   form.append("file", file);
   const path = sourceCoverPath(modelId, sourceId);
-  const res = await fetch(getUrl(path), {
+  return requestMutation<ModelSourceCoverRead>(path, {
     method: "PUT",
-    headers: authHeaders(),
+
     body: form,
   });
-  invalidateApiCache(path);
-  return handleResponse<ModelSourceCoverRead>(res);
 }
 
 export function deleteModelSourceCover(modelId: number, sourceId: number): Promise<void> {

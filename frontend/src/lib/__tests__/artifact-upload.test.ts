@@ -14,6 +14,7 @@ import {
   uploadArtifact,
   type ArtifactUploadApi,
 } from "@/lib/artifact-upload";
+import { clearLogin } from "@/lib/auth-store";
 import type { ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 
 const NOW = "2026-09-09T00:00:00Z";
@@ -98,6 +99,14 @@ describe("uploadArtifact", () => {
       },
     );
 
+    expect(api.createArtifactUpload).toHaveBeenCalledWith({
+      purpose: "model",
+      target_role: "new_model",
+      filename: "part.stl",
+      media_type: "model/stl",
+      size_bytes: 8,
+      sha256: "a".repeat(64),
+    });
     expect(rememberedArtifactUploads()).toEqual(["session-1"]);
     expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
     expect(sessions).toEqual(["session-1"]);
@@ -257,5 +266,59 @@ describe("sha256Blob", () => {
     withoutSubtleCrypto();
 
     await expect(sha256Blob(blob)).resolves.toBe(native);
+  });
+});
+
+/** Authentication bounds the entire upload workflow, including local hashing and signed bytes. */
+describe("upload session isolation", () => {
+  it("stops an upload retired during hashing", async () => {
+    const api = anApi();
+    const hash = Promise.withResolvers<string>();
+    const pending = uploadArtifact(
+      new File(["12345678"], "part.stl"),
+      { purpose: "model", target_role: "new_model" },
+      { api, digest: () => hash.promise },
+    );
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    hash.resolve("a".repeat(64));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(api.createArtifactUpload).not.toHaveBeenCalled();
+    expect(rememberedArtifactUploads()).toEqual([]);
+  });
+
+  it("never records a signed-part receipt after session retirement", async () => {
+    const api = anApi();
+    vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ mode: "native_parts" }));
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "native_parts",
+      chunk_size: 8,
+      max_parallel: 1,
+      upload_path: "/opaque/parts/{part_number}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.signArtifactUploadPart).mockResolvedValue({
+      url: "https://objects.example.test/private-part?signature=temporary",
+      method: "PUT",
+      headers: { "x-checksum": "required" },
+      expires_at: NOW,
+    });
+    const headers = Promise.withResolvers<Response>();
+    const fetcher = vi.fn<typeof fetch>().mockReturnValueOnce(headers.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const pending = resumeArtifactUpload("session-1", new File(["12345678"], "part.stl"), {
+      api,
+      digest,
+    });
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    clearLogin();
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    headers.resolve(new Response(null, { headers: { etag: '"part-1"' } }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(api.recordArtifactUploadPart).not.toHaveBeenCalled();
+    expect(api.finalizeArtifactUpload).not.toHaveBeenCalled();
   });
 });

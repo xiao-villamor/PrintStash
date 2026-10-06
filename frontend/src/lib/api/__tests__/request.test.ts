@@ -13,11 +13,9 @@
  * so it is attacker-shaped: a name with a path separator or a newline in it is
  * what this sanitises before it reaches the download attribute.
  *
- * **The GET cache.** Caching is what keeps a navigation from refetching the same
- * config four times, and the risk is entirely staleness: an in-flight
- * deduplication that outlives its usefulness, or a cache that survives a
- * mutation, both show the user data they just changed away. So `fresh: true` and
- * `invalidateApiCache` are asserted as hard bypasses, and every mutation clears.
+ * **Session transport.** Query owns JSON freshness. The HTTP layer reads every
+ * time and fences headers, bodies and acknowledged writes against the session
+ * incarnation that started them. Caller cancellation retains its reason.
  *
  * **Auth headers.** No token is read out of legacy browser storage, and no empty
  * `Authorization` header is sent — the second would look like a malformed
@@ -39,17 +37,12 @@ import {
   sanitizeDownloadFilename,
   sendAction,
   sendFormWithProgress,
+  sendForm,
   sendJson,
 } from "@/lib/api/request";
+import { queryClient, queryKeys } from "@/lib/query-client";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
-import { getUser, storeLogin } from "@/lib/auth-store";
-
-/**
- * request.ts keeps a small in-memory GET cache (30s TTL) with in-flight
- * deduplication, sitting *underneath* TanStack Query. These tests pin its real
- * behaviour: cache hits skip the network, concurrent calls share one request,
- * `fresh` bypasses the cache, and any mutation clears it.
- */
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 
 /** Any payload the API can serialise as a JSON response body. */
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -82,8 +75,9 @@ function blobResponse(headers: HeadersInit = {}): Response {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  // Start each test with an empty cache (also drops any prior inflight map).
-  invalidateApiCache();
+  // Clear Query state independently of transport (which does not cache).
+  queryClient.clear();
+  clearLogin();
   window.localStorage.clear();
 });
 
@@ -252,7 +246,7 @@ describe("downloadFilename", () => {
 });
 
 describe("getJson", () => {
-  it("drops cached data when another tab changes the session", async () => {
+  it("reads current data after another tab changes the session", async () => {
     respondWith([{ name: "old owner" }]);
     await getJson("/api/v1/tags");
     window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
@@ -277,30 +271,15 @@ describe("getJson", () => {
       const outcome = oldRead.catch((error: Error) => error);
       storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
       pending.resolve(jsonResponse({ detail: "expired" }, 401));
-      expect(await outcome).toEqual(new Error("request_session_changed"));
+      expect(await outcome).toMatchObject({
+        name: "AbortError",
+        message: "request_session_changed",
+      });
       expect(getUser()?.id).toBe(9);
     },
   );
 
-  it("does not repopulate caches from a previous session's pending read", async () => {
-    const previous = Promise.withResolvers<Response>();
-    const current = Promise.withResolvers<Response>();
-    fetchMock.mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
-    const oldRead = getJson("/api/v1/tags");
-    const oldOutcome = oldRead.catch((error: Error) => error);
-    window.dispatchEvent(new Event("printstash:auth-changed"));
-    const newRead = getJson("/api/v1/tags");
-    previous.resolve(jsonResponse([{ name: "previous owner" }]));
-    expect(await oldOutcome).toEqual(new Error("request_session_changed"));
-    const shared = getJson("/api/v1/tags");
-    current.resolve(jsonResponse([{ name: "current owner" }]));
-    expect(await newRead).toEqual([{ name: "current owner" }]);
-    expect(await shared).toEqual([{ name: "current owner" }]);
-    expect(await getJson("/api/v1/tags")).toEqual([{ name: "current owner" }]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not repopulate an invalidated cache from a pending read", async () => {
+  it("does not reuse a response that preceded explicit invalidation", async () => {
     const previous = Promise.withResolvers<Response>();
     fetchMock.mockReturnValueOnce(previous.promise);
     const oldRead = getJson("/api/v1/tags");
@@ -312,46 +291,37 @@ describe("getJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("serves a second call from cache without a second fetch", async () => {
-    respondWith([{ id: 1 }]);
-
-    const first = await getJson("/api/v1/models");
-    const second = await getJson("/api/v1/models");
-
-    expect(first).toEqual([{ id: 1 }]);
-    expect(second).toEqual([{ id: 1 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("returns fresh JSON on every transport read", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2 }));
+    expect(await getJson("/api/v1/models")).toEqual({ id: 1 });
+    expect(await getJson("/api/v1/models")).toEqual({ id: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("deduplicates concurrent in-flight requests for the same path", async () => {
-    let resolve!: (r: Response) => void;
-    fetchMock.mockReturnValue(
-      new Promise<Response>((r) => {
-        resolve = r;
-      }),
-    );
-
-    const both = Promise.all([getJson("/api/v1/tags"), getJson("/api/v1/tags")]);
-    resolve(jsonResponse([{ id: 9 }]));
-    const [a, b] = await both;
-
-    expect(a).toEqual([{ id: 9 }]);
-    expect(b).toEqual([{ id: 9 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("keeps concurrent transport reads independent", async () => {
+    const first = Promise.withResolvers<Response>();
+    const second = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const reads = [getJson("/api/v1/models"), getJson("/api/v1/models")];
+    second.resolve(jsonResponse({ id: 2 }));
+    first.resolve(jsonResponse({ id: 1 }));
+    expect(await Promise.all(reads)).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
-  it("bypasses the cache when { fresh: true } is passed", async () => {
+  it("accepts the legacy fresh option on uncached reads", async () => {
     respondWith([]);
 
     await getJson("/api/v1/printers", { fresh: true });
     await getJson("/api/v1/printers", { fresh: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // fresh reads must not be cached or served to non-fresh reads either.
+    // Compatibility options cannot reinstate a transport cache.
     expect(initOf(0)).toMatchObject({ cache: "no-store" });
   });
 
-  it("refetches after invalidateApiCache clears the cache", async () => {
+  it("reads the server after the compatibility invalidation bridge", async () => {
     respondWith([{ id: 1 }]);
 
     await getJson("/api/v1/models");
@@ -371,7 +341,7 @@ describe("protected byte session isolation", () => {
     const outcome = oldRead.catch((error: Error) => error);
     storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
     pending.resolve(jsonResponse({ detail: "expired" }, 401));
-    expect(await outcome).toEqual(new Error("request_session_changed"));
+    expect(await outcome).toMatchObject({ name: "AbortError", message: "request_session_changed" });
     expect(getUser()?.id).toBe(9);
   });
 });
@@ -398,8 +368,8 @@ describe("authHeaders", () => {
 });
 
 describe("sendJson", () => {
-  it("sendJson issues the right method/body and clears the GET cache", async () => {
-    // Prime the cache, then mutate and confirm a follow-up GET refetches.
+  it("sends the requested JSON method and payload", async () => {
+    // Reads remain network requests around an acknowledged mutation.
     respondWith([{ id: 1 }]);
     await getJson("/api/v1/collections");
 
@@ -413,7 +383,7 @@ describe("sendJson", () => {
 
     respondWith([{ id: 1 }, { id: 2 }]);
     await getJson("/api/v1/collections");
-    // 1 initial GET + 1 POST + 1 refetched GET = 3 (cache was busted).
+    // One initial GET, one POST and one current GET.
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -423,7 +393,7 @@ describe("sendJson", () => {
     expect(initOf(0)).toMatchObject({ method: "DELETE" });
   });
 
-  it("keeps cached reads when a mutation fails", async () => {
+  it("reads current server state after a failed mutation", async () => {
     respondWith([{ id: 1 }]);
     await getJson("/api/v1/models");
 
@@ -433,8 +403,8 @@ describe("sendJson", () => {
     ).rejects.toMatchObject({ status: 400 });
 
     respondWith([{ id: 2 }]);
-    expect(await getJson("/api/v1/models")).toEqual([{ id: 1 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await getJson("/api/v1/models")).toEqual([{ id: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -531,6 +501,149 @@ describe("getAuthenticatedText", () => {
     const content = await getAuthenticatedText("/api/v1/files/7/download", controller.signal);
 
     expect(content).toBe("G1 X10");
-    expect(initOf(0)).toMatchObject({ cache: "no-cache", signal: controller.signal });
+    expect(initOf(0).cache).toBe("no-cache");
+    controller.abort();
+    expect(initOf(0).signal?.aborted).toBe(true);
+  });
+});
+
+/** Deferred bodies expose races that header-only transport guards cannot catch. */
+describe("session request completion", () => {
+  function establishSession(id = 7) {
+    storeLogin("", { id, username: `owner-${id}`, email: null, is_superuser: false });
+  }
+
+  it.each([
+    { label: "JSON", read: () => getJson("/api/v1/models") },
+    { label: "text", read: () => getAuthenticatedText("/api/v1/files/7/download") },
+    { label: "blob", read: () => getAuthenticatedBlob("/api/v1/files/7/download") },
+  ])("rejects old-session response bodies for $label", async ({ read }) => {
+    establishSession();
+    const body = Promise.withResolvers<Uint8Array>();
+    const response = new Response(
+      new ReadableStream({
+        async start(controller) {
+          controller.enqueue(await body.promise);
+          controller.close();
+        },
+      }),
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    const pending = read();
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+    establishSession(9);
+    body.resolve(new TextEncoder().encode('{"id":7}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+
+  it("ignores unauthorized bodies from retired sessions", async () => {
+    establishSession();
+    const body = Promise.withResolvers<Uint8Array>();
+    const response = new Response(
+      new ReadableStream({
+        async start(controller) {
+          controller.enqueue(await body.promise);
+          controller.close();
+        },
+      }),
+      { status: 401 },
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    const pending = getJson("/api/v1/auth/me");
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+    establishSession(9);
+    body.resolve(new TextEncoder().encode('{"detail":"expired"}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+
+  it("preserves current-session unauthorized errors", async () => {
+    establishSession();
+    respondWith({ detail: "invalid_or_expired_token" }, 401);
+    await expect(getJson("/api/v1/auth/me")).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_or_expired_token",
+    });
+    expect(getUser()).toBeNull();
+  });
+
+  it.each([
+    { label: "JSON", write: () => sendJson("/api/v1/models", "POST", {}) },
+    { label: "form", write: () => sendForm("/api/v1/ingest", new FormData()) },
+    { label: "action", write: () => sendAction("/api/v1/models/7", "DELETE") },
+  ])("rejects retired mutation acknowledgements for $label", async ({ write }) => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = write();
+    const outcome = pending.catch((error: Error) => error);
+    establishSession(9);
+    queryClient.setQueryData(queryKeys.models, [{ id: 9 }]);
+    headers.resolve(jsonResponse({ id: 7 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(queryClient.getQueryData(queryKeys.models)).toEqual([{ id: 9 }]);
+    expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(false);
+  });
+
+  it("aborts pending transports on logout", async () => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = getJson("/api/v1/models");
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    expect(initOf(0).signal?.aborted).toBe(true);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects same-account session replacement", async () => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = getJson("/api/v1/models");
+    const outcome = pending.catch((error: Error) => error);
+    establishSession();
+    expect(initOf(0).signal?.aborted).toBe(true);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+  });
+
+  it("preserves caller cancellation", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const caller = new AbortController();
+    const reason = new DOMException("Navigation cancelled", "AbortError");
+    const pending = getJson("/api/v1/models", { signal: caller.signal });
+    const outcome = pending.catch((error: Error) => error);
+    caller.abort(reason);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toBe(reason);
+  });
+});
+
+/** Upload progress belongs to the session that started the browser transfer. */
+describe("upload session retirement", () => {
+  it("aborts retired upload progress", async () => {
+    FetchBackedXhr.requests = [];
+    vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
+    fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+    const progress = vi.fn<(loaded: number, total: number) => void>();
+    const pending = sendFormWithProgress(
+      "/api/v1/ingest",
+      new FormData(),
+      new AbortController().signal,
+      progress,
+    );
+    const outcome = pending.catch((error: Error) => error);
+    const transfer = FetchBackedXhr.requests[0];
+    transfer.emitProgress(1, 8);
+    clearLogin();
+    transfer.emitProgress(8, 8);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(progress.mock.calls).toEqual([[1, 8]]);
   });
 });

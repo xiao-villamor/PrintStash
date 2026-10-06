@@ -1,11 +1,9 @@
 import {
-  authHeaders,
   expectOk,
   getJson,
   GetJsonOptions,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
+  requestApi,
+  requestMutation,
   sendAction,
   sendForm,
   sendFormWithProgress,
@@ -118,9 +116,7 @@ export function starModel(id: number): Promise<ModelStarRead> {
 
 export async function unstarModel(id: number): Promise<ModelStarRead> {
   const path = `/api/v1/models/${id}/star`;
-  const res = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<ModelStarRead>(res);
+  return requestMutation<ModelStarRead>(path, { method: "DELETE" });
 }
 
 export function getModel(id: number): Promise<ModelRead> {
@@ -132,40 +128,46 @@ export function getVaultStats(options?: GetJsonOptions): Promise<VaultStatsRead>
 }
 
 export async function downloadModelExport(format: "json" | "csv"): Promise<void> {
-  const res = await fetch(getUrl(`/api/v1/models/export?format=${format}`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  await expectOk(res);
-  const blob = await res.blob();
-  const fallback = `printstash-model-export.${format}`;
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallback;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  return requestApi(
+    `/api/v1/models/export?format=${format}`,
+    { cache: "no-store" },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const fallback = `printstash-model-export.${format}`;
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallback;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  );
 }
 
 export async function downloadLibraryArchive(version: 1 | 2 = 2): Promise<void> {
-  const res = await fetch(getUrl(`/api/v1/models/library-archive?version=${version}`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  await expectOk(res);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `printstash-library-v${version}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  return requestApi(
+    `/api/v1/models/library-archive?version=${version}`,
+    { cache: "no-store" },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `printstash-library-v${version}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  );
 }
 
 export function importLibraryArchive(file: File): Promise<JobAccepted> {
@@ -262,22 +264,24 @@ export function restoreModel(id: number): Promise<ModelRead> {
 
 export async function purgeModel(id: number, confirmStorageRisk = false): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
-  const res = await fetch(getUrl(`/api/v1/models/${id}/purge${query}`), {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  invalidateApiCache(`/api/v1/models/${id}/purge`);
-  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
+  return normalizeTrashPurgeRead(
+    await requestMutation<Partial<TrashPurgeRead>>(
+      `/api/v1/models/${id}/purge${query}`,
+      { method: "DELETE" },
+      `/api/v1/models/${id}/purge`,
+    ),
+  );
 }
 
 export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
-  const res = await fetch(getUrl(`/api/v1/models/trash/expired${query}`), {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  invalidateApiCache("/api/v1/models/trash/expired");
-  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
+  return normalizeTrashPurgeRead(
+    await requestMutation<Partial<TrashPurgeRead>>(
+      `/api/v1/models/trash/expired${query}`,
+      { method: "DELETE" },
+      "/api/v1/models/trash/expired",
+    ),
+  );
 }
 
 export function updateFileRevision(
@@ -302,9 +306,7 @@ export function replaceFileTags(
 
 export async function trashSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}`;
-  const res = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<ModelRead>(res);
+  return requestMutation<ModelRead>(path, { method: "DELETE" });
 }
 
 export function restoreSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
@@ -313,12 +315,9 @@ export function restoreSourceFile(modelId: number, fileId: number): Promise<Mode
 
 export async function deleteFileRevision(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}/revision`;
-  const res = await fetch(getUrl(path), {
+  return requestMutation<ModelRead>(path, {
     method: "DELETE",
-    headers: authHeaders(),
   });
-  invalidateApiCache(path);
-  return handleResponse<ModelRead>(res);
 }
 
 export function addGcodeRevision(modelId: number, formData: FormData): Promise<ModelRead> {

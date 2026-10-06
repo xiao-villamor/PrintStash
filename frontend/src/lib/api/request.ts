@@ -1,16 +1,16 @@
-import { emitUnauthorized, getStoredToken, onAuthChange } from "@/lib/auth";
+import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
 import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
+import {
+  getSessionVersion,
+  requireSessionVersion,
+  withSessionRequest,
+  type SessionRequest,
+} from "@/lib/session-transport";
 import type { DerivativeState } from "@/types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const WS_BASE = import.meta.env.VITE_WS_URL || "";
-let sessionGeneration = 0;
-
-function requireCurrentSession(session: number): void {
-  if (session !== sessionGeneration) throw new Error("request_session_changed");
-}
-
 function isBrowser(): boolean {
   // `"window" in globalThis` rather than a `typeof` probe: the question is
   // "am I running in a document?", which the global's presence answers.
@@ -40,52 +40,79 @@ export function getAssetUrl(path: string): string {
 }
 
 /** Revalidate protected bytes; a failed cross-origin delivery retries via the API. */
-async function fetchArtifact(path: string, signal?: AbortSignal): Promise<Response> {
-  const session = sessionGeneration;
-  const options: RequestInit = { headers: authHeaders(), cache: "no-cache", signal };
+async function fetchArtifact(path: string, session: SessionRequest): Promise<Response> {
+  const options: RequestInit = {
+    headers: authHeaders(),
+    cache: "no-cache",
+    signal: session.signal,
+  };
   const proxy = async () => {
-    requireCurrentSession(session);
+    session.assertCurrent();
     const response = await fetch(getUrl(path), {
       ...options,
       headers: { ...authHeaders(), "X-PrintStash-Delivery": "proxy" },
     });
-    requireCurrentSession(session);
+    session.assertCurrent();
     return response;
   };
   let response: Response;
   try {
     response = await fetch(getUrl(path), options);
   } catch (error) {
-    if (!(error instanceof TypeError) || signal?.aborted) throw error;
+    session.assertCurrent();
+    if (!(error instanceof TypeError)) throw error;
     return proxy();
   }
-  requireCurrentSession(session);
-  // An expired provider capability can return an HTTP failure rather than a
-  // browser CORS/network error. Reauthorize against the original URL once.
+  session.assertCurrent();
+  // Reauthorize once when an expired provider capability returns an HTTP failure.
   return response.redirected && !response.ok ? proxy() : response;
 }
 
-export async function getAuthenticatedBlob(path: string): Promise<Blob> {
-  const res = await fetchArtifact(path);
-  if (!res.ok) throw await parseError(res);
-  return res.blob();
+async function withApiSession<T>(
+  operation: (session: SessionRequest) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const version = getSessionVersion();
+  try {
+    return await withSessionRequest(operation, signal);
+  } catch (error) {
+    // The scoped error parser fenced the body before returning an ApiError.
+    // Expire only after scope completion so this genuine 401 stays an ApiError.
+    if (error instanceof ApiError && error.status === 401) {
+      requireSessionVersion(version);
+      emitUnauthorized();
+    }
+    throw error;
+  }
+}
+
+export async function getAuthenticatedBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  return withApiSession(async (session) => {
+    const res = await fetchArtifact(path, session);
+    await expectOk(res, session);
+    return res.blob();
+  }, signal);
 }
 
 /** A published binary derivative, or its pending preparation state. */
 export type DerivedBlob = { ready: true; blob: Blob } | { ready: false };
 
 export async function getDerivedBlob(path: string, signal?: AbortSignal): Promise<DerivedBlob> {
-  const response = await fetchArtifact(path, signal);
-  if (!response.ok) throw await parseError(response);
-  if (response.status === 202) return { ready: false };
-  return { ready: true, blob: await response.blob() };
+  return withApiSession(async (session) => {
+    const response = await fetchArtifact(path, session);
+    await expectOk(response, session);
+    if (response.status === 202) return { ready: false };
+    return { ready: true, blob: await response.blob() };
+  }, signal);
 }
 
 /** Read a protected text resource while preserving the shared 401 handling. */
 export async function getAuthenticatedText(path: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetchArtifact(path, signal);
-  if (!res.ok) throw await parseError(res);
-  return res.text();
+  return withApiSession(async (session) => {
+    const res = await fetchArtifact(path, session);
+    await expectOk(res, session);
+    return res.text();
+  }, signal);
 }
 
 /**
@@ -106,16 +133,18 @@ const DERIVATIVE_STATES: readonly DerivativeState[] = [
 ];
 
 export async function getDerivedText(path: string, signal?: AbortSignal): Promise<DerivedText> {
-  const res = await fetchArtifact(path, signal);
-  if (!res.ok) throw await parseError(res);
-  if (res.status === 202) {
-    // The 202 body is `{"state": "<derivative state>"}`, written by the server.
-    const body: { state?: unknown } = await res.json();
-    const state = DERIVATIVE_STATES.find((known) => known === body.state);
-    if (state === undefined) throw new Error("derivative_state_invalid");
-    return { ready: false, state };
-  }
-  return { ready: true, text: await res.text() };
+  return withApiSession(async (session) => {
+    const res = await fetchArtifact(path, session);
+    await expectOk(res, session);
+    if (res.status === 202) {
+      const body: { state?: unknown } = await res.json();
+      session.assertCurrent();
+      const state = DERIVATIVE_STATES.find((known) => known === body.state);
+      if (state === undefined) throw new Error("derivative_state_invalid");
+      return { ready: false, state };
+    }
+    return { ready: true, text: await res.text() };
+  }, signal);
 }
 
 const SAFE_DOWNLOAD_FALLBACK = "download";
@@ -172,21 +201,24 @@ export function parseContentDispositionFilename(header: string | null): string |
  * token, then trigger a save via a temporary object URL.
  */
 export async function downloadAuthenticatedFile(path: string, filename?: string): Promise<void> {
-  const res = await fetchArtifact(path);
-  if (!res.ok) throw await parseError(res);
-  const blob = await res.blob();
-  const resolvedFilename =
-    sanitizeDownloadFilename(filename) ??
-    parseContentDispositionFilename(res.headers.get("content-disposition")) ??
-    SAFE_DOWNLOAD_FALLBACK;
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = resolvedFilename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(objectUrl);
+  return withApiSession(async (session) => {
+    const res = await fetchArtifact(path, session);
+    await expectOk(res, session);
+    const blob = await res.blob();
+    session.assertCurrent();
+    const resolvedFilename =
+      sanitizeDownloadFilename(filename) ??
+      parseContentDispositionFilename(res.headers.get("content-disposition")) ??
+      SAFE_DOWNLOAD_FALLBACK;
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = resolvedFilename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  });
 }
 
 export function getWsUrl(path: string): string {
@@ -230,29 +262,50 @@ function errorCode(status: number, body: string): string {
   return parseDetailCode(body) ?? String(status);
 }
 
-async function parseError(res: Response): Promise<ApiError> {
-  if (res.status === 401) emitUnauthorized();
-  const text = await res.text().catch(() => "Unknown error");
+async function parseError(res: Response, session?: SessionRequest): Promise<ApiError> {
+  session?.assertCurrent();
+  const text = await res.text().catch((error) => {
+    session?.assertCurrent();
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    return "Unknown error";
+  });
+  session?.assertCurrent();
+  if (!session && res.status === 401) emitUnauthorized();
   return new ApiError(res.status, errorCode(res.status, text), text);
 }
 
-export async function handleResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) throw await parseError(res);
+export async function handleResponse<T>(res: Response, session?: SessionRequest): Promise<T> {
+  session?.assertCurrent();
+  if (!res.ok) throw await parseError(res, session);
   if (res.status === 204) {
-    // SAFETY: a 204 carries no body at all, so `undefined` is the only value
-    // this branch can produce (`res.json()` would throw on the empty payload).
-    // The endpoints that answer 204 are the void ones, whose callers declare
-    // `T` as `void`/`undefined`.
+    // SAFETY: a 204 has no body; void endpoints declare T as void/undefined.
     return undefined as T;
   }
-  // `Response.json()` is typed `Promise<any>` by lib.dom, so `T` — the response
-  // contract the calling wrapper in `src/lib/api` declares for this endpoint —
-  // flows through without an assertion.
-  return res.json();
+  const value: T = await res.json();
+  session?.assertCurrent();
+  return value;
 }
 
-export async function expectOk(res: Response): Promise<void> {
-  if (!res.ok) throw await parseError(res);
+export async function expectOk(res: Response, session?: SessionRequest): Promise<void> {
+  session?.assertCurrent();
+  if (!res.ok) throw await parseError(res, session);
+}
+
+/** Scope the entire response consumer, including binary bodies and mutation effects. */
+export function requestApi<T>(
+  path: string,
+  options: RequestInit = {},
+  consume: (response: Response, session: SessionRequest) => Promise<T> = handleResponse<T>,
+): Promise<T> {
+  return withApiSession(async (session) => {
+    const response = await fetch(getUrl(path), {
+      ...options,
+      headers: options.headers ?? authHeaders(),
+      signal: session.signal,
+    });
+    session.assertCurrent();
+    return consume(response, session);
+  }, options.signal ?? undefined);
 }
 
 export function authHeaders(): Record<string, string> {
@@ -266,106 +319,37 @@ export function jsonHeaders(): Record<string, string> {
   return headers;
 }
 
-// ---------------------------------------------------------------------------
-// In-memory GET cache (browser only).
-//
-// Short TTL so back-navigation and repeat renders reuse the last response
-// instead of flashing a loading state; any mutation through this module
-// invalidates the whole cache, so staleness is bounded to TTL for changes
-// made outside this tab.
-// ---------------------------------------------------------------------------
-
-const CACHE_TTL_MS = 30_000;
-
-const responseCache = new Map<string, { value: unknown; expires: number }>();
-const inflight = new Map<string, Promise<unknown>>();
-let cacheGeneration = 0;
-
 /**
- * Bust caches after a mutation. Pass the mutated `path` for keyed,
- * resource-scoped query invalidation (the good-practice path); omit it for a
- * blanket invalidation (manual callers that don't know the affected resource).
- * Either way the legacy in-memory GET cache is fully cleared — it's a 30s TTL
- * map, so dropping it wholesale is cheap and keeps it coherent.
+ * Compatibility bridge for endpoint clients awaiting feature-owned reconciliation.
+ * There is no transport cache. Remove this adapter with the final I10 cutover.
  */
 export function invalidateApiCache(path?: string): void {
-  cacheGeneration += 1;
-  responseCache.clear();
-  inflight.clear();
-  if (path === undefined) {
-    queryClient.invalidateQueries();
-  } else {
-    invalidateQueriesForPath(path);
-  }
+  if (path === undefined) void queryClient.invalidateQueries();
+  else invalidateQueriesForPath(path);
 }
 
-if (isBrowser()) {
-  // Login/logout changes identity — drop all cached data (not just invalidate)
-  // so the previous user's reads can't linger under RBAC.
-  onAuthChange(() => {
-    sessionGeneration += 1;
-    cacheGeneration += 1;
-    responseCache.clear();
-    inflight.clear();
-    queryClient.clear();
+/** Compatibility mutation adapter: validate the acknowledgement before invalidation. */
+export function requestMutation<T>(
+  path: string,
+  options: RequestInit,
+  invalidationPath = path,
+): Promise<T> {
+  return requestApi<T>(path, options, async (response, session) => {
+    const value = await handleResponse<T>(response, session);
+    session.assertCurrent();
+    invalidateApiCache(invalidationPath);
+    return value;
   });
 }
 
 export interface GetJsonOptions {
   signal?: AbortSignal;
-  /** Bypass the in-memory cache (polling endpoints, explicit refresh). */
+  /** Compatibility only: JSON transport always reads the network. Remove in I10. */
   fresh?: boolean;
 }
 
-export async function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {
-  const session = sessionGeneration;
-  if (!isBrowser() || options?.fresh || options?.signal) {
-    const res = await fetch(getUrl(path), {
-      signal: options?.signal,
-      headers: authHeaders(),
-      cache: "no-store",
-    });
-    requireCurrentSession(session);
-    const value = await handleResponse<T>(res);
-    requireCurrentSession(session);
-    return value;
-  }
-
-  const now = Date.now();
-  const cached = responseCache.get(path);
-  if (cached && cached.expires > now) {
-    // SAFETY: the cache is keyed by request path and is only written below, with
-    // the body `handleResponse<T>` just produced for that same path — so a live
-    // entry for `path` holds exactly what a cache miss would have returned.
-    return cached.value as T;
-  }
-  const pending = inflight.get(path);
-  if (pending) {
-    // SAFETY: the in-flight entry for `path` is the promise created below for
-    // that same path, i.e. `handleResponse<T>` on this endpoint's response;
-    // sharing it is what makes concurrent readers issue one request.
-    return pending as Promise<T>;
-  }
-  const generation = cacheGeneration;
-  const request = (async () => {
-    const res = await fetch(getUrl(path), {
-      headers: authHeaders(),
-      cache: "no-store",
-    });
-    requireCurrentSession(session);
-    const value = await handleResponse<T>(res);
-    requireCurrentSession(session);
-    if (generation === cacheGeneration) {
-      responseCache.set(path, { value, expires: Date.now() + CACHE_TTL_MS });
-    }
-    return value;
-  })();
-  inflight.set(path, request);
-  try {
-    return await request;
-  } finally {
-    if (inflight.get(path) === request) inflight.delete(path);
-  }
+export function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {
+  return requestApi<T>(path, { signal: options?.signal, cache: "no-store" });
 }
 
 export async function sendJson<T>(
@@ -380,30 +364,33 @@ export async function sendJson<T>(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<T> {
-  const res = await fetch(getUrl(path), {
-    method,
-    headers: { ...jsonHeaders(), ...headers },
-    body: JSON.stringify(body),
-  });
-  const value = await handleResponse<T>(res);
-  invalidateApiCache(path);
-  return value;
+  return requestApi<T>(
+    path,
+    {
+      method,
+      headers: { ...jsonHeaders(), ...headers },
+      body: JSON.stringify(body),
+    },
+    async (response, session) => {
+      const value = await handleResponse<T>(response, session);
+      session.assertCurrent();
+      invalidateApiCache(path);
+      return value;
+    },
+  );
 }
 
-export async function sendForm<T>(
-  path: string,
-  formData: FormData,
-  signal?: AbortSignal,
-): Promise<T> {
-  const res = await fetch(getUrl(path), {
-    method: "POST",
-    headers: authHeaders(),
-    body: formData,
-    signal,
-  });
-  const value = await handleResponse<T>(res);
-  invalidateApiCache(path);
-  return value;
+export function sendForm<T>(path: string, formData: FormData, signal?: AbortSignal): Promise<T> {
+  return requestApi<T>(
+    path,
+    { method: "POST", body: formData, signal },
+    async (response, session) => {
+      const value = await handleResponse<T>(response, session);
+      session.assertCurrent();
+      invalidateApiCache(path);
+      return value;
+    },
+  );
 }
 
 /** Multipart transfer with browser upload progress, used for large ZIP archives. */
@@ -413,54 +400,51 @@ export function sendFormWithProgress<T>(
   signal: AbortSignal,
   onProgress: (loaded: number, total: number) => void,
 ): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException("Upload cancelled", "AbortError"));
-      return;
-    }
-    const request = new XMLHttpRequest();
-    let settled = false;
-    const finish = () => {
-      settled = true;
-      signal.removeEventListener("abort", abort);
-    };
-    const abort = () => request.abort();
-    request.open("POST", getUrl(path));
-    for (const [name, value] of Object.entries(authHeaders()))
-      request.setRequestHeader(name, value);
-    request.upload.onprogress = (event) => {
-      if (event.lengthComputable && event.total > 0 && !settled)
-        onProgress(event.loaded, event.total);
-    };
-    request.onload = () => {
-      if (settled) return;
-      finish();
-      const response = new Response(request.responseText, { status: request.status });
-      void handleResponse<T>(response).then((value) => {
-        invalidateApiCache(path);
-        resolve(value);
-      }, reject);
-    };
-    request.onerror = () => {
-      if (settled) return;
-      finish();
-      reject(new TypeError("Failed to fetch"));
-    };
-    request.onabort = () => {
-      if (settled) return;
-      finish();
-      reject(new DOMException("Upload cancelled", "AbortError"));
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    request.send(formData);
-  });
+  return withApiSession(async (session) => {
+    const response = await new Promise<Response>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      let settled = false;
+      const finish = () => {
+        settled = true;
+        session.signal.removeEventListener("abort", abort);
+      };
+      const abort = () => request.abort();
+      request.open("POST", getUrl(path));
+      for (const [name, value] of Object.entries(authHeaders()))
+        request.setRequestHeader(name, value);
+      request.upload.onprogress = (event) => {
+        if (session.signal.aborted || settled) return;
+        if (event.lengthComputable && event.total > 0) onProgress(event.loaded, event.total);
+      };
+      request.onload = () => {
+        if (settled) return;
+        finish();
+        resolve(new Response(request.responseText, { status: request.status }));
+      };
+      request.onerror = () => {
+        if (settled) return;
+        finish();
+        reject(new TypeError("Failed to fetch"));
+      };
+      request.onabort = () => {
+        if (settled) return;
+        finish();
+        reject(session.signal.reason);
+      };
+      session.signal.addEventListener("abort", abort, { once: true });
+      request.send(formData);
+    });
+    const value = await handleResponse<T>(response, session);
+    session.assertCurrent();
+    invalidateApiCache(path);
+    return value;
+  }, signal);
 }
 
-export async function sendAction(path: string, method: "POST" | "DELETE"): Promise<void> {
-  const res = await fetch(getUrl(path), {
-    method,
-    headers: authHeaders(),
+export function sendAction(path: string, method: "POST" | "DELETE"): Promise<void> {
+  return requestApi(path, { method }, async (response, session) => {
+    await expectOk(response, session);
+    session.assertCurrent();
+    invalidateApiCache(path);
   });
-  await expectOk(res);
-  invalidateApiCache(path);
 }

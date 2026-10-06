@@ -27,6 +27,7 @@ import {
   revokeApiKey,
   updateAdminUser,
 } from "@/lib/api/auth";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -201,5 +202,23 @@ describe("deactivateAdminUser", () => {
     await deactivateAdminUser(3);
 
     expectRequest("/api/v1/admin/users/3", "DELETE");
+  });
+});
+
+/** Auth reads must retire with the cookie session that started them. */
+describe("auth read isolation", () => {
+  it.each([
+    { label: "identity", read: getMe },
+    { label: "API keys", read: listApiKeys },
+  ])("ignores a retired $label response", async ({ read }) => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = read();
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    headers.resolve(new Response('{"detail":"expired"}', { status: 401 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
   });
 });

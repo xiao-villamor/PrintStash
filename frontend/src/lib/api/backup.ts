@@ -1,12 +1,4 @@
-import {
-  authHeaders,
-  expectOk,
-  getJson,
-  getUrl,
-  sendAction,
-  sendForm,
-  sendJson,
-} from "@/lib/api/request";
+import { expectOk, getJson, requestApi, sendAction, sendForm, sendJson } from "@/lib/api/request";
 import type { JobAccepted, JobStatus, StorageOperations } from "@/types";
 
 export type BackupRunOutcome = "running" | "completed" | "partial" | "failed";
@@ -223,24 +215,24 @@ export function deleteBackup(backupId: string, sourceRef?: string | null): Promi
 }
 
 export async function downloadBackup(backupId: string, sourceRef?: string | null): Promise<void> {
-  const res = await fetch(
-    getUrl(`/api/v1/backups/${encodeURIComponent(backupId)}/download${sourceQuery(sourceRef)}`),
-    {
-      headers: authHeaders(),
-      cache: "no-store",
+  return requestApi(
+    `/api/v1/backups/${encodeURIComponent(backupId)}/download${sourceQuery(sourceRef)}`,
+    { cache: "no-store" },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ?? `printstash-backup-${backupId}.tar.gz`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     },
   );
-  await expectOk(res);
-  const blob = await res.blob();
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const filename =
-    disposition.match(/filename="([^"]+)"/)?.[1] ?? `printstash-backup-${backupId}.tar.gz`;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }

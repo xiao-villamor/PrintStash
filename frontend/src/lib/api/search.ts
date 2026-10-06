@@ -1,11 +1,4 @@
-import {
-  authHeaders,
-  getJson,
-  getUrl,
-  handleResponse,
-  sendAction,
-  sendJson,
-} from "@/lib/api/request";
+import { authHeaders, getJson, requestApi, sendAction, sendJson } from "@/lib/api/request";
 import { ApiError } from "@/lib/errors";
 import type { SavedViewFilters, ModelSort } from "@/types";
 import type {
@@ -47,14 +40,12 @@ async function searchRequest<T>(path: string, options: RequestInit = {}): Promis
     30_000,
   );
   try {
-    return await handleResponse<T>(
-      await fetch(getUrl(path), {
-        headers: authHeaders(),
-        cache: "no-store",
-        ...options,
-        signal: controller.signal,
-      }),
-    );
+    return await requestApi<T>(path, {
+      headers: authHeaders(),
+      cache: "no-store",
+      ...options,
+      signal: controller.signal,
+    });
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason;
     throw error;

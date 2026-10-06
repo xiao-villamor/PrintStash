@@ -1,12 +1,4 @@
-import {
-  authHeaders,
-  getJson,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
-  sendAction,
-  sendJson,
-} from "@/lib/api/request";
+import { getJson, requestMutation, sendAction, sendJson } from "@/lib/api/request";
 import type {
   MultipartModelCandidate,
   MultipartModelCreate,
@@ -73,20 +65,16 @@ export async function uploadMultipartModelCover(
   const path = `/api/v1/multipart-models/${id}/cover`;
   const body = new FormData();
   body.append("file", file);
-  const response = await fetch(getUrl(path), {
+  return requestMutation<MultipartModelRead>(path, {
     method: "PUT",
-    headers: authHeaders(),
+
     body,
   });
-  invalidateApiCache(path);
-  return handleResponse<MultipartModelRead>(response);
 }
 
 export async function deleteMultipartModelCover(id: number): Promise<MultipartModelRead> {
   const path = `/api/v1/multipart-models/${id}/cover`;
-  const response = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<MultipartModelRead>(response);
+  return requestMutation<MultipartModelRead>(path, { method: "DELETE" });
 }
 
 export function replaceMultipartModelTags(id: number, tags: string[]): Promise<MultipartModelRead> {
@@ -104,9 +92,7 @@ export function starMultipartModel(id: number): Promise<MultipartModelStarRead> 
 
 export async function unstarMultipartModel(id: number): Promise<MultipartModelStarRead> {
   const path = `/api/v1/multipart-models/${id}/star`;
-  const response = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<MultipartModelStarRead>(response);
+  return requestMutation<MultipartModelStarRead>(path, { method: "DELETE" });
 }
 
 export function listMultipartModelCandidates(

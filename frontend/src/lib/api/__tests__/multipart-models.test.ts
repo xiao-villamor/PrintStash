@@ -14,6 +14,8 @@ import {
   unstarMultipartModel,
   uploadMultipartModelCover,
 } from "@/lib/api/multipart-models";
+import { clearLogin } from "@/lib/auth-store";
+import { queryClient, queryKeys } from "@/lib/query-client";
 import { invalidateApiCache } from "@/lib/api/request";
 import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
 
@@ -162,5 +164,27 @@ describe("multipart model wire contract", () => {
     respondWith({ multipart_model_id: 4, starred: false });
     await unstarMultipartModel(4);
     expectRequest("/api/v1/multipart-models/4/star", "DELETE");
+  });
+});
+
+/** Direct cover/star mutations acknowledge writes within their original session. */
+describe("multipart mutation isolation", () => {
+  it.each([
+    {
+      label: "cover upload",
+      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png")),
+    },
+    { label: "cover deletion", write: () => deleteMultipartModelCover(4) },
+    { label: "favourite removal", write: () => unstarMultipartModel(4) },
+  ])("discards a retired $label acknowledgement", async ({ write }) => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = write();
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    queryClient.setQueryData(queryKeys.multipartModels, [{ id: 9 }]);
+    headers.resolve(new Response('{"id":4}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(queryClient.getQueryState(queryKeys.multipartModels)?.isInvalidated).toBe(false);
   });
 });

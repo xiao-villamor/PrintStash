@@ -2,10 +2,7 @@ import {
   getJson,
   GetJsonOptions,
   getWsUrl,
-  authHeaders,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
+  requestMutation,
   sendAction,
   sendJson,
 } from "@/lib/api/request";
@@ -164,12 +161,9 @@ export async function deletePrinterFile(
   id: number,
   printerFileId: number,
 ): Promise<PrinterFileRead[]> {
-  const res = await fetch(getUrl(`/api/v1/printers/${id}/files/${printerFileId}`), {
+  return requestMutation<PrinterFileRead[]>(`/api/v1/printers/${id}/files/${printerFileId}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
-  invalidateApiCache(`/api/v1/printers/${id}/files/${printerFileId}`);
-  return handleResponse<PrinterFileRead[]>(res);
 }
 
 export function listPrinterJobs(id: number, limit = 50): Promise<PrintJobRead[]> {

@@ -1,11 +1,4 @@
-import {
-  authHeaders,
-  getJson,
-  getUrl,
-  handleResponse,
-  sendAction,
-  sendJson,
-} from "@/lib/api/request";
+import { getJson, getUrl, sendAction, sendJson } from "@/lib/api/request";
 import {
   ApiKeyCreateResponse,
   ApiKeyRead,
@@ -34,20 +27,12 @@ export function logout(): Promise<void> {
   return sendAction("/api/v1/auth/logout", "POST");
 }
 
-export async function getMe(): Promise<UserRead> {
-  const res = await fetch(getUrl("/api/v1/auth/me"), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  return handleResponse<UserRead>(res);
+export function getMe(): Promise<UserRead> {
+  return getJson<UserRead>("/api/v1/auth/me");
 }
 
-export async function listApiKeys(): Promise<ApiKeyRead[]> {
-  const res = await fetch(getUrl("/api/v1/auth/api-keys"), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  return handleResponse<ApiKeyRead[]>(res);
+export function listApiKeys(): Promise<ApiKeyRead[]> {
+  return getJson<ApiKeyRead[]>("/api/v1/auth/api-keys");
 }
 
 export function listAdminUsers(): Promise<UserRead[]> {

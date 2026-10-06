@@ -1,3 +1,4 @@
+import { withSessionRequest } from "@/lib/session-transport";
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import {
@@ -134,66 +135,77 @@ async function transfer(
   file: File,
   options: UploadOptions,
 ): Promise<ArtifactUploadStatus> {
-  const digest = options.digest ?? sha256Blob;
-  const api = options.api ?? defaultArtifactUploadApi;
-  const plan = await api.getArtifactUploadPlan(session.id);
-  const uploaded = new Set(plan.uploaded_parts.map((part) => part.index));
-  let transferred = plan.uploaded_parts.reduce((total, part) => total + part.size_bytes, 0);
-  const parts = Math.ceil(file.size / plan.chunk_size);
-  for (let index = 0; index < parts; index += 1) {
-    if (uploaded.has(index)) continue;
-    if (options.signal?.aborted) throw new DOMException("Upload paused", "AbortError");
-    const offset = index * plan.chunk_size;
-    const bytes = file.slice(offset, Math.min(file.size, offset + plan.chunk_size));
-    const checksum = await digest(bytes);
-    if (plan.mode === "native_parts") {
-      const instruction = await api.signArtifactUploadPart(session.id, index + 1, checksum);
-      const response = await fetch(instruction.url, {
-        method: instruction.method,
-        headers: instruction.headers,
-        body: bytes,
-        signal: options.signal,
+  return withSessionRequest(async (request) => {
+    const digest = options.digest ?? sha256Blob;
+    const api = options.api ?? defaultArtifactUploadApi;
+    const plan = await api.getArtifactUploadPlan(session.id);
+    request.assertCurrent();
+    const uploaded = new Set(plan.uploaded_parts.map((part) => part.index));
+    let transferred = plan.uploaded_parts.reduce((total, part) => total + part.size_bytes, 0);
+    const parts = Math.ceil(file.size / plan.chunk_size);
+    for (let index = 0; index < parts; index += 1) {
+      if (uploaded.has(index)) continue;
+      request.assertCurrent();
+      const offset = index * plan.chunk_size;
+      const bytes = file.slice(offset, Math.min(file.size, offset + plan.chunk_size));
+      const checksum = await digest(bytes);
+      request.assertCurrent();
+      if (plan.mode === "native_parts") {
+        const instruction = await api.signArtifactUploadPart(session.id, index + 1, checksum);
+        request.assertCurrent();
+        const response = await fetch(instruction.url, {
+          method: instruction.method,
+          headers: instruction.headers,
+          body: bytes,
+          signal: request.signal,
+        });
+        request.assertCurrent();
+        if (!response.ok) throw new Error("artifact_upload_part_failed");
+        const etag = response.headers.get("etag");
+        if (!etag) throw new Error("artifact_upload_receipt_missing");
+        session = (
+          await api.recordArtifactUploadPart(session.id, index + 1, {
+            size_bytes: bytes.size,
+            checksum_sha256: checksum,
+            etag,
+          })
+        ).session;
+      } else {
+        session = await api.putArtifactUploadChunk(
+          session.id,
+          index,
+          offset,
+          bytes,
+          checksum,
+          request.signal,
+        );
+      }
+      request.assertCurrent();
+      transferred += bytes.size;
+      options.onProgress?.({
+        phase: "transferring",
+        transferredBytes: transferred,
+        totalBytes: file.size,
       });
-      if (!response.ok) throw new Error("artifact_upload_part_failed");
-      const etag = response.headers.get("etag");
-      if (!etag) throw new Error("artifact_upload_receipt_missing");
-      session = (
-        await api.recordArtifactUploadPart(session.id, index + 1, {
-          size_bytes: bytes.size,
-          checksum_sha256: checksum,
-          etag,
-        })
-      ).session;
-    } else {
-      session = await api.putArtifactUploadChunk(
-        session.id,
-        index,
-        offset,
-        bytes,
-        checksum,
-        options.signal,
-      );
     }
-    transferred += bytes.size;
+    request.assertCurrent();
     options.onProgress?.({
-      phase: "transferring",
-      transferredBytes: transferred,
+      phase: "verifying",
+      transferredBytes: file.size,
       totalBytes: file.size,
     });
-  }
-  options.onProgress?.({
-    phase: "verifying",
-    transferredBytes: file.size,
-    totalBytes: file.size,
-  });
-  const finalized = await api.finalizeArtifactUpload(session.id);
-  options.onProgress?.({
-    phase: finalized.state === "completed" ? "completed" : "ingesting",
-    transferredBytes: file.size,
-    totalBytes: file.size,
-  });
-  if (finalized.state === "completed") forgetArtifactUpload(finalized.id);
-  return finalized;
+    request.assertCurrent();
+    const finalized = await api.finalizeArtifactUpload(session.id);
+    request.assertCurrent();
+    options.onProgress?.({
+      phase: finalized.state === "completed" ? "completed" : "ingesting",
+      transferredBytes: file.size,
+      totalBytes: file.size,
+    });
+    request.assertCurrent();
+    if (finalized.state === "completed") forgetArtifactUpload(finalized.id);
+    return finalized;
+  }, options.signal);
 }
 
 export async function uploadArtifact(
@@ -201,24 +213,29 @@ export async function uploadArtifact(
   request: Omit<ArtifactUploadCreate, "filename" | "media_type" | "size_bytes" | "sha256">,
   options: UploadOptions = {},
 ): Promise<ArtifactUploadStatus> {
-  const digest = options.digest ?? sha256Blob;
-  const api = options.api ?? defaultArtifactUploadApi;
-  options.onProgress?.({ phase: "hashing", transferredBytes: 0, totalBytes: file.size });
-  const sha256 = await digest(file);
-  const session = await api.createArtifactUpload({
-    ...request,
-    filename: file.name,
-    media_type: file.type || "application/octet-stream",
-    size_bytes: file.size,
-    sha256,
-  });
-  rememberArtifactUpload(session.id);
-  const controlled = controlledOptions(session.id, { ...options, digest });
-  try {
-    return await transfer(session, file, controlled);
-  } finally {
-    releaseController(session.id, controlled.signal);
-  }
+  return withSessionRequest(async (transport) => {
+    const digest = options.digest ?? sha256Blob;
+    const api = options.api ?? defaultArtifactUploadApi;
+    options.onProgress?.({ phase: "hashing", transferredBytes: 0, totalBytes: file.size });
+    const sha256 = await digest(file);
+    transport.assertCurrent();
+    const session = await api.createArtifactUpload({
+      ...request,
+      filename: file.name,
+      media_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+      sha256,
+    });
+    transport.assertCurrent();
+    rememberArtifactUpload(session.id);
+    const controlled = controlledOptions(session.id, { ...options, digest });
+    transport.assertCurrent();
+    try {
+      return await transfer(session, file, controlled);
+    } finally {
+      releaseController(session.id, controlled.signal);
+    }
+  }, options.signal);
 }
 
 export async function resumeArtifactUpload(
@@ -226,26 +243,34 @@ export async function resumeArtifactUpload(
   file: File,
   options: UploadOptions = {},
 ): Promise<ArtifactUploadStatus> {
-  const api = options.api ?? defaultArtifactUploadApi;
-  const session = await api.getArtifactUpload(id);
-  if (session.filename !== file.name || session.size_bytes !== file.size) {
-    throw new Error("artifact_upload_file_mismatch");
-  }
-  rememberArtifactUpload(id);
-  const controlled = controlledOptions(id, options);
-  try {
-    return await transfer(session, file, controlled);
-  } finally {
-    releaseController(id, controlled.signal);
-  }
+  return withSessionRequest(async (request) => {
+    const api = options.api ?? defaultArtifactUploadApi;
+    const session = await api.getArtifactUpload(id);
+    request.assertCurrent();
+    if (session.filename !== file.name || session.size_bytes !== file.size) {
+      throw new Error("artifact_upload_file_mismatch");
+    }
+    request.assertCurrent();
+    rememberArtifactUpload(id);
+    const controlled = controlledOptions(id, options);
+    request.assertCurrent();
+    try {
+      return await transfer(session, file, controlled);
+    } finally {
+      releaseController(id, controlled.signal);
+    }
+  }, options.signal);
 }
 
 export async function cancelArtifactUpload(
   id: string,
   api: ArtifactUploadApi = defaultArtifactUploadApi,
 ): Promise<ArtifactUploadStatus> {
-  pauseArtifactUpload(id);
-  const session = await api.abortArtifactUpload(id);
-  forgetArtifactUpload(id);
-  return session;
+  return withSessionRequest(async (request) => {
+    pauseArtifactUpload(id);
+    const session = await api.abortArtifactUpload(id);
+    request.assertCurrent();
+    forgetArtifactUpload(id);
+    return session;
+  });
 }

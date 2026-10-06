@@ -23,6 +23,7 @@ import {
   consumeSessionExpired,
   emitUnauthorized,
   getToken,
+  clearLogin,
   onUnauthorized,
   onAuthChange,
   storeLogin,
@@ -92,5 +93,55 @@ describe("auth change notifications", () => {
     }
     window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** Storage is metadata persistence, never the session retirement mechanism. */
+describe("session retirement", () => {
+  it("retires sessions when browser storage is unavailable", () => {
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Blocked", "SecurityError");
+    });
+    try {
+      clearLogin();
+      expect(changes).toHaveBeenCalledOnce();
+    } finally {
+      remove.mockRestore();
+      off();
+    }
+  });
+
+  it("retires bootstrap when validated identity changes", () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    try {
+      storeLogin(
+        "",
+        { id: 9, username: "new-owner", email: null, is_superuser: false },
+        { silent: true },
+      );
+      expect(changes).toHaveBeenCalledOnce();
+    } finally {
+      off();
+    }
+  });
+
+  it("keeps same-session metadata refresh silent", () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    try {
+      storeLogin(
+        "",
+        { id: 7, username: "maker", email: null, is_superuser: true },
+        { silent: true },
+      );
+      expect(changes).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth-store";
 import { login as apiLogin, logout as apiLogout, getMe } from "@/lib/api";
 import { AuthContext, type AuthApi } from "@/lib/auth-context";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { markStartup } from "@/lib/startup-timing";
 
 const SERVER_AUTH_API: AuthApi = { login: apiLogin, logout: apiLogout, getMe };
@@ -69,20 +70,24 @@ export function AuthProvider({
 
   const login = useCallback(
     async (username: string, password: string, remember_me: boolean = false) => {
+      clearLogin();
+      setUser(null);
+      const version = getSessionVersion();
       const token = await api.login({ username, password, remember_me });
-      storeLogin(token.access_token, { id: 0, username, email: null, is_superuser: false });
+      requireSessionVersion(version);
       try {
         const me = await api.getMe();
+        requireSessionVersion(version);
         const stored: StoredUser = {
           id: me.id,
           username: me.username,
           email: me.email,
           is_superuser: me.is_superuser,
         };
-        storeLogin(token.access_token, stored, { silent: true });
+        storeLogin(token.access_token, stored);
         setUser(stored);
       } catch (e) {
-        clearLogin();
+        if (version === getSessionVersion()) clearLogin();
         throw e;
       }
     },
@@ -90,17 +95,16 @@ export function AuthProvider({
   );
 
   const logout = useCallback(async () => {
-    try {
-      await api.logout();
-    } finally {
-      clearLogin();
-      setUser(null);
-    }
+    clearLogin();
+    setUser(null);
+    await api.logout();
   }, [api]);
 
   const refresh = useCallback(async () => {
+    const version = getSessionVersion();
     try {
       const me = await api.getMe();
+      requireSessionVersion(version);
       const stored: StoredUser = {
         id: me.id,
         username: me.username,
@@ -110,8 +114,10 @@ export function AuthProvider({
       storeLogin("", stored, { silent: true });
       setUser(stored);
     } catch (error) {
-      clearLogin();
-      setUser(null);
+      if (version === getSessionVersion()) {
+        clearLogin();
+        setUser(null);
+      }
       throw error;
     }
   }, [api]);

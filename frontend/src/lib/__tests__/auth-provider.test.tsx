@@ -317,3 +317,68 @@ describe("AuthProvider", () => {
     });
   });
 });
+
+/** A late lifecycle operation must not replace or clear a newer verified session. */
+describe("session transition races", () => {
+  it("retains verified identity after stale refresh", async () => {
+    withStoredSession();
+    const refresh = Promise.withResolvers<UserRead>();
+    const getMe = vi
+      .fn<AuthApi["getMe"]>()
+      .mockResolvedValueOnce(aUser())
+      .mockReturnValueOnce(refresh.promise);
+    renderProvider({ getMe });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    screen.getByRole("button", { name: "refresh" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledTimes(2));
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => refresh.resolve(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+
+  it("retains verified identity after stale logout", async () => {
+    withStoredSession();
+    const logout = Promise.withResolvers<void>();
+    renderProvider({ logout: () => logout.promise });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    screen.getByRole("button", { name: "sign out" }).click();
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => logout.resolve());
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+
+  it("rejects stale login identity publication", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const getMe = vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise);
+    renderProvider({ getMe });
+    screen.getByRole("button", { name: "sign in" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledOnce());
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => me.resolve(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+});
+
+/** Retiring a cookie session is immediate; identity is published only after verification. */
+describe("auth transition boundaries", () => {
+  it("retires the displayed session while logout awaits the server", async () => {
+    withStoredSession();
+    const logout = Promise.withResolvers<void>();
+    renderProvider({ logout: () => logout.promise });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    await act(async () => screen.getByRole("button", { name: "sign out" }).click());
+    expect(screen.getByText("signed out")).toBeVisible();
+    await act(async () => logout.resolve());
+  });
+
+  it("publishes no provisional identity during login verification", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const getMe = vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise);
+    renderProvider({ getMe });
+    screen.getByRole("button", { name: "sign in" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledOnce());
+    expect(window.localStorage.getItem("printstash.user")).toBeNull();
+    await act(async () => me.resolve(aUser()));
+    expect(screen.getByText("signed in as maker")).toBeVisible();
+  });
+});

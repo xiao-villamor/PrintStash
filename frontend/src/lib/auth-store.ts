@@ -68,6 +68,7 @@ export function isLoggedIn(): boolean {
 
 export function storeLogin(token: string, user: StoredUser, options?: { silent?: boolean }): void {
   if (!isBrowser()) return;
+  const previous = getUser();
   try {
     // The backend also sets the access JWT as an HttpOnly SameSite cookie.
     // Never persist the response token where injected JavaScript can read it.
@@ -79,12 +80,12 @@ export function storeLogin(token: string, user: StoredUser, options?: { silent?:
     // `silent` persists the latest user without broadcasting an identity
     // change. The auth-changed event makes the API layer wipe the whole query
     // cache (so one user's data never leaks to the next); the bootstrap/refresh
-    // getMe is the *same* identity, so firing it there would needlessly nuke
-    // freshly-loaded queries on every page load.
-    if (!options?.silent) emit();
+    // getMe may refresh the same identity without nuking freshly-loaded reads.
+    // A different verified id always retires the old session.
   } catch {
-    /* ignore */
+    /* Storage is optional metadata; session retirement still happens below. */
   }
+  if (!options?.silent || previous?.id !== user.id) emit();
 }
 
 export function clearLogin(): void {
@@ -94,10 +95,10 @@ export function clearLogin(): void {
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(LEGACY_USER_KEY);
-    emit();
   } catch {
     /* ignore */
   }
+  emit();
 }
 
 export function onAuthChange(cb: () => void): () => void {
