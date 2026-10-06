@@ -1504,7 +1504,15 @@ describe("ModelBrowser", () => {
           aModelListItem({ id: 1, name: "Benchy" }),
           aModelListItem({ id: 2, name: "Cube" }),
         ],
-        routes: { "POST /api/v1/models/batch/move": json({ succeeded_ids: [1, 2] }) },
+        routes: {
+          "POST /api/v1/models/batch/move": json({
+            succeeded_ids: [1, 2],
+            succeeded_versions: { 1: 9, 2: 9 },
+            succeeded_count: 2,
+            failed: [],
+            failed_count: 0,
+          }),
+        },
       });
       await selectBoth(user);
 
@@ -1708,6 +1716,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
+            succeeded_versions: { 1: 9 },
             succeeded_count: 1,
             failed_count: 0,
             failed: [],
@@ -2427,6 +2436,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
+            succeeded_versions: { 1: 9 },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -2454,11 +2464,12 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
+            succeeded_versions: { 1: 9 },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
           }),
-          "PATCH /api/v1/models/1": json({ id: 1, tags: ["draft"] }),
+          "PATCH /api/v1/models/1": json({ id: 1, tags: ["draft"], edit_version: 12 }),
         },
       });
       await screen.findByText("Benchy");
@@ -2675,6 +2686,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [1],
+            succeeded_versions: { 1: 9 },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -2697,6 +2709,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [1],
+            succeeded_versions: { 1: 9 },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -2710,6 +2723,7 @@ describe("ModelBrowser", () => {
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
           collection: "parts",
+          expected_versions: { 1: 9 },
         }),
       );
     });
@@ -2724,6 +2738,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [],
+            succeeded_versions: {},
             succeeded_count: 0,
             failed: [{ model_id: 1, reason: "forbidden" }],
             failed_count: 1,

@@ -21,6 +21,57 @@ import { aModelListItem, aMultipartModel } from "../../src/test-support/factorie
 useMockApi();
 
 test.describe("vault route", () => {
+  test("reports a conflicting batch undo", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({ id: 1, name: "Undo bracket", edit_version: 3 }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/batch/tags", (route) => {
+      expect(route.request().postDataJSON().expected_versions).toEqual({ 1: 3 });
+      return route.fulfill({
+        json: {
+          succeeded_ids: [1],
+          succeeded_count: 1,
+          succeeded_versions: { 1: 9 },
+          failed: [],
+          failed_count: 0,
+        },
+      });
+    });
+    const undoVersions: (string | undefined)[] = [];
+    await page.route("**/api/v1/models/1", (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      undoVersions.push(route.request().headers()["if-match"]);
+      return route.fulfill({ status: 412, json: { detail: "edit_conflict" } });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Undo bracket" }).click();
+    await page.getByRole("button", { name: "Tag", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("combobox").first().fill("functional");
+    await dialog.getByRole("combobox").first().press("Enter");
+    await dialog.getByRole("button", { name: /Apply/ }).click();
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+
+    await expect(page.getByText("1 skipped", { exact: true })).toBeVisible();
+    await expect(page.getByText("Tags restored", { exact: true })).toHaveCount(0);
+    expect(undoVersions).toEqual(['"model-1-v9"']);
+  });
+
   test("removes a favorite after browser confirmation", async ({ page }) => {
     const confirmation = Promise.withResolvers<void>();
     await page.route("**/api/v1/models/browse?**", (route) =>

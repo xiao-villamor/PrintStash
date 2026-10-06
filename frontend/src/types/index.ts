@@ -32,6 +32,7 @@ export type {
   StorageCleanupStatus,
   ModelBatchFailure,
   ModelBatchResult,
+  ModelEditBatchResult,
   RevisionBatchResult,
   StorageUsageRead,
   VaultStatsRead,

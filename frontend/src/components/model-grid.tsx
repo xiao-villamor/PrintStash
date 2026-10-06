@@ -1,6 +1,13 @@
 "use client";
 
 import {
+  moveLibraryModels,
+  tagLibraryModels,
+  type LibraryEditReceipt,
+} from "@/features/library/batch-edits";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
+import {
   libraryBrowseOptions,
   libraryBrowseKeys,
   useLibraryBrowse,
@@ -88,8 +95,6 @@ import {
   moveCollection,
   renameCollection,
   deleteCollection,
-  batchMoveModels,
-  batchTagModels,
   batchDeleteModels,
   createSavedView,
   updateSavedView,
@@ -1313,16 +1318,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setBatchBusy(true);
     let succeeded = 0;
     let failed = 0;
-    const movedModelIds: number[] = [];
+    let modelReceipt: LibraryEditReceipt | null = null;
     const movedCollections: CollectionNodeRead[] = [];
     const failureDetails: string[] = [];
-    const originalModels = new Map(selectedModelSnapshot.current);
+    const session = getSessionVersion();
     try {
       if (selectedIdList.length) {
-        const result = await batchInChunks((ids) => batchMoveModels(ids, target));
+        modelReceipt = await moveLibraryModels(
+          selectedIdList.map((id) => {
+            const model = selectedModelSnapshot.current.get(id);
+            if (!model) throw new Error("selected_model_snapshot_missing");
+            return model;
+          }),
+          target,
+        );
+        requireSessionVersion(session);
+        const result = modelReceipt.result;
         succeeded += result.succeeded_count;
         failed += result.failed_count;
-        movedModelIds.push(...result.succeeded_ids);
         failureDetails.push(
           ...result.failed.map((failure) =>
             uiText("Model #{value1}: {value2}", {
@@ -1333,11 +1346,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         );
       }
       for (const collection of selectedCollections) {
+        requireSessionVersion(session);
         try {
           await moveCollection(collection.id, parentId);
+          requireSessionVersion(session);
           succeeded += 1;
           movedCollections.push(collection);
         } catch {
+          requireSessionVersion(session);
           failed += 1;
           failureDetails.push(
             uiText("Folder: {value1}", {
@@ -1348,18 +1364,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
       if (succeeded)
         toast.undo(uiText("Moved {value1}", { value1: String(succeeded) }), async () => {
-          const groups = new Map<string, number[]>();
-          for (const id of movedModelIds) {
-            const original = originalModels.get(id)?.collection ?? "";
-            groups.set(original, [...(groups.get(original) ?? []), id]);
+          try {
+            requireSessionVersion(session);
+            const result = await modelReceipt?.undo();
+            for (const collection of movedCollections) {
+              requireSessionVersion(session);
+              await moveCollection(collection.id, collection.parent_id);
+            }
+            requireSessionVersion(session);
+            refresh();
+            if (result?.failed_count)
+              toast.warning(
+                uiText("{value1} skipped", { value1: String(result.failed_count) }),
+                result.failed
+                  .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+                  .join(" · "),
+              );
+            else toast.success(uiText("Move undone"));
+          } catch (error) {
+            if (session === getSessionVersion()) toast.error(error);
           }
-          for (const [collection, ids] of groups)
-            for (let index = 0; index < ids.length; index += 500)
-              await batchMoveModels(ids.slice(index, index + 500), collection);
-          for (const collection of movedCollections)
-            await moveCollection(collection.id, collection.parent_id);
-          refresh();
-          toast.success(uiText("Move undone"));
         });
       if (failed)
         toast.warning(
@@ -1369,9 +1393,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       refresh();
       clearSelection();
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setBatchBusy(false);
+      if (session === getSessionVersion()) setBatchBusy(false);
     }
   }
 
@@ -1438,32 +1462,53 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function tagSelection(add: string[], remove: string[]) {
     setBatchBusy(true);
-    const originalModels = new Map(selectedModelSnapshot.current);
+    const session = getSessionVersion();
     try {
-      const result = await batchInChunks((ids) => batchTagModels(ids, add, remove));
+      const receipt = await tagLibraryModels(
+        selectedIdList.map((id) => {
+          const model = selectedModelSnapshot.current.get(id);
+          if (!model) throw new Error("selected_model_snapshot_missing");
+          return model;
+        }),
+        add,
+        remove,
+      );
+      requireSessionVersion(session);
+      const result = receipt.result;
       if (result.succeeded_count)
         toast.undo(
           uiText("Tagged {value1}", { value1: String(result.succeeded_count) }),
           async () => {
-            for (const id of result.succeeded_ids) {
-              const original = originalModels.get(id);
-              if (original) await updateModel(id, { tags: original.tags });
+            try {
+              const undone = await receipt.undo();
+              requireSessionVersion(session);
+              refresh();
+              if (undone.failed_count)
+                toast.warning(
+                  uiText("{value1} skipped", { value1: String(undone.failed_count) }),
+                  undone.failed
+                    .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+                    .join(" · "),
+                );
+              else toast.success(uiText("Tags restored"));
+            } catch (error) {
+              if (session === getSessionVersion()) toast.error(error);
             }
-            refresh();
-            toast.success(uiText("Tags restored"));
           },
         );
       if (result.failed_count)
         toast.warning(
           uiText("{value1} skipped", { value1: String(result.failed_count) }),
-          result.failed.map((failure) => `#${failure.model_id}: ${failure.reason}`).join(" · "),
+          result.failed
+            .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+            .join(" · "),
         );
       refresh();
       clearSelection();
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setBatchBusy(false);
+      if (session === getSessionVersion()) setBatchBusy(false);
     }
   }
   const hasActiveFilters =
@@ -2795,8 +2840,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               suggestions={tags}
               open={tagDialogOpen}
               onClose={() => setTagDialogOpen(false)}
-              onSaved={(nextTags) => {
-                setTagTarget((current) => (current ? { ...current, tags: nextTags } : current));
+              onSaved={(nextTags, editVersion) => {
+                setTagTarget((current) =>
+                  current ? { ...current, tags: nextTags, edit_version: editVersion } : current,
+                );
                 refresh();
               }}
             />

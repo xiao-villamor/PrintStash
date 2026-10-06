@@ -18,6 +18,7 @@ import {
   ListModelsParams,
   ManualPrintJobCreate,
   ModelBatchResult,
+  ModelEditBatchResult,
   ModelListItem,
   ModelFacetsRead,
   ModelPageRead,
@@ -234,23 +235,40 @@ export function deleteModel(id: number): Promise<void> {
   return sendAction(`/api/v1/models/${id}`, "DELETE");
 }
 
-export function batchMoveModels(modelIds: number[], collection: string): Promise<ModelBatchResult> {
-  return sendJson<ModelBatchResult>("/api/v1/models/batch/move", "POST", {
-    model_ids: modelIds,
-    collection,
-  });
+export function batchMoveModels(
+  modelIds: number[],
+  collection: string,
+  expectedVersions: Record<number, number>,
+): Promise<ModelEditBatchResult> {
+  return sendJson<ModelEditBatchResult>(
+    "/api/v1/models/batch/move",
+    "POST",
+    {
+      model_ids: modelIds,
+      collection,
+      expected_versions: expectedVersions,
+    },
+    { "X-PrintStash-Edit-Contract": "conditional-v1" },
+  );
 }
 
 export function batchTagModels(
   modelIds: number[],
   add: string[],
   remove: string[],
-): Promise<ModelBatchResult> {
-  return sendJson<ModelBatchResult>("/api/v1/models/batch/tags", "POST", {
-    model_ids: modelIds,
-    add,
-    remove,
-  });
+  expectedVersions: Record<number, number>,
+): Promise<ModelEditBatchResult> {
+  return sendJson<ModelEditBatchResult>(
+    "/api/v1/models/batch/tags",
+    "POST",
+    {
+      model_ids: modelIds,
+      add,
+      remove,
+      expected_versions: expectedVersions,
+    },
+    { "X-PrintStash-Edit-Contract": "conditional-v1" },
+  );
 }
 
 export function batchSetRevisionLabels(

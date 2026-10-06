@@ -576,7 +576,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           suggestions={tags}
           open={tagDialogOpen}
           onClose={() => setTagDialogOpen(false)}
-          onSaved={(nextTags) => setModel((current) => ({ ...current, tags: nextTags }))}
+          onSaved={(nextTags, editVersion) =>
+            setModel((current) => ({ ...current, tags: nextTags, edit_version: editVersion }))
+          }
         />
         {editing && editConflict && (
           <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">

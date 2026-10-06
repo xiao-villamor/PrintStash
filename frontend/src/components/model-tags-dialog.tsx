@@ -9,6 +9,7 @@ import { Plus, Tag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { Modal } from "@/components/ui/modal";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { batchTagModels } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
@@ -16,6 +17,7 @@ import type { TagRead } from "@/types";
 
 interface TaggedModel {
   id: number;
+  edit_version: number;
   name: string;
   tags: string[];
 }
@@ -35,15 +37,16 @@ export function ModelTagsDialog({
   suggestions: TagRead[];
   open: boolean;
   onClose: () => void;
-  onSaved: (tags: string[]) => void;
+  onSaved: (tags: string[], editVersion: number) => void;
 }) {
   useUiLocale();
+  const [base, setBase] = useState(model);
   const [selected, setSelected] = useState<string[]>(() => [...model.tags]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const needle = normalized(query);
   const selectedNames = useMemo(() => new Set(selected.map(normalized)), [selected]);
-  const originalNames = useMemo(() => new Set(model.tags.map(normalized)), [model.tags]);
+  const originalNames = useMemo(() => new Set(base.tags.map(normalized)), [base.tags]);
   const matching = useMemo(
     () =>
       needle
@@ -64,6 +67,7 @@ export function ModelTagsDialog({
     [...originalNames].some((name) => !selectedNames.has(name));
 
   function reset() {
+    setBase(model);
     setSelected([...model.tags]);
     setQuery("");
   }
@@ -90,21 +94,26 @@ export function ModelTagsDialog({
   async function save() {
     if (!hasChanges || busy) return;
     const add = selected.filter((name) => !originalNames.has(normalized(name)));
-    const remove = model.tags.filter((name) => !selectedNames.has(normalized(name)));
+    const remove = base.tags.filter((name) => !selectedNames.has(normalized(name)));
+    const session = getSessionVersion();
     setBusy(true);
     try {
-      const result = await batchTagModels([model.id], add, remove);
+      const result = await batchTagModels([base.id], add, remove, { [base.id]: base.edit_version });
+      requireSessionVersion(session);
       if (result.succeeded_count !== 1) {
         throw new Error(result.failed[0]?.reason ?? "Could not update tags");
       }
-      onSaved([...selected]);
+      const version = result.succeeded_versions[base.id];
+      if (!Number.isSafeInteger(version) || version < 1)
+        throw new Error("invalid_edit_acknowledgment");
+      onSaved([...selected], version);
       toast.success(uiText("Tags updated"));
       setQuery("");
       onClose();
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setBusy(false);
+      if (session === getSessionVersion()) setBusy(false);
     }
   }
 

@@ -316,6 +316,10 @@ export interface ModelBatchResult {
   failed_count: number;
 }
 
+export interface ModelEditBatchResult extends ModelBatchResult {
+  succeeded_versions: Record<number, number>;
+}
+
 export interface RevisionBatchResult {
   succeeded_ids: number[];
   succeeded_count: number;

@@ -16,14 +16,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
 import { json, renderApp } from "@/test-support/render";
-import type { ModelBatchResult, TagRead } from "@/types";
+import { aModelListItem } from "@/test-support/factories";
+import type { ModelEditBatchResult, TagRead } from "@/types";
 
-const model = { id: 1, name: "Cable guide", tags: ["Workshop"] };
+const model = aModelListItem({ id: 1, name: "Cable guide", tags: ["Workshop"], edit_version: 3 });
 const tags: TagRead[] = [
   { id: 1, name: "Workshop", slug: "workshop", model_count: 2 },
   { id: 2, name: "Functional", slug: "functional", model_count: 4 },
 ];
-const success: ModelBatchResult = {
+const success: ModelEditBatchResult = {
+  succeeded_versions: { 1: 9 },
   succeeded_ids: [1],
   failed: [],
   succeeded_count: 1,
@@ -50,6 +52,29 @@ afterEach(() => {
 });
 
 describe("ModelTagsDialog", () => {
+  it("publishes the confirmed tag version", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [version, setVersion] = useState(model.edit_version);
+      return (
+        <>
+          <output aria-label="Saved version">{version}</output>
+          <ModelTagsDialog
+            model={model}
+            suggestions={tags}
+            open
+            onClose={() => {}}
+            onSaved={(_tags, version) => setVersion(version)}
+          />
+        </>
+      );
+    }
+    renderApp(<Harness />, { routes: { "POST /api/v1/models/batch/tags": json(success) } });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await waitFor(() => expect(screen.getByLabelText("Saved version")).toHaveTextContent("9"));
+  });
+
   it("assigns an existing tag", async () => {
     const user = userEvent.setup();
     const { requestsWithMethod } = renderDialog();
@@ -61,6 +86,7 @@ describe("ModelTagsDialog", () => {
     await waitFor(() =>
       expect(JSON.parse(requestsWithMethod("POST")[0]?.body ?? "{}")).toMatchObject({
         model_ids: [1],
+        expected_versions: { 1: 3 },
         add: ["Functional"],
         remove: [],
       }),

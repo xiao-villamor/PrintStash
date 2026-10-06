@@ -8,7 +8,7 @@ M4 requirements recorded before conditional writer migration.
 | 2 | sends the editor's Multipart version | Happy | Multipart v7 composition edited | exact If-Match at HTTP boundary | Frontend unit | ❌ missing |
 | 3 | preserves a Model draft on edit conflict | Error | another editor saved first | draft retained; explicit latest-version review | Frontend unit | ✅ `src/components/model-detail/__tests__/index.test.tsx::preserves a Model draft on edit conflict` |
 | 4 | preserves a Multipart draft on edit conflict | Error | another editor saved first | composition retained; no automatic retry | Frontend unit | ❌ missing |
-| 5 | rejects undo after another writer changed the Model | Error | acknowledged batch version now stale | conflict preserved without overwriting current value | Frontend unit | ❌ missing |
+| 5 | retains a concurrent change when undo conflicts | Error | acknowledged batch version now stale | conflict preserved without overwriting current value | Frontend unit | ✅ `src/features/library/__tests__/batch-edits.test.tsx::retains a concurrent change when undo conflicts` |
 | 6 | confirms an ambiguous Model save before retry | Error | save response lost | authoritative read; no blind second write | Playwright | ❌ missing |
 | 7 | keeps an edited Model draft through refetch | Edge | derivative refresh during editing | original edit version and draft preserved | Frontend unit | ❌ missing |
 | 8 | saves a retained Model draft only after explicit version review | Happy | reviewed v7 | one intentional retry with v7; saved draft shown | Frontend unit | ✅ `src/components/model-detail/__tests__/index.test.tsx::saves a retained Model draft only after explicit version review` |
