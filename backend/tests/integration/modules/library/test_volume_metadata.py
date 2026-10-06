@@ -3,10 +3,12 @@
 import pytest
 from printstash_core.mesh.measurements import (
     VolumeLegacyUnassessed,
+    VolumeMeasured,
     VolumeMethod,
     VolumeNotCalculated,
     VolumeNotCalculatedCause,
     VolumeState,
+    VolumeUnavailable,
     VolumeUnavailableCause,
 )
 from sqlalchemy import text
@@ -21,6 +23,7 @@ from app.db.models import (
     Metadata,
 )
 from app.modules.derivatives import producers
+from app.modules.library.volume_metadata import read_volume
 from tests.factories import content
 
 
@@ -271,3 +274,166 @@ class TestDimensionDatabaseConstraint:
                 {"value": value, "id": metadata.id},
             )
         db_session.rollback()
+
+
+class TestReadVolume:
+    @pytest.mark.parametrize(
+        "volume",
+        [
+            pytest.param(VolumeMeasured(100.0), id="measured"),
+            pytest.param(
+                VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+                id="unavailable",
+            ),
+            pytest.param(
+                VolumeNotCalculated(VolumeNotCalculatedCause.ENRICHMENT_PENDING),
+                id="pending",
+            ),
+            pytest.param(VolumeLegacyUnassessed(0.0), id="legacy-zero"),
+            pytest.param(VolumeLegacyUnassessed(-1.0), id="legacy-negative"),
+            pytest.param(VolumeLegacyUnassessed(None), id="legacy-null"),
+        ],
+    )
+    def test_preserves_the_durable_volume_variant(
+        self, db_session, stored, make_metadata, volume
+    ):
+        artifact = stored("volume.stl", content.binary_stl())
+        metadata = make_metadata(artifact, volume=volume)
+        db_session.expire_all()
+
+        restored = read_volume(metadata)
+
+        assert restored == volume
+
+    @pytest.mark.parametrize(
+        "volume,column,invalid_value,message",
+        [
+            pytest.param(
+                VolumeMeasured(100.0),
+                "volume_mm3",
+                None,
+                "measured",
+                id="measured-missing-value",
+            ),
+            pytest.param(
+                VolumeMeasured(100.0),
+                "volume_method",
+                None,
+                "measured",
+                id="measured-missing-method",
+            ),
+            pytest.param(
+                VolumeMeasured(100.0),
+                "volume_unavailable_cause",
+                VolumeUnavailableCause.NOT_WATERTIGHT,
+                "measured",
+                id="measured-unavailable-cause",
+            ),
+            pytest.param(
+                VolumeMeasured(100.0),
+                "volume_not_calculated_cause",
+                VolumeNotCalculatedCause.NOT_REQUESTED,
+                "measured",
+                id="measured-not-calculated-cause",
+            ),
+            pytest.param(
+                VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+                "volume_mm3",
+                100.0,
+                "unavailable",
+                id="unavailable-has-value",
+            ),
+            pytest.param(
+                VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+                "volume_method",
+                None,
+                "unavailable",
+                id="unavailable-missing-method",
+            ),
+            pytest.param(
+                VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+                "volume_unavailable_cause",
+                None,
+                "unavailable",
+                id="unavailable-missing-cause",
+            ),
+            pytest.param(
+                VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT),
+                "volume_not_calculated_cause",
+                VolumeNotCalculatedCause.NOT_REQUESTED,
+                "unavailable",
+                id="unavailable-not-calculated-cause",
+            ),
+            pytest.param(
+                VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+                "volume_mm3",
+                100.0,
+                "not calculated",
+                id="not-calculated-has-value",
+            ),
+            pytest.param(
+                VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+                "volume_method",
+                VolumeMethod.MESH_SURFACE_INTEGRAL,
+                "not calculated",
+                id="not-calculated-has-method",
+            ),
+            pytest.param(
+                VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+                "volume_unavailable_cause",
+                VolumeUnavailableCause.NOT_WATERTIGHT,
+                "not calculated",
+                id="not-calculated-unavailable-cause",
+            ),
+            pytest.param(
+                VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+                "volume_not_calculated_cause",
+                None,
+                "not calculated",
+                id="not-calculated-missing-cause",
+            ),
+            pytest.param(
+                VolumeLegacyUnassessed(100.0),
+                "volume_method",
+                VolumeMethod.MESH_SURFACE_INTEGRAL,
+                "legacy",
+                id="legacy-has-method",
+            ),
+            pytest.param(
+                VolumeLegacyUnassessed(100.0),
+                "volume_unavailable_cause",
+                VolumeUnavailableCause.NOT_WATERTIGHT,
+                "legacy",
+                id="legacy-unavailable-cause",
+            ),
+            pytest.param(
+                VolumeLegacyUnassessed(100.0),
+                "volume_not_calculated_cause",
+                VolumeNotCalculatedCause.NOT_REQUESTED,
+                "legacy",
+                id="legacy-not-calculated-cause",
+            ),
+        ],
+    )
+    def test_refuses_incoherent_detached_volume_evidence(
+        self, db_session, stored, make_metadata, volume, column, invalid_value, message
+    ):
+        artifact = stored("incoherent.stl", content.binary_stl())
+        metadata = make_metadata(artifact, volume=volume)
+        db_session.expunge(metadata)
+        setattr(metadata, column, invalid_value)
+
+        with pytest.raises(ValueError, match=f"invalid persisted {message} volume"):
+            read_volume(metadata)
+
+    @pytest.mark.parametrize("state", [None, "unknown"], ids=["missing", "unknown"])
+    def test_refuses_an_unknown_detached_volume_state(
+        self, db_session, stored, make_metadata, state
+    ):
+        artifact = stored("state.stl", content.binary_stl())
+        metadata = make_metadata(artifact)
+        db_session.expunge(metadata)
+        metadata.volume_state = state
+
+        with pytest.raises(ValueError, match="invalid persisted volume state"):
+            read_volume(metadata)

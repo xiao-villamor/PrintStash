@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify durable volume evidence reads preserve closed variants and refuse
+  incompatible scalar, method, cause or state combinations.
+
 - Verify search generation proposal provider, visual profile and aggregation
   rejection contracts directly at the public schema boundary.
 
