@@ -588,6 +588,114 @@ describe("ModelDetail", () => {
       expect(await screen.findByText("Benchy v2")).toBeInTheDocument();
     });
 
+    it("clears a description the user emptied", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        model: aModel({ description: "Previous description" }),
+        routes: {
+          "PATCH /api/v1/models/1": json(aModel({ description: null, edit_version: 2 })),
+        },
+      });
+      await openEdit(user);
+
+      await user.clear(screen.getByPlaceholderText("Optional description"));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty(
+        "description",
+        null,
+      );
+    });
+
+    it("clears all Model tags", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        model: aModel({ tags: ["old-tag"] }),
+        routes: {
+          "PATCH /api/v1/models/1": json(aModel({ tags: [], edit_version: 2 })),
+        },
+      });
+      await openEdit(user);
+
+      await user.click(screen.getByPlaceholderText("Search or create — press Enter"));
+      await user.keyboard("{Backspace}");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty("tags", []);
+    });
+
+    it.each(["transport", "server"] as const)(
+      "blocks another Model write after an unconfirmed response (%s)",
+      async (failure) => {
+        const user = userEvent.setup();
+        const failures = {
+          transport: () => {
+            throw new TypeError("Failed to fetch");
+          },
+          server: () => json({ detail: "unavailable" }, 503),
+        };
+        const app = renderDetail({ routes: { "PATCH /api/v1/models/1": failures[failure] } });
+        await openEdit(user);
+
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        expect(
+          await screen.findByText(
+            "The save was not confirmed. Review the latest version before retrying.",
+          ),
+        ).toBeVisible();
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+        expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it("keeps an unconfirmed draft blocked when review fails", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "unavailable" }, 503),
+          "GET /api/v1/models/1": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Review latest version" })).not.toBeDisabled(),
+      );
+
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("adopts the reviewed result of an unconfirmed save without rewriting", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "unavailable" }, 503),
+          "GET /api/v1/models/1": json(aModel({ name: "Saved draft", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "Saved draft");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Use latest version" }));
+
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      expect(app.client.getQueryData<ModelRead>(queryKeys.model(1))).toMatchObject({
+        name: "Saved draft",
+        edit_version: 7,
+      });
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Saved draft");
+    });
+
     it("clears a source URL the user emptied", async () => {
       // An empty string here has to travel as null: `undefined` would leave the
       // old link in place, so the field would silently refuse to be cleared.

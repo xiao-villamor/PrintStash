@@ -402,7 +402,7 @@ export interface PrintStatisticsRead {
 
 export interface ModelUpdate {
   name?: string;
-  description?: string;
+  description?: string | null;
   source_url?: string | null;
   collection?: string;
   tags?: string[];

@@ -42,6 +42,48 @@ test.describe("model detail route", () => {
     await expect(page).toHaveURL(/\/models\/1$/);
   });
 
+  test("confirms an ambiguous Model save before retry", async ({ page }) => {
+    let responseLost = false;
+    let writes = 0;
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (route.request().method() === "PATCH") {
+        writes += 1;
+        responseLost = true;
+        await route.abort("failed");
+        return;
+      }
+      const response = await route.fetch();
+      // SAFETY: the mock API's Model detail fixture has the complete ModelRead contract.
+      const model = (await response.json()) as ModelRead;
+      await route.fulfill({
+        json: {
+          ...model,
+          name: responseLost ? "Saved draft" : model.name,
+          edit_version: responseLost ? 7 : 1,
+        },
+      });
+    });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByPlaceholder("Model name").fill("Saved draft");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+      page.getByText("The save was not confirmed. Review the latest version before retrying."),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
+      "Saved draft",
+    );
+    await page.getByRole("button", { name: "Use latest version" }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    await expect(page.getByRole("heading", { name: "Saved draft", exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+  });
+
   test("reviews a conflicting Model before intentional retry", async ({ page }) => {
     let conflicted = false;
     let saved = false;

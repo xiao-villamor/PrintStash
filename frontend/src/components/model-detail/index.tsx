@@ -177,7 +177,7 @@ function ModelDetailPresentation({
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editBaseVersion, setEditBaseVersion] = useState(model.edit_version);
-  const [editConflict, setEditConflict] = useState(false);
+  const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
   const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -323,7 +323,7 @@ function ModelDetailPresentation({
 
   function enterEdit() {
     setEditBaseVersion(model.edit_version);
-    setEditConflict(false);
+    setEditProblem(null);
     setReviewedModel(null);
     setEditName(model.name);
     setEditDescription(model.description || "");
@@ -338,7 +338,7 @@ function ModelDetailPresentation({
   }
 
   function cancelEdit() {
-    setEditConflict(false);
+    setEditProblem(null);
     setReviewedModel(null);
     setEditing(false);
   }
@@ -353,23 +353,31 @@ function ModelDetailPresentation({
         model.id,
         {
           name: editName.trim() || undefined,
-          description: editDescription.trim() || undefined,
+          description: editDescription.trim() || null,
           source_url: editSourceUrl.trim() || null,
           collection: editCollection,
-          tags: editTags.length ? editTags : undefined,
+          tags: editTags,
         },
         version,
       );
       requireSessionVersion(session);
       if (!(await setModel(updated))) return;
-      setEditConflict(false);
+      setEditProblem(null);
       setReviewedModel(null);
       setEditing(false);
       toast.success(uiText("Model updated"));
     } catch (e) {
       if (session !== getSessionVersion()) return;
       if (e instanceof ApiError && e.status === 412) {
-        setEditConflict(true);
+        setEditProblem("conflict");
+        setReviewedModel(null);
+      } else if (
+        !(e instanceof ApiError) ||
+        e.status === 0 ||
+        e.status === 408 ||
+        e.status >= 500
+      ) {
+        setEditProblem("unconfirmed");
         setReviewedModel(null);
       } else toast.error(e);
     } finally {
@@ -400,7 +408,7 @@ function ModelDetailPresentation({
     setEditCollection(reviewedModel.collection ?? "");
     setEditCollectionLabel(reviewedModel.collection_label);
     setEditTags([...reviewedModel.tags]);
-    setEditConflict(false);
+    setEditProblem(null);
     setReviewedModel(null);
   }
 
@@ -592,9 +600,13 @@ function ModelDetailPresentation({
             void setModel((current) => ({ ...current, tags: nextTags, edit_version: editVersion }));
           }}
         />
-        {editing && editConflict && (
+        {editing && editProblem && (
           <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
-            <p>{uiText("library.editConflict")}</p>
+            <p>
+              {uiText(
+                editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+              )}
+            </p>
             <Button
               variant="outline"
               size="sm"
@@ -726,7 +738,7 @@ function ModelDetailPresentation({
                   size="sm"
                   onClick={() => void saveEdit()}
                   loading={saving}
-                  disabled={!editName.trim() || editConflict || !canEditModel}
+                  disabled={!editName.trim() || editProblem !== null || !canEditModel}
                 >
                   {!saving && <Check className="h-4 w-4" />}{" "}
                   {saving ? uiText("Saving…") : uiText("Save")}
