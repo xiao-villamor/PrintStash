@@ -16,10 +16,69 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("vault route", () => {
+  test("preserves mixed order through browser pagination", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      const continued = new URL(route.request().url()).searchParams.has("cursor");
+      await route.fulfill({
+        json: {
+          items: continued
+            ? [{ kind: "model", model: aModelListItem({ name: "Älpha", thumbnail_url: null }) }]
+            : [
+                {
+                  kind: "multipart",
+                  multipart: aMultipartModel({ name: "Zeta", cover_thumbnail_url: null }),
+                },
+              ],
+          total: 2,
+          next_cursor: continued ? null : "next",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?type=all&sort=name-asc");
+    await expect(page.getByRole("link", { name: /Zeta/ })).toBeVisible();
+
+    await page.getByRole("button", { name: "Load more" }).click();
+
+    const cards = page.locator(".stagger-children > *").filter({ hasText: /Zeta|Älpha/ });
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0)).toContainText("Zeta");
+    await expect(cards.nth(1)).toContainText("Älpha");
+  });
+
+  test("continues an empty browse page in the browser", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      const continued = new URL(route.request().url()).searchParams.has("cursor");
+      await route.fulfill({
+        json: {
+          items: continued
+            ? [
+                {
+                  kind: "model",
+                  model: aModelListItem({ name: "Reached match", thumbnail_url: null }),
+                },
+              ]
+            : [],
+          total: 1,
+          next_cursor: continued ? null : "next",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?file_type=stl");
+
+    await page.getByRole("button", { name: "Load more" }).click();
+
+    await expect(page.getByText("Reached match", { exact: true })).toBeVisible();
+  });
+
   test("restores library mode after collection history", async ({ page }) => {
     await page.goto("/?type=multipart&sort=name-asc");
     await expect(
@@ -77,7 +136,7 @@ test.describe("vault route", () => {
     const pageRequests: string[] = [];
     page.on("request", (request) => {
       const url = new URL(request.url());
-      if (url.pathname === "/api/v1/models/page") pageRequests.push(url.search);
+      if (url.pathname === "/api/v1/models/browse") pageRequests.push(url.search);
     });
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
@@ -87,7 +146,8 @@ test.describe("vault route", () => {
       page.waitForRequest((request) => {
         const url = new URL(request.url());
         return (
-          url.pathname === "/api/v1/models/page" && url.searchParams.get("sort") === "success-desc"
+          url.pathname === "/api/v1/models/browse" &&
+          url.searchParams.get("sort") === "success-desc"
         );
       }),
       page.getByRole("menuitem", { name: "Best success rate" }).click(),

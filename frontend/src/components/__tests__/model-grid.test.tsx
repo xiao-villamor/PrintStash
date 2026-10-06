@@ -174,7 +174,19 @@ function renderVault(
       ],
       routes: {
         "GET /api/v1/models/facets": json(EMPTY_FACETS),
-        "GET /api/v1/models/page": json({ items: models, total: models.length, next_cursor: null }),
+        "GET /api/v1/models/browse": (url) =>
+          json({
+            items: [
+              ...(new URL(url, "http://printstash.test").searchParams.get("view") === "multipart"
+                ? []
+                : models.map((model) => ({ kind: "model", model }))),
+              ...multipartModels.map((multipart) => ({ kind: "multipart", multipart })),
+            ],
+            total: models.length + multipartModels.length,
+            next_cursor: null,
+            browse_revision: "r1",
+            authorization_revision: "a1",
+          }),
         "GET /api/v1/models/outliner": json([]),
         "GET /api/v1/models": json(models),
         "GET /api/v1/saved-views": json([]),
@@ -230,14 +242,14 @@ function uploadButton() {
  */
 function lastModelsQuery(requests: () => { method: string; url: string }[]): URLSearchParams {
   const url = requests()
-    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/models/page"))
+    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/models/browse"))
     .at(-1)?.url;
   return new URLSearchParams(url?.split("?")[1] ?? "");
 }
 
 function lastMultipartQuery(requests: () => { method: string; url: string }[]): URLSearchParams {
   const url = requests()
-    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/multipart-models"))
+    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/models/browse"))
     .at(-1)?.url;
   return new URLSearchParams(url?.split("?")[1] ?? "");
 }
@@ -369,11 +381,13 @@ describe("ModelBrowser", () => {
     it("bounds the initial model page without changing URL filters", async () => {
       const { requests } = renderVault({ at: "/?tag=functional", startup: true });
       await waitFor(() =>
-        expect(requests().some((request) => request.url.startsWith("/api/v1/models/page"))).toBe(
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/browse"))).toBe(
           true,
         ),
       );
-      const request = requests().find((request) => request.url.startsWith("/api/v1/models/page"))!;
+      const request = requests().find((request) =>
+        request.url.startsWith("/api/v1/models/browse"),
+      )!;
       const params = new URL(request.url, "http://test").searchParams;
       expect(params.get("limit")).toBe("24");
       expect(params.getAll("tag")).toEqual(["functional"]);
@@ -386,10 +400,10 @@ describe("ModelBrowser", () => {
       });
       const { requests } = renderVault({
         startup: true,
-        routes: { "GET /api/v1/models/page": () => primary },
+        routes: { "GET /api/v1/models/browse": () => primary },
       });
       await waitFor(() =>
-        expect(requests().some((request) => request.url.startsWith("/api/v1/models/page"))).toBe(
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/browse"))).toBe(
           true,
         ),
       );
@@ -400,7 +414,13 @@ describe("ModelBrowser", () => {
         false,
       );
       deliver(
-        json({ items: [aModelListItem({ name: "Ready bracket" })], total: 1, next_cursor: null }),
+        json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Ready bracket" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
       );
       expect(await screen.findByText("Ready bracket")).toBeVisible();
       await waitFor(() =>
@@ -415,7 +435,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({
         startup: true,
         collections: [aCollection()],
-        routes: { "GET /api/v1/models/page": () => new Promise(() => {}) },
+        routes: { "GET /api/v1/models/browse": () => new Promise(() => {}) },
       });
       const outliner = await screen.findByRole("complementary");
       const folder = await within(outliner).findByTitle("Parts");
@@ -433,7 +453,7 @@ describe("ModelBrowser", () => {
     it("loads filter options immediately when filters are opened early", async () => {
       const { requests } = renderVault({
         startup: true,
-        routes: { "GET /api/v1/models/page": () => new Promise(() => {}) },
+        routes: { "GET /api/v1/models/browse": () => new Promise(() => {}) },
       });
       await userEvent.click(screen.getAllByRole("button", { name: "Filters" })[0]);
       await waitFor(() =>
@@ -481,9 +501,9 @@ describe("ModelBrowser", () => {
     it("releases catalog requests after a primary error", async () => {
       const { requests } = renderVault({
         startup: true,
-        routes: { "GET /api/v1/models/page": json({ detail: "startup_failed" }, 500) },
+        routes: { "GET /api/v1/models/browse": json({ detail: "startup_failed" }, 500) },
       });
-      await screen.findByText(/startup_failed/);
+      await screen.findByText(/startup_failed/, {}, { timeout: 3000 });
       await waitFor(() =>
         expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
           true,
@@ -726,30 +746,36 @@ describe("ModelBrowser", () => {
         at: "/?c=parts",
         collections: PARTS_TREE,
         routes: {
-          "GET /api/v1/models/page": (url) =>
-            json({
-              items: [
-                aModelListItem({
-                  name: url.includes("parts%2Fbrackets") ? "Bracket piece" : "Shelf rig",
+          "GET /api/v1/models/browse": (url) =>
+            url.includes("parts%2Fbrackets")
+              ? pending.promise
+              : json({
+                  items: [{ kind: "model", model: aModelListItem({ name: "Shelf rig" }) }],
+                  total: 1,
+                  next_cursor: null,
+                  browse_revision: "r1",
+                  authorization_revision: "a1",
                 }),
-              ],
-              total: 1,
-              next_cursor: null,
-            }),
-          "GET /api/v1/multipart-models": (url) =>
-            url.includes("parts%2Fbrackets") ? pending.promise : json([]),
         },
       });
       await screen.findByText("Shelf rig");
       await user.click(await folderCard("parts/brackets"));
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
       expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
       expect(screen.getByText("Shelf rig")).toBeVisible();
       expect(screen.queryByText("Bracket piece")).not.toBeInTheDocument();
       expect(await folderCard("parts/brackets")).toBeVisible();
-      pending.resolve(json([]));
+      pending.resolve(
+        json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Bracket piece" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
+      );
       expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
       expect(screen.getByText("Bracket piece")).toBeVisible();
       expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument();
@@ -766,11 +792,7 @@ describe("ModelBrowser", () => {
       await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() => {
-        for (const prefix of [
-          "/api/v1/models/page",
-          "/api/v1/models/facets",
-          "/api/v1/multipart-models",
-        ]) {
+        for (const prefix of ["/api/v1/models/browse", "/api/v1/models/facets"]) {
           expect(requestsFor(requests, prefix, "parts/brackets")).toHaveLength(1);
         }
       });
@@ -782,14 +804,14 @@ describe("ModelBrowser", () => {
       await screen.findByRole("heading", { name: "Parts" });
       await user.hover(await folderCard("parts/brackets"));
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
 
       await user.click(await folderCard("parts/brackets"));
 
       await screen.findByRole("heading", { name: "Brackets" });
-      expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1);
-      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(1);
+      expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1);
+      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
     });
 
     it("warms a folder focused from the keyboard", async () => {
@@ -799,7 +821,7 @@ describe("ModelBrowser", () => {
       fireEvent.focus(await folderCard("parts/brackets"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
     });
 
@@ -811,7 +833,7 @@ describe("ModelBrowser", () => {
       await user.hover(await within(outliner).findByTitle("Parts"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1),
       );
     });
 
@@ -848,7 +870,7 @@ describe("ModelBrowser", () => {
       const { requests, client } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
       await screen.findByRole("heading", { name: "Parts" });
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1),
       );
       // Past production's staleTime, a prefetch of this folder would refetch it.
       client.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
@@ -857,7 +879,7 @@ describe("ModelBrowser", () => {
       await user.hover(within(outliner).getByTitle("Parts"));
 
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(requestsFor(requests, "/api/v1/models/page", "parts")).toHaveLength(1);
+      expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1);
     });
 
     it("warms a folder hovered in the list view", async () => {
@@ -869,7 +891,7 @@ describe("ModelBrowser", () => {
       await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
     });
 
@@ -881,7 +903,7 @@ describe("ModelBrowser", () => {
       fireEvent.focus(await folderCard("parts/brackets"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
     });
 
@@ -895,9 +917,9 @@ describe("ModelBrowser", () => {
       await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
-      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(1);
+      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
     });
 
     it("warms a folder focused in the sidebar tree", async () => {
@@ -907,7 +929,7 @@ describe("ModelBrowser", () => {
       fireEvent.focus(await within(outliner).findByTitle("Parts"));
 
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/page", "parts")).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1),
       );
     });
 
@@ -922,7 +944,7 @@ describe("ModelBrowser", () => {
       await user.hover(await folderCard("parts/brackets"));
 
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(0);
+      expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(0);
     });
 
     it("does not ask for the readme of a folder the list says has none", async () => {
@@ -2231,12 +2253,62 @@ describe("ModelBrowser", () => {
       ).toHaveLength(2);
     });
 
+    it("preserves server order when another mixed page arrives", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        at: "/?type=all&sort=name-asc",
+        routes: {
+          "GET /api/v1/models/browse": (url) =>
+            json({
+              items: url.includes("cursor=")
+                ? [{ kind: "model", model: aModelListItem({ id: 2, name: "Älpha" }) }]
+                : [{ kind: "multipart", multipart: aMultipartSet({ name: "Zeta" }) }],
+              total: 2,
+              next_cursor: url.includes("cursor=") ? null : "next",
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            }),
+        },
+      });
+      const first = await screen.findByRole("link", { name: /Zeta/ });
+
+      await user.click(screen.getByRole("button", { name: /Load more/ }));
+
+      const second = await screen.findByText("Älpha");
+      expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    });
+
+    it("reaches matching results after an empty browse page", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        at: "/?file_type=stl",
+        routes: {
+          "GET /api/v1/models/browse": (url) =>
+            json({
+              items: url.includes("cursor=")
+                ? [{ kind: "model", model: aModelListItem({ name: "Match" }) }]
+                : [],
+              total: 1,
+              next_cursor: url.includes("cursor=") ? null : "next",
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+
+      expect(await screen.findByText("Match")).toBeVisible();
+    });
+
     it("offers more when the page reports a cursor", async () => {
       renderVault({
         models: [aModelListItem({ name: "Benchy" })],
         routes: {
-          "GET /api/v1/models/page": json({
-            items: [aModelListItem({ name: "Benchy" })],
+          "GET /api/v1/models/browse": json({
+            items: [{ kind: "model", model: aModelListItem({ name: "Benchy" }) }],
+            browse_revision: "r1",
+            authorization_revision: "a1",
             total: 120,
             next_cursor: "next",
           }),

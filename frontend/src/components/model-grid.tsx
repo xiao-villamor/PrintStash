@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  libraryBrowseOptions,
+  libraryBrowseKeys,
+  useLibraryBrowse,
+} from "@/features/library/browse";
+import { listLibraryPage } from "@/lib/api/library-browse";
+
 import { historyFilters, historyKeys } from "@/lib/search-filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
@@ -88,7 +95,6 @@ import {
   updateSavedView,
   deleteSavedView,
   listSavedViews,
-  listModels,
   restoreModel,
   replaceCollectionTags,
 } from "@/lib/api";
@@ -106,8 +112,6 @@ import {
   useCollectionSearch,
   useModelFacets,
   useLibraryPrefetch,
-  useModelList,
-  useMultipartModels,
   usePrinters,
   useTags,
   type ModelListFilters,
@@ -216,25 +220,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
     },
   },
 ];
-
-/** Sort the two card types as one library whenever they share a meaningful key. */
-function sortLibraryItems(items: LibraryItem[], sortKey: SortKey): LibraryItem[] {
-  return [...items].sort((left, right) => {
-    if (sortKey === "name-asc" || sortKey === "name-desc") {
-      const order = left.value.name.localeCompare(right.value.name);
-      return sortKey === "name-asc" ? order : -order;
-    }
-    if (sortKey === "date-asc" || sortKey === "date-desc") {
-      const order = Date.parse(left.value.updated_at) - Date.parse(right.value.updated_at);
-      return sortKey === "date-asc" ? order : -order;
-    }
-    // Print-result sorts have no aggregate equivalent yet. Preserve the API's
-    // Model order and put sets after it instead of implying a fabricated score.
-    if (left.kind !== right.kind) return left.kind === "model" ? -1 : 1;
-    if (left.kind === "model") return 0;
-    return Date.parse(right.value.updated_at) - Date.parse(left.value.updated_at);
-  });
-}
 
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
@@ -916,14 +901,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     direct: !searchQuery,
     q: searchQuery,
   });
-  const folderMultipartFilters = (collection: string | null = selectedCollection) => ({
-    collection: collection ?? undefined,
-    direct: !searchQuery,
-    q: searchQuery,
-    tag: selectedTags.length ? selectedTags : undefined,
-    favorites: favoritesOnly || undefined,
-    limit: 500,
-  });
   const facetQuery = useModelFacets(folderModelFilters(), { enabled: filtersEnabled });
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
@@ -1054,11 +1031,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // The paginated grid. `keepPreviousData` (in the hook) holds the current page
   // on screen while a new search/folder loads, and results are cached per filter
   // set so backspacing a query or re-entering a folder is instant.
-  const multipartListEnabled = true;
-  const modelQuery = useModelList(folderModelFilters(), PAGE_SIZE, sortKey, true);
-  const multipartQuery = useMultipartModels(folderMultipartFilters(), {
-    enabled: multipartListEnabled,
-  });
+  const browseParams = {
+    ...folderModelFilters(),
+    view: libraryView,
+    limit: PAGE_SIZE,
+    sort: sortKey,
+  };
+  const modelQuery = useLibraryBrowse(browseParams);
   const libraryPrefetch = useLibraryPrefetch();
 
   const selectedLookup = useCollectionLookup(selectedCollection);
@@ -1079,24 +1058,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
-    !modelQuery.isPlaceholderData &&
-    multipartQuery.data !== undefined &&
-    !multipartQuery.isPlaceholderData;
+    !modelQuery.isPlaceholderData;
 
-  const models = useMemo(
-    () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
+  const orderedItems = useMemo<LibraryItem[]>(
+    () =>
+      modelQuery.data?.pages.flatMap((page) =>
+        page.items.map((entry): LibraryItem =>
+          entry.kind === "model"
+            ? { kind: "model", value: entry.model }
+            : { kind: "multipart", value: entry.multipart },
+        ),
+      ) ?? [],
     [modelQuery.data],
   );
-  const multipartModels = useMemo(() => multipartQuery.data ?? [], [multipartQuery.data]);
   // Commit one coherent browsing result. Independent requests may settle in any
   // order; neither placeholder models nor a cached root folder page belongs to
   // a destination whose lookup/children have not completed yet.
   const nextSnapshot = useMemo(() => {
     if (!browseReady) return null;
-    const displayedModels = libraryView === "multipart" ? [] : models;
     return {
-      models: displayedModels,
-      multipartModels,
+      items: orderedItems,
       collections: folderPages.data?.pages.flatMap((page) => page.items) ?? [],
       collection: selectedCollectionRow,
       breadcrumbs:
@@ -1108,9 +1089,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     };
   }, [
     browseReady,
-    libraryView,
-    models,
-    multipartModels,
+    orderedItems,
     folderPages.data,
     folderPages.hasNextPage,
     selectedCollectionRow,
@@ -1120,14 +1099,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
   const snapshot = nextSnapshot ?? settledSnapshot;
-  const visibleModels = snapshot?.models ?? [];
-  const visibleMultipartModels = snapshot?.multipartModels ?? [];
+  const libraryItems = snapshot?.items ?? [];
+  const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
+  const visibleMultipartModels = libraryItems.flatMap((item) =>
+    item.kind === "multipart" ? [item.value] : [],
+  );
   const visibleCollections = snapshot?.collections ?? [];
   const breadcrumbs = snapshot?.breadcrumbs ?? [];
   const selectedName = snapshot?.collection?.name ?? null;
   const error =
     modelQuery.error?.message ??
-    multipartQuery.error?.message ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
     null;
@@ -1138,7 +1119,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage));
   const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
   const hasMore = snapshot?.hasMore ?? false;
-  const fetchNextPage = modelQuery.fetchNextPage;
+
   useEffect(() => {
     if (browseReady) settleStartup("cards", "ready");
     else if (error !== null) settleStartup("cards", "failed");
@@ -1148,16 +1129,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // A fresh upload's card shows a placeholder until its thumbnail is derived;
   // refetch the list when one lands instead of waiting for a reload.
   const refreshModels = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.models });
+    void queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all });
   }, [queryClient]);
   useThumbnailArrivals(visibleModels, refreshModels);
 
   function loadMore() {
-    if (hasMore && !loadingMore) fetchNextPage();
+    if (hasMore && !loadingMore) void modelQuery.loadMore();
   }
   function refresh() {
     void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.models }),
+      queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
       queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
     ]);
@@ -1181,14 +1162,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = visibleModels;
-  const libraryItems = sortLibraryItems(
-    [
-      ...visibleModels.map((value) => ({ kind: "model" as const, value })),
-      ...visibleMultipartModels.map((value) => ({ kind: "multipart" as const, value })),
-    ],
-    sortKey,
-  );
-
   const openTagEditor = useCallback(
     (model: ModelListItem) => {
       setTagTarget(model);
@@ -1249,18 +1222,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setSelectingAll(true);
     try {
       const all: ModelListItem[] = [];
-      for (let offset = 0; ; offset += 500) {
-        const page = await listModels({
-          ...baseFilters,
-          collection: selectedCollection ?? undefined,
-          direct: !searchQuery,
-          q: searchQuery,
-          limit: 500,
-          offset,
-        });
-        all.push(...page);
-        if (page.length < 500) break;
-      }
+      let cursor: string | undefined;
+      do {
+        const page = await listLibraryPage({ ...browseParams, limit: 500, cursor });
+        all.push(...page.items.flatMap((item) => (item.kind === "model" ? [item.model] : [])));
+        cursor = page.next_cursor ?? undefined;
+      } while (cursor !== undefined);
       setSelectedIds(new Set(all.map((model) => model.id)));
       selectedModelSnapshot.current = new Map(all.map((model) => [model.id, model]));
       toast.info(uiText("{value1} matching models selected", { value1: String(all.length) }));
@@ -1553,8 +1520,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // of the round-trip, so entering the folder renders from cache.
   function prefetchFolder(path: string) {
     if (path === selectedCollection) return;
-    void libraryPrefetch.modelList(folderModelFilters(path), PAGE_SIZE, sortKey);
-    if (multipartListEnabled) void libraryPrefetch.multipartModels(folderMultipartFilters(path));
+    void queryClient.prefetchInfiniteQuery(
+      libraryBrowseOptions({
+        ...folderModelFilters(path),
+        view: libraryView,
+        limit: PAGE_SIZE,
+        sort: sortKey,
+      }),
+    );
     if (filtersEnabled) void libraryPrefetch.modelFacets(folderModelFilters(path));
     const target = visibleCollections.find((collection) => collection.path === path);
     if (target?.has_readme) void libraryPrefetch.collectionReadme(target.id);
@@ -2628,7 +2601,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 )
               ) : error && snapshot === null ? null : sortedModels.length === 0 &&
                 visibleMultipartModels.length === 0 &&
-                visibleCollections.length === 0 ? (
+                visibleCollections.length === 0 &&
+                !hasMore ? (
                 <EmptyState
                   title={uiText("No models found")}
                   description={

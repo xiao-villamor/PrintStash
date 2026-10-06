@@ -1279,6 +1279,24 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, []);
     return;
   }
+  if (url.pathname === "/api/v1/models/browse/revision") {
+    sendJson(res, { browse_revision: "r1", authorization_revision: "a1" });
+    return;
+  }
+  if (url.pathname === "/api/v1/models/browse") {
+    const items =
+      url.searchParams.get("view") === "multipart"
+        ? []
+        : modelList.map((model) => ({ kind: "model", model }));
+    sendJson(res, {
+      items,
+      next_cursor: null,
+      total: items.length,
+      browse_revision: "r1",
+      authorization_revision: "a1",
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/models/page") {
     sendJson(res, {
       items: modelList,
