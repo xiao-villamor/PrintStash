@@ -10,18 +10,31 @@ const PRINTER_CARD_IMAGE_EVENT = "printstash:printer-card-image-changed";
  */
 const isBrowser = (): boolean => "window" in globalThis;
 
+// The current document retains a choice while optional persistence is unavailable.
+let documentChoice: { value: boolean; pending: boolean } | null = null;
+
 export function readPrinterCardImagePreference(): boolean {
   if (!isBrowser()) return false;
+  if (documentChoice?.pending) return documentChoice.value;
   try {
-    return window.localStorage.getItem(PRINTER_CARD_IMAGE_STORAGE_KEY) === "true";
+    const value = window.localStorage.getItem(PRINTER_CARD_IMAGE_STORAGE_KEY) === "true";
+    documentChoice = { value, pending: false };
+    return value;
   } catch {
-    return false;
+    return documentChoice?.value ?? false;
   }
 }
 
 export function writePrinterCardImagePreference(showImage: boolean): void {
   if (!isBrowser()) return;
-  window.localStorage.setItem(PRINTER_CARD_IMAGE_STORAGE_KEY, String(showImage));
+  const raw = String(showImage);
+  documentChoice = { value: showImage, pending: true };
+  try {
+    window.localStorage.setItem(PRINTER_CARD_IMAGE_STORAGE_KEY, raw);
+    documentChoice.pending = false;
+  } catch {
+    // A blocked/quota-limited store cannot prevent the same-document update.
+  }
   window.dispatchEvent(new Event(PRINTER_CARD_IMAGE_EVENT));
 }
 
