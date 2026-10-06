@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify STL publication readers preserve buffered byte semantics and cancellation,
+  refusing nonregular output and unavailable or mismatched source storage.
+
 - Verify local inference rejects missing capabilities, model assets and oversized
   input while preserving admission recovery and read-only cached model support.
 

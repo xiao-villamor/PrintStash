@@ -8,6 +8,8 @@ API process (#259). Running it elsewhere must not change what the viewer receive
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import struct
 import tracemalloc
 from contextlib import contextmanager
@@ -492,3 +494,131 @@ class TestPrepareStl:
 
         assert actual == payload
         assert source.read_bytes() == payload
+
+
+class TestPublicationBoundaries:
+    @pytest.mark.parametrize("method", ["read1", "readinto", "readinto1"], ids=str)
+    def test_preserves_buffered_publication_read_semantics(self, tmp_path, method):
+        source = tmp_path / "original.stl"
+        payload = b"original STL byte semantics"
+        source.write_bytes(payload)
+        with stl_isolation.prepare_stl(
+            source,
+            file_type="stl",
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            workspace=tmp_path,
+        ) as prepared:
+            if method == "read1":
+                prefix = prepared.stream.read1(8)
+            else:
+                buffer = bytearray(8)
+                count = getattr(prepared.stream, method)(buffer)
+                assert count == 8
+                prefix = bytes(buffer)
+            assert prefix == payload[:8]
+            assert prepared.stream.tell() == 8
+            assert prepared.stream.read() == payload[8:]
+            prepared.verify()
+        assert source.read_bytes() == payload
+
+    @pytest.mark.parametrize("method", ["read1", "readinto", "readinto1"], ids=str)
+    def test_cancels_buffered_publication_reads_before_consumption(
+        self, tmp_path, monkeypatch, method
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        source = tmp_path / "original.stl"
+        payload = b"original STL byte semantics"
+        source.write_bytes(payload)
+
+        def cancelled(*args, **kwargs):
+            raise OperationCancelled()
+
+        with stl_isolation.prepare_stl(
+            source,
+            file_type="stl",
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            workspace=tmp_path,
+        ) as prepared:
+            scratch = prepared.path.parent
+            monkeypatch.setattr(stl_isolation, "checkpoint", cancelled)
+            with pytest.raises(OperationCancelled):
+                argument = 8 if method == "read1" else bytearray(8)
+                getattr(prepared.stream, method)(argument)
+            assert prepared.stream.tell() == 0
+        assert prepared.stream.closed
+        assert not scratch.exists()
+        assert source.read_bytes() == payload
+
+    @pytest.mark.parametrize("kind", ["fifo", "directory"], ids=str)
+    def test_refuses_nonregular_output_descriptor(self, tmp_path, kind):
+        output = tmp_path / "mesh.stl"
+        if kind == "fifo":
+            os.mkfifo(output)
+        else:
+            output.mkdir()
+        before = output.stat()
+        with pytest.raises(MeshWorkerError) as error:
+            stl_isolation._open_output(output)
+        assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
+        after = output.stat()
+        assert after.st_ino == before.st_ino
+        assert stat.S_IFMT(after.st_mode) == stat.S_IFMT(before.st_mode)
+
+    def test_refuses_original_stl_digest_mismatch(self, tmp_path):
+        source = tmp_path / "original.stl"
+        payload = b"original STL byte semantics"
+        source.write_bytes(payload)
+        with pytest.raises(MeshWorkerError) as error:
+            with stl_isolation.prepare_stl(
+                source, file_type="stl", expected_sha256="0" * 64, workspace=tmp_path
+            ):
+                pytest.fail("incorrect original digest yielded a publication stream")
+        assert error.value.reason is ThumbnailFailureReason.SOURCE_CHANGED
+        assert source.read_bytes() == payload
+        assert list(tmp_path.iterdir()) == [source]
+
+    def test_refuses_removed_source_before_adoption(self, tmp_path):
+        source = tmp_path / "original.stl"
+        payload = b"original STL byte semantics"
+        source.write_bytes(payload)
+        with stl_isolation.prepare_stl(
+            source,
+            file_type="stl",
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            workspace=tmp_path,
+        ) as prepared:
+            scratch = prepared.path.parent
+            source.unlink()
+            with pytest.raises(MeshWorkerError) as error:
+                prepared.verify()
+            assert error.value.reason is ThumbnailFailureReason.STORAGE
+            assert prepared.stream.read() == payload
+        assert prepared.stream.closed
+        assert not scratch.exists()
+        assert not source.exists()
+
+    def test_reports_source_open_permission_failure(self, tmp_path, monkeypatch):
+        source = tmp_path / "original.stl"
+        payload = b"original STL byte semantics"
+        source.write_bytes(payload)
+        original_open = Path.open
+
+        def protected(path, *args, **kwargs):
+            if path == source:
+                raise PermissionError("source storage read refused")
+            return original_open(path, *args, **kwargs)
+
+        with monkeypatch.context() as storage:
+            storage.setattr(Path, "open", protected)
+            with pytest.raises(MeshWorkerError) as error:
+                with stl_isolation.prepare_stl(
+                    source,
+                    file_type="stl",
+                    expected_sha256=hashlib.sha256(payload).hexdigest(),
+                    workspace=tmp_path,
+                ):
+                    pytest.fail("unreadable source yielded a publication stream")
+            assert error.value.reason is ThumbnailFailureReason.STORAGE
+        assert source.read_bytes() == payload
+        assert list(tmp_path.iterdir()) == [source]
