@@ -982,3 +982,45 @@ Parent authorized only lazy-component.ts, its existing mirror and this record. O
 M10 lazy recovery qualification: the tests-first gate reported6failed/3existingpassed. Both successful imports failed to render under blocked getter/removeItem; all4failed-import storage variants surfaced DOMException instead of the original chunk error. Production changed only optional stamp error boundaries. Final focused gate passed13tests2files (lazy recovery9, repository hygiene4) in2.18s. Affected-source/mirror oxlint, oxfmt2files and git diff --check passed. Direct production-source TypeScript passed with the repository's `tsc --ignoreConfig --noEmit --strict --skipLibCheck --target ES2020 --module preserve --moduleResolution bundler --lib ESNext,DOM src/lib/lazy-component.ts`. Initial type invocations were setup failures, not source diagnostics: this workspace exposes tsc rather than tsgo, and TypeScript7 requires --ignoreConfig for explicit files; the corrected command passed. Full app typecheck was not repeated because root owns current integration and the worker retains the documented11obsolete caller errors. No browser/coverage/CI/performance evidence is claimed.
 
 The assigned mirror was fully reviewed after editing: existing healthy storage recovery plus six new blocked getter/getItem/removeItem/setItem and quota variants. Successful import always returns the module; a denied persistent stamp makes failed import rethrow its original error without reloading. No volatile retry flag, router edit, printer preference, server command, private Query or framework change was added. The continued M0 ledger above remains partial exactly where marked; read-only audit continues after this checkpoint.
+
+
+## M0 package ledger closure after lazy checkpoint
+
+Continued read-only review completed every tracked file in `frontend/packages/ui` and `frontend/packages/domain` enumerated by rg --files, including the previously unread mirrors below. The package directories contain no separate UI vitest.setup.ts or README files; the UI configuration uses the existing shared setup already recorded. No package suite was run or package source changed. This closes manual file review of those two packages only, not every application consumer or full frontend qualification.
+
+| Exact paths newly read in full | Symbols / assertions inspected |
+|---|---|
+| `frontend/packages/ui/src/components/__tests__/badge.test.tsx` | Semantic variant/override/DOM attribute and variant export contract. |
+| `frontend/packages/ui/src/components/__tests__/button.test.tsx` | asChild semantic element, ref/click/class override and loading disabling/spinner. |
+| `frontend/packages/ui/src/components/__tests__/card.test.tsx` | Slot heading/paragraph structure, overrides and forwarded DOM refs. |
+| `frontend/packages/ui/src/components/__tests__/checkbox.test.tsx` | Checked/change value, descriptions, propagation prevention, disabled/ref/override behavior. |
+| `frontend/packages/ui/src/components/__tests__/empty-state.test.tsx` | Optional description/action/icon and decorative accessibility branches. |
+| `frontend/packages/ui/src/components/__tests__/input.test.tsx` | Type/value handler/ref/class passthrough and shared input classes. |
+| `frontend/packages/ui/src/components/__tests__/page-container.test.tsx` | Scroll frame, full/prose width and caller override. |
+| `frontend/packages/ui/src/components/__tests__/page-header.test.tsx` | h1 title and omitted/present description/action slots. |
+| `frontend/packages/ui/src/components/__tests__/separator.test.tsx` | Decorative versus semantic separator and orientation. |
+| `frontend/packages/ui/src/components/__tests__/skeleton.test.tsx` | Loading animation, caller size and overrides. |
+| `frontend/packages/ui/src/components/__tests__/spinner.test.tsx` | Accessible injected/default status label, sizes and overrides. |
+| `frontend/packages/ui/src/components/__tests__/confirm-modal.test.tsx` | Confirm/cancel mapping, busy confirm/cancel button disabling, close affordance; no busy close/Escape/backdrop assertion. |
+| `frontend/packages/ui/src/components/__tests__/drawer.test.tsx` | Portal/role/label, left/bottom origin, dismiss/Escape, exit unmount and caller classes. |
+| `frontend/packages/ui/src/components/__tests__/modal.test.tsx` | Shell portal/ARIA/title/close wiring, exit unmount, overrides and untitled branches. |
+| `frontend/packages/ui/src/components/__tests__/dropdown-menu.test.tsx` | Mounted transition, outside/inside pointer dismissal, focus return, roving/wrap/Home/End, dialog/empty/nested ownership and checkbox item navigation. |
+| `frontend/packages/ui/src/components/__tests__/tabs.test.tsx` | Controlled selection/wrap/roving focus, geometry/reflow indicator, missing-active/hidden branches and ResizeObserver disposal. No empty-tab arrow assertion. |
+| `frontend/packages/ui/src/__tests__/index.test.tsx` | Filesystem-derived completeness and excess-export contract, full named package surface. |
+| `frontend/src/lib/card-metrics.ts` | Full domain re-export plus locale-derived option label/abbreviation; owns no duplicate preference. |
+| `frontend/src/lib/metadata-preferences.ts` | Full domain re-export and localized metadata field labels. |
+| `frontend/src/lib/last-collection.ts` | Full direct domain re-export. |
+| `frontend/src/lib/format.ts` | Full domain formatting wrappers passing currentLocale, plus Intl number formatter. |
+| `frontend/src/lib/currency.ts` | Full localized Intl.DisplayNames currency options and domain formatter wrapper. |
+| `frontend/src/lib/overlay.ts` | Full shared UI overlay hooks/token re-export. |
+| `frontend/src/lib/use-media-query.ts` | Full shared UI external-store hook re-export. |
+| `frontend/src/lib/utils.ts` | Full shared class merging re-export. |
+| `frontend/src/lib/use-combobox-nav.ts` | Full shared UI keyboard/ARIA hook re-export. |
+| `frontend/src/components/ui/{badge,button,card,checkbox,drawer,dropdown-menu,empty-state,input,page-container,page-header,separator,skeleton,tabs}.tsx` | Full per-file shared primitive/type re-exports; no app endpoint/private DTO owner. |
+| `frontend/src/components/ui/confirm-modal.tsx` | Full shared primitive wrapper injecting localized title/description/close/cancel/confirm; feature retains command lifetime. |
+| `frontend/src/components/ui/modal.tsx` | Full shared primitive/type wrapper injecting close label. |
+| `frontend/src/components/ui/spinner.tsx` | Full shared primitive wrapper subscribing to locale and injecting default accessible label. |
+
+Additional application sections only: `frontend/src/pages/statistics.tsx`245–283 and605–629, loadVisibleWidgets initialization and toggleWidget updater. The read is outside the JSON decoder catch and the write precedes returning the selected Set; inaccessible storage may block those interactions. This remains an unexecuted source hypothesis and the rest of this page is not manually reviewed by this worker. `frontend/src/components/model-detail/source-tab.tsx`1–85 was read only for the domain provenanceOriginKey integration/API dependency declaration; its remaining remote effects/commands are not reviewed in this increment and remain root-owned. `frontend/src/components/storage-inventory-panel.tsx` was identified as the other direct domain consumer but is unread here. These partial/unread flags supersede no other owner's evidence.
+
+The direct package import inventory demonstrates app adapters plus source-tab/storage-inventory domain usage; it does not prove every transitive application consumer is reviewed. The previous section's UI-mirror unread list is historical and is now closed by the exact reads above. All other explicit frontend/preferences/endpoint-mirror gaps remain open. No new production manifest was accepted after lazy recovery; printer-image, theme, Statistics widgets, SavedView recents and artifact-upload id persistence are still unmodified here.
