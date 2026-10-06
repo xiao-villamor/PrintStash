@@ -193,6 +193,10 @@ export function useLibraryAuthority(
     checking: active && query.isFetching,
     error: active ? query.error : null,
     authority: current ? observation.authority : null,
+    recheck: () => {
+      if (active && !authorizationChanged && getSessionVersion() === mountedSession)
+        return refetch({ cancelRefetch: false });
+    },
     refresh: () => {
       if (active && !authorizationChanged && getSessionVersion() === mountedSession)
         return onRefresh();

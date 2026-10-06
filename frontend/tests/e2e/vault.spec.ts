@@ -21,6 +21,57 @@ import { aModelListItem, aMultipartModel } from "../../src/test-support/factorie
 useMockApi();
 
 test.describe("vault route", () => {
+  test("refreshes a changed library deliberately", async ({ page }) => {
+    const browseRequests: string[] = [];
+    let changed = false;
+    const thumbnailRead = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/models/browse/thumbnails",
+    );
+    await page.route("**/api/v1/models/browse/revision", (route) =>
+      route.fulfill({
+        json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
+      }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      browseRequests.push(route.request().url());
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({
+                name: changed ? "Current bracket" : "Original bracket",
+                thumbnail_url: null,
+              }),
+            },
+          ],
+          total: changed ? 1 : 2,
+          next_cursor: changed ? null : "old",
+          browse_revision: changed ? "r2" : "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/");
+    await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
+    const initialReads = browseRequests.length;
+    changed = true;
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await thumbnailRead;
+    await expect(
+      page.getByText("The library has changed. Refresh before loading more results."),
+    ).toBeVisible();
+    await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
+    expect(browseRequests).toHaveLength(initialReads);
+
+    await page.getByRole("button", { name: "Refresh library" }).click();
+
+    await expect(page.getByText("Current bracket", { exact: true })).toBeVisible();
+    await expect(page.getByText("Original bracket", { exact: true })).toHaveCount(0);
+    expect(browseRequests).toHaveLength(initialReads + 1);
+    expect(browseRequests.every((url) => !new URL(url).searchParams.has("cursor"))).toBe(true);
+  });
+
   test("reports a conflicting batch undo", async ({ page }) => {
     await page.route("**/api/v1/models/browse?**", (route) =>
       route.fulfill({

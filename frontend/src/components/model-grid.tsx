@@ -12,6 +12,8 @@ import {
   libraryBrowseKeys,
   useLibraryBrowse,
 } from "@/features/library/browse";
+import { useLibraryThumbnails } from "@/features/library/thumbnails";
+import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
 
 import { historyFilters, historyKeys } from "@/lib/search-filters";
@@ -555,7 +557,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
-  const { user } = useAuth();
+  const { user, refresh: refreshAuth } = useAuth();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
   const filtersEnabled = startup.canLoad("filters");
@@ -1104,6 +1106,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
   const snapshot = nextSnapshot ?? settledSnapshot;
+  const onAuthorityRetired = useCallback(() => {
+    const session = getSessionVersion();
+    void refreshAuth().catch((error) => {
+      if (session === getSessionVersion()) toast.error(error);
+    });
+  }, [refreshAuth]);
+  const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
+    onRefresh: refresh,
+    onAuthorityRetired,
+  });
+  const refreshRequired = authority.refreshRequired || modelQuery.refreshRequired;
   const libraryItems = snapshot?.items ?? [];
   const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
   const visibleMultipartModels = libraryItems.flatMap((item) =>
@@ -1113,7 +1126,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const breadcrumbs = snapshot?.breadcrumbs ?? [];
   const selectedName = snapshot?.collection?.name ?? null;
   const error =
-    modelQuery.error?.message ??
+    (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
     null;
@@ -1131,22 +1144,32 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [browseReady, error, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
   useStartupThumbnails(startupContent, browseReady);
-  // A fresh upload's card shows a placeholder until its thumbnail is derived;
-  // refetch the list when one lands instead of waiting for a reload.
-  const refreshModels = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all });
-  }, [queryClient]);
-  useThumbnailArrivals(visibleModels, refreshModels);
+  const thumbnails = useLibraryThumbnails(
+    visibleModels,
+    browseReady ? (modelQuery.data?.pages[0] ?? null) : null,
+    onAuthorityRetired,
+  );
+  useThumbnailArrivals(visibleModels, thumbnails.refresh);
 
   function loadMore() {
-    if (hasMore && !loadingMore) void modelQuery.loadMore();
+    if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
+      void modelQuery.loadMore();
   }
-  function refresh() {
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-    ]);
+  async function refresh() {
+    const session = getSessionVersion();
+    try {
+      await queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all });
+      requireSessionVersion(session);
+      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
+      requireSessionVersion(session);
+      await Promise.all([
+        queryClient.resetQueries({ queryKey: libraryBrowseKeys.pages(browseParams), exact: true }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+      ]);
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    }
   }
 
   // Multi-select for batch actions. The selected set is view-independent so it
@@ -1794,6 +1817,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     return items;
   })();
+
+  if (authority.authorizationChanged || thumbnails.authorizationChanged)
+    return (
+      <div aria-busy="true">
+        <ModelGridSkeleton />
+      </div>
+    );
 
   return (
     <Localized>
@@ -2632,6 +2662,38 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             />
           ) : (
             <div className="flex-1 flex flex-col bg-background">
+              {refreshRequired && (
+                <div
+                  role="status"
+                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
+                >
+                  <p>{uiText("library.updatesAvailable")}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={refreshing}
+                    onClick={() => void authority.refresh()}
+                  >
+                    {uiText("library.refresh")}
+                  </Button>
+                </div>
+              )}
+              {authority.error && (
+                <div
+                  role="status"
+                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm"
+                >
+                  <p>{uiText("library.authorityCheckFailed")}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={authority.checking}
+                    onClick={() => void authority.recheck()}
+                  >
+                    {uiText("library.checkAgain")}
+                  </Button>
+                </div>
+              )}
               {error && (
                 <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {error}
@@ -2749,7 +2811,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     onClick={() => void fetchMoreFolders()}
                     folders
                   />
-                  <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+                  <LoadMore
+                    hasMore={hasMore && !refreshRequired}
+                    loading={loadingMore}
+                    onClick={loadMore}
+                  />
                 </div>
               ) : (
                 <div key="list" className="flex-1 overflow-y-auto animate-panel-in">
@@ -2803,7 +2869,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       ),
                     )}
                   </div>
-                  <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+                  <LoadMore
+                    hasMore={hasMore && !refreshRequired}
+                    loading={loadingMore}
+                    onClick={loadMore}
+                  />
                 </div>
               )}
             </div>

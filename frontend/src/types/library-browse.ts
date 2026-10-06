@@ -22,3 +22,8 @@ export interface LibraryBrowseParams extends Omit<ListModelsParams, "offset" | "
   sort: ModelSort;
   limit: number;
 }
+
+export interface LibraryThumbnailProjection {
+  items: { model_id: number; thumbnail_url: string | null }[];
+  authorization_revision: string;
+}

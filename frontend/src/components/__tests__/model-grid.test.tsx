@@ -175,6 +175,10 @@ function renderVault(
       ],
       routes: {
         "GET /api/v1/models/facets": json(EMPTY_FACETS),
+        "GET /api/v1/models/browse/revision": json({
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
         "GET /api/v1/models/browse": (url) =>
           json({
             items: [
@@ -243,14 +247,22 @@ function uploadButton() {
  */
 function lastModelsQuery(requests: () => { method: string; url: string }[]): URLSearchParams {
   const url = requests()
-    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/models/browse"))
+    .filter(
+      (call) =>
+        call.method === "GET" &&
+        new URL(call.url, "http://test").pathname === "/api/v1/models/browse",
+    )
     .at(-1)?.url;
   return new URLSearchParams(url?.split("?")[1] ?? "");
 }
 
 function lastMultipartQuery(requests: () => { method: string; url: string }[]): URLSearchParams {
   const url = requests()
-    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/models/browse"))
+    .filter(
+      (call) =>
+        call.method === "GET" &&
+        new URL(call.url, "http://test").pathname === "/api/v1/models/browse",
+    )
     .at(-1)?.url;
   return new URLSearchParams(url?.split("?")[1] ?? "");
 }
@@ -382,12 +394,14 @@ describe("ModelBrowser", () => {
     it("bounds the initial model page without changing URL filters", async () => {
       const { requests } = renderVault({ at: "/?tag=functional", startup: true });
       await waitFor(() =>
-        expect(requests().some((request) => request.url.startsWith("/api/v1/models/browse"))).toBe(
-          true,
-        ),
+        expect(
+          requests().some(
+            (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
+          ),
+        ).toBe(true),
       );
-      const request = requests().find((request) =>
-        request.url.startsWith("/api/v1/models/browse"),
+      const request = requests().find(
+        (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
       )!;
       const params = new URL(request.url, "http://test").searchParams;
       expect(params.get("limit")).toBe("24");
@@ -404,9 +418,11 @@ describe("ModelBrowser", () => {
         routes: { "GET /api/v1/models/browse": () => primary },
       });
       await waitFor(() =>
-        expect(requests().some((request) => request.url.startsWith("/api/v1/models/browse"))).toBe(
-          true,
-        ),
+        expect(
+          requests().some(
+            (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
+          ),
+        ).toBe(true),
       );
       expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
         false,
@@ -2350,6 +2366,132 @@ describe("ModelBrowser", () => {
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: /Load more/ })).toBeInTheDocument(),
       );
+    });
+  });
+  describe("Library authority", () => {
+    it("keeps displayed rows until explicit refresh", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original bracket" })],
+        routes: {
+          "GET /api/v1/models/browse/revision": json({
+            browse_revision: "r2",
+            authorization_revision: "a1",
+          }),
+        },
+      });
+      await screen.findByText("The library has changed. Refresh before loading more results.");
+      expect(screen.getByText("Original bracket")).toBeVisible();
+      expect(
+        app
+          .requests()
+          .filter(
+            (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
+          ),
+      ).toHaveLength(1);
+      app.route({
+        "GET /api/v1/models/browse": json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
+          next_cursor: null,
+          total: 1,
+          browse_revision: "r2",
+          authorization_revision: "a1",
+        }),
+      });
+
+      await user.click(screen.getByRole("button", { name: "Refresh library" }));
+
+      expect(await screen.findByText("Current bracket")).toBeVisible();
+      expect(screen.queryByText("Original bracket")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("The library has changed. Refresh before loading more results."),
+      ).not.toBeInTheDocument();
+    });
+
+    it("restarts a rejected continuation from the first page", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        routes: {
+          "GET /api/v1/models/browse": (url) =>
+            url.includes("cursor=")
+              ? json({ detail: "browse_refresh_required" }, 409)
+              : json({
+                  items: [{ kind: "model", model: aModelListItem({ name: "Original bracket" }) }],
+                  next_cursor: "old",
+                  total: 2,
+                  browse_revision: "r1",
+                  authorization_revision: "a1",
+                }),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+      await screen.findByText("The library has changed. Refresh before loading more results.");
+      expect(screen.getByText("Original bracket")).toBeVisible();
+      app.route({
+        "GET /api/v1/models/browse": json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
+          next_cursor: null,
+          total: 1,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
+      });
+
+      await user.click(screen.getByRole("button", { name: "Refresh library" }));
+
+      expect(await screen.findByText("Current bracket")).toBeVisible();
+      const reads = app
+        .requests()
+        .filter(
+          (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
+        );
+      expect(reads.filter((request) => request.url.includes("cursor="))).toHaveLength(1);
+      expect(reads.at(-1)?.url).not.toContain("cursor=");
+    });
+
+    it("hides private content when authorization changes", async () => {
+      const authority = Promise.withResolvers<Response>();
+      renderVault({
+        auth: adminSession({ refresh: async () => {} }),
+        models: [aModelListItem({ name: "Private bracket" })],
+        collections: [aCollection({ name: "Private folder" })],
+        routes: { "GET /api/v1/models/browse/revision": () => authority.promise },
+      });
+      await screen.findByText("Private bracket");
+      authority.resolve(json({ browse_revision: "r2", authorization_revision: "a2" }));
+      await waitFor(() => expect(screen.queryByText("Private bracket")).not.toBeInTheDocument());
+      expect(screen.queryByText("Private folder")).not.toBeInTheDocument();
+    });
+
+    it("retries an unavailable authority check", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original bracket" })],
+        routes: { "GET /api/v1/models/browse/revision": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("Could not check whether the library is up to date.");
+      expect(screen.getByText("Original bracket")).toBeVisible();
+      app.route({
+        "GET /api/v1/models/browse/revision": json({
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
+      });
+
+      await user.click(screen.getByRole("button", { name: "Check again" }));
+
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Could not check whether the library is up to date."),
+        ).not.toBeInTheDocument(),
+      );
+      expect(
+        app
+          .requests()
+          .filter(
+            (request) => new URL(request.url, "http://test").pathname === "/api/v1/models/browse",
+          ),
+      ).toHaveLength(1);
     });
   });
   describe("acting on a folder from the sidebar", () => {

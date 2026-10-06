@@ -1281,6 +1281,16 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, []);
     return;
   }
+  if (url.pathname === "/api/v1/models/browse/thumbnails") {
+    const ids = new Set(url.searchParams.getAll("model_id").map(Number));
+    sendJson(res, {
+      items: modelList
+        .filter((model) => ids.has(model.id))
+        .map((model) => ({ model_id: model.id, thumbnail_url: model.thumbnail_url })),
+      authorization_revision: "a1",
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/models/browse/revision") {
     sendJson(res, { browse_revision: "r1", authorization_revision: "a1" });
     return;

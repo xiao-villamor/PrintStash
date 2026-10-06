@@ -4,6 +4,7 @@ import type {
   LibraryAuthority,
   LibraryBrowsePage,
   LibraryBrowseParams,
+  LibraryThumbnailProjection,
 } from "@/types/library-browse";
 
 export function listLibraryPage(
@@ -19,4 +20,13 @@ export function listLibraryPage(
 
 export function getLibraryRevision(options?: GetJsonOptions): Promise<LibraryAuthority> {
   return getJson<LibraryAuthority>("/api/v1/models/browse/revision", options);
+}
+
+export function getLibraryThumbnails(
+  ids: number[],
+  options?: GetJsonOptions,
+): Promise<LibraryThumbnailProjection> {
+  const search = new URLSearchParams();
+  for (const id of ids) search.append("model_id", String(id));
+  return getJson<LibraryThumbnailProjection>(`/api/v1/models/browse/thumbnails?${search}`, options);
 }
