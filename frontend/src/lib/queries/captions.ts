@@ -45,8 +45,9 @@ export function useCaptionCommand() {
       return session;
     },
     onSuccess: async (caption, { userId, type, id }, session) => {
-      await client.cancelQueries({ queryKey: captionKeys.detail(userId, type, id) });
       if (session === undefined) throw new Error("A caption command requires its session");
+      requireSessionVersion(session);
+      await client.cancelQueries({ queryKey: captionKeys.detail(userId, type, id) });
       requireSessionVersion(session);
       client.setQueryData(captionKeys.detail(userId, type, id), caption);
       for (const queryKey of [

@@ -82,6 +82,54 @@ describe("caption command lifetime", () => {
     expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     expect(app.client.getQueriesData({ queryKey: ["subject-caption"] })).toHaveLength(0);
   });
+  it("leaves a new same-user read active when a retired acknowledgement resumes", async () => {
+    const app = renderCommand();
+    await screen.findByText("A mounting bracket");
+    const cache = app.client.getMutationCache();
+    const previousSuccess = cache.config.onSuccess;
+    const previousSettled = cache.config.onSettled;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    cache.config.onSuccess = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    cache.config.onSettled = () => {
+      settled.resolve();
+    };
+    const currentRead = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Save caption" }));
+      await entered.promise;
+      app.unmount();
+      clearLogin();
+      renderApp(<Editor />, {
+        routes: {
+          "GET /api/v1/subjects/model/7/caption": (_url, init) => {
+            signal = init?.signal;
+            return currentRead.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await act(async () => {
+        resume.resolve();
+        await settled.promise;
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        currentRead.resolve(json(aCaption({ text: "Current session caption" })));
+      });
+      expect(await screen.findByText("Current session caption")).toBeVisible();
+    } finally {
+      cache.config.onSuccess = previousSuccess;
+      cache.config.onSettled = previousSettled;
+      resume.resolve();
+      currentRead.resolve(json(aCaption()));
+    }
+  });
   it("refreshes the owning Search projection after a caption edit", async () => {
     function Results() {
       const query = useInfiniteQuery(
