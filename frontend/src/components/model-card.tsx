@@ -1,10 +1,11 @@
 "use client";
 
+import type { LibraryEntry } from "@/features/library/navigation-state";
 import { formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Link } from "@/lib/link";
+import { LibraryItemLink } from "@/features/library/navigation";
 import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
@@ -163,6 +164,7 @@ function MetricCell({
 
 function ModelCardInner({
   model,
+  origin,
   collectionLabel,
   metrics,
   selectable = false,
@@ -172,6 +174,7 @@ function ModelCardInner({
   onEditTags,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel?: string | null;
   metrics: CardMetrics;
   selectable?: boolean;
@@ -280,7 +283,8 @@ function ModelCardInner({
             <Tags className="h-4 w-4" />
           </Button>
         )}
-        <Link
+        <LibraryItemLink
+          origin={origin}
           href={`/models/${model.id}`}
           draggable={false}
           className="flex flex-col h-full overflow-hidden"
@@ -393,7 +397,7 @@ function ModelCardInner({
               {timeAgoShort(model.updated_at)}
             </p>
           </div>
-        </Link>
+        </LibraryItemLink>
       </article>
     </Localized>
   );
@@ -403,6 +407,7 @@ const ModelCardMemo = memo(ModelCardInner);
 
 export function ModelCard({
   model,
+  origin,
   collectionLabel,
   selectable,
   selected,
@@ -411,6 +416,7 @@ export function ModelCard({
   onEditTags,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel?: string | null;
   selectable?: boolean;
   selected?: boolean;
@@ -435,6 +441,7 @@ export function ModelCard({
   return (
     <Localized>
       <ModelCardMemo
+        origin={origin}
         model={model}
         collectionLabel={collectionLabel}
         metrics={metrics}

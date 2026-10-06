@@ -1,5 +1,7 @@
 "use client";
 
+import type { LibraryEntry } from "@/features/library/navigation-state";
+import { LibraryItemLink, LibraryBackLink } from "@/features/library/navigation";
 import { useMultipartPublication } from "@/features/library/multipart";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { ApiError } from "@/lib/errors";
@@ -73,12 +75,14 @@ import { multipartError, detailHref } from "@/lib/multipart-model-presentation";
 
 export function MultipartModelCard({
   item,
+  origin,
   collectionLabel,
   returnTo,
   availableTags = [],
   onDataChange,
 }: {
   item: MultipartModelListItem;
+  origin?: LibraryEntry;
   collectionLabel?: string | null;
   returnTo?: string;
   availableTags?: TagRead[];
@@ -146,7 +150,8 @@ export function MultipartModelCard({
           />
         </div>
       )}
-      <Link
+      <LibraryItemLink
+        origin={origin}
         href={detailHref(item.id, returnTo)}
         aria-label={item.name}
         className="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -207,7 +212,7 @@ export function MultipartModelCard({
             )}
           </div>
         </div>
-      </Link>
+      </LibraryItemLink>
     </article>
   );
 }
@@ -1324,13 +1329,13 @@ function MultipartDetail({ id }: { id: number }) {
       />
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-lowest px-4 py-3 md:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-          <Link
-            href={backHref}
+          <LibraryBackLink
+            href={model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/"}
             aria-label={t("multipart.title")}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded text-on-surface-variant transition-colors duration-press hover:bg-surface-container-high"
           >
             <ArrowLeft className="h-5 w-5" />
-          </Link>
+          </LibraryBackLink>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold leading-tight text-on-surface">
               {model.name}

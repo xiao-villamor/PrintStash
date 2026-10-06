@@ -782,6 +782,9 @@ describe("ModelBrowser", () => {
       );
       expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
       expect(screen.getByText("Shelf rig")).toBeVisible();
+      const sourceLink = screen.getByRole("link", { name: /Shelf rig/ });
+      const sourceHref = new URL(sourceLink.getAttribute("href")!, "http://test");
+      expect(sourceHref.searchParams.get("return")).toBe("/?c=parts&type=all&sort=date-desc");
       expect(screen.queryByText("Bracket piece")).not.toBeInTheDocument();
       expect(await folderCard("parts/brackets")).toBeVisible();
       pending.resolve(
@@ -1215,7 +1218,7 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("Dragon body")).toBeVisible();
       expect(screen.getByRole("link", { name: /Dragon figure/ })).toHaveAttribute(
         "href",
-        "/multipart-models/40?return=%2F%3Ftype%3Dall%26sort%3Ddate-desc",
+        "/multipart-models/40?return=%2F%3Ftype%3Dall%26sort%3Ddate-desc%26v%3Dmodels",
       );
     });
 

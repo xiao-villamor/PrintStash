@@ -1,5 +1,7 @@
 "use client";
 
+import { LibraryItemLink } from "@/features/library/navigation";
+import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
 import {
   moveLibraryModels,
   tagLibraryModels,
@@ -1067,6 +1069,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     modelQuery.data !== undefined &&
     !modelQuery.isPlaceholderData;
 
+  const entry = useLibraryEntry(canonicalLibraryHref, browseReady);
   const orderedItems = useMemo<LibraryItem[]>(
     () =>
       modelQuery.data?.pages.flatMap((page) =>
@@ -1084,6 +1087,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const nextSnapshot = useMemo(() => {
     if (!browseReady) return null;
     return {
+      entry,
       items: orderedItems,
       collections: folderPages.data?.pages.flatMap((page) => page.items) ?? [],
       collection: selectedCollectionRow,
@@ -1096,6 +1100,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     };
   }, [
     browseReady,
+    entry,
     orderedItems,
     folderPages.data,
     folderPages.hasNextPage,
@@ -1546,13 +1551,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
   const displayCount = libraryItems.length;
-  // Build the return target from the selected view as well as the router
-  // snapshot. `router.replace()` is asynchronous, so a card clicked directly
-  // after changing Library view must not capture the previous URL.
-  const returnParams = new URLSearchParams(searchParams.toString());
-  returnParams.delete("v");
-  returnParams.set("type", libraryView);
-  const currentLibraryHref = returnParams.size ? `/?${returnParams.toString()}` : "/";
+  // Links belong to the displayed result even while another destination loads.
+  const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
@@ -2788,6 +2788,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           item={item.value}
                           collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
+                          origin={snapshot?.entry}
                           availableTags={tags}
                           onDataChange={refresh}
                         />
@@ -2795,6 +2796,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         <ModelCard
                           key={item.value.id}
                           model={item.value}
+                          origin={snapshot?.entry}
                           collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
@@ -2855,11 +2857,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           item={item.value}
                           collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
+                          origin={snapshot?.entry}
                         />
                       ) : (
                         <ModelListRow
                           key={item.value.id}
                           model={item.value}
+                          origin={snapshot?.entry}
                           collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
@@ -3108,16 +3112,19 @@ function MultipartModelListRow({
   item,
   collectionLabel,
   returnTo,
+  origin,
 }: {
   item: MultipartModelListItem;
   collectionLabel: string | null;
   returnTo: string;
+  origin?: LibraryEntry;
 }) {
   useUiLocale();
   const { t } = useI18n();
   const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(item.cover_thumbnail_url);
   return (
-    <Link
+    <LibraryItemLink
+      origin={origin}
       href={`/multipart-models/${item.id}?${new URLSearchParams({ return: returnTo }).toString()}`}
       aria-label={item.name}
       className="group flex items-center gap-2 border-b border-border px-4 py-3 transition-colors hover:bg-muted active:bg-muted md:gap-3"
@@ -3150,12 +3157,13 @@ function MultipartModelListRow({
       <span className="hidden w-24 text-right font-mono text-xs text-muted-foreground md:block">
         {timeAgo(item.updated_at)}
       </span>
-    </Link>
+    </LibraryItemLink>
   );
 }
 
 function ModelListRow({
   model,
+  origin,
   collectionLabel,
   selectable = false,
   selected = false,
@@ -3163,6 +3171,7 @@ function ModelListRow({
   draggable = false,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel: string | null;
   selectable?: boolean;
   selected?: boolean;
@@ -3175,7 +3184,8 @@ function ModelListRow({
   const printerPresence = model.printer_presence ?? [];
   return (
     <Localized>
-      <Link
+      <LibraryItemLink
+        origin={origin}
         href={`/models/${model.id}`}
         draggable={draggable}
         onDragStart={
@@ -3259,7 +3269,7 @@ function ModelListRow({
         <span className="w-24 text-right text-xs font-mono text-muted-foreground hidden md:block">
           {timeAgo(model.updated_at)}
         </span>
-      </Link>
+      </LibraryItemLink>
     </Localized>
   );
 }

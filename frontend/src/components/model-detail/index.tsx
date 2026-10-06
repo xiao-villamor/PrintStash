@@ -1,5 +1,6 @@
 "use client";
 
+import { LibraryBackLink } from "@/features/library/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   useModelDetail,
@@ -20,7 +21,6 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import {
   ArrowLeft,
@@ -660,13 +660,13 @@ function ModelDetailPresentation({
         {/* Detail Header */}
         <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
           <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
-            <Link
+            <LibraryBackLink
               href={model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/"}
               aria-label={uiText("Back")}
               className="w-10 h-10 shrink-0 flex items-center justify-center rounded hover:bg-surface-container-high text-on-surface-variant transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ArrowLeft className="h-5 w-5" />
-            </Link>
+            </LibraryBackLink>
             <div className="min-w-0 flex-1">
               {editing ? (
                 <input

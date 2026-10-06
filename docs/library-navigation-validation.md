@@ -48,3 +48,34 @@ Browser startup exposed pre-existing Vite dependency-scan warnings in
 `scripts/viewer-representation-pilot/browser.ts` for missing comparison-camera
 and thumbnail-camera imports. Browser assertions passed; the warning remains an
 M10 configuration/tooling finding, not a clean startup claim.
+
+# M5 Library history ownership
+
+M5 follows the server browse and conditional-write foundations. The pre-refactor Model detail Back link reconstructs only the collection, while Model cards omit the originating filters entirely. Multipart links carry a URL but create another entry when returning. The grid scrolls an inner `main` (and a second list container), so window scroll restoration cannot recover the reading position. The pre-refactor coherent visual snapshot carries rows and folder labels but not its originating URL; a retained card clicked during a pending navigation can capture the destination's filters.
+
+The navigation owner will bind the displayed snapshot to its canonical URL and history entry. Detail links carry a safe URL fallback plus an in-memory entry identity. A normal Back action reuses the exact originating history entry when it is still known to this session; direct/deep links and new tabs use the URL fallback. Native modified-link gestures remain native. Restoration metadata contains entry identity, container offsets, visible entity anchors and loaded-page counts, never another copy of server data. It is bounded to the previously loaded pages and retired on session/access-scope change. Query remains the remote-data owner.
+
+Implementation order: first qualify exact source links and snapshot identity, then inner-container restoration, bounded reconstruction, removed anchors and private retirement. React Router remains the navigation owner. No schema or deployment change is needed. Rollback removes this one navigation owner and its link integration; it does not alter stored library data.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | returns a Model to its exact Library view | Happy | Open filtered/sorted Model then detail Back | Same URL and history entry | Browser | ✅ |
+| 2 | returns a Multipart set to its exact Library entry | Happy | Open Multipart then detail Back | Same URL and history entry | Browser | ✅ |
+| 3 | preserves native modified-link navigation | Edge | Ctrl/Meta/middle/new-tab interaction | Native click remains unhandled for Ctrl/Meta/middle; usable encoded return URL | Component | ✅ |
+| 4 | retains a displayed snapshot's return target during navigation | Edge | A displayed while B remains pending | A card returns to A; labels/cards remain coherent | Component | ✅ |
+| 5 | restores the grid's nested reading position | Happy | Scroll, detail, Back/Forward | Same visible entity and offset | Browser | ❌ |
+| 6 | restores list layout independently | Happy | List scroll then detail Back | List reading position restored | Browser | ❌ |
+| 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ❌ |
+| 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Feature/browser | ❌ |
+| 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ❌ |
+| 10 | retires private history metadata on session/access change | Edge | Session retired while detail open | No old restoration/cache/DOM reused | Feature/browser | ❌ |
+| 11 | chooses a safe fallback for direct detail links | Edge | No known history origin or unsafe return URL | Same-origin Library URL; no external redirect | Component | ✅ |
+| 12 | resolves rapid navigation using one displayed identity | Edge | A→B→C with out-of-order reads | Heading, cards, link target and restoration belong together | Component/browser | ❌ |
+
+This matrix is the pre-implementation contract. No scroll/history acceptance is claimed from the earlier folder-navigation tests alone.
+
+## Qualified increment: originating links
+
+Model and Multipart detail now reuse the immediate originating history entry on an ordinary Back click, preserving the complete canonical URL. A retained result uses its settled snapshot identity while a different route is loading. Unknown/deep links use a validated same-origin Library fallback. Only the bounded entry registry is implemented here; scroll metadata and restoration remain pending.
+
+Both browser cases failed before the link change (Model lost filters; Multipart pushed a new entry) and passed afterward: 2 Chromium cases in 12.7s. The link and entry mirrors passed 16 cases in 5.37s; the prior grid gate passed all 154 cases, including the retained-snapshot return target. App/UI/domain typecheck and lint passed. The session-retirement regression failed before the mount-session fence and passed afterward; row 10 remains open because full restoration/DOM retirement has not been exercised. JSDOM reports its expected unsupported native-document navigation for the three unhandled modified-click cases. No scroll or performance improvement is claimed.
