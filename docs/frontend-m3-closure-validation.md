@@ -142,3 +142,30 @@ requirement has an observable browser assertion.
 
 Browser continuation acceptance passed in Chromium (1/1, 14.3 s). App/UI/domain
 type checks and the changed component/test lint and formatting checks passed.
+
+The existing inaccessible-entry case now also asserts `total == 0`, closing the
+master matrix's explicit no-count-leak requirement. The targeted case passed;
+this tightens the existing authorization behavior without changing production.
+
+Backend static qualification: `ruff check app/ tests/` passed; the required
+formatting scope passed (175 files); Pyright reported 0 errors and 0 warnings.
+These checks do not replace the pending runtime and scale qualification.
+
+## Ordinary gate completed
+
+The official `full-ordinary` lane (excluding the already-qualified ordinary
+migration/contracts partition) finished with **19,226 passed and one failed** in
+2,588.87 s. The only failure was the five naming violations documented above;
+the targeted control passed after those names were corrected. Retain both
+results: this is a broad run plus a targeted correction, not a single all-green
+invocation. The process returned exit 1 normally.
+
+The source manifest confirms production `app/` and Alembic files did not change
+during the run. Six test files changed: three received naming-only corrections
+or the additional anonymous/count assertions, and the excluded contracts,
+PostgreSQL and scale files gained the explicit acceptance cases documented here.
+Those additions are qualified separately. The earlier ordinary migration union
+contains exactly 382 cases (174 retained passes plus 208 disjoint recovery passes).
+Final full resource and latest-commit CI qualification remain M11 delivery gates;
+the M3-specific PostgreSQL additions and deep continuation measurements are still
+pending. No resource suite has been described as fully green.

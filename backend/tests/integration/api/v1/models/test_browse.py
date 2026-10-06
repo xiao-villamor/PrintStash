@@ -181,6 +181,7 @@ class TestBrowseModels:
 
         assert response.status_code == 200, response.text
         assert response.json()["items"] == []
+        assert response.json()["total"] == 0
 
     def test_filters_groups_by_matching_member(
         self, client, auth_headers, make_model, make_file, make_multipart_model
