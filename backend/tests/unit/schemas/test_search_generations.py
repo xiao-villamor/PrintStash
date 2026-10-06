@@ -66,7 +66,9 @@ class TestGenerationProposal:
         with pytest.raises(ValidationError, match="search_one_provider_required"):
             GenerationProposal.model_validate(providers)
 
-    @pytest.mark.parametrize("profile", ["thumbnail", "multiview", "point_cloud"])
+    @pytest.mark.parametrize(
+        "profile", ["thumbnail", "multiview", "point_cloud"], ids=str
+    )
     @pytest.mark.parametrize(
         "provider_settings",
         [
@@ -88,7 +90,9 @@ class TestGenerationProposal:
         ):
             GenerationProposal.model_validate({"profile": profile, **provider_settings})
 
-    @pytest.mark.parametrize("profile", ["semantic_text", "thumbnail", "point_cloud"])
+    @pytest.mark.parametrize(
+        "profile", ["semantic_text", "thumbnail", "point_cloud"], ids=str
+    )
     def test_refuses_max_aggregation_outside_multiview(self, profile):
         with pytest.raises(ValidationError, match="search_aggregation_unavailable"):
             GenerationProposal.model_validate(
