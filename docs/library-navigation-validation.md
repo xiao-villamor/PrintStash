@@ -109,3 +109,17 @@ The full nine navigation cases passed, including desktop/mobile cached Back/Forw
 The nine navigation cases plus the unchanged layering case passed in the initial combined run; that run also contained the two incorrect-fixture failures described above. The targeted corrected motion/pagination run closes those failures without claiming that initial run was wholly green. Favorite-removal anchors, explicit refresh reconstruction, rapid destination races and full browser session retirement still keep M5 open.
 
 Final affected gate: 290 tests across 11 files passed in 69.07s, including both folder reconstruction outcomes and the integrated Documents/Inbox/Profiles session corrections. Full app/UI/domain typecheck passed. Lint initially found the obsolete helper's unused expect import; it was removed. The full browser contract remains M5-partial as described above.
+
+## Retired favorite acknowledgements
+
+Before changing the favorite owner, a late acknowledgement must be fenced before
+any cancellation in the current Query client, as well as before publishing data.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | leaves a new browse read active after a retired favorite acknowledgement | Edge | Server ACK held before success callback; session retires; new browse GET starts | New request remains live and its list is displayed | Frontend unit | ✅ `src/features/library/__tests__/mutations.test.tsx::leaves a new browse read active after a retired favorite acknowledgement` |
+
+The regression failed before the pre-cancellation session guard: the next browse
+request had an aborted signal. After the guard, all 10 favorite-owner tests passed
+within the 27-case preferences/hygiene integration gate (3.43s). Domain preference
+mirrors independently passed all 29 cases (1.85s).

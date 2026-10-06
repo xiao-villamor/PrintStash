@@ -49,6 +49,7 @@ export function useLibraryStar() {
       requireSessionVersion(command.version);
     },
     onSuccess: async (starred, command) => {
+      requireSessionVersion(command.version);
       await cancel(command);
       requireSessionVersion(command.version);
       client.setQueriesData<InfiniteData<LibraryBrowsePage>>(
