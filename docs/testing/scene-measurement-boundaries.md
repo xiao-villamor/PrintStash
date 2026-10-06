@@ -1,0 +1,12 @@
+# Scene measurement numeric boundary contracts
+
+The retained-scene contract in docs/derivatives.md requires exact referenced dimensions/counts independently of optional volume, additive signed closed-resource integrals, and explicit refusals for unrepresentable results. Tests exercise real indexed resources and affine placements. The external numeric kernel fault is injected at its existing third-party boundary; application measurement helpers are not replaced.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | preserves_collapsed_source_dimensions | Edge | All coordinates zero or all vertices coplanar | Finite dimensions/counts; explicit nonpositive volume; source buffers unchanged | Unit | ✅ `unit/modules/media/test_scene_measurements.py::TestMeasureScene::test_preserves_collapsed_source_dimensions` |
+| 2 | preserves_dimensions_when_signed_total_overflows | Error | Five overlapping closed placements; each finite integral, aggregate overflow | Dimensions/count remain finite; nonfinite volume evidence | Unit | ✅ `unit/modules/media/test_scene_measurements.py::TestMeasureScene::test_preserves_dimensions_when_signed_total_overflows` |
+| 3 | preserves_dimensions_when_kernel_returns_nonfinite_integral | Error | External mass-properties kernel returns NaN | Nonfinite evidence after normalization; dimensions/count retained | Unit | ✅ `unit/modules/media/test_scene_measurements.py::TestMeasureScene::test_preserves_dimensions_when_kernel_returns_nonfinite_integral` |
+| 4 | rejects_overflow_during_placement | Error | Finite large vertices multiplied by finite transform | Numeric range refusal before output publication | Unit | ✅ `unit/modules/media/test_scene_measurements.py::TestMeasureScene::test_rejects_overflow_during_placement` |
+
+Validation: 44 affected-file cases pass in 4.29 seconds (29 warnings from deliberate extreme numeric cases and a third-party deprecation; bounded wall time 8.49 seconds). Five new cases cover four behaviours. The aggregate-overflow case first asserts a single placement produces a finite measured 6.4e307 mm³; five such placements overflow their sum. Both collapsed sources and faulting calculations preserve original input buffers. Initial affected-file run: 44 passes in 4.49 seconds, before adding that individual-integral control; runs overlap. Ruff, formatting and whitespace checks pass. No application/dependency/floor changes or local coverage execution. Final GitHub Deep CI must measure the module floor.

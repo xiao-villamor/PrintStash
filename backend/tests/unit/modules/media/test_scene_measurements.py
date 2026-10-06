@@ -4,6 +4,8 @@ Bounds/counts describe referenced placed surfaces. Signed volume is additive
 for raw closed resources, while unresolved welding is an explicit later phase.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 import trimesh
@@ -431,6 +433,105 @@ class TestMeasureScene:
         )
         with pytest.raises(ValueError, match="topology_resolution_required"):
             _ = measured.measurements
+
+    @pytest.mark.parametrize("shape", ["origin", "coplanar"], ids=str)
+    def test_preserves_collapsed_source_dimensions(self, resource, shape):
+        vertices = resource.vertices.copy()
+        if shape == "origin":
+            vertices[:] = 0
+            expected_extents = (0.0, 0.0, 0.0)
+        else:
+            vertices[:, 2] = 0
+            expected_extents = (10.0, 20.0, 0.0)
+        scene = ExpandedScene(
+            (MeshResource("part", vertices, resource.faces),),
+            (Instance("part", np.eye(4)),),
+        )
+        original = vertices.tobytes(), resource.faces.tobytes()
+
+        measured = measure_scene(scene)
+
+        assert measured.geometry == {
+            "bbox_x_mm": expected_extents[0],
+            "bbox_y_mm": expected_extents[1],
+            "bbox_z_mm": expected_extents[2],
+            "triangle_count": 4,
+            "volume_mm3": None,
+        }
+        assert measured.volume == VolumeUnavailable(
+            VolumeUnavailableCause.NON_POSITIVE_INTEGRAL
+        )
+        assert (vertices.tobytes(), resource.faces.tobytes()) == original
+
+    def test_preserves_dimensions_when_signed_total_overflows(self, resource):
+        vertices = resource.vertices * 4e101
+        scene = ExpandedScene(
+            (MeshResource("part", vertices, resource.faces),),
+            tuple(Instance("part", np.eye(4)) for _ in range(5)),
+        )
+        original = vertices.tobytes(), resource.faces.tobytes()
+
+        individual = measure_scene(ExpandedScene(scene.resources, scene.instances[:1]))
+        assert isinstance(individual.volume, VolumeMeasured)
+        assert individual.volume.value_mm3 == pytest.approx(6.4e307, rel=1e-12)
+
+        measured = measure_scene(scene)
+
+        assert measured.geometry == pytest.approx(
+            {
+                "bbox_x_mm": 4e102,
+                "bbox_y_mm": 8e102,
+                "bbox_z_mm": 12e102,
+                "triangle_count": 20,
+                "volume_mm3": None,
+            }
+        )
+        assert measured.volume == VolumeUnavailable(
+            VolumeUnavailableCause.NONFINITE_INTEGRAL
+        )
+        assert (vertices.tobytes(), resource.faces.tobytes()) == original
+
+    def test_preserves_dimensions_when_kernel_returns_nonfinite_integral(
+        self, resource, monkeypatch
+    ):
+        def nonfinite_integral(*args, **kwargs):
+            return SimpleNamespace(volume=float("nan"))
+
+        monkeypatch.setattr(trimesh.triangles, "mass_properties", nonfinite_integral)
+        scene = ExpandedScene((resource,), (Instance("part", np.eye(4)),))
+        original = resource.vertices.tobytes(), resource.faces.tobytes()
+
+        measured = measure_scene(scene)
+
+        assert measured.geometry == {
+            "bbox_x_mm": 10.0,
+            "bbox_y_mm": 20.0,
+            "bbox_z_mm": 30.0,
+            "triangle_count": 4,
+            "volume_mm3": None,
+        }
+        assert measured.volume == VolumeUnavailable(
+            VolumeUnavailableCause.NONFINITE_INTEGRAL
+        )
+        assert (resource.vertices.tobytes(), resource.faces.tobytes()) == original
+
+    def test_rejects_overflow_during_placement(self, resource):
+        vertices = resource.vertices * 1e306
+        transform = np.diag([100.0, 100.0, 100.0, 1.0])
+        scene = ExpandedScene(
+            (MeshResource("part", vertices, resource.faces),),
+            (Instance("part", transform),),
+        )
+        original = vertices.tobytes(), resource.faces.tobytes(), transform.tobytes()
+
+        with pytest.raises(GeometryError, match="numeric_range"):
+            measure_scene(scene)
+
+        assert (
+            vertices.tobytes(),
+            resource.faces.tobytes(),
+            transform.tobytes(),
+        ) == original
 
 
 class TestSceneMeasurements:

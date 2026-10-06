@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify retained scene measurements preserve finite dimensions when closed
+  resources collapse or numeric volume aggregation exceeds its representable range.
+
 - Verify mesh output frame boundaries reject malformed flags, incoherent evidence,
   oversized payloads and invalid fingerprint records before publication.
 
