@@ -8,15 +8,21 @@ import { BottomNavBar } from "@/components/bottom-nav-bar";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
 import { MobileFilterProvider } from "@/lib/mobile-filter-provider";
+import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Localized } from "@/components/ui/localized";
-import { ArchiveReviewDialog } from "@/components/archive-review";
+import { DeferredDialog } from "@/components/deferred-dialog";
+import { lazyImport } from "@/lib/lazy-component";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
-import { subscribeImportJobCompletions } from "@/lib/task-center";
+import { resetTasksForNewSetup, subscribeImportJobCompletions } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { uiText } from "@/lib/locale";
 import { refreshVaultAfterIngest } from "@/lib/query-client";
+
+const ArchiveReviewDialog = lazyImport(() =>
+  import("@/components/archive-review").then((module) => ({ default: module.ArchiveReviewDialog })),
+);
 
 const CHROMELESS_PREFIXES = ["/setup", "/login", "/getting-started"];
 
@@ -28,6 +34,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const chromeless = CHROMELESS_PREFIXES.some((p) => pathname.startsWith(p));
   const isVault = pathname === "/";
   const [archiveJobId, setArchiveJobId] = useState<string | null>(null);
+  const sessionId = user?.id;
+  useEffect(() => {
+    if (sessionId === undefined) return;
+    // Drop shared snapshots and invalidate in-flight responses when the owner changes.
+    return resetTasksForNewSetup;
+  }, [sessionId]);
 
   useEffect(() => subscribeArchiveReviewRequests(setArchiveJobId), []);
 
@@ -97,6 +109,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [chromeless, loading, pathname, router, user]);
 
+  if (!chromeless && loading) {
+    return <div className="min-h-screen w-full bg-background" aria-busy="true" />;
+  }
+
   if (!chromeless && !loading && !user) {
     return (
       <Localized>
@@ -112,26 +128,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {chromeless ? (
           children
         ) : (
-          <MobileFilterProvider>
-            <div className="flex flex-col h-dvh overflow-hidden">
-              <TopBar />
-              <div className="flex flex-1 min-h-0 overflow-hidden">
-                {isVault ? (
-                  children
-                ) : (
-                  <main className="flex-1 min-w-0 overflow-hidden bg-background">{children}</main>
+          <LibraryStartupProvider key={user?.id ?? "signed-out"} active={isVault}>
+            <MobileFilterProvider>
+              <div className="flex flex-col h-dvh overflow-hidden">
+                <TopBar />
+                <div className="flex flex-1 min-h-0 overflow-hidden">
+                  {isVault ? (
+                    children
+                  ) : (
+                    <main className="flex-1 min-w-0 overflow-hidden bg-background">{children}</main>
+                  )}
+                </div>
+                <BottomNavBar />
+                {archiveJobId && (
+                  <DeferredDialog
+                    open
+                    title={uiText("ZIP ready. Choose which files to add.")}
+                    onClose={() => setArchiveJobId(null)}
+                  >
+                    <ArchiveReviewDialog
+                      key={archiveJobId}
+                      jobId={archiveJobId}
+                      onClose={() => setArchiveJobId(null)}
+                    />
+                  </DeferredDialog>
                 )}
               </div>
-              <BottomNavBar />
-              {archiveJobId && (
-                <ArchiveReviewDialog
-                  key={archiveJobId}
-                  jobId={archiveJobId}
-                  onClose={() => setArchiveJobId(null)}
-                />
-              )}
-            </div>
-          </MobileFilterProvider>
+            </MobileFilterProvider>
+          </LibraryStartupProvider>
         )}
       </>
     </Localized>

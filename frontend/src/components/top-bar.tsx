@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import { lastVaultHref } from "@/lib/last-collection";
 import { LibrarySearch } from "@/components/library-search";
 import { BrandMark } from "@/components/brand-mark";
@@ -52,6 +53,8 @@ export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+  const startup = useLibraryStartup();
+  const activityEnabled = startup.canLoad("activity");
   const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -62,12 +65,12 @@ export function TopBar() {
 
   useEffect(() => {
     const unsubscribe = subscribeTasks(() => setTasks(listTasks()));
-    const stopSync = startImportJobSync();
+    const stopSync = activityEnabled ? startImportJobSync() : () => {};
     return () => {
       unsubscribe();
       stopSync();
     };
-  }, []);
+  }, [activityEnabled]);
 
   useEffect(() => subscribeArchiveReviewRequests(() => setTasksOpen(false)), []);
 
@@ -110,7 +113,10 @@ export function TopBar() {
         <LocaleToggle />
         <DropdownMenu
           open={tasksOpen}
-          onOpenChange={setTasksOpen}
+          onOpenChange={(open) => {
+            if (open) startup.request("activity");
+            setTasksOpen(open);
+          }}
           align="end"
           role="dialog"
           className="hidden sm:flex"
@@ -118,7 +124,10 @@ export function TopBar() {
             <button
               type="button"
               data-menu-trigger
-              onClick={() => setTasksOpen((v) => !v)}
+              onClick={() => {
+                startup.request("activity");
+                setTasksOpen((v) => !v);
+              }}
               className="relative text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
               aria-label={t("nav.notifications")}
               title={t("nav.notifications")}

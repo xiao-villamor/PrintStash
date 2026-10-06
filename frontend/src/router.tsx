@@ -1,34 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createBrowserRouter } from "react-router-dom";
-import { Suspense, lazy } from "react";
+import { Suspense } from "react";
+import { lazyImport } from "@/lib/lazy-component";
 
 import RootLayout from "@/root-layout";
+import HomePage from "@/pages/home";
 
 // After a rebuild the browser may still hold an index.html referencing an
 // old chunk hash that no longer exists on disk, so the dynamic import 404s.
 // Reload once to pick up the fresh index.html/chunk map; a session flag
 // stops an infinite reload loop if the import keeps failing for another
 // reason.
-function lazyImport<T extends { default: React.ComponentType }>(factory: () => Promise<T>) {
-  const key = "chunk-reload";
-  return lazy(() =>
-    factory()
-      .then((mod) => {
-        sessionStorage.removeItem(key);
-        return mod;
-      })
-      .catch((err) => {
-        if (!sessionStorage.getItem(key)) {
-          sessionStorage.setItem(key, "1");
-          window.location.reload();
-          return new Promise<T>(() => {});
-        }
-        throw err;
-      }),
-  );
-}
-
-const HomePage = lazyImport(() => import("@/pages/home"));
 const SearchPage = lazyImport(() => import("@/pages/search"));
 const SimilarModelComparisonPage = lazyImport(() => import("@/pages/similar-model-comparison"));
 const SimilarModelsPage = lazyImport(() => import("@/pages/similar-models"));
@@ -97,11 +79,7 @@ export const router = createBrowserRouter([
       },
       {
         index: true,
-        element: (
-          <RouteChunk>
-            <HomePage />
-          </RouteChunk>
-        ),
+        element: <HomePage />,
       },
       {
         path: "models/:id",

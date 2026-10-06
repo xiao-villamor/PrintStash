@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
-  Boxes,
   FileText,
   Pencil,
   Plus,
@@ -35,7 +34,6 @@ import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
 import { useCollectionChildren, useCollectionLookup, useTags } from "@/lib/queries";
 import {
-  createMultipartModel,
   deleteDocument,
   deleteMultipartModel,
   deleteMultipartModelCover,
@@ -51,7 +49,6 @@ import {
   useMultipartModel,
   useMultipartModelCandidates,
 } from "@/lib/queries";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { Link } from "@/lib/link";
@@ -66,65 +63,10 @@ import type {
 } from "@/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { parseApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
 
-/**
- * Keep server details behind the same error translation seam as the rest of
- * the app. Multipart endpoints also have a few domain-specific detail codes;
- * those should get useful, localised copy instead of exposing the code itself.
- */
-function multipartError(
-  cause: unknown,
-  t: ReturnType<typeof useI18n>["t"],
-  fallback: Parameters<ReturnType<typeof useI18n>["t"]>[0],
-): string {
-  const parsed = parseApiError(cause);
-  // Multipart operations need copy from the active catalog. The global
-  // userMessage seam intentionally stays locale-neutral, so map the boundary
-  // categories here instead of exposing a server detail code or English copy
-  // in a Spanish vault.
-  if (parsed.code === "network_unreachable") return t("multipart.networkError");
-  if (parsed.status === 403 || parsed.code.endsWith("_permission_denied")) {
-    return t("multipart.permissionError");
-  }
-  if (parsed.status === 404 || parsed.code.endsWith("_not_found")) {
-    return t("multipart.notFoundError");
-  }
-  if (parsed.code === "unknown" || parsed.code === "offline") return t(fallback);
-  if (parsed.code.startsWith("multipart_") || parsed.code.startsWith("part_")) {
-    return t(fallback);
-  }
-  if (parsed.code.endsWith("_failed")) return t(fallback);
-  // Unknown details must remain operation-specific and localized. Do not fall
-  // through to userMessage(), whose generic catalog is deliberately English.
-  return t(fallback);
-}
-
-function Count({ count, one, many }: { count: number; one: string; many: string }) {
-  useUiLocale();
-  return <span>{(count === 1 ? one : many).replace("{count}", String(count))}</span>;
-}
-
-function Cover({ src, alt }: { src: string | null; alt: string }) {
-  useUiLocale();
-  const external = src?.startsWith("https://") || src?.startsWith("http://") ? src : null;
-  const authenticated = useAuthenticatedAssetUrl(external ? null : src);
-  const url = external ?? authenticated;
-  return url ? (
-    <img src={url} alt={alt} className="h-full w-full object-contain" />
-  ) : (
-    <div className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground">
-      <Boxes className="h-10 w-10" aria-hidden />
-    </div>
-  );
-}
-
-function detailHref(id: number, returnTo?: string): string {
-  if (!returnTo) return `/multipart-models/${id}`;
-  const search = new URLSearchParams({ return: returnTo });
-  return `/multipart-models/${id}?${search.toString()}`;
-}
+import { Count, Cover } from "@/components/multipart-model-presentation";
+import { multipartError, detailHref } from "@/lib/multipart-model-presentation";
 
 export function MultipartModelCard({
   item,
@@ -269,123 +211,6 @@ export function MultipartModelCard({
         </div>
       </Link>
     </article>
-  );
-}
-
-/** The folder a new set starts in: its id is what is saved, its path what is shown chosen. */
-export interface CollectionChoice {
-  id: number;
-  path: string;
-}
-
-export function NewMultipartModelModal({
-  open,
-  onClose,
-  collection,
-  returnTo,
-}: {
-  open: boolean;
-  onClose: () => void;
-  collection: CollectionChoice | null;
-  returnTo?: string;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [target, setTarget] = useState<CollectionChoice | null>(collection);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function closeModal() {
-    setName("");
-    setDescription("");
-    setTarget(collection);
-    setError(null);
-    onClose();
-  }
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!name.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createMultipartModel({
-        name: name.trim(),
-        description: description.trim() || null,
-        collection_id: target?.id ?? null,
-      });
-      closeModal();
-      router.push(detailHref(created.id, returnTo));
-    } catch (cause) {
-      setError(multipartError(cause, t, "multipart.createError"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={busy ? () => undefined : closeModal}
-      title={t("multipart.new")}
-      className="max-w-lg"
-    >
-      <form onSubmit={submit} className="space-y-5">
-        <p className="text-sm text-muted-foreground">{t("multipart.linkedNotice")}</p>
-        <label className="block space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.name")}</span>
-          <Input
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t("multipart.namePlaceholder")}
-            maxLength={200}
-            required
-          />
-        </label>
-        <div className="space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
-          <CollectionPicker
-            minRole="edit"
-            selectedPath={target?.path ?? ""}
-            onSelect={(picked) =>
-              setTarget(picked === null ? null : { id: picked.id, path: picked.path })
-            }
-            noneLabel={t("multipart.vaultOnly")}
-            emptyLabel={uiText("No editable collections.")}
-          />
-        </div>
-        <label className="block space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder={t("multipart.descriptionPlaceholder")}
-            rows={3}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </label>
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={closeModal} disabled={busy}>
-            {t("multipart.cancel")}
-          </Button>
-          <Button type="submit" loading={busy} disabled={!name.trim()}>
-            {t("multipart.create")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 

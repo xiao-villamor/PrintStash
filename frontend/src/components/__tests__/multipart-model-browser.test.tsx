@@ -208,7 +208,7 @@ describe("MultipartModelDetailPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
     await user.click(screen.getByRole("button", { name: "Edit tags" }));
-    await user.click(screen.getByRole("button", { name: "Display" }));
+    await user.click(await screen.findByRole("button", { name: "Display" }));
     await user.click(screen.getByRole("button", { name: "Save tags" }));
 
     await waitFor(() =>

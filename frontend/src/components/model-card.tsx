@@ -316,7 +316,10 @@ function ModelCardInner({
           }}
         >
           {/* Thumbnail */}
-          <div className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0">
+          <div
+            data-library-thumbnail={model.thumbnail_url ? (thumb ? "ready" : "pending") : "missing"}
+            className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0"
+          >
             {thumb ? (
               <img
                 alt={model.name}

@@ -34,6 +34,16 @@ measured scale and coverage gates. Both phases must succeed; fail-fast is disabl
 so one failure preserves the other result. Each retains the 60-minute limit.
 The `full` lane and backend branch-coverage job keep their existing composition.
 
+Deep CI also measures production library startup against real disposable SQLite
+corpora: 91 Models in 27 collections and a 90-Model collection. Both jobs build
+production assets and use the production nginx template, an active service
+worker, 30 warm reloads and 20 fresh authenticated profiles in English/Spanish.
+Individual JSON samples and browser evidence are uploaded. Hosted runners record
+trends; `STARTUP_ENFORCE_BUDGET=1` enforces the 500 ms median / 800 ms p95 warm
+budget and 1 s fresh-profile median on the reference machine. Tracing is disabled
+for timing samples. See [the startup audit](library-startup-audit.md) for the
+procedure, exact first-visit definition, coverage and measured acceptance.
+
 The `scale` lane runs serially within each CI job. Four separate jobs split
 budget and growth checks by administrator and granted viewer, measuring 13
 reads apiece. Running four seeded 100,000-Model databases on one CI runner

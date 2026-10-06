@@ -28,7 +28,7 @@ describe("EntityTagsDialog", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Edit tags" }));
-    expect(screen.getByText("Inherited by descendants.")).toBeVisible();
+    expect(await screen.findByText("Inherited by descendants.")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Workshop" }));
     await userEvent.type(screen.getByLabelText("Tags to add"), "Painted{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));

@@ -578,3 +578,55 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+  library-startup:
+    name: Production library startup (${{ matrix.distribution }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: [distributed, dense]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install real backend and fixture dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Prepare the production nginx image
+        run: docker pull nginxinc/nginx-unprivileged:alpine
+      # Shared hosted runners record trends. Only the reference machine enforces
+      # the 500/800 ms budget through STARTUP_ENFORCE_BUDGET=1.
+      - name: Measure 30 warm and 20 fresh visits per language
+        working-directory: frontend
+        env:
+          STARTUP_DISTRIBUTION: ${{ matrix.distribution }}
+        run: pnpm test:startup
+      - name: Publish individual samples and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: startup-${{ matrix.distribution }}
+          include-hidden-files: true
+          path: |
+            frontend/.startup-results/metrics/
+            frontend/.startup-results/browser/
+          if-no-files-found: error

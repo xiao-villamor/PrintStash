@@ -18,7 +18,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "@/lib/auth-provider";
@@ -57,6 +57,7 @@ function Probe() {
   return (
     <div>
       <p>{loading ? "loading" : user ? `signed in as ${user.username}` : "signed out"}</p>
+      <span>{user?.is_superuser ? "administrator" : "member"}</span>
       <button type="button" onClick={() => void login("maker", "hunter2").catch(() => {})}>
         sign in
       </button>
@@ -163,6 +164,52 @@ describe("AuthProvider", () => {
 
       await waitFor(() => expect(screen.queryByText("loading")).toBeNull());
     });
+  });
+
+  it("keeps session validation pending through unrelated storage events", async () => {
+    withStoredSession();
+    let deliver: (user: UserRead) => void = () => {};
+    renderProvider({
+      getMe: () =>
+        new Promise<UserRead>((resolve) => {
+          deliver = resolve;
+        }),
+    });
+    act(() =>
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "printstash.locale", newValue: "es" }),
+      ),
+    );
+    expect(screen.getByText("loading")).toBeVisible();
+    await act(async () => deliver(aUser()));
+    expect(screen.getByText("signed in as maker")).toBeVisible();
+  });
+
+  it("accepts same-user auth changes after session validation", async () => {
+    withStoredSession();
+    renderProvider();
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    act(() => storeLogin("", { id: 7, username: "maker", email: null, is_superuser: true }));
+    expect(screen.getByText("administrator")).toBeVisible();
+    act(() => clearLogin());
+    expect(screen.getByText("signed out")).toBeVisible();
+  });
+
+  it("ignores bootstrap identity after logout and another session", async () => {
+    withStoredSession();
+    let deliver: (user: UserRead) => void = () => {};
+    renderProvider({
+      getMe: () =>
+        new Promise<UserRead>((resolve) => {
+          deliver = resolve;
+        }),
+    });
+    act(() => clearLogin());
+    expect(screen.getByText("signed out")).toBeVisible();
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => deliver(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+    expect(screen.queryByText("signed in as maker")).toBeNull();
   });
 
   describe("signing in", () => {

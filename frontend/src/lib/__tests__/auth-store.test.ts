@@ -24,6 +24,7 @@ import {
   emitUnauthorized,
   getToken,
   onUnauthorized,
+  onAuthChange,
   storeLogin,
 } from "@/lib/auth-store";
 
@@ -71,5 +72,25 @@ describe("expireSession", () => {
     expect(localStorage.getItem("printstash.token")).toBeNull();
     expect(sessionStorage.getItem("printstash.token")).toBeNull();
     expect(getToken()).toBeNull();
+  });
+});
+
+describe("auth change notifications", () => {
+  it("ignores unrelated storage events while recognizing cross-tab sessions", () => {
+    const listener = vi.fn<() => void>();
+    const off = onAuthChange(listener);
+    try {
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.locale" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.theme" }));
+      expect(listener).not.toHaveBeenCalled();
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      window.dispatchEvent(new StorageEvent("storage", { key: null }));
+      expect(listener).toHaveBeenCalledTimes(2);
+    } finally {
+      off();
+    }
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 });

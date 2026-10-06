@@ -955,7 +955,9 @@ export function startImportJobSync(): () => void {
     stopEvents = subscribeEvents((notice) => {
       if (notice.type === "job" || notice.type === "resync") wakeImportJobSync();
     });
-    scheduleImportJobSync(0);
+    // The server's first resync owns the first snapshot. If no socket notice
+    // arrives, this bounded fallback still discovers server-owned work.
+    scheduleImportJobSync(1_000);
   }
   let stopped = false;
   return () => {

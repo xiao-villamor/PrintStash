@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Load the Library route immediately and defer upload, tag, multipart creation
+  and ZIP review forms until opened. Prioritize cards and the bounded tree,
+  release auxiliary reads after paint or explicit interaction, and share the
+  initial Jobs snapshot with the event handshake and a one-second fallback.
+  Deliver bootstrap and hashed assets without waiting for Cache Storage, keep
+  an offline shell fallback, and bound Model pages to 24 cards. Add production
+  startup measurements against a disposable real SQLite library in Deep CI.
+  Discard reads from previous sessions, prevent late GET/blob results from
+  refilling invalidated caches, and recognize session changes across tabs.
+
 - Add storage publication authority boundary tests for incompatible receipts and stale reconciliation.
 
 - Add import download contracts for staging names, redirect and window ceilings, stream cleanup and ZIP CRC refusal.

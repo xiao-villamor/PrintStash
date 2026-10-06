@@ -56,10 +56,60 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.dispatchEvent(new Event("printstash:auth-changed"));
   vi.unstubAllGlobals();
 });
 
 describe("assetCache", () => {
+  it("revokes cached thumbnails when another tab changes the session", async () => {
+    const path = "/files/cross-tab/thumbnail";
+    const oldUrl = await getCachedAssetUrl(path);
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+    expect(peekCachedAssetUrl(path)).toBeNull();
+    expect(revoked).toContain(oldUrl);
+  });
+
+  it("revokes cached thumbnails when the session owner changes", async () => {
+    const path = "/files/session/thumbnail";
+    const oldUrl = await getCachedAssetUrl(path);
+    window.dispatchEvent(new Event("printstash:auth-changed"));
+    expect(peekCachedAssetUrl(path)).toBeNull();
+    expect(revoked).toContain(oldUrl);
+    expect(await getCachedAssetUrl(path)).not.toBe(oldUrl);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects old thumbnail bytes without erasing the new session's pending request", async () => {
+    const previous = Promise.withResolvers<Response>();
+    const current = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
+    const path = "/files/session-pending/thumbnail";
+    const oldRead = getCachedAssetUrl(path);
+    const oldOutcome = oldRead.catch((error: Error) => error);
+    window.dispatchEvent(new Event("printstash:auth-changed"));
+    const newRead = getCachedAssetUrl(path);
+    previous.resolve(new Response("previous owner"));
+    expect(await oldOutcome).toEqual(new Error("request_session_changed"));
+    expect(getCachedAssetUrl(path)).toBe(newRead);
+    current.resolve(new Response("current owner"));
+    expect(await newRead).toBe(created[0]);
+    expect(created).toHaveLength(1);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects thumbnail bytes invalidated during their download", async () => {
+    const previous = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(previous.promise);
+    const path = "/files/invalidated-pending/thumbnail";
+    const oldRead = getCachedAssetUrl(path);
+    const oldOutcome = oldRead.catch((error: Error) => error);
+    invalidateCachedAsset(path);
+    previous.resolve(new Response("old bytes"));
+    expect(await oldOutcome).toEqual(new Error("asset_request_invalidated"));
+    expect(peekCachedAssetUrl(path)).toBeNull();
+    expect(created).toHaveLength(0);
+  });
+
   describe("fetching an asset", () => {
     it("returns an object URL for the blob", async () => {
       const url = await getCachedAssetUrl("/files/1/thumbnail");

@@ -1,10 +1,15 @@
-import { emitUnauthorized, getStoredToken } from "@/lib/auth";
+import { emitUnauthorized, getStoredToken, onAuthChange } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
 import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
 import type { DerivativeState } from "@/types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const WS_BASE = import.meta.env.VITE_WS_URL || "";
+let sessionGeneration = 0;
+
+function requireCurrentSession(session: number): void {
+  if (session !== sessionGeneration) throw new Error("request_session_changed");
+}
 
 function isBrowser(): boolean {
   // `"window" in globalThis` rather than a `typeof` probe: the question is
@@ -36,12 +41,17 @@ export function getAssetUrl(path: string): string {
 
 /** Revalidate protected bytes; a failed cross-origin delivery retries via the API. */
 async function fetchArtifact(path: string, signal?: AbortSignal): Promise<Response> {
+  const session = sessionGeneration;
   const options: RequestInit = { headers: authHeaders(), cache: "no-cache", signal };
-  const proxy = () =>
-    fetch(getUrl(path), {
+  const proxy = async () => {
+    requireCurrentSession(session);
+    const response = await fetch(getUrl(path), {
       ...options,
       headers: { ...authHeaders(), "X-PrintStash-Delivery": "proxy" },
     });
+    requireCurrentSession(session);
+    return response;
+  };
   let response: Response;
   try {
     response = await fetch(getUrl(path), options);
@@ -49,6 +59,7 @@ async function fetchArtifact(path: string, signal?: AbortSignal): Promise<Respon
     if (!(error instanceof TypeError) || signal?.aborted) throw error;
     return proxy();
   }
+  requireCurrentSession(session);
   // An expired provider capability can return an HTTP failure rather than a
   // browser CORS/network error. Reauthorize against the original URL once.
   return response.redirected && !response.ok ? proxy() : response;
@@ -268,6 +279,7 @@ const CACHE_TTL_MS = 30_000;
 
 const responseCache = new Map<string, { value: unknown; expires: number }>();
 const inflight = new Map<string, Promise<unknown>>();
+let cacheGeneration = 0;
 
 /**
  * Bust caches after a mutation. Pass the mutated `path` for keyed,
@@ -277,6 +289,7 @@ const inflight = new Map<string, Promise<unknown>>();
  * map, so dropping it wholesale is cheap and keeps it coherent.
  */
 export function invalidateApiCache(path?: string): void {
+  cacheGeneration += 1;
   responseCache.clear();
   inflight.clear();
   if (path === undefined) {
@@ -289,7 +302,9 @@ export function invalidateApiCache(path?: string): void {
 if (isBrowser()) {
   // Login/logout changes identity — drop all cached data (not just invalidate)
   // so the previous user's reads can't linger under RBAC.
-  window.addEventListener("printstash:auth-changed", () => {
+  onAuthChange(() => {
+    sessionGeneration += 1;
+    cacheGeneration += 1;
     responseCache.clear();
     inflight.clear();
     queryClient.clear();
@@ -303,13 +318,17 @@ export interface GetJsonOptions {
 }
 
 export async function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {
+  const session = sessionGeneration;
   if (!isBrowser() || options?.fresh || options?.signal) {
     const res = await fetch(getUrl(path), {
       signal: options?.signal,
       headers: authHeaders(),
       cache: "no-store",
     });
-    return handleResponse<T>(res);
+    requireCurrentSession(session);
+    const value = await handleResponse<T>(res);
+    requireCurrentSession(session);
+    return value;
   }
 
   const now = Date.now();
@@ -327,20 +346,25 @@ export async function getJson<T>(path: string, options?: GetJsonOptions): Promis
     // sharing it is what makes concurrent readers issue one request.
     return pending as Promise<T>;
   }
+  const generation = cacheGeneration;
   const request = (async () => {
     const res = await fetch(getUrl(path), {
       headers: authHeaders(),
       cache: "no-store",
     });
+    requireCurrentSession(session);
     const value = await handleResponse<T>(res);
-    responseCache.set(path, { value, expires: Date.now() + CACHE_TTL_MS });
+    requireCurrentSession(session);
+    if (generation === cacheGeneration) {
+      responseCache.set(path, { value, expires: Date.now() + CACHE_TTL_MS });
+    }
     return value;
   })();
   inflight.set(path, request);
   try {
     return await request;
   } finally {
-    inflight.delete(path);
+    if (inflight.get(path) === request) inflight.delete(path);
   }
 }
 

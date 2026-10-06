@@ -26,6 +26,7 @@
     "test:e2e:pr": "playwright test --config=playwright.real.config.ts --grep @pr-smoke",
     "test:e2e:critical": "playwright test --config=playwright.real.config.ts --grep @critical && playwright test --config=playwright.storage.config.ts --grep @critical && playwright test --config=playwright.critical-backup.config.ts --grep @critical",
     "test:e2e:storage": "playwright test --config=playwright.storage.config.ts && playwright test --config=playwright.delivery.config.ts",
+    "test:startup": "playwright test --config=playwright.startup.config.ts",
     "test:perf": "playwright test --config=playwright.performance.config.ts",
     "test:perf:react-compiler": "PERF_BUILD_MODE=react-compiler playwright test --config=playwright.performance.config.ts",
     "test:frontend": "node scripts/frontend-smoke.mjs",

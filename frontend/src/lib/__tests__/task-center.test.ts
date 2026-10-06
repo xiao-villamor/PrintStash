@@ -1124,9 +1124,53 @@ describe("syncImportJobs", () => {
 });
 
 describe("createImportJobSynchronizer", () => {
+  async function handshake() {
+    await vi.advanceTimersByTimeAsync(0);
+    socket.deliver({ type: "resync" });
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("shares one handshake snapshot between subscribers", async () => {
+    const stopA = tc.startImportJobSync();
+    const stopB = tc.startImportJobSync();
+    await handshake();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stopA();
+    stopB();
+  });
+
+  it("falls back after one second without a socket notice", async () => {
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(listJobs).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("retains a Job notice received during a snapshot", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise<JobStatus[]>((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const stop = tc.startImportJobSync();
+    await handshake();
+    socket.deliver({ type: "job", job_id: "changed-job", state: "completed" });
+    listJobs.mockResolvedValue([aJob({ job_id: "changed-job", state: "completed" })]);
+    deliver([aJob({ job_id: "changed-job", state: "running" })]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "changed-job", status: "completed" }]);
+    stop();
+  });
+
   it("stops polling after the initial sync when the server is idle", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(10_000);
@@ -1147,7 +1191,7 @@ describe("createImportJobSynchronizer", () => {
       }),
     ]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1_000);
@@ -1159,7 +1203,7 @@ describe("createImportJobSynchronizer", () => {
 
   it("wakes an idle synchronizer when a new server job is tracked", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     tc.trackImportJob("new-job", "Scan library");
@@ -1171,7 +1215,7 @@ describe("createImportJobSynchronizer", () => {
   it("backs off after a failed sync even without a local task record", async () => {
     listJobs.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(999);
@@ -1183,7 +1227,7 @@ describe("createImportJobSynchronizer", () => {
 
   it("wakes immediately when connectivity returns", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     window.dispatchEvent(new Event("online"));
     await vi.advanceTimersByTimeAsync(0);
     expect(listJobs).toHaveBeenCalledTimes(2);
@@ -1194,7 +1238,7 @@ describe("createImportJobSynchronizer", () => {
     // A worker finished the Job; without the notice an idle Task Center would
     // show the old state until something else woke it.
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     socket.deliver({ type: "job", job_id: "j1", state: "completed" });
@@ -1205,19 +1249,23 @@ describe("createImportJobSynchronizer", () => {
   });
 
   it("refetches after the events socket reconnects", async () => {
+    listJobs.mockResolvedValue([aJob({ job_id: "reconnected-job", state: "running" })]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
+    expect(tc.listTasks()).toMatchObject([{ jobId: "reconnected-job", status: "running" }]);
 
+    listJobs.mockResolvedValue([aJob({ job_id: "reconnected-job", state: "completed" })]);
     socket.deliver({ type: "resync" });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(listJobs).toHaveBeenCalledTimes(2);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "reconnected-job", status: "completed" }]);
     stop();
   });
 
   it("ignores notices about derivatives", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
 
     socket.deliver({ type: "derivative", state: "ready" });
     await vi.advanceTimersByTimeAsync(0);
@@ -1228,7 +1276,7 @@ describe("createImportJobSynchronizer", () => {
 
   it("closes the events socket when nothing shows the Task Center", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
 
     stop();
 

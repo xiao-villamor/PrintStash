@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { getSearchStatus, searchLibrary } from "@/lib/api/search";
 import { useAuth } from "@/lib/auth-context";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
@@ -13,6 +14,8 @@ import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 export function LibrarySearch() {
   const { t } = useI18n();
   const { user } = useAuth();
+  const startup = useLibraryStartup();
+  const statusEnabled = startup.canLoad("search");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -35,7 +38,7 @@ export function LibrarySearch() {
   const status = useQuery({
     queryKey: ["ai-search", "status", user?.id],
     queryFn: getSearchStatus,
-    enabled: visible && !!user,
+    enabled: visible && !!user && statusEnabled,
     refetchInterval: 15000,
     retry: false,
   });
@@ -195,6 +198,7 @@ export function LibrarySearch() {
             />
             <input
               ref={input}
+              onFocus={() => startup.request("search")}
               data-model-search
               data-menu-trigger
               type="search"

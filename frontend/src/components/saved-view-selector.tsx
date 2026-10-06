@@ -2,6 +2,7 @@
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 
 import { useMemo, useState } from "react";
 import {
@@ -76,6 +77,7 @@ export function SavedViewSelector({
   triggerVariant?: "outline" | "ghost";
 }) {
   useUiLocale();
+  const startup = useLibraryStartup();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<number[]>(readRecent);
@@ -99,6 +101,7 @@ export function SavedViewSelector({
   const active = views.find((view) => view.id === activeId);
 
   function setMenuOpen(next: boolean) {
+    if (next) startup.request("saved-views");
     setOpen(next);
     if (!next) setQuery("");
   }

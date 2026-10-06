@@ -3,6 +3,7 @@
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
@@ -639,6 +640,8 @@ export function FilterSidebarContent({
 }: FilterSidebarProps) {
   useUiLocale();
   const { t } = useI18n();
+  const startup = useLibraryStartup();
+  const settleStartup = startup.settle;
   const outlinerQ = (outlinerFilter ?? "").trim();
   const [searchText, setSearchText] = useState(outlinerQ);
   useEffect(() => {
@@ -665,6 +668,10 @@ export function FilterSidebarContent({
     return initial;
   });
   const [allModelsExpanded, setAllModelsExpanded] = useState(readAllModelsExpanded);
+  useEffect(() => {
+    if (roots.data !== undefined) settleStartup("tree", "ready");
+    else if (roots.isError) settleStartup("tree", "failed");
+  }, [roots.data, roots.isError, settleStartup]);
   const [tagFilter, setTagFilter] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
   const [printerExpanded, setPrinterExpanded] = useState(false);

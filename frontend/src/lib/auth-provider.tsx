@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth-store";
 import { login as apiLogin, logout as apiLogout, getMe } from "@/lib/api";
 import { AuthContext, type AuthApi } from "@/lib/auth-context";
+import { markStartup } from "@/lib/startup-timing";
 
 const SERVER_AUTH_API: AuthApi = { login: apiLogin, logout: apiLogout, getMe };
 
@@ -28,7 +29,10 @@ export function AuthProvider({
 
   useEffect(() => {
     let alive = true;
+    let checking = true;
     const off = onAuthChange(() => {
+      checking = false;
+      setLoading(false);
       setUser(getUser());
     });
 
@@ -37,18 +41,20 @@ export function AuthProvider({
     api
       .getMe()
       .then((u) => {
-        if (!alive) return;
+        if (!alive || !checking) return;
         const stored: StoredUser = {
           id: u.id,
           username: u.username,
           email: u.email,
           is_superuser: u.is_superuser,
         };
+        checking = false;
         storeLogin("", stored, { silent: true });
+        markStartup("session-validated");
         setUser(stored);
       })
       .catch(() => {
-        if (!alive) return;
+        if (!alive || !checking) return;
         clearLogin();
       })
       .finally(() => {

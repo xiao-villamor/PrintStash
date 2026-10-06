@@ -1,4 +1,5 @@
 import { getAuthenticatedBlob } from "@/lib/api";
+import { onAuthChange } from "@/lib/auth-store";
 
 /**
  * Session cache for authenticated asset blobs (thumbnails).
@@ -50,8 +51,9 @@ export function getCachedAssetUrl(path: string): Promise<string> {
   const pending = inflight.get(path);
   if (pending) return pending;
 
-  const promise = getAuthenticatedBlob(path)
+  const promise: Promise<string> = getAuthenticatedBlob(path)
     .then((blob) => {
+      if (inflight.get(path) !== promise) throw new Error("asset_request_invalidated");
       const url = URL.createObjectURL(blob);
       urlCache.set(path, url);
       inflight.delete(path);
@@ -59,7 +61,7 @@ export function getCachedAssetUrl(path: string): Promise<string> {
       return url;
     })
     .catch((err) => {
-      inflight.delete(path);
+      if (inflight.get(path) === promise) inflight.delete(path);
       throw err;
     });
 
@@ -85,4 +87,12 @@ function evictIfNeeded(): void {
     urlCache.delete(oldest);
     if (url !== undefined) URL.revokeObjectURL(url);
   }
+}
+
+if ("window" in globalThis) {
+  onAuthChange(() => {
+    for (const url of urlCache.values()) URL.revokeObjectURL(url);
+    urlCache.clear();
+    inflight.clear();
+  });
 }

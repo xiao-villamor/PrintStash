@@ -1,3 +1,5 @@
+import { markStartup } from "@/lib/startup-timing";
+
 import { listOutlinerCollections, listOutlinerEntries, searchOutliner } from "@/lib/api/outliner";
 import type { OutlinerParams } from "@/types/outliner";
 import { createContext, useContext, useMemo } from "react";
@@ -209,10 +211,11 @@ export function useCollectionReadme(collectionId: number, options?: { enabled?: 
   });
 }
 
-export function useTags() {
+export function useTags(options?: { enabled?: boolean }) {
   const api = useQueryApi();
   return useQuery<TagRead[]>({
     queryKey: queryKeys.tags,
+    enabled: options?.enabled,
     queryFn: () => api.listTags({ fresh: true }),
   });
 }
@@ -416,9 +419,13 @@ function modelFacetsOptions(api: QueryApi, filters: ModelListFilters) {
   });
 }
 
-export function useModelFacets(filters: ModelListFilters) {
+export function useModelFacets(filters: ModelListFilters, options?: { enabled?: boolean }) {
   const api = useQueryApi();
-  return useQuery({ ...modelFacetsOptions(api, filters), placeholderData: keepPreviousData });
+  return useQuery({
+    ...modelFacetsOptions(api, filters),
+    enabled: options?.enabled,
+    placeholderData: keepPreviousData,
+  });
 }
 
 /**
@@ -452,13 +459,15 @@ function modelListOptions(
     ModelPageCursor
   >({
     queryKey: [...queryKeys.models, "list", filters, sort],
-    queryFn: ({ pageParam }) =>
-      api.listModelPage({
+    queryFn: ({ pageParam }) => {
+      markStartup("library-requests");
+      return api.listModelPage({
         ...filters,
         limit: pageSize,
         sort,
         cursor: pageParam ?? undefined,
-      }),
+      });
+    },
     initialPageParam: null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   });

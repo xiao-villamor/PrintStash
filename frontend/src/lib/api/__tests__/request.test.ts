@@ -42,6 +42,7 @@ import {
   sendJson,
 } from "@/lib/api/request";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
+import { getUser, storeLogin } from "@/lib/auth-store";
 
 /**
  * request.ts keeps a small in-memory GET cache (30s TTL) with in-flight
@@ -251,6 +252,66 @@ describe("downloadFilename", () => {
 });
 
 describe("getJson", () => {
+  it("drops cached data when another tab changes the session", async () => {
+    respondWith([{ name: "old owner" }]);
+    await getJson("/api/v1/tags");
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+    respondWith([{ name: "new owner" }]);
+    expect(await getJson("/api/v1/tags")).toEqual([{ name: "new owner" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["cached", "fresh", "abortable"] as const)(
+    "ignores an old session's 401 on a %s read",
+    async (mode) => {
+      const pending = Promise.withResolvers<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      storeLogin("", { id: 7, username: "old-owner", email: null, is_superuser: false });
+      const options =
+        mode === "fresh"
+          ? { fresh: true }
+          : mode === "abortable"
+            ? { signal: new AbortController().signal }
+            : undefined;
+      const oldRead = getJson("/api/v1/auth/me", options);
+      const outcome = oldRead.catch((error: Error) => error);
+      storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+      pending.resolve(jsonResponse({ detail: "expired" }, 401));
+      expect(await outcome).toEqual(new Error("request_session_changed"));
+      expect(getUser()?.id).toBe(9);
+    },
+  );
+
+  it("does not repopulate caches from a previous session's pending read", async () => {
+    const previous = Promise.withResolvers<Response>();
+    const current = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
+    const oldRead = getJson("/api/v1/tags");
+    const oldOutcome = oldRead.catch((error: Error) => error);
+    window.dispatchEvent(new Event("printstash:auth-changed"));
+    const newRead = getJson("/api/v1/tags");
+    previous.resolve(jsonResponse([{ name: "previous owner" }]));
+    expect(await oldOutcome).toEqual(new Error("request_session_changed"));
+    const shared = getJson("/api/v1/tags");
+    current.resolve(jsonResponse([{ name: "current owner" }]));
+    expect(await newRead).toEqual([{ name: "current owner" }]);
+    expect(await shared).toEqual([{ name: "current owner" }]);
+    expect(await getJson("/api/v1/tags")).toEqual([{ name: "current owner" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not repopulate an invalidated cache from a pending read", async () => {
+    const previous = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(previous.promise);
+    const oldRead = getJson("/api/v1/tags");
+    invalidateApiCache();
+    previous.resolve(jsonResponse([{ name: "old value" }]));
+    await oldRead;
+    respondWith([{ name: "new value" }]);
+    expect(await getJson("/api/v1/tags")).toEqual([{ name: "new value" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("serves a second call from cache without a second fetch", async () => {
     respondWith([{ id: 1 }]);
 
@@ -298,6 +359,20 @@ describe("getJson", () => {
     await getJson("/api/v1/models");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("protected byte session isolation", () => {
+  it("ignores an old session's unauthorized thumbnail response", async () => {
+    const pending = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(pending.promise);
+    storeLogin("", { id: 7, username: "old-owner", email: null, is_superuser: false });
+    const oldRead = getAuthenticatedBlob("/api/v1/files/1/thumbnail");
+    const outcome = oldRead.catch((error: Error) => error);
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    pending.resolve(jsonResponse({ detail: "expired" }, 401));
+    expect(await outcome).toEqual(new Error("request_session_changed"));
+    expect(getUser()?.id).toBe(9);
   });
 });
 

@@ -25,6 +25,7 @@ import userEvent from "@testing-library/user-event";
 import { useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { ModelBrowser } from "@/components/model-grid";
 import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { queryKeys } from "@/lib/query-client";
@@ -143,6 +144,7 @@ function renderVault(
     collections?: CollectionRead[];
     tags?: TagRead[];
     historyProbe?: boolean;
+    startup?: boolean;
   } = {},
 ) {
   const {
@@ -151,13 +153,16 @@ function renderVault(
     collections = [],
     tags = [],
     historyProbe = false,
+    startup = false,
     seed = [],
     routes = {},
     ...rest
   } = options;
   return renderApp(
     <>
-      <ModelBrowser />
+      <LibraryStartupProvider active={startup}>
+        <ModelBrowser />
+      </LibraryStartupProvider>
       {historyProbe && <HistoryProbe />}
     </>,
     {
@@ -344,12 +349,139 @@ describe("ModelBrowser", () => {
       });
 
       await user.click(await screen.findByRole("button", { name: "Add tags to Dragon figure" }));
-      const dialog = screen.getByRole("dialog");
-      await user.click(within(dialog).getByRole("button", { name: "functional" }));
-      await user.click(within(dialog).getByRole("button", { name: "Save tags" }));
+      await user.click(await screen.findByRole("button", { name: "functional" }));
+      await user.click(screen.getByRole("button", { name: "Save tags" }));
 
       await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
       expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({ tags: ["functional"] });
+    });
+  });
+
+  describe("progressive startup", () => {
+    it("bounds the initial model page without changing URL filters", async () => {
+      const { requests } = renderVault({ at: "/?tag=functional", startup: true });
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/page"))).toBe(
+          true,
+        ),
+      );
+      const request = requests().find((request) => request.url.startsWith("/api/v1/models/page"))!;
+      const params = new URL(request.url, "http://test").searchParams;
+      expect(params.get("limit")).toBe("24");
+      expect(params.getAll("tag")).toEqual(["functional"]);
+    });
+
+    it("defers catalogs until coherent primary content is visible", async () => {
+      let deliver: (response: Response) => void = () => {};
+      const primary = new Promise<Response>((resolve) => {
+        deliver = resolve;
+      });
+      const { requests } = renderVault({
+        startup: true,
+        routes: { "GET /api/v1/models/page": () => primary },
+      });
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/page"))).toBe(
+          true,
+        ),
+      );
+      expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
+        false,
+      );
+      expect(requests().some((request) => request.url.startsWith("/api/v1/saved-views"))).toBe(
+        false,
+      );
+      deliver(
+        json({ items: [aModelListItem({ name: "Ready bracket" })], total: 1, next_cursor: null }),
+      );
+      expect(await screen.findByText("Ready bracket")).toBeVisible();
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
+          true,
+        ),
+      );
+    });
+
+    it("keeps secondary reads deferred when the navigation tree is used early", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderVault({
+        startup: true,
+        collections: [aCollection()],
+        routes: { "GET /api/v1/models/page": () => new Promise(() => {}) },
+      });
+      const outliner = await screen.findByRole("complementary");
+      const folder = await within(outliner).findByTitle("Parts");
+      await user.hover(folder);
+      await user.click(folder);
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.includes("collection=parts"))).toBe(true),
+      );
+      expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
+        false,
+      );
+      expect(requests().some((request) => request.url.startsWith("/api/v1/tags"))).toBe(false);
+    });
+
+    it("loads filter options immediately when filters are opened early", async () => {
+      const { requests } = renderVault({
+        startup: true,
+        routes: { "GET /api/v1/models/page": () => new Promise(() => {}) },
+      });
+      await userEvent.click(screen.getAllByRole("button", { name: "Filters" })[0]);
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
+          true,
+        ),
+      );
+      expect(requests().some((request) => request.url.startsWith("/api/v1/saved-views"))).toBe(
+        false,
+      );
+    });
+
+    it("waits for child folders before releasing secondary reads", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const { requests } = renderVault({
+        startup: true,
+        models: [aModelListItem({ name: "Ready model" })],
+        routes: { "GET /api/v1/collections/children": () => pending.promise },
+      });
+      await waitFor(() =>
+        expect(requests().some((r) => r.url.startsWith("/api/v1/collections/children"))).toBe(true),
+      );
+      expect(screen.queryByText("Ready model")).not.toBeInTheDocument();
+      expect(requests().some((r) => r.url.startsWith("/api/v1/models/facets"))).toBe(false);
+      pending.resolve(json({ items: [], next_cursor: null }));
+      expect(await screen.findByText("Ready model")).toBeVisible();
+      await waitFor(() =>
+        expect(requests().some((r) => r.url.startsWith("/api/v1/models/facets"))).toBe(true),
+      );
+    });
+
+    it("releases recovery controls after child folders fail", async () => {
+      const { requests } = renderVault({
+        startup: true,
+        routes: { "GET /api/v1/collections/children": json({ detail: "folder_unavailable" }, 503) },
+      });
+      expect(await screen.findByText(/folder_unavailable/)).toBeVisible();
+      expect(screen.queryByText("No models found")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(requests().some((r) => r.url.startsWith("/api/v1/models/facets"))).toBe(true),
+      );
+      expect(screen.getAllByRole("button", { name: "Filters" })[0]).toBeEnabled();
+    });
+
+    it("releases catalog requests after a primary error", async () => {
+      const { requests } = renderVault({
+        startup: true,
+        routes: { "GET /api/v1/models/page": json({ detail: "startup_failed" }, 500) },
+      });
+      await screen.findByText(/startup_failed/);
+      await waitFor(() =>
+        expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
+          true,
+        ),
+      );
+      expect(screen.getAllByRole("button", { name: "Filters" })[0]).toBeEnabled();
     });
   });
 
@@ -577,26 +709,43 @@ describe("ModelBrowser", () => {
       );
     }
 
-    it("keeps the current folder on screen while the next one loads", async () => {
-      // Swapping the grid for its first-load skeleton on every folder is what
-      // makes browsing feel slow, however fast the answer then arrives.
+    it("keeps one coherent folder result while the destination loads", async () => {
       const user = userEvent.setup();
-      renderVault({
+      const pending = Promise.withResolvers<Response>();
+      const { requests } = renderVault({
         at: "/?c=parts",
         collections: PARTS_TREE,
-        models: [aModelListItem({ name: "Shelf rig" })],
         routes: {
+          "GET /api/v1/models/page": (url) =>
+            json({
+              items: [
+                aModelListItem({
+                  name: url.includes("parts%2Fbrackets") ? "Bracket piece" : "Shelf rig",
+                }),
+              ],
+              total: 1,
+              next_cursor: null,
+            }),
           "GET /api/v1/multipart-models": (url) =>
-            url.includes("parts%2Fbrackets") ? new Promise<Response>(() => {}) : json([]),
+            url.includes("parts%2Fbrackets") ? pending.promise : json([]),
         },
       });
       await screen.findByText("Shelf rig");
-
       await user.click(await folderCard("parts/brackets"));
-
-      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
+      await waitFor(() =>
+        expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
+      );
+      expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
       expect(screen.getByText("Shelf rig")).toBeVisible();
-      expect(screen.queryByText("Loading...")).toBeNull();
+      expect(screen.queryByText("Bracket piece")).not.toBeInTheDocument();
+      expect(await folderCard("parts/brackets")).toBeVisible();
+      pending.resolve(json([]));
+      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
+      expect(screen.getByText("Bracket piece")).toBeVisible();
+      expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("main").querySelector('[data-collection-path="parts/brackets"]'),
+      ).toBeNull();
     });
 
     it("warms a folder when the pointer rests on its card", async () => {

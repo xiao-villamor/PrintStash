@@ -102,7 +102,16 @@ export function clearLogin(): void {
 
 export function onAuthChange(cb: () => void): () => void {
   if (!isBrowser()) return () => {};
-  const handler = () => cb();
+  const handler = (event: Event) => {
+    if (
+      event instanceof StorageEvent &&
+      event.key !== null &&
+      event.key !== USER_KEY &&
+      event.key !== LEGACY_USER_KEY
+    )
+      return;
+    cb();
+  };
   window.addEventListener(AUTH_EVENT, handler);
   window.addEventListener("storage", handler);
   return () => {
