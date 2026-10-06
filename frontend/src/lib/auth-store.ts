@@ -101,6 +101,11 @@ export function clearLogin(): void {
   emit();
 }
 
+/** Retire private requests and UI after an authoritative permission change. */
+export function retirePrivateSessionScope(): void {
+  emit();
+}
+
 export function onAuthChange(cb: () => void): () => void {
   if (!isBrowser()) return () => {};
   const handler = (event: Event) => {

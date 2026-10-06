@@ -18,8 +18,10 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useState } from "react";
 
 import { AuthProvider } from "@/lib/auth-provider";
 import { useAuth, type AuthApi } from "@/lib/auth-context";
@@ -101,6 +103,34 @@ afterEach(() => {
 });
 
 describe("AuthProvider", () => {
+  it("discards private component state on a new session", async () => {
+    function PrivateDraft() {
+      const [draft, setDraft] = useState("");
+      return (
+        <input
+          aria-label="Private draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      );
+    }
+    withStoredSession();
+    render(
+      <AuthProvider api={stubApi()}>
+        <Probe />
+        <PrivateDraft />
+      </AuthProvider>,
+    );
+    await screen.findByText("signed in as maker");
+    fireEvent.change(screen.getByRole("textbox", { name: "Private draft" }), {
+      target: { value: "Previous scope draft" },
+    });
+
+    await act(async () => withStoredSession());
+
+    expect(screen.getByRole("textbox", { name: "Private draft" })).toHaveValue("");
+  });
+
   describe("a visitor with no stored session", () => {
     it("is ready at once", () => {
       // There is nothing to confirm, so waiting would put a spinner in front of

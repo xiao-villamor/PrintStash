@@ -27,7 +27,24 @@ import {
   onUnauthorized,
   onAuthChange,
   storeLogin,
+  getUser,
+  retirePrivateSessionScope,
 } from "@/lib/auth-store";
+
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
+describe("retirePrivateSessionScope", () => {
+  it("retires private state without logging out", () => {
+    const user = { id: 1, username: "maker", email: null, is_superuser: false };
+    storeLogin("", user);
+    const version = getSessionVersion();
+
+    retirePrivateSessionScope();
+
+    expect(getUser()).toEqual(user);
+    expect(() => requireSessionVersion(version)).toThrow("request_session_changed");
+  });
+});
 
 describe("expireSession", () => {
   beforeEach(() => {

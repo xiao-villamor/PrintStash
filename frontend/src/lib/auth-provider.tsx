@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   getUser,
   isLoggedIn,
@@ -23,6 +23,7 @@ export function AuthProvider({
   children: React.ReactNode;
   api?: AuthApi;
 }) {
+  const version = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const [user, setUser] = useState<StoredUser | null>(null);
   // Only a stored login has a session worth confirming with `getMe`; with no
   // stored login there is nothing to await, so the provider is ready at once.
@@ -123,7 +124,7 @@ export function AuthProvider({
   }, [api]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>
+    <AuthContext.Provider key={version} value={{ user, loading, login, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );
