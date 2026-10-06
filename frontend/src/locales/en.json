@@ -4190,6 +4190,7 @@
   "library.refresh": "Refresh library",
   "library.authorityCheckFailed": "Could not check whether the library is up to date.",
   "library.checkAgain": "Check again",
+  "share.loadError": "The shared model could not be loaded. Try again.",
   "aiSearch.statusError": "Search capabilities could not be loaded.",
   "aiSearch.preferencesLoadError": "Your search preferences could not be loaded.",
   "aiSearch.downloadsLoadError": "Model downloads could not be loaded.",

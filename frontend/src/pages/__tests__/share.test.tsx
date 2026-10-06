@@ -17,10 +17,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SharePage from "@/pages/share";
+import userEvent from "@testing-library/user-event";
+import { useRouter } from "@/lib/navigation";
+import { clearLogin } from "@/lib/auth-store";
+import { focusManager } from "@tanstack/react-query";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { PublicFileRead, PublicModelRead } from "@/types";
 
@@ -92,6 +96,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  focusManager.setFocused(undefined);
   vi.unstubAllGlobals();
 });
 
@@ -149,6 +154,132 @@ describe("SharePage", () => {
       expect(
         await screen.findByText("This share link is invalid, expired, or revoked."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("public token lifetime", () => {
+    it("opens a valid token after an invalid token", async () => {
+      function Next() {
+        const router = useRouter();
+        return <button onClick={() => router.push("/share/current")}>Next token</button>;
+      }
+      renderApp(
+        <>
+          <Next />
+          <SharePage />
+        </>,
+        {
+          at: "/share/expired",
+          routePath: "/share/:token",
+          routes: {
+            "GET /api/v1/share/expired": json({}, 404),
+            "GET /api/v1/share/current": json(sharedModel({ name: "Current boat", files: [] })),
+          },
+        },
+      );
+      await screen.findByText("This share link is invalid, expired, or revoked.");
+      await userEvent.click(screen.getByRole("button", { name: "Next token" }));
+      expect(await screen.findByRole("heading", { name: "Current boat" })).toBeVisible();
+      expect(screen.queryByText("This share link is invalid, expired, or revoked.")).toBeNull();
+    });
+    it("aborts an obsolete token before presenting its model", async () => {
+      let finish!: (response: Response) => void;
+      let signal: AbortSignal | null | undefined;
+      const held = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      function Next() {
+        const router = useRouter();
+        return <button onClick={() => router.push("/share/current")}>Next token</button>;
+      }
+      const app = renderApp(
+        <>
+          <Next />
+          <SharePage />
+        </>,
+        {
+          at: "/share/old",
+          routePath: "/share/:token",
+          routes: {
+            "GET /api/v1/share/old": (_url, init) => {
+              signal = init?.signal;
+              return held;
+            },
+            "GET /api/v1/share/current": json(sharedModel({ name: "Current boat", files: [] })),
+          },
+        },
+      );
+      await waitFor(() =>
+        expect(app.requests().some(({ url }) => url.endsWith("/share/old"))).toBe(true),
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Next token" }));
+      expect(await screen.findByRole("heading", { name: "Current boat" })).toBeVisible();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        finish(json(sharedModel({ name: "Obsolete boat", files: [] })));
+        await held;
+      });
+      expect(screen.queryByRole("heading", { name: "Obsolete boat" })).toBeNull();
+      expect(document.title).toContain("Current boat");
+    });
+    it("keeps a public lookup alive after private cache retirement", async () => {
+      let finish!: (response: Response) => void;
+      let signal: AbortSignal | null | undefined;
+      const held = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      const app = renderShare({
+        routes: {
+          "GET /api/v1/share/abc123": (_url, init) => {
+            signal = init?.signal;
+            return held;
+          },
+        },
+      });
+      expect(screen.getByRole("status", { name: "Loading…" })).toBeVisible();
+      await waitFor(() => expect(app.requests()).toHaveLength(1));
+      act(() => {
+        clearLogin();
+        app.client.clear();
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        finish(json(sharedModel({ files: [] })));
+        await held;
+      });
+      expect(await screen.findByRole("heading", { name: "Benchy" })).toBeVisible();
+      expect(app.requests()).toHaveLength(1);
+      expect(app.client.getQueriesData({ queryKey: ["public-share"] })).toHaveLength(0);
+    });
+    it("hides a cached public model after confirmed revocation", async () => {
+      const app = renderShare({
+        routes: {
+          "GET /api/v1/share/abc123": json(sharedModel({ files: [], allow_download: true })),
+        },
+      });
+      await screen.findByRole("heading", { name: "Benchy" });
+      app.route({ "GET /api/v1/share/abc123": json({}, 403) });
+      act(() => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      expect(
+        await screen.findByText("This share link is invalid, expired, or revoked."),
+      ).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Benchy" })).toBeNull();
+      expect(document.title).not.toContain("Benchy");
+      expect(app.requests()).toHaveLength(2);
+    });
+    it("retries a temporary failure without calling the token revoked", async () => {
+      const app = renderShare({ routes: { "GET /api/v1/share/abc123": json({}, 503) } });
+      expect(
+        await screen.findByText("The shared model could not be loaded. Try again."),
+      ).toBeVisible();
+      expect(screen.queryByText("This share link is invalid, expired, or revoked.")).toBeNull();
+      app.route({ "GET /api/v1/share/abc123": json(sharedModel({ files: [] })) });
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByRole("heading", { name: "Benchy" })).toBeVisible();
+      expect(app.requests().filter(({ url }) => url === "/api/v1/share/abc123")).toHaveLength(2);
     });
   });
 

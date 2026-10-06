@@ -4,7 +4,7 @@ import { translate } from "@/lib/locale";
 import { revisionStatusLabel } from "@/components/model-detail/presentation";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { useUiLocale } from "@/lib/i18n";
+import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -12,9 +12,14 @@ import { AlertTriangle, Box, Download, Layers, Loader2 } from "lucide-react";
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import { getAssetUrl } from "@/lib/api";
-import { getSharedModel, sharedDownloadUrl, sharedGcodeUrl, sharedStlUrl } from "@/lib/api/share";
+import { sharedDownloadUrl, sharedGcodeUrl, sharedStlUrl } from "@/lib/api/share";
 import { formatBytes, formatDuration } from "@/lib/format";
-import { PublicFileRead, PublicModelRead } from "@/types";
+import { PublicFileRead } from "@/types";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { parseApiError } from "@/lib/errors";
+import { sharedModelOptions } from "@/lib/queries/share";
+import { getPublicDerivedBlob, getPublicDerivedText } from "@/lib/api/request";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
@@ -41,42 +46,29 @@ function revisionTitle(file: PublicFileRead) {
 }
 
 export default function SharePage() {
-  const locale = useUiLocale();
   const { token = "" } = useParams();
-  const [model, setModel] = useState<PublicModelRead | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  return <ShareScope key={token} token={token} />;
+}
+
+function ShareScope({ token }: { token: string }) {
+  const [client] = useState(() => new QueryClient());
+  useEffect(() => () => client.clear(), [client]);
+  return (
+    <QueryClientProvider client={client}>
+      <ShareContent token={token} />
+    </QueryClientProvider>
+  );
+}
+
+function ShareContent({ token }: { token: string }) {
+  const locale = useUiLocale();
+  const { t } = useI18n();
+  const query = useQuery(sharedModelOptions(token));
+  const model = query.isError ? undefined : query.data;
   const [viewerMode, setViewerMode] = useState<ShareViewerMode>("model");
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
   const [showGrid, setShowGrid] = useState(true);
   const viewerControls = useRef<STLViewerControls | null>(null);
-
-  // The share token comes from the route, so a new token is a new fetch: reset to
-  // the loading state (and back to the 3D view) on the render that first sees it
-  // rather than from an effect that would show the previous model in between.
-  const [fetchedToken, setFetchedToken] = useState(token);
-  if (fetchedToken !== token) {
-    setFetchedToken(token);
-    setLoading(true);
-    setViewerMode("model");
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    getSharedModel(token)
-      .then((m) => {
-        if (!cancelled) setModel(m);
-      })
-      .catch(() => {
-        if (!cancelled) setError(uiText("This share link is invalid, expired, or revoked."));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
 
   useEffect(() => {
     document.title = model
@@ -107,22 +99,38 @@ export default function SharePage() {
           ? "gcode"
           : null;
 
-  if (loading) {
+  if (query.isPending) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-surface">
+      <div
+        role="status"
+        aria-label={t("Loading…")}
+        className="min-h-screen flex items-center justify-center bg-surface"
+      >
         <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
       </div>
     );
   }
 
-  if (error || !model) {
+  if (query.isError) {
+    const denied = [401, 403, 404, 410].includes(parseApiError(query.error).status);
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
         <AlertTriangle className="h-8 w-8 text-amber-500" />
-        <p className="font-mono text-sm text-on-surface-variant">{error ?? uiText("Not found.")}</p>
+        <p className="font-mono text-sm text-on-surface-variant">
+          {denied
+            ? uiText("This share link is invalid, expired, or revoked.")
+            : t("share.loadError")}
+        </p>
+        {!denied && (
+          <Button variant="outline" onClick={() => void query.refetch()}>
+            {t("Retry")}
+          </Button>
+        )}
       </div>
     );
   }
+
+  if (!model) throw new Error("A successful public share requires its model");
 
   return (
     <div className="min-h-screen bg-surface text-on-surface">
@@ -189,6 +197,8 @@ export default function SharePage() {
             >
               <GcodeViewer
                 url={sharedGcodeUrl(token, selectedGcode.id)}
+                toolpathFetcher={getPublicDerivedText}
+                privateEventsEnabled={false}
                 screenshotName={model.name}
               />
             </Suspense>
@@ -202,6 +212,7 @@ export default function SharePage() {
             >
               <STLViewer
                 url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
+                previewFetcher={getPublicDerivedBlob}
                 onControlsReady={(api) => {
                   viewerControls.current = api;
                 }}

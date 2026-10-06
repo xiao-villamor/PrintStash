@@ -4190,6 +4190,7 @@
   "library.refresh": "Actualizar biblioteca",
   "library.authorityCheckFailed": "No se pudo comprobar si la biblioteca está al día.",
   "library.checkAgain": "Comprobar de nuevo",
+  "share.loadError": "No se pudo cargar el modelo compartido. Inténtalo de nuevo.",
   "aiSearch.statusError": "No se pudieron cargar las funciones de búsqueda.",
   "aiSearch.preferencesLoadError": "No se pudieron cargar tus preferencias de búsqueda.",
   "aiSearch.downloadsLoadError": "No se pudieron cargar las descargas de modelos.",
