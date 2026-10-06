@@ -36,6 +36,7 @@ from app.modules.work.jobs import status_of
 from app.runtime import native_runtime
 from tests.factories import build_file, build_model, content
 from tests.factories.geometry import three_mf
+from tests.fakes.ingestion_fairness_progress import ForegroundProgress
 from tests.fakes.job_engine_process import _emit, _set_up
 
 _DEADLINE_S = 110
@@ -81,7 +82,7 @@ def main() -> None:
     source_root = settings.staging_dir / "fairness-sources"
     source_root.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + _DEADLINE_S
-    uploads: list[str] = []
+    foreground = ForegroundProgress()
     old_ids: list[int] = []
     observations: list[dict] = []
     completed_at: dict[int, float] = {}
@@ -99,7 +100,7 @@ def main() -> None:
             "elapsed_seconds": time.monotonic() - began,
             "deadline_seconds": _DEADLINE_S,
             "deadline_remaining_seconds": deadline - time.monotonic(),
-            "submitted": len(uploads),
+            "submitted": foreground.submitted,
             "arrival_window": _WINDOW,
             "refill_interval_seconds": _REFILL_INTERVAL_S,
             "arrival_budget": _MAX_UPLOADS,
@@ -130,17 +131,17 @@ def main() -> None:
 
     def upload(client: TestClient) -> None:
         checkpoint()
-        assert len(uploads) < _MAX_UPLOADS, json.dumps(
+        assert foreground.submitted < _MAX_UPLOADS, json.dumps(
             failure_facts("bounded_interactive_arrival_budget_exhausted")
         )
-        index = len(uploads)
+        index = foreground.submitted
         payload = content.binary_stl(triangles=12, offset=(float(index + 1), 0, 0))
         response = client.post(
             "/api/v1/ingest/model",
             files={"file": (f"interactive-{index}.stl", payload, "application/sla")},
         )
         assert response.status_code == 202, response.text
-        uploads.append(response.json()["job_id"])
+        foreground.accept(response.json()["job_id"])
 
     def observe() -> tuple[int, int]:
         nonlocal queued_large, large_active
@@ -161,14 +162,16 @@ def main() -> None:
                     col(Job.kind).in_(
                         (JobKind.INGESTION_UPLOAD, JobKind.INGESTION_ARTIFACT_UPLOAD)
                     ),
-                    col(Job.id).in_(uploads),
+                    col(Job.id).in_(foreground.pending),
                 )
             ).all()
-            owned_file_ids = set(old_ids)
-            for job in ingest_jobs:
-                file_id = status_of(job).file_id
-                if file_id is not None:
-                    owned_file_ids.add(file_id)
+            # Completed foreground uploads leave the read window permanently.
+            # The six pending inputs plus two backfills bound SQL/ORM observer
+            # work independently of cumulative throughput or coverage overhead.
+            files_by_job = {job.id: status_of(job).file_id for job in ingest_jobs}
+            owned_file_ids = set(old_ids) | {
+                file_id for file_id in files_by_job.values() if file_id is not None
+            }
             jobs = session.exec(
                 select(Job).where(
                     Job.kind == JobKind.DERIVATIVES_MESH,
@@ -190,8 +193,11 @@ def main() -> None:
             if row.state is DerivativeState.READY:
                 counts[row.file_id] = counts.get(row.file_id, 0) + 1
         ready = {identifier for identifier, count in counts.items() if count == 2}
-        ready_foreground = len(ready - set(old_ids))
-        pending_foreground = len(uploads) - ready_foreground
+        foreground.complete(
+            {job_id for job_id, file_id in files_by_job.items() if file_id in ready}
+        )
+        ready_foreground = foreground.ready
+        pending_foreground = len(foreground.pending)
         active_backfill = sum(
             job.priority is WorkPriority.BACKFILL
             and job.state in (JobState.QUEUED, JobState.RUNNING, JobState.INTERRUPTED)
@@ -213,6 +219,7 @@ def main() -> None:
             {
                 "elapsed": time.monotonic() - began,
                 "foreground_ready": ready_foreground,
+                "foreground_observed_jobs": len(ingest_jobs),
                 "foreground_pending": pending_foreground,
                 "backfill_ready": len(completed_at),
                 "active_backfill_jobs": active_backfill,
@@ -273,7 +280,7 @@ def main() -> None:
             time.sleep(_REFILL_INTERVAL_S)
         # No new arrivals after both backfills complete. Finish every accepted
         # upload to prove that fairness did not merely strand foreground intent.
-        submitted_during_contention = len(uploads)
+        submitted_during_contention = foreground.submitted
         phase = "foreground_drain"
         while True:
             checkpoint()
@@ -301,6 +308,9 @@ def main() -> None:
             capacity_bytes=capacity.bytes,
             submitted=submitted_during_contention,
             foreground_ready=foreground_ready,
+            max_foreground_observed_jobs=max(
+                row["foreground_observed_jobs"] for row in observations
+            ),
             backfill_ready=len(completed_at),
             backfill_completion_seconds=list(completed_at.values()),
             foreground_pending_at_backfill_completion=list(

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep fairness qualification reads bounded to pending foreground uploads while
+  preserving exact progress totals, native budgets and its existing deadline.
+
 - Qualify backup recovery and exact deletion against versioned S3 generations;
   verify that missing receipts on unversioned targets are refused without
   changing the published archive.

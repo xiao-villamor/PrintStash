@@ -83,6 +83,9 @@ class TestIngestionFairness:
         assert report["arrival_window"] == 6, report
         assert report["initial_foreground_pending"] == report["arrival_window"], report
         assert report["max_foreground_pending"] == report["arrival_window"], report
+        assert report["max_foreground_observed_jobs"] == report["arrival_window"], (
+            report
+        )
         assert report["staging_active_per_user_limit"] == report["arrival_window"], (
             report
         )
