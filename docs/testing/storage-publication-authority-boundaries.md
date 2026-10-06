@@ -1,0 +1,17 @@
+# Storage publication authority boundaries
+
+Publication completion and reconciliation must retain exact captured authority. These integration tests prepare real local bytes and durable SQLite reservations. Altered immutable handles/receipt descriptors are inputs to refusal paths; invalid rows are never persisted. No persistence or storage mocks. Physical descriptors are changed as input evidence, without claiming actual OS inode replacement.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | `previous_locator_mismatch_preserves_authority` | Security | Four incompatible captured locator/provider fields | Exact refusal; original SQL row/outbox and physical bytes unchanged | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_previous_locator_mismatch_preserves_authority` |
+| 2 | `receipt_locator_mismatch_preserves_authority` | Security | Three incompatible receipt locator fields | Exact refusal; original SQL row/outbox and physical bytes unchanged | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_receipt_locator_mismatch_preserves_authority` |
+| 3 | `receipt_provider_mismatch_preserves_authority` | Security | Explicit incompatible provider identity | Provider mismatch; original authority and bytes retained | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_receipt_provider_mismatch_preserves_authority` |
+| 4 | `conflicting_physical_receipt_preserves_authority` | Integrity | Altered size/inode/ctime descriptor for real local receipt | Receipt mismatch; original authority/outbox/bytes retained | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_conflicting_physical_receipt_preserves_authority` |
+| 5 | `blocked_reservation_refuses_completion_and_failure_overwrite` | Partial failure | Real reconciliation transitions PENDING to BLOCKED | Late receipt refused; late error cannot overwrite verified block | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_blocked_reservation_refuses_completion_and_failure_overwrite` |
+| 6 | `stale_reconciliation_and_failure_cannot_mutate_authority` | Concurrency | Missing ID, different generation, stale observed state | Reconciliation false; stale handle failure cannot change SQL row/outbox/bytes | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_stale_reconciliation_and_failure_cannot_mutate_authority` |
+| 7 | `reconciliation_cannot_adopt_publication` | Security | Reconciliation requests COMMITTED | Explicit adoption refusal; authority/outbox/bytes unchanged | Integration | ✅ `integration/modules/storage/storage_ownership/test_authority_boundaries.py::test_reconciliation_cannot_adopt_publication` |
+
+Sixteen new cases cover seven behaviors. Application/packages, constraints, dependencies, floors and budgets remain unchanged. No local coverage/full/Deep run. Measured module floors await the final GitHub Deep CI; this does not qualify global publication cleanup or RSS attribution.
+
+Validation:62 passed,1 deprecation warning,8.67s (bounded15.57s), including16 new cases and existing publication/retirement contracts. Ruff check/format and whitespace checks pass.

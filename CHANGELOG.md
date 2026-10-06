@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add storage publication authority boundary tests for incompatible receipts and stale reconciliation.
+
 - Add import download contracts for staging names, redirect and window ceilings, stream cleanup and ZIP CRC refusal.
 
 - Add thumbnail engine contracts for unavailable allocation, source files and RSS telemetry, preserving publication errors.
