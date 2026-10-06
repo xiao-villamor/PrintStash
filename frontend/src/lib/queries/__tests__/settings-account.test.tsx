@@ -62,12 +62,14 @@ function UserEditor() {
   const command = useAdminUserCommand();
   return (
     <>
+      <p>{command.status}</p>
       {query.data?.map((user) => (
         <p key={user.id}>
           {user.username} {user.is_active ? "Active" : "Disabled"}
         </p>
       ))}
       <button
+        disabled={command.isPending}
         onClick={() =>
           command.mutate({
             kind: "create",
@@ -80,6 +82,7 @@ function UserEditor() {
         Create User
       </button>
       <button
+        disabled={command.isPending}
         onClick={() =>
           command.mutate({
             kind: "update",
@@ -93,6 +96,7 @@ function UserEditor() {
         Update User
       </button>
       <button
+        disabled={command.isPending}
         onClick={() =>
           command.mutate({
             kind: "password",
@@ -106,6 +110,7 @@ function UserEditor() {
         Reset password
       </button>
       <button
+        disabled={command.isPending}
         onClick={() =>
           command.mutate({ kind: "deactivate", id: 2, userId: 1, session: getSessionVersion() })
         }
@@ -130,6 +135,78 @@ afterEach(() => {
 });
 
 describe("account snapshot ownership", () => {
+  it.each([
+    { label: "create success", button: "Create User", path: "/api/v1/admin/users", status: 200 },
+    { label: "create failure", button: "Create User", path: "/api/v1/admin/users", status: 503 },
+    {
+      label: "password success",
+      button: "Reset password",
+      path: "/api/v1/admin/users/2/password",
+      status: 200,
+    },
+    {
+      label: "password failure",
+      button: "Reset password",
+      path: "/api/v1/admin/users/2/password",
+      status: 503,
+    },
+  ])("keeps $label credentials outside shared caches", async ({ button, path, status }) => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(<UserEditor />, {
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        [`POST ${path}`]: () => pending.promise,
+      },
+    });
+    await screen.findByText("maker Active");
+    await userEvent.click(screen.getByRole("button", { name: button }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    const caches = () =>
+      JSON.stringify({
+        queries: app.client
+          .getQueryCache()
+          .getAll()
+          .map((query) => query.state.data),
+        mutations: app.client
+          .getMutationCache()
+          .getAll()
+          .map((mutation) => mutation.state),
+      });
+    try {
+      expect.soft(caches()).not.toContain("FakePassword123");
+      expect(screen.getByRole("button", { name: button })).toBeDisabled();
+      await act(async () => {
+        pending.resolve(status === 200 ? json(aUser()) : json({ detail: "unavailable" }, status));
+      });
+      expect(await screen.findByText(status === 200 ? "success" : "error")).toBeVisible();
+      expect(caches()).not.toContain("FakePassword123");
+      expect(screen.getByRole("button", { name: button })).toBeEnabled();
+      expect(app.requestsWithMethod("POST")).toHaveLength(1);
+    } finally {
+      pending.resolve(json(aUser()));
+    }
+  });
+  it("dispatches only one credential command while an earlier call is active", async () => {
+    const response = Promise.withResolvers<Response>();
+    const app = renderApp(<UserEditor />, {
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "POST /api/v1/admin/users": () => response.promise,
+      },
+    });
+    await screen.findByText("maker Active");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create User" }));
+      fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    });
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "Reset password" })).toBeDisabled();
+    await act(async () => {
+      response.resolve(json(aUser()));
+    });
+    expect(await screen.findByText("success")).toBeVisible();
+    expect(app.requestsWithMethod("POST")[0].url).toBe("/api/v1/admin/users");
+  });
   it("keeps an issued secret outside shared caches", async () => {
     const app = renderKeys();
     await waitFor(() => expect(app.requests()).toHaveLength(1));

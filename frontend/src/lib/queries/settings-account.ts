@@ -1,5 +1,5 @@
 /** Account snapshots are authoritative; an issued secret is a local receipt only. */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listApiKeys,
@@ -11,7 +11,8 @@ import {
   resetAdminUserPassword,
   deactivateAdminUser,
 } from "@/lib/api/auth";
-import { requireSessionVersion } from "@/lib/session-transport";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { onAuthChange } from "@/lib/auth-store";
 import type { ApiKeyRead, UserRead, UserCreate, UserUpdate } from "@/types";
 
 export const accountKeys = {
@@ -118,49 +119,114 @@ export type AdminUserCommand = AccountGesture &
     | { kind: "password"; id: number; password: string }
     | { kind: "deactivate"; id: number }
   );
-export function useAdminUserCommand() {
+type AdminPendingCommand =
+  | { kind: "create" }
+  | { kind: "update" | "password" | "deactivate"; id: number };
+type AdminCommandState =
+  | { status: "idle" | "success" }
+  | { status: "pending"; command: AdminPendingCommand }
+  | { status: "error"; error: unknown };
+type AdminCommandOwner = {
+  status: AdminCommandState["status"];
+  isError: boolean;
+  error: unknown;
+  mutate: (command: AdminUserCommand) => void;
+  mutateAsync: (command: AdminUserCommand) => Promise<UserRead | null>;
+} & (
+  | { isPending: true; variables: AdminPendingCommand }
+  | { isPending: false; variables: undefined }
+);
+
+/** Password-bearing commands exist only for their active call, never in MutationCache. */
+export function useAdminUserCommand(): AdminCommandOwner {
   const client = useQueryClient();
-  return useMutation({
-    retry: false,
-    onMutate: async ({ userId, session }: AdminUserCommand) => {
-      requireSessionVersion(session);
-      await client.cancelQueries({ queryKey: accountKeys.users(userId) });
-      requireSessionVersion(session);
-    },
-    mutationFn: async (command: AdminUserCommand): Promise<UserRead | null> => {
+  const [state, setState] = useState<AdminCommandState>({ status: "idle" });
+  const live = useRef(true);
+  const active = useRef<object | null>(null);
+  useEffect(() => {
+    live.current = true;
+    const release = onAuthChange(() => {
+      active.current = null;
+      setState({ status: "idle" });
+    });
+    return () => {
+      live.current = false;
+      active.current = null;
+      release();
+    };
+  }, []);
+
+  async function mutateAsync(command: AdminUserCommand): Promise<UserRead | null> {
+    if (!live.current) throw new DOMException("Account view was disposed", "AbortError");
+    if (active.current !== null) throw new Error("An account command is already pending");
+    const token = {};
+    active.current = token;
+    setState({
+      status: "pending",
+      command:
+        command.kind === "create" ? { kind: "create" } : { kind: command.kind, id: command.id },
+    });
+    const key = accountKeys.users(command.userId);
+    try {
       requireSessionVersion(command.session);
-      const key = accountKeys.users(command.userId);
+      await client.cancelQueries({ queryKey: key });
+      requireSessionVersion(command.session);
+      let row: UserRead | null;
       if (command.kind === "deactivate") {
         await deactivateAdminUser(command.id);
         requireSessionVersion(command.session);
         await client.cancelQueries({ queryKey: key });
         requireSessionVersion(command.session);
-        // DELETE deactivates and returns204, so the actual updated DTO needs one read.
+        // DELETE deactivates and returns204, so its updated DTO needs one authoritative read.
         void client.invalidateQueries({ queryKey: key });
-        return null;
-      }
-      const row =
-        command.kind === "create"
-          ? await createAdminUser(command.payload)
-          : command.kind === "update"
-            ? await updateAdminUser(command.id, command.payload)
-            : await resetAdminUserPassword(command.id, { password: command.password });
-      requireSessionVersion(command.session);
-      await client.cancelQueries({ queryKey: key });
-      requireSessionVersion(command.session);
-      client.setQueryData<UserRead[]>(key, (rows) => {
+        row = null;
+      } else {
+        row =
+          command.kind === "create"
+            ? await createAdminUser(command.payload)
+            : command.kind === "update"
+              ? await updateAdminUser(command.id, command.payload)
+              : await resetAdminUserPassword(command.id, { password: command.password });
         requireSessionVersion(command.session);
-        if (!rows) return rows;
-        const next = rows.some((item) => item.id === row.id)
-          ? rows.map((item) => (item.id === row.id ? row : item))
-          : command.kind === "create"
-            ? [...rows, row]
-            : rows;
-        return [...next].sort((a, b) =>
-          a.username < b.username ? -1 : a.username > b.username ? 1 : 0,
-        );
-      });
+        await client.cancelQueries({ queryKey: key });
+        requireSessionVersion(command.session);
+        const acknowledged = row;
+        client.setQueryData<UserRead[]>(key, (rows) => {
+          requireSessionVersion(command.session);
+          if (!rows) return rows;
+          const next = rows.some((item) => item.id === acknowledged.id)
+            ? rows.map((item) => (item.id === acknowledged.id ? acknowledged : item))
+            : command.kind === "create"
+              ? [...rows, acknowledged]
+              : rows;
+          return [...next].sort((a, b) =>
+            a.username < b.username ? -1 : a.username > b.username ? 1 : 0,
+          );
+        });
+      }
+      if (live.current && active.current === token && command.session === getSessionVersion())
+        setState({ status: "success" });
       return row;
-    },
-  });
+    } catch (error) {
+      if (live.current && active.current === token && command.session === getSessionVersion())
+        setState({ status: "error", error });
+      throw error;
+    } finally {
+      if (active.current === token) active.current = null;
+    }
+  }
+  function mutate(command: AdminUserCommand) {
+    // The local error state is the observable result for fire-and-observe callers.
+    void mutateAsync(command).catch(() => {});
+  }
+  const result = {
+    status: state.status,
+    isError: state.status === "error",
+    error: state.status === "error" ? state.error : null,
+    mutate,
+    mutateAsync,
+  };
+  return state.status === "pending"
+    ? { ...result, isPending: true, variables: state.command }
+    : { ...result, isPending: false, variables: undefined };
 }
