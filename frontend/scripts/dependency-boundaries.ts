@@ -62,6 +62,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "authority",
     "batch-edits",
     "browse",
+    "filters",
     "model-detail",
     "multipart",
     "mutations",

@@ -578,6 +578,130 @@ describe("ModelBrowser", () => {
     });
   });
 
+  describe("Library filter projection", () => {
+    it("removes malformed boolean constraints before browsing", async () => {
+      const { requests } = renderVault({
+        at: "/?printed=invalid&has_similar_candidates=false",
+        models: [aModelListItem({ name: "Benchy" })],
+      });
+      await screen.findByText("Benchy");
+      expect(lastModelsQuery(requests).has("printed")).toBe(false);
+      expect(lastModelsQuery(requests).has("has_similar_candidates")).toBe(false);
+    });
+
+    it("replaces a malformed printer bookmark", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderVault({
+        at: "/?printer_id=-1&unknown=keep",
+        auth: adminSession(),
+        historyProbe: true,
+        models: [aModelListItem({ name: "Benchy" })],
+      });
+      await screen.findByText("Benchy");
+      expect(lastModelsQuery(requests).has("printer_id")).toBe(false);
+      await waitFor(() =>
+        expect(screen.getByTestId("vault-location")).not.toHaveTextContent("printer_id"),
+      );
+      expect(screen.getByTestId("vault-location")).toHaveTextContent("unknown=keep");
+      await user.click(screen.getByRole("button", { name: "Open multipart location" }));
+      await user.click(screen.getByRole("button", { name: "History back" }));
+      expect(screen.getByTestId("vault-location")).not.toHaveTextContent("printer_id");
+      expect(screen.getByTestId("vault-location")).toHaveTextContent("unknown=keep");
+    });
+
+    it("preserves a stored admin view when a member applies it", async () => {
+      const user = userEvent.setup();
+      const saved = aSavedView({ filters: { ...aSavedView().filters, printer_id: 7 } });
+      const { requests, requestsWithMethod } = renderVault({
+        auth: memberSession(),
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: { "GET /api/v1/saved-views": json([saved]) },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: saved.name }));
+      expect(lastModelsQuery(requests).has("printer_id")).toBe(false);
+      expect(screen.queryByText("Printer: 7")).not.toBeInTheDocument();
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
+      expect(saved.filters.printer_id).toBe(7);
+    });
+
+    it("saves only effective member filters", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderVault({
+        at: "/?printer_id=7&printer_presence=none",
+        auth: memberSession(),
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: { "POST /api/v1/saved-views": json(aSavedView()) },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByRole("textbox"), "Member view");
+      await user.click(within(dialog).getByRole("button", { name: "Save view" }));
+      await waitFor(() =>
+        expect(
+          JSON.parse(
+            requestsWithMethod("POST").find((call) => call.url.includes("saved-views"))?.body ??
+              "{}",
+          ),
+        ).toMatchObject({ filters: { printer_id: null, printer_presence: null } }),
+      );
+    });
+
+    it("duplicates only effective member filters", async () => {
+      const user = userEvent.setup();
+      const saved = aSavedView({ filters: { ...aSavedView().filters, printer_id: 7 } });
+      const { requestsWithMethod } = renderVault({
+        auth: memberSession(),
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: {
+          "GET /api/v1/saved-views": json([saved]),
+          "POST /api/v1/saved-views": json(aSavedView({ id: 2 })),
+        },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: `Duplicate ${saved.name}` }));
+      await waitFor(() =>
+        expect(
+          JSON.parse(
+            requestsWithMethod("POST").find((call) => call.url.includes("saved-views"))?.body ??
+              "{}",
+          ),
+        ).toMatchObject({ filters: { printer_id: null, printer_presence: null } }),
+      );
+      expect(saved.filters.printer_id).toBe(7);
+    });
+
+    it("shares effective filters across Library requests", async () => {
+      const { requests } = renderVault({
+        at: "/?file_type=stl&file_type=bad&printed=no&tag=functional",
+        models: [aModelListItem({ name: "Benchy" })],
+      });
+      await screen.findByText("Benchy");
+      await openFilters();
+      await waitFor(() =>
+        expect(requests().some((call) => call.url.includes("/models/facets"))).toBe(true),
+      );
+      const facets = new URL(
+        requests()
+          .filter((call) => call.url.includes("/models/facets"))
+          .at(-1)!.url,
+        "http://test",
+      ).searchParams;
+      for (const params of [lastModelsQuery(requests), facets]) {
+        expect(params.getAll("file_type")).toEqual(["stl"]);
+        expect(params.get("printed")).toBe("false");
+        expect(params.getAll("tag")).toEqual(["functional"]);
+      }
+    });
+  });
+
   describe("collection navigation", () => {
     it("keeps existing root collections visible beside an imported root", async () => {
       renderVault({

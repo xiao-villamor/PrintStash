@@ -21,6 +21,14 @@ import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
 
 import { historyFilters, historyKeys } from "@/lib/search-filters";
+import {
+  readLibraryFilters,
+  writeLibraryFilters,
+  effectiveLibraryView,
+  sameLibraryFilters,
+  structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
+  type StructuredLibraryFilterKey as StructuredFilterKey,
+} from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
@@ -35,15 +43,12 @@ import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
-  ArtifactFileType,
   CollectionNodeRead,
   CollectionRead,
-  FileRevisionStatus,
   ModelBatchResult,
   ModelListItem,
   ModelSort,
   MultipartModelListItem,
-  PrintJobState,
   PrinterRead,
   SavedViewRead,
   TagRead,
@@ -147,14 +152,6 @@ const NewMultipartModelModal = lazyImport(() =>
     default: module.NewMultipartModelModal,
   })),
 );
-
-function viewFilterSignature(filters: SavedViewRead["filters"]): string {
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(filters).sort(([left], [right]) => left.localeCompare(right)),
-    ),
-  );
-}
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -412,64 +409,11 @@ function DisplayMenu({
   );
 }
 
-// Every model filter that lives in the URL as a repeated query parameter.
-const STRUCTURED_FILTER_KEYS = [
-  "file_type",
-  "material_type",
-  "slicer_name",
-  "printer_model",
-  "revision_status",
-  "print_outcome",
-  "storage",
-  "printed",
-  "has_similar_candidates",
-] as const;
-type StructuredFilterKey = (typeof STRUCTURED_FILTER_KEYS)[number];
-
 /** Bare paths, as builds before #295 wrote them; read when nothing newer is stored. */
 const RECENT_FOLDERS_KEY = "ps-recent-folders";
 const RECENT_FOLDERS_LABELLED_KEY = "ps-recent-folders-labelled";
 const RECENT_FOLDERS_LIMIT = 6;
 const LIBRARY_VIEW_KEY = "ps-vault-library-view";
-
-// The values each enum-valued filter accepts. The URL is user-editable, so a
-// `?file_type=nonsense` has to be dropped before it reaches a query.
-type StorageKind = NonNullable<ModelListFilters["storage"]>[number];
-const ARTIFACT_FILE_TYPES: readonly ArtifactFileType[] = [
-  "stl",
-  "3mf",
-  "gcode",
-  "obj",
-  "step",
-  "dxf",
-];
-const FILE_REVISION_STATUSES: readonly FileRevisionStatus[] = [
-  "known_good",
-  "needs_test",
-  "failed",
-  "archived",
-];
-const PRINT_JOB_STATES: readonly PrintJobState[] = [
-  "queued",
-  "uploading",
-  "started",
-  "printing",
-  "paused",
-  "completed",
-  "cancelled",
-  "failed",
-];
-const STORAGE_KINDS: readonly StorageKind[] = ["vault", "external"];
-
-/** Keep the URL values the API recognises, in the order the URL listed them. */
-function parseFilterValues<T extends string>(values: string[], allowed: readonly T[]): T[] {
-  const parsed: T[] = [];
-  for (const value of values) {
-    const match = allowed.find((option) => option === value);
-    if (match !== undefined) parsed.push(match);
-  }
-  return parsed;
-}
 
 function readVaultPreference(key: string): string | null {
   if (!("window" in globalThis)) return null;
@@ -573,14 +517,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     initial?.printers ??
     [];
   const filterQuery = searchParams.toString();
-  const selectedTags = useMemo(() => new URLSearchParams(filterQuery).getAll("tag"), [filterQuery]);
-  const selectedPrinterId = searchParams.get("printer_id")
-    ? Number(searchParams.get("printer_id"))
-    : null;
-  const rawPresence = searchParams.get("printer_presence");
-  const selectedPrinterPresence =
-    rawPresence === "any" || rawPresence === "none" ? rawPresence : null;
-  const favoritesOnly = searchParams.get("favorites") === "true";
   function setSelectedTags(value: string[]) {
     const params = new URLSearchParams(searchParams.toString());
     const tags = value;
@@ -652,12 +588,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       ),
     [filterQuery, initialLibraryPreferences, initialLibrarySection],
   );
-  const {
-    view: libraryView,
-    sort: sortKey,
-    section: docView,
-    href: canonicalLibraryHref,
-  } = libraryLocation;
+  const { view: libraryView, sort: sortKey, section: docView } = libraryLocation;
+  const canViewPrinters = !!user?.is_superuser;
+  const libraryFilters = useMemo(
+    () =>
+      readLibraryFilters(
+        new URLSearchParams(libraryLocation.href.split("?")[1]),
+        libraryLocation,
+        canViewPrinters,
+      ),
+    [libraryLocation, canViewPrinters],
+  );
+  const { filters: currentFilters, structured, baseFilters } = libraryFilters;
+  const selectedTags = currentFilters.tag;
+  const selectedPrinterId = currentFilters.printer_id;
+  const selectedPrinterPresence = currentFilters.printer_presence;
+  const favoritesOnly = currentFilters.favorites;
+  const canonicalLibraryHref = `/?${libraryFilters.params}`;
   const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
   useEffect(() => {
     if (currentLocationHref !== canonicalLibraryHref)
@@ -784,7 +731,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // mirroring into state) means a folder switch just re-keys the model query;
   // `keepPreviousData` holds the old cards on screen until the new page lands, so
   // there's no manual clearing or loading flash.
-  const selectedCollection = searchParams.get("c") || null;
+  const selectedCollection = currentFilters.collection;
   // Entering a folder pushes it onto the recent list on the render that first
   // sees the new `?c=`, so the list is never a navigation behind the URL.
   const [recordedCollection, setRecordedCollection] = useState<string | null>(null);
@@ -844,27 +791,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [uploadRequested, searchParams, router]);
 
   const query = searchParams.get("q") ?? "";
-  const searchQuery = query.trim() || undefined;
-  const canViewPrinters = !!user?.is_superuser;
+  const searchQuery = currentFilters.q ?? undefined;
   const queryClient = useQueryClient();
-  // Raw URL values, one entry per filter key; `satisfies` makes a missing key a
-  // type error instead of a silently absent filter.
-  const structured = {
-    file_type: searchParams.getAll("file_type"),
-    material_type: searchParams.getAll("material_type"),
-    slicer_name: searchParams.getAll("slicer_name"),
-    printer_model: searchParams.getAll("printer_model"),
-    revision_status: searchParams.getAll("revision_status"),
-    print_outcome: searchParams.getAll("print_outcome"),
-    storage: searchParams.getAll("storage"),
-    printed: searchParams.getAll("printed"),
-    has_similar_candidates: searchParams.getAll("has_similar_candidates"),
-  } satisfies Record<StructuredFilterKey, string[]>;
-  // The enum-valued filters, parsed down to the values the API accepts.
-  const fileTypes = parseFilterValues(structured.file_type, ARTIFACT_FILE_TYPES);
-  const revisionStatuses = parseFilterValues(structured.revision_status, FILE_REVISION_STATUSES);
-  const printOutcomes = parseFilterValues(structured.print_outcome, PRINT_JOB_STATES);
-  const storageKinds = parseFilterValues(structured.storage, STORAGE_KINDS);
 
   function setStructuredFilter(key: StructuredFilterKey, values: string[]) {
     const params = new URLSearchParams(searchParams.toString());
@@ -874,31 +802,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
 
-  // Filters shared by the grid + outliner queries; only the search query and
-  // pagination differ between them.
-  const baseFilters: ModelListFilters = {
-    ...historyFilters(searchParams),
-    tag: selectedTags.length ? selectedTags : undefined,
-    printer_id: canViewPrinters ? (selectedPrinterId ?? undefined) : undefined,
-    printer_presence:
-      canViewPrinters && selectedPrinterId === null
-        ? (selectedPrinterPresence ?? undefined)
-        : undefined,
-    favorites: favoritesOnly || undefined,
-    file_type: fileTypes,
-    material_type: structured.material_type,
-    slicer_name: structured.slicer_name,
-    printer_model: structured.printer_model,
-    revision_status: revisionStatuses,
-    print_outcome: printOutcomes,
-    storage: storageKinds,
-    printed: structured.printed[0] ? structured.printed[0] === "yes" : undefined,
-    has_similar_candidates: structured.has_similar_candidates[0]
-      ? structured.has_similar_candidates[0] === "yes"
-      : undefined,
-    uploaded_after: searchParams.get("uploaded_after") || undefined,
-    uploaded_before: searchParams.get("uploaded_before") || undefined,
-  };
   // One builder per folder-scoped query, shared by the live queries and the
   // hover prefetch so a warmed folder fills exactly the entries it will read.
   // They default to the current folder rather than taking it as an argument:
@@ -917,35 +820,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const facetQuery = useModelFacets(folderModelFilters(), { enabled: filtersEnabled });
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
-    const params = new URLSearchParams();
-    params.set("type", filters.library_view);
-    params.set("sort", filters.sort ?? "date-desc");
-    if (filters.collection) params.set("c", filters.collection);
-    if (filters.q) params.set("q", filters.q);
-    filters.tag.forEach((tag) => params.append("tag", tag));
-    if (filters.printer_id) params.set("printer_id", String(filters.printer_id));
-    if (filters.printer_presence) params.set("printer_presence", filters.printer_presence);
-    if (filters.favorites) params.set("favorites", "true");
-    for (const key of [
-      "file_type",
-      "material_type",
-      "slicer_name",
-      "printer_model",
-      "revision_status",
-      "print_outcome",
-      "storage",
-    ] as const) {
-      for (const value of filters[key] ?? []) params.append(key, value);
-    }
-    if (filters.has_similar_candidates != null)
-      params.set("has_similar_candidates", filters.has_similar_candidates ? "yes" : "no");
-    if (filters.printed != null) params.set("printed", filters.printed ? "yes" : "no");
-    if (filters.uploaded_after) params.set("uploaded_after", filters.uploaded_after);
-    if (filters.uploaded_before) params.set("uploaded_before", filters.uploaded_before);
-    historyKeys.forEach((key) => {
-      if (filters[key] != null) params.set(key, String(filters[key]));
-    });
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    const params = writeLibraryFilters(filters, canViewPrinters);
+    router.replace(`/?${params}`, { scroll: false });
   }
 
   function applySavedView(view: SavedViewRead) {
@@ -965,7 +841,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       await savedViewsOwner.mutation.mutateAsync({
         kind: "create",
         name,
-        filters: currentViewFilters(),
+        filters: currentFilters,
       });
       requireSessionVersion(session);
       if (revision === saveViewRevision.current) {
@@ -980,50 +856,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
 
-  function currentViewFilters(): SavedViewRead["filters"] {
-    return {
-      ...historyFilters(searchParams),
-      sort: sortKey,
-      library_view: libraryView,
-      collection: selectedCollection,
-      direct: !searchQuery,
-      tag: selectedTags,
-      q: searchQuery ?? null,
-      printer_id: selectedPrinterId,
-      printer_presence: selectedPrinterPresence,
-      favorites: favoritesOnly,
-      file_type: fileTypes,
-      material_type: structured.material_type,
-      slicer_name: structured.slicer_name,
-      printer_model: structured.printer_model,
-      revision_status: revisionStatuses,
-      print_outcome: printOutcomes,
-      storage: storageKinds,
-      printed: structured.printed[0] ? structured.printed[0] === "yes" : null,
-      has_similar_candidates: structured.has_similar_candidates[0]
-        ? structured.has_similar_candidates[0] === "yes"
-        : null,
-      uploaded_after: searchParams.get("uploaded_after"),
-      uploaded_before: searchParams.get("uploaded_before"),
-    };
-  }
-
   const activeSavedView = savedViews.find((view) => view.id === activeSavedViewId) ?? null;
   const savedViewModified =
     activeSavedView !== null &&
-    viewFilterSignature({
-      ...activeSavedView.filters,
-      has_similar_candidates: activeSavedView.filters.has_similar_candidates ?? null,
-      collection: activeSavedView.filters.collection ?? null,
-      q: activeSavedView.filters.q ?? null,
-      printer_id: activeSavedView.filters.printer_id ?? null,
-      printer_presence: activeSavedView.filters.printer_presence ?? null,
-      tag: [...activeSavedView.filters.tag].sort(),
-    }) !==
-      viewFilterSignature({
-        ...currentViewFilters(),
-        tag: [...selectedTags].sort(),
-      });
+    !sameLibraryFilters(activeSavedView.filters, currentFilters, canViewPrinters);
 
   async function manageSavedView(command: SavedViewCommand, success: MessageKey) {
     const session = getSessionVersion();
@@ -2285,7 +2121,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               {
                                 kind: "update",
                                 id: view.id,
-                                payload: { filters: currentViewFilters() },
+                                payload: { filters: currentFilters },
                               },
                               "savedView.updateSuccess",
                             )
@@ -2301,7 +2137,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               {
                                 kind: "create",
                                 name: duplicateViewName(view.name),
-                                filters: view.filters,
+                                filters: effectiveLibraryView(view.filters, canViewPrinters),
                               },
                               "savedView.duplicateSuccess",
                             )
@@ -2628,7 +2464,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           {
                             kind: "update",
                             id: view.id,
-                            payload: { filters: currentViewFilters() },
+                            payload: { filters: currentFilters },
                           },
                           "savedView.updateSuccess",
                         )
@@ -2644,7 +2480,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           {
                             kind: "create",
                             name: duplicateViewName(view.name),
-                            filters: view.filters,
+                            filters: effectiveLibraryView(view.filters, canViewPrinters),
                           },
                           "savedView.duplicateSuccess",
                         )
