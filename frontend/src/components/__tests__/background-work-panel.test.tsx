@@ -9,12 +9,16 @@
  * the field would leave the override in place. A Job change reported on the
  * events socket refreshes the page, since a worker in another process moved it.
  */
-import { screen, waitFor, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { memberSession, adminSession } from "@/test-support/render";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BackgroundWorkPanel, type BackgroundWorkApi } from "@/components/background-work-panel";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
+import { retirePrivateSessionScope } from "@/lib/auth-store";
+import { ApiError } from "@/lib/errors";
 import { setLocale } from "@/lib/locale";
 import { aJob, aWorkOverview } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
@@ -167,7 +171,12 @@ describe("BackgroundWorkPanel", () => {
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel job" }),
     );
-    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith("preview-2"));
+    await waitFor(() =>
+      expect(api.cancelJob).toHaveBeenCalledWith(
+        "preview-2",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
   });
 
   it("leads to a model's preview status", async () => {
@@ -273,7 +282,13 @@ describe("BackgroundWorkPanel", () => {
       await user.type(input, "3");
       await user.click(screen.getByRole("button", { name: "Save" }));
 
-      await waitFor(() => expect(api.setLane).toHaveBeenCalledWith("derive.native", 3));
+      await waitFor(() =>
+        expect(api.setLane).toHaveBeenCalledWith(
+          "derive.native",
+          3,
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("returns an overridden lane to its default", async () => {
@@ -287,7 +302,13 @@ describe("BackgroundWorkPanel", () => {
       await user.click(await screen.findByRole("tab", { name: "Worker settings" }));
       await user.click(screen.getByRole("button", { name: "Reset" }));
 
-      await waitFor(() => expect(api.setLane).toHaveBeenCalledWith("derive.native", null));
+      await waitFor(() =>
+        expect(api.setLane).toHaveBeenCalledWith(
+          "derive.native",
+          null,
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it.each([
@@ -320,7 +341,12 @@ describe("BackgroundWorkPanel", () => {
       const dialog = await screen.findByRole("dialog");
       await user.click(within(dialog).getByRole("button", { name: "Cancel queued" }));
 
-      await waitFor(() => expect(api.cancelQueued).toHaveBeenCalledWith("derivatives.mesh"));
+      await waitFor(() =>
+        expect(api.cancelQueued).toHaveBeenCalledWith(
+          "derivatives.mesh",
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("offers no cancel for a definition with nothing queued", async () => {
@@ -343,7 +369,13 @@ describe("BackgroundWorkPanel", () => {
       const row = (await screen.findAllByText("thumbnail"))[0].closest("li")!;
       await user.click(within(row).getByRole("button", { name: "Derive missing" }));
 
-      await waitFor(() => expect(api.regenerate).toHaveBeenCalledWith("thumbnail", "missing"));
+      await waitFor(() =>
+        expect(api.regenerate).toHaveBeenCalledWith(
+          "thumbnail",
+          "missing",
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("regenerates every Artifact only after confirmation", async () => {
@@ -359,7 +391,13 @@ describe("BackgroundWorkPanel", () => {
         within(await screen.findByRole("dialog")).getByRole("button", { name: "Regenerate" }),
       );
 
-      await waitFor(() => expect(api.regenerate).toHaveBeenCalledWith("thumbnail", "all"));
+      await waitFor(() =>
+        expect(api.regenerate).toHaveBeenCalledWith(
+          "thumbnail",
+          "all",
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
   });
 
@@ -381,7 +419,12 @@ describe("BackgroundWorkPanel", () => {
 
       await user.click(await screen.findByRole("button", { name: "Retry" }));
 
-      await waitFor(() => expect(api.retry).toHaveBeenCalledWith("failed-1"));
+      await waitFor(() =>
+        expect(api.retry).toHaveBeenCalledWith(
+          "failed-1",
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("counts failed derivatives across the library", async () => {
@@ -446,7 +489,10 @@ describe("derivative controls", () => {
       await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" }),
     );
     await waitFor(() =>
-      expect(api.setPolicy).toHaveBeenCalledWith({ derivatives_mesh_enabled: false }),
+      expect(api.setPolicy).toHaveBeenCalledWith(
+        { derivatives_mesh_enabled: false },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
     await waitFor(() =>
       expect(
@@ -456,7 +502,10 @@ describe("derivative controls", () => {
     expect(screen.getByRole("button", { name: "Use deployment default" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Use deployment default" }));
     await waitFor(() =>
-      expect(api.setPolicy).toHaveBeenCalledWith({ derivatives_mesh_enabled: null }),
+      expect(api.setPolicy).toHaveBeenCalledWith(
+        { derivatives_mesh_enabled: null },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
     );
   });
 
@@ -477,7 +526,7 @@ describe("derivative controls", () => {
         screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
       ).toBeChecked(),
     );
-    expect(api.overview).toHaveBeenCalledTimes(2);
+    expect(api.overview).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes on a policy notice", async () => {
@@ -488,5 +537,304 @@ describe("derivative controls", () => {
     const calls = vi.mocked(api.overview).mock.calls.length;
     socket.onmessage?.({ data: JSON.stringify({ type: "derivative_policy" }) });
     await waitFor(() => expect(api.overview).toHaveBeenCalledTimes(calls + 1));
+  });
+});
+
+describe("work query ownership", () => {
+  it("shares work snapshots between mounted panels", async () => {
+    const api = stubApi();
+    renderApp(
+      <>
+        <BackgroundWorkPanel api={api} />
+        <BackgroundWorkPanel api={api} />
+      </>,
+    );
+    expect(await screen.findAllByRole("heading", { name: "What's happening now" })).toHaveLength(2);
+    expect(api.overview).toHaveBeenCalledTimes(1);
+    expect(api.jobs).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces work notices during pending reads", async () => {
+    let deliver: (value: WorkOverview) => void = () => {};
+    const api = stubApi(aWorkOverview(), {
+      overview: vi.fn<BackgroundWorkApi["overview"]>().mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            deliver = resolve;
+          }),
+      ),
+    });
+    renderPanel(api);
+    await waitFor(() => expect(socket.onmessage).not.toBeNull());
+    act(() => {
+      for (const type of ["resync", "job", "derivative_policy"])
+        socket.onmessage?.({
+          data: JSON.stringify({ type, job_id: "changed", state: "completed" }),
+        });
+    });
+    expect(api.overview).toHaveBeenCalledTimes(1);
+    act(() => deliver(aWorkOverview()));
+    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+  });
+
+  it("shows overview when Jobs reading fails", async () => {
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockRejectedValue(new Error("jobs offline")),
+    });
+    renderPanel(api);
+    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(screen.getByRole("alert")).toBeVisible();
+  });
+
+  it("shows active Jobs when overview reading fails", async () => {
+    const api = stubApi(aWorkOverview(), {
+      overview: vi
+        .fn<BackgroundWorkApi["overview"]>()
+        .mockRejectedValue(new Error("overview offline")),
+      jobs: vi
+        .fn<BackgroundWorkApi["jobs"]>()
+        .mockResolvedValue([aJob({ label: "Live work", state: "running" })]),
+    });
+    renderPanel(api);
+    expect(await screen.findByText("Live work")).toBeVisible();
+    expect(screen.getByRole("alert")).toBeVisible();
+  });
+
+  it("preserves lane drafts on background refresh", async () => {
+    const user = userEvent.setup();
+    const api = stubApi();
+    renderPanel(api);
+    await openAdvanced(user);
+    await user.click(await screen.findByRole("tab", { name: "Worker settings" }));
+    const input = screen.getByLabelText("Concurrency for derive.native");
+    await user.clear(input);
+    await user.type(input, "7");
+    const updated = aWorkOverview();
+    updated.lanes = updated.lanes.map((lane) => ({ ...lane, concurrency: 4 }));
+    vi.mocked(api.overview).mockResolvedValue(updated);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(api.overview).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("Concurrency for derive.native")).toHaveValue(7);
+  });
+
+  it("retires work presentation on account scope change", async () => {
+    let deliver: (value: WorkOverview) => void = () => {};
+    const overview = busyOverview();
+    const api = stubApi(overview, {
+      overview: vi
+        .fn<BackgroundWorkApi["overview"]>()
+        .mockResolvedValueOnce(overview)
+        .mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              deliver = resolve;
+            }),
+        ),
+    });
+    renderPanel(api);
+    expect(
+      await screen.findByText(/Preview or metadata failures across the library: 3/),
+    ).toBeVisible();
+    act(() => retirePrivateSessionScope());
+    expect(
+      screen.queryByText(/Preview or metadata failures across the library: 3/),
+    ).not.toBeInTheDocument();
+    act(() => deliver(aWorkOverview()));
+  });
+});
+
+describe("work lifetime", () => {
+  it("aborts work reads when the last panel leaves", async () => {
+    let signal: AbortSignal | undefined;
+    const api = stubApi(aWorkOverview(), {
+      overview: vi.fn<BackgroundWorkApi["overview"]>().mockImplementation((options) => {
+        signal = options?.signal;
+        return new Promise(() => {});
+      }),
+    });
+    const view = renderPanel(api);
+    await waitFor(() => expect(api.overview).toHaveBeenCalledTimes(1));
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("suppresses a late work acknowledgement after retirement", async () => {
+    const user = userEvent.setup();
+    let deliver: (overview: WorkOverview) => void = () => {};
+    const api = stubApi(aWorkOverview(), {
+      overview: vi
+        .fn<BackgroundWorkApi["overview"]>()
+        .mockResolvedValueOnce(aWorkOverview())
+        .mockImplementation(() => new Promise(() => {})),
+      setLane: vi.fn<BackgroundWorkApi["setLane"]>().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            deliver = resolve;
+          }),
+      ),
+    });
+    renderPanel(api);
+    await openAdvanced(user);
+    await user.click(screen.getByRole("tab", { name: "Worker settings" }));
+    const input = screen.getByLabelText("Concurrency for derive.native");
+    await user.clear(input);
+    await user.type(input, "3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    act(() => retirePrivateSessionScope());
+    await act(async () => {
+      deliver(busyOverview());
+    });
+    expect(
+      screen.queryByText(/Preview or metadata failures across the library: 3/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Lane derive.native updated")).not.toBeInTheDocument();
+  });
+
+  it("aborts work mutation when its view leaves", async () => {
+    const user = userEvent.setup();
+    let signal: AbortSignal | undefined;
+    let deliver: (overview: WorkOverview) => void = () => {};
+    const api = stubApi(aWorkOverview(), {
+      setLane: vi
+        .fn<BackgroundWorkApi["setLane"]>()
+        .mockImplementation((_lane, _value, options) => {
+          signal = options?.signal;
+          return new Promise((resolve) => {
+            deliver = resolve;
+          });
+        }),
+    });
+    const view = renderPanel(api);
+    await openAdvanced(user);
+    await user.click(screen.getByRole("tab", { name: "Worker settings" }));
+    const input = screen.getByLabelText("Concurrency for derive.native");
+    await user.clear(input);
+    await user.type(input, "3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      deliver(aWorkOverview());
+    });
+    expect(screen.queryByText("Lane derive.native updated")).not.toBeInTheDocument();
+  });
+
+  it("keeps work data after denied writes", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(busyOverview(), {
+      retry: vi
+        .fn<BackgroundWorkApi["retry"]>()
+        .mockRejectedValue(new ApiError(403, "forbidden", "forbidden")),
+    });
+    renderPanel(api);
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(api.retry).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Preview or metadata failures across the library: 3/)).toBeVisible();
+  });
+});
+
+describe("work drafts", () => {
+  it("clears acknowledged lane drafts after saving", async () => {
+    const user = userEvent.setup();
+    const saved = aWorkOverview();
+    saved.lanes = saved.lanes.map((lane) => ({ ...lane, concurrency: 3 }));
+    const api = stubApi(aWorkOverview(), {
+      setLane: vi.fn<BackgroundWorkApi["setLane"]>().mockImplementation(async () => {
+        vi.mocked(api.overview).mockResolvedValue(saved);
+        return saved;
+      }),
+    });
+    renderPanel(api);
+    await openAdvanced(user);
+    await user.click(screen.getByRole("tab", { name: "Worker settings" }));
+    const input = screen.getByLabelText("Concurrency for derive.native");
+    await user.clear(input);
+    await user.type(input, "3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+    const later = aWorkOverview();
+    later.lanes = later.lanes.map((lane) => ({ ...lane, concurrency: 4 }));
+    vi.mocked(api.overview).mockResolvedValue(later);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Concurrency for derive.native")).toHaveValue(4),
+    );
+  });
+
+  it("preserves a changed draft while saving", async () => {
+    const user = userEvent.setup();
+    let deliver: (overview: WorkOverview) => void = () => {};
+    const saved = aWorkOverview();
+    saved.lanes = saved.lanes.map((lane) => ({ ...lane, concurrency: 3 }));
+    const api = stubApi(aWorkOverview(), {
+      setLane: vi.fn<BackgroundWorkApi["setLane"]>().mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            deliver = resolve;
+          }),
+      ),
+    });
+    renderPanel(api);
+    await openAdvanced(user);
+    await user.click(screen.getByRole("tab", { name: "Worker settings" }));
+    const input = screen.getByLabelText("Concurrency for derive.native");
+    await user.clear(input);
+    await user.type(input, "3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.clear(input);
+    await user.type(input, "7");
+    vi.mocked(api.overview).mockResolvedValue(saved);
+    await act(async () => {
+      deliver(saved);
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(screen.getByLabelText("Concurrency for derive.native")).toHaveValue(7);
+  });
+
+  it.each(["anonymous", "member"])("does not read administrator work for %s", async (role) => {
+    const api = stubApi();
+    renderApp(<BackgroundWorkPanel api={api} />, {
+      auth: role === "member" ? memberSession() : adminSession({ user: null }),
+    });
+    await act(async () => {});
+    expect(api.overview).not.toHaveBeenCalled();
+    expect(api.jobs).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "What's happening now" })).not.toBeInTheDocument();
+  });
+
+  it("polls work only in a visible active view", async () => {
+    vi.useFakeTimers();
+    focusManager.setFocused(true);
+    const api = stubApi();
+    const view = renderPanel(api);
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(api.overview).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(api.overview).toHaveBeenCalledTimes(2);
+      focusManager.setFocused(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(api.overview).toHaveBeenCalledTimes(2);
+      focusManager.setFocused(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(api.overview).toHaveBeenCalledTimes(3);
+      view.unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(api.overview).toHaveBeenCalledTimes(3);
+    } finally {
+      view.unmount();
+      focusManager.setFocused(undefined);
+      vi.useRealTimers();
+    }
   });
 });

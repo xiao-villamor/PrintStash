@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { queryClient, queryKeys } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 import {
@@ -18,6 +19,7 @@ import {
   regenerateDerivatives,
   retryDerivative,
   setLaneConcurrency,
+  updateWorkDerivativePolicy,
 } from "@/lib/api/work";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -152,6 +154,59 @@ describe("events ticket lifetime", () => {
     const pending = createEventsTicket();
     clearLogin();
     finish(new Response(JSON.stringify({ ticket: "late", expires_in: 30 })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("work owner transport", () => {
+  it("reads work through caller cancellation", async () => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending = getWorkOverview({ signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ lanes: [] })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it.each([
+    { label: "lane", send: () => setLaneConcurrency("ingest", 4) },
+    { label: "queue", send: () => cancelQueuedJobs("ingestion.upload") },
+  ])("keeps raw $label acknowledgements outside compatibility effects", async ({ send }) => {
+    queryClient.setQueryData(queryKeys.vaultConfig, { sentinel: true });
+    respondWith({ lanes: [], cancelled: 2 });
+    await send();
+    expect(queryClient.getQueryState(queryKeys.vaultConfig)?.isInvalidated).toBe(false);
+  });
+
+  it("writes only requested derivative policy fields", async () => {
+    queryClient.setQueryData(queryKeys.vaultConfig, { sentinel: true });
+    respondWith({ derivatives_mesh_enabled: false });
+    await updateWorkDerivativePolicy({ derivatives_mesh_enabled: false });
+    expectRequest("/api/v1/config", "PUT");
+    expect(lastBody()).toEqual({ derivatives_mesh_enabled: false });
+    expect(queryClient.getQueryState(queryKeys.vaultConfig)?.isInvalidated).toBe(false);
+  });
+
+  it("retains regeneration compatibility for settings callers", async () => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending = regenerateDerivatives("thumbnail", "all", { signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ kind: "thumbnail", mode: "all" })));
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });

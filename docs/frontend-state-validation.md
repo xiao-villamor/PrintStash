@@ -512,3 +512,94 @@ Same-owner stamped recovery is retained. Legacy unowned local upload/review reco
 | `frontend/tests/repo/suite-hygiene.test.ts` | Existing headers/names/mirror checks included in combined gate; no edits. |
 
 Final M7 task-center gates: full app/UI/domain typecheck and full frontend lint passed. Full format check681files and git diff --check passed. No browser, coverage, CI or timing result is inferred.
+
+
+## M7 Background work ownership plan (before tests)
+
+Two independent authoritative reads retain partial output on failures. Query owns10s foreground polling and focus/reconnect; notices coalesce pending reads. Lane drafts and confirmations remain local, keyed by lane identity and private scope. Owned writes fence caller/session lifetime before exact cancellation/publication/invalidation. Regeneration retains the inventoried compatibility adapter because Settings still calls it.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 168 | shares work snapshots between mounted panels | Happy | two panels | one overview + Jobs read; same rendered data | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::shares work snapshots between mounted panels` |
+| 169 | coalesces work notices during pending reads | Edge | job/resync/policy burst | one pending read pair retained | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::coalesces work notices during pending reads` |
+| 170 | shows overview when Jobs reading fails | Error | Jobs503; overviewvalid | overview visible plus read error | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::shows overview when Jobs reading fails` |
+| 171 | shows active Jobs when overview reading fails | Error | overview503; Jobsvalid | Jobs visible plus read error | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::shows active Jobs when overview reading fails` |
+| 172 | aborts work reads when the last panel leaves | Edge | pending reads; unmount | signals aborted; late publication discarded | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::aborts work reads when the last panel leaves` |
+| 173 | retires work presentation on account scope change | Edge | loaded and pending private reads; retire | old output removed; pending read rejected | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::retires work presentation on account scope change` |
+| 174 | preserves lane drafts on background refresh | Edge | editedlane; updatedserverconcurrency | typed value retained | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::preserves lane drafts on background refresh` |
+| 175 | clears acknowledged lane drafts after saving | Happy | own save ack | confirmed concurrency visible | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::clears acknowledged lane drafts after saving` |
+| 176 | preserves a changed draft while saving | Edge | type again duringwrite | new text retained | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::preserves a changed draft while saving` |
+| 177 | publishes acknowledged work changes after cancelling old reads | Edge | old overview read pending during lane acknowledgement | oldreadcancelled; confirmed update retained | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::publishes acknowledged work changes after cancelling old reads` |
+| 178 | keeps work data after denied writes | Error | mutation403 | cached presentation retained; error visible | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::keeps work data after denied $label writes` |
+| 179 | suppresses a late work acknowledgement after retirement | Edge | writepending; scope retired | no old success/Querypublication | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::suppresses a late work acknowledgement after retirement` |
+| 180 | aborts work mutation when its view leaves | Edge | writepending; unmount | caller signal abort; no late toast | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::aborts work mutation when its view leaves` |
+| 181 | preserves current unauthorized work failures | Error | current401 | ApiError401 retained; sessionexpires | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::preserves current unauthorized $label failures` |
+| 182 | invalidates only affected work resources | Edge | ownedlane/queue/policywrites | exact work keys refreshed; unrelatedkeysretained | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::invalidates affected work resources for $label` |
+| 183 | does not read administrator work anonymously | Edge | noverifieduser/member | no privateworkread; no cacheoutput | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::does not read administrator work for %s` |
+| 184 | reads work through caller cancellation | Edge | overview/workJobs options | wire signal/body remains cancellable | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::reads work through caller cancellation` |
+| 185 | keeps raw owned work acknowledgements outside compatibility effects | Edge | lane/queue writes | DTO preserved; unrelatedQuerynotinvalidated | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::keeps raw $label acknowledgements outside compatibility effects` |
+| 186 | writes only requested derivative policy fields | Happy | partialmesh/gcode/toolpathpayload | existingconfigroute; exactpayload; no defaultreset | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::writes only requested derivative policy fields` |
+| 187 | retains regeneration compatibility for settings callers | Edge | regeneratewithsignal | caller abort fenced through the response body; existing mode payload retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/work.test.ts::retains regeneration compatibility for settings callers` |
+| 188 | polls work only in a visible active view | Edge | 10s foregroundfallback; hidden/unmount | sharedreads refresh; no backgroundpoll | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::polls work only in a visible active view` |
+| 189 | rejects a lane acknowledgement missing its lane | Error | malformed acknowledgement DTO | error; prior Query remains untouched | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::rejects a lane acknowledgement missing its lane` |
+| 190 | rejects a Job acknowledgement for a different Job | Error | mismatched job_id | error; prior Query remains untouched | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::rejects a Job acknowledgement for a different Job` |
+| 191 | aborts owned Job writes | Edge | cancel/retry pending; callerabort | wire aborted; late DTO rejected | Frontend unit | ✅ `frontend/src/lib/api/__tests__/jobs.test.ts::aborts the %s acknowledgement` |
+
+
+M7 Background work evidence: six initial owner regressions were red (duplicate reads, pending-notice coalescing, both partial-failure presentations, draft overwrite and private-scope output retention). Lifetime tests added three red cases; denied writes already retained the prior presentation. Transport cases added three red caller-cancellation cases; raw unknown-route cache isolation and policy payload checks already passed. The first combined run had79cases with9failures from existing mock expectations for the newly forwarded signal and the deliberately removed failed-save refetch. Those expectations were corrected; no production failure was hidden. The focus fallback test initially failed because the shared render helper disables focus refresh; explicit feature-owned focus/reconnect options fixed this. A render-time ref assignment was rejected by lint and replaced with event-handler updates.
+
+Qualification passed90tests across the component, feature, two endpoint mirrors and suite hygiene. The subsequent six cancellation/exact-invalidation variants passed in the two changed mirrors:30tests2files. These results cover96distinct cases across the same five files; no second aggregate96-case run is inferred. Full app/UI/domain typecheck and full frontend lint passed before those six test-only additions. The final test files received focused lint; full formatting checked683files and git diff --check passed. No browser, coverage, CI or performance result is claimed for this slice.
+
+Administrative reads use two endpoints initially; no backend aggregation was added. Query owns foreground10s polling, focus/reconnect and notice reconciliation; pending reads coalesce. Overview and Job failures are independent. Lane drafts/confirmation state remain presentation-owned and retire with private scope. Acknowledged lane writes patch only their lane, Job writes validate their identity and patch the known Job list, and each mutation cancels older affected reads before publication and exact invalidation. Current401/403 contracts, caller abort and session retirement remain explicit. No server Job is cancelled merely because its view/session retires.
+
+`regenerateDerivatives` keeps the existing compatibility adapter because Settings also calls it. Its existing mode-wire cases and new caller/body cancellation case are qualified; retention of the adapter is manual source evidence, not a separately proved broad invalidation effect. The narrow policy writer sends only the existing requested config fields. All production `cancelJob`/`retryJob` consumers were inventoried: the BackgroundWork owner is the only caller; Fleet uses a different `retryFleetJob`. The feature worker's separate `listJobs` signal change is not present in this worker checkpoint and must be preserved when integrating the disjoint endpoint hunk.
+
+### M7 Background work manually inspected source, test and configuration ledger
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/features/work/queries.ts` | Full new owner: workKeys, typed BackgroundWorkApi, two Query option factories, read admission/notice subscription, closed WorkChange/WorkOutcome, acknowledged cancellation/publication/invalidation and identity guards. |
+| `frontend/src/features/work/__tests__/queries.test.tsx` | Full mirror: real wire401/403 for five mutation kinds; pending-read cancellation, five exact-key cases, late scope acknowledgement and malformed lane/Job acknowledgement. |
+| `frontend/src/components/background-work-panel.tsx` | Full source: preserved activity/advanced controls, local lane draft lifecycle, keyed private view, StrictMode-safe caller controller, guarded success/error/toast, independent read errors and active Job presentation. |
+| `frontend/src/components/__tests__/background-work-panel.test.tsx` | Full mirror: original controls/policy/confirmation/localization cases and new shared reads, partial errors, refresh drafts, cancellation/retirement and foreground timer cases. Existing write mocks now accept the caller signal. |
+| `frontend/src/lib/api/work.ts` | Full source: cancellable overview/lane/queue/regeneration, retained derivative compatibility exports, existing events ticket and narrow raw partial policy writer. |
+| `frontend/src/lib/api/__tests__/work.test.ts` | Full mirror: mode/null/exact payload, permission and events ticket cases retained; work caller cancellation and raw route/policy isolation cases. |
+| `frontend/src/lib/api/jobs.ts` | Full source: work list/cancel/retry caller signals and raw acknowledgements. getJobStatus/listJobs/discardStaging untouched; listJobs belongs to feature worker. |
+| `frontend/src/lib/api/__tests__/jobs.test.ts` | Full mirror: retained status/list/tracked IDs/action wire cases; work-list cancellation and cancel/retry body abort. No edits to listJobs assertions. |
+| `frontend/src/lib/query-client.ts` | Shared Query defaults/key vocabulary and compatibility invalidation mapping checked; no edits. |
+| `frontend/src/lib/session-transport.ts` | Captured session/caller lifetime and401 translation checked; no edits. |
+| `frontend/src/test-support/render.tsx` | Session fixture and disabled focus default checked; no edits. |
+| `frontend/package.json` | Gate commands and source workspace dependencies checked; no changes. |
+
+### M10 read-only PWA and package boundary audit
+
+The following is manual source/test inspection, not a new executed gate. It does not constitute full frontend/package coverage. Existing worker entry and CacheStorage tests assert delivery and fallback behavior; the current dev-server browser spec does not prove production bootstrap registration or private-route CacheStorage exclusion. No production change to these boundaries was made.
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/lib/pwa.ts` | Full source: production/serviceWorker guards, one latched controller reload, load registration, waiting-worker activation and optional registration failure. |
+| `frontend/public/sw.js` | Full source: named static shell cache, API/nonGET/cross-origin early return, network-first navigation/bootstrap and static fallback, immutable cache-write shortcut and activation cleanup. No private API response cache owner. |
+| `frontend/src/lib/__tests__/pwa.test.ts` | Full source: existing registration options/disabled/reload/source-string cases inspected only. |
+| `frontend/tests/repo/service-worker.test.ts` | Full source: VM worker harness, independent network delivery despite hanging CacheStorage, offline/named-cache/bootstrap/immutable/activation assertions inspected only. |
+| `frontend/tests/e2e/pwa.spec.ts` | Full source: manifest and manual worker registration using dev server; production registration/private API-cache browser proof remains outside these cases. |
+| `frontend/vite.config.ts` | Full source: API proxy, Three dependency prebundle, optional compiler profile and app/package coverage boundaries. |
+| `frontend/packages/domain/package.json` | Full source: source exports and framework-free dependency boundary. |
+| `frontend/packages/ui/package.json` | Full source: React peer, primitive dependencies and source exports. |
+| `frontend/packages/domain/src/index.ts` | Full barrel: pure/domain exports and explicit browser preference helpers. |
+| `frontend/packages/domain/src/last-collection.ts` | Full source: guarded storage and legacy navigation recovery. Collection-navigation preference currently crosses private identities; parent URL owner should assess intended preference policy separately. |
+| `frontend/packages/domain/src/metadata-preferences.ts` | Full source: closed field validation and false-only flags; browser storage access is unguarded unlike last-collection. No new blocked-storage regression was run. |
+| `frontend/packages/ui/src/index.ts` | Full barrel: UI primitives/browser helpers only. |
+| `frontend/packages/ui/src/lib/use-media-query.ts` | Full source: guarded matchMedia external store and listener cleanup. |
+| `frontend/packages/ui/src/lib/overlay.ts` | Full source: mount/exit/body-lock/focus lifecycle; no remote data owner. |
+| `frontend/packages/domain/vitest.config.ts` | Full source: domain-owned environment/tests and branch coverage policy. |
+| `frontend/packages/ui/vitest.config.ts` | Full source: UI-owned environment/tests and branch coverage policy. |
+| `frontend/src/lib/metadata-preferences.ts` | Full compatibility wrapper: localized labels plus domain reexports. |
+| `frontend/src/lib/last-collection.ts` | Full domain reexport wrapper. |
+| `frontend/src/lib/use-media-query.ts` | Full UI reexport wrapper. |
+| `frontend/src/lib/overlay.ts` | Full UI reexport wrapper. |
+| `frontend/src/lib/archive-review-events.ts` | Full typed DOM notification publisher/subscriber and cleanup; no HTTP state owner. |
+| `frontend/src/lib/use-thumbnail-arrivals.ts` | Full source: bounded coalescing, current callback and settled/notice/resync subscriptions; root owns Library integration. |
+| `frontend/src/components/archive-review.tsx` | Full source reviewed: Job status effect and local selected/folder drafts need subject-identity/caller-cancellation review; no edits in this checkpoint. |
+| `frontend/src/components/external-libraries-panel.tsx` | Only pollScanJob and completion sections (282–510) inspected: scan polling also feeds task tracking; owner coordination needed before replacing it. This is not full-file review. |
+| `frontend/src/components/derivative-status.tsx` | Full existing derivative read/retry lifecycle inspected; root's dirty ModelDetail slice owns its replacement. |
+| `frontend/src/components/model-detail/use-derivative-refresh.ts` | Full existing notice/read lifecycle inspected; root's dirty ModelDetail slice owns its replacement. |

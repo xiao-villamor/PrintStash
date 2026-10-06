@@ -1,25 +1,42 @@
-import { getJson, jsonHeaders, requestApi, sendJson } from "@/lib/api/request";
-import type { DerivativeRead, WorkOverview } from "@/types";
+import {
+  getJson,
+  jsonHeaders,
+  requestApi,
+  requestMutation,
+  sendJson,
+  type GetJsonOptions,
+} from "@/lib/api/request";
+import type { DerivativeRead, WorkOverview, VaultConfigUpdate, VaultConfigRead } from "@/types";
 
 /** Lanes, definitions, executors and recent failures (administrators only). */
-export function getWorkOverview(): Promise<WorkOverview> {
-  return getJson<WorkOverview>("/api/v1/admin/work", { fresh: true });
+export function getWorkOverview(options?: GetJsonOptions): Promise<WorkOverview> {
+  return getJson<WorkOverview>("/api/v1/admin/work", options);
 }
 
 /** Override a lane's concurrency at runtime; `null` returns it to its default. */
 export function setLaneConcurrency(
   lane: string,
   concurrency: number | null,
+  options?: { signal?: AbortSignal },
 ): Promise<WorkOverview> {
-  return sendJson<WorkOverview>(`/api/v1/admin/work/lanes/${encodeURIComponent(lane)}`, "PUT", {
-    concurrency,
+  return requestApi<WorkOverview>(`/api/v1/admin/work/lanes/${encodeURIComponent(lane)}`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ concurrency }),
+    signal: options?.signal,
   });
 }
 
 /** Withdraw every Job of one definition that has not started yet. */
-export function cancelQueuedJobs(definition: string): Promise<{ cancelled: number }> {
-  return sendJson<{ cancelled: number }>("/api/v1/admin/work/cancel-queued", "POST", {
-    definition,
+export function cancelQueuedJobs(
+  definition: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ cancelled: number }> {
+  return requestApi<{ cancelled: number }>("/api/v1/admin/work/cancel-queued", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ definition }),
+    signal: options?.signal,
   });
 }
 
@@ -31,9 +48,14 @@ export function cancelQueuedJobs(definition: string): Promise<{ cancelled: numbe
 export function regenerateDerivatives(
   kind: string,
   mode: "missing" | "all",
+  options?: { signal?: AbortSignal },
 ): Promise<{ kind: string; mode: "missing" | "all" }> {
-  return sendJson(`/api/v1/admin/work/derivatives/${encodeURIComponent(kind)}/regenerate`, "POST", {
-    mode,
+  // Settings still owns an unmigrated caller; remove this compatibility adapter in M10.
+  return requestMutation(`/api/v1/admin/work/derivatives/${encodeURIComponent(kind)}/regenerate`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ mode }),
+    signal: options?.signal,
   });
 }
 
@@ -58,5 +80,23 @@ export function createEventsTicket(
     headers: jsonHeaders(),
     body: "{}",
     signal,
+  });
+}
+
+/** The Background work owner changes only derivative policy overrides. */
+export type WorkDerivativePolicy = Pick<
+  VaultConfigUpdate,
+  "derivatives_mesh_enabled" | "derivatives_gcode_enabled" | "derivatives_toolpath_enabled"
+>;
+
+export async function updateWorkDerivativePolicy(
+  body: WorkDerivativePolicy,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  await requestApi<VaultConfigRead>("/api/v1/config", {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options?.signal,
   });
 }

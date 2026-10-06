@@ -1,4 +1,4 @@
-import { getJson, sendJson, type GetJsonOptions } from "@/lib/api/request";
+import { getJson, sendJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import type { JobStatus } from "@/types";
 
 /** One Job, uncached: a cached status never sees its Job finish. */
@@ -22,18 +22,28 @@ export function listJobs(
 }
 
 /** Administrator's live queue, including system-owned preview and maintenance Jobs. */
-export function listWorkJobs(): Promise<JobStatus[]> {
-  return getJson<JobStatus[]>("/api/v1/jobs?include_system=true&terminal_limit=0", { fresh: true });
+export function listWorkJobs(options?: GetJsonOptions): Promise<JobStatus[]> {
+  return getJson<JobStatus[]>("/api/v1/jobs?include_system=true&terminal_limit=0", options);
 }
 
 /** Withdraw what the Job was doing (the server releases its subject first). */
-export function cancelJob(jobId: string): Promise<JobStatus> {
-  return sendJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, "POST", {});
+export function cancelJob(jobId: string, options?: { signal?: AbortSignal }): Promise<JobStatus> {
+  return requestApi<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
+  });
 }
 
 /** Queue a failed or cancelled Job again on the same subject. */
-export function retryJob(jobId: string): Promise<JobStatus> {
-  return sendJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, "POST", {});
+export function retryJob(jobId: string, options?: { signal?: AbortSignal }): Promise<JobStatus> {
+  return requestApi<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
+  });
 }
 
 /** Release retained, uncommitted input after the user confirms. */

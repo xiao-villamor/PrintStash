@@ -118,3 +118,42 @@ describe("retryJob", () => {
     });
   });
 });
+
+describe("administrator Job reader", () => {
+  it("reads work Jobs through caller cancellation", async () => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending = listWorkJobs({ signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response("[]"));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("owned Job write cancellation", () => {
+  it.each(["cancel", "retry"] as const)("aborts the %s acknowledgement", async (action) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending =
+      action === "cancel"
+        ? cancelJob("abc", { signal: caller.signal })
+        : retryJob("abc", { signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify(RUNNING)));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});

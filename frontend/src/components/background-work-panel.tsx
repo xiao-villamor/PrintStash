@@ -6,7 +6,7 @@
  * separate views below. It refreshes when the events socket reports a Job
  * change, and on a slow interval as a fallback, because a notice can be dropped.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -31,59 +31,21 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
 import {
-  cancelQueuedJobs,
-  cancelJob,
-  getWorkOverview,
-  updateVaultConfig,
-  listWorkJobs,
-  regenerateDerivatives,
-  retryJob,
-  setLaneConcurrency,
-} from "@/lib/api";
-import { subscribeEvents } from "@/lib/events";
+  useBackgroundWork,
+  useWorkMutation,
+  workApi,
+  type BackgroundWorkApi,
+  type WorkChange,
+  type WorkOutcome,
+} from "@/features/work/queries";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion, withSessionRequest } from "@/lib/session-transport";
+export type { BackgroundWorkApi } from "@/features/work/queries";
 import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { currentLocale, knownUiText, uiText } from "@/lib/locale";
 import { toast } from "@/lib/toast";
-import type {
-  DerivativeKind,
-  JobStatus,
-  WorkDefinition,
-  WorkLane,
-  WorkOverview,
-  VaultConfigUpdate,
-} from "@/types";
-
-/** The panel's server boundary, so a test drives it without a fetch layer. */
-export interface BackgroundWorkApi {
-  overview: () => Promise<WorkOverview>;
-  setPolicy: (body: VaultConfigUpdate) => Promise<void>;
-  jobs: () => Promise<JobStatus[]>;
-  cancelJob: (jobId: string) => Promise<JobStatus>;
-  setLane: (lane: string, concurrency: number | null) => Promise<WorkOverview>;
-  cancelQueued: (definition: string) => Promise<{ cancelled: number }>;
-  regenerate: (
-    kind: string,
-    mode: "missing" | "all",
-  ) => Promise<{ kind: string; mode: "missing" | "all" }>;
-  retry: (jobId: string) => Promise<JobStatus>;
-}
-
-const WORK_API: BackgroundWorkApi = {
-  overview: getWorkOverview,
-  setPolicy: async (body) => {
-    await updateVaultConfig(body);
-  },
-  jobs: listWorkJobs,
-  cancelJob,
-  setLane: setLaneConcurrency,
-  cancelQueued: cancelQueuedJobs,
-  regenerate: regenerateDerivatives,
-  retry: retryJob,
-};
-
-/** A fallback refresh for dropped notices; the socket is the primary signal. */
-const REFRESH_MS = 10_000;
+import type { DerivativeKind, JobStatus, WorkDefinition, WorkLane } from "@/types";
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(currentLocale(), {
@@ -161,12 +123,22 @@ function LaneRow({
 }: {
   lane: WorkLane;
   busy: boolean;
-  onSave: (concurrency: number | null) => void;
+  onSave: (concurrency: number | null) => Promise<boolean>;
 }) {
-  // The row is keyed by its saved concurrency, so a saved change remounts it
-  // with a fresh draft instead of syncing the draft from an effect.
-  const [draft, setDraft] = useState(String(lane.concurrency));
-  const parsed = Number(draft);
+  const [draft, setDraft] = useState<string | null>(null);
+  const latestDraft = useRef(draft);
+  const updateDraft = (value: string | null) => {
+    latestDraft.current = value;
+    setDraft(value);
+  };
+  const value = draft ?? String(lane.concurrency);
+  const parsed = Number(value);
+  async function save(concurrency: number | null) {
+    const submitted = latestDraft.current;
+    if (await onSave(concurrency)) {
+      if (latestDraft.current === submitted) updateDraft(null);
+    }
+  }
   const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 64;
   return (
     <li className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:px-5">
@@ -190,20 +162,20 @@ function LaneRow({
           min={1}
           max={64}
           className="w-20"
-          value={draft}
+          value={value}
           aria-label={uiText("Concurrency for {lane}", { lane: lane.name })}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => updateDraft(event.target.value)}
         />
         <Button
           size="sm"
           variant="outline"
           disabled={!valid || parsed === lane.concurrency || busy}
-          onClick={() => onSave(parsed)}
+          onClick={() => void save(parsed)}
         >
           {uiText("Save")}
         </Button>
         {lane.overridden && (
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onSave(null)}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void save(null)}>
             {uiText("Reset")}
           </Button>
         )}
@@ -212,44 +184,26 @@ function LaneRow({
   );
 }
 
-export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkApi }) {
+export function BackgroundWorkPanel({ api = workApi }: { api?: BackgroundWorkApi }) {
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  return <BackgroundWorkView key={session} api={api} />;
+}
+
+function BackgroundWorkView({ api }: { api: BackgroundWorkApi }) {
   useUiLocale();
-  const [overview, setOverview] = useState<WorkOverview | null>(null);
-  const [activeJobs, setActiveJobs] = useState<JobStatus[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [policyBusy, setPolicyBusy] = useState<Set<string>>(new Set());
+  const { overview, activeJobs, error: readError, loading, refresh } = useBackgroundWork(api);
+  const error = readError ? userMessage(readError) : null;
+  const mutation = useWorkMutation(api);
+  const [busy, setBusy] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending | null>(null);
   const [activeView, setActiveView] = useState<"types" | "workers">("types");
   const advancedRef = useRef<HTMLDetailsElement>(null);
-
-  const refresh = useCallback(() => {
-    Promise.all([api.overview(), api.jobs()])
-      .then(([nextOverview, nextJobs]) => {
-        setOverview(nextOverview);
-        setActiveJobs(
-          nextJobs.filter(
-            (job) =>
-              job.state === "queued" || job.state === "running" || job.state === "interrupted",
-          ),
-        );
-        setError(null);
-      })
-      .catch((cause: unknown) => setError(userMessage(cause)));
-  }, [api]);
-
+  const viewRequests = useRef<AbortController | null>(null);
   useEffect(() => {
-    refresh();
-    const timer = window.setInterval(refresh, REFRESH_MS);
-    const stop = subscribeEvents((notice) => {
-      if (notice.type === "job" || notice.type === "resync" || notice.type === "derivative_policy")
-        refresh();
-    });
-    return () => {
-      window.clearInterval(timer);
-      stop();
-    };
-  }, [refresh]);
+    const controller = new AbortController();
+    viewRequests.current = controller;
+    return () => controller.abort(new DOMException("work_view_disposed", "AbortError"));
+  }, []);
 
   const derivativeKinds = useMemo(
     () => [...new Set((overview?.definitions ?? []).flatMap((d) => d.derivative_kinds))].sort(),
@@ -259,43 +213,44 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
   const waiting = overview?.definitions.reduce((total, d) => total + d.queued, 0);
   const staleWorkers = overview?.executors.filter((executor) => executor.stale).length;
 
-  async function act(key: string, work: () => Promise<void>) {
-    setBusy(key);
+  async function act(
+    key: string,
+    change: WorkChange,
+    onSaved: (outcome: WorkOutcome) => void,
+  ): Promise<boolean> {
+    const controller = viewRequests.current;
+    if (!controller || controller.signal.aborted) return false;
+    const session = getSessionVersion();
+    setBusy((current) => new Set(current).add(key));
     try {
-      await work();
+      await withSessionRequest(async (request) => {
+        const outcome = await mutation.mutateAsync({ ...change, signal: request.signal });
+        request.assertCurrent();
+        onSaved(outcome);
+      }, controller.signal);
+      return true;
     } catch (cause) {
-      toast.error(cause);
+      if (!controller.signal.aborted && session === getSessionVersion()) toast.error(cause);
+      return false;
     } finally {
-      setBusy(null);
+      if (!controller.signal.aborted && session === getSessionVersion())
+        setBusy((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
     }
   }
 
   function savePolicy(definition: WorkDefinition, value: boolean | null) {
     if (!(definition.name in POLICY_SETTINGS)) return;
-    // SAFETY: the membership guard restricts the registry key to derivative definitions.
+    // SAFETY: the membership guard restricts the key to derivative policy fields.
     const setting = POLICY_SETTINGS[definition.name as keyof typeof POLICY_SETTINGS];
-    setPolicyBusy((current) => new Set(current).add(definition.name));
-    void api
-      .setPolicy({ [setting]: value })
-      .then(async () => {
-        setOverview(await api.overview());
-      })
-      .catch((cause: unknown) => {
-        toast.error(cause);
-        refresh();
-      })
-      .finally(() => {
-        setPolicyBusy((current) => {
-          const next = new Set(current);
-          next.delete(definition.name);
-          return next;
-        });
-      });
+    void act(`policy:${definition.name}`, { kind: "policy", body: { [setting]: value } }, () => {});
   }
 
   function saveLane(lane: WorkLane, concurrency: number | null) {
-    void act(`lane:${lane.name}`, async () => {
-      setOverview(await api.setLane(lane.name, concurrency));
+    return act(`lane:${lane.name}`, { kind: "lane", lane: lane.name, concurrency }, () => {
       toast.success(uiText("Lane {lane} updated", { lane: lane.name }));
     });
   }
@@ -303,36 +258,32 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
   function confirmPending() {
     const action = pending;
     if (!action) return;
-    void act("confirm", async () => {
-      if (action.kind === "cancel") {
-        const { cancelled } = await api.cancelQueued(action.definition.name);
-        toast.success(uiText("{count} queued Jobs cancelled", { count: cancelled }));
-      } else if (action.kind === "cancel-job") {
-        await api.cancelJob(action.job.job_id);
-        toast.success(uiText("Job cancelled"));
-      } else {
-        await api.regenerate(action.derivative, "all");
+    const change: WorkChange =
+      action.kind === "cancel"
+        ? { kind: "cancel-queued", definition: action.definition.name }
+        : action.kind === "cancel-job"
+          ? { kind: "cancel-job", jobId: action.job.job_id }
+          : { kind: "regenerate", derivative: action.derivative, mode: "all" };
+    void act("confirm", change, (outcome) => {
+      if (outcome.kind === "cancel-queued")
+        toast.success(uiText("{count} queued Jobs cancelled", { count: outcome.cancelled }));
+      else if (action.kind === "cancel-job") toast.success(uiText("Job cancelled"));
+      else if (action.kind === "regenerate")
         toast.success(uiText("Re-deriving every {kind}", { kind: action.derivative }));
-      }
       setPending(null);
-      refresh();
     });
   }
 
   function deriveMissing(kind: DerivativeKind) {
-    void act(`missing:${kind}`, async () => {
-      await api.regenerate(kind, "missing");
-      toast.success(uiText("Deriving missing {kind}", { kind }));
-      refresh();
-    });
+    void act(`missing:${kind}`, { kind: "regenerate", derivative: kind, mode: "missing" }, () =>
+      toast.success(uiText("Deriving missing {kind}", { kind })),
+    );
   }
 
   function retry(job: JobStatus) {
-    void act(`retry:${job.job_id}`, async () => {
-      await api.retry(job.job_id);
-      toast.success(uiText("Job queued again"));
-      refresh();
-    });
+    void act(`retry:${job.job_id}`, { kind: "retry", jobId: job.job_id }, () =>
+      toast.success(uiText("Job queued again")),
+    );
   }
 
   return (
@@ -344,7 +295,12 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
             {uiText("See work that continues while you use PrintStash.")}
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={refresh} aria-label={uiText("Refresh")}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void refresh()}
+          aria-label={uiText("Refresh")}
+        >
           <RefreshCw className="h-4 w-4" aria-hidden />
         </Button>
       </div>
@@ -356,7 +312,13 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
         </div>
       )}
 
-      {!overview && !error ? (
+      {!overview && activeJobs.length > 0 && (
+        <ActiveWorkJobs
+          activeJobs={activeJobs}
+          onCancel={(job) => setPending({ kind: "cancel-job", job })}
+        />
+      )}
+      {!overview && loading && !error ? (
         <div className="space-y-3 p-4 sm:p-5" aria-busy="true">
           <Skeleton className="h-6 w-1/3" />
           <Skeleton className="h-12 w-full" />
@@ -382,7 +344,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                   <label className="flex items-start gap-3 text-sm">
                     <Checkbox
                       checked={definition.enabled}
-                      disabled={policyBusy.has(definition.name)}
+                      disabled={busy.has(`policy:${definition.name}`)}
                       ariaLabel={policyPurpose(definition.name)}
                       onChange={(checked) => savePolicy(definition, checked)}
                     />
@@ -403,7 +365,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={policyBusy.has(definition.name)}
+                      disabled={busy.has(`policy:${definition.name}`)}
                       onClick={() => savePolicy(definition, null)}
                     >
                       {uiText("Use deployment default")}
@@ -468,89 +430,10 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
             </Link>
           </div>
 
-          <SectionHeader
-            icon={Activity}
-            title={uiText("In progress")}
-            description={uiText("Work that is running or waiting to start.")}
+          <ActiveWorkJobs
+            activeJobs={activeJobs}
+            onCancel={(job) => setPending({ kind: "cancel-job", job })}
           />
-          {activeJobs.length > 0 && (
-            <ul className="divide-y divide-border border-b">
-              {activeJobs.map((job) => (
-                <li
-                  key={job.job_id}
-                  className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium">{job.label ?? job.kind}</span>
-                      <Badge variant={job.state === "running" ? "secondary" : "outline"}>
-                        {job.state === "running"
-                          ? uiText("Running now")
-                          : uiText("Waiting to start")}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {job.kind === "backups.create" || job.kind === "backups.automatic" ? (
-                        <>
-                          {job.stage ? uiText(job.stage) : uiText("Waiting for a worker")}
-                          {job.stage === "publishing" && job.current_item
-                            ? ` · ${knownUiText(job.current_item)}`
-                            : ""}
-                          {job.total !== null && job.stage === "archiving"
-                            ? ` · ${job.processed} / ${job.total}`
-                            : ""}
-                        </>
-                      ) : (
-                        <>
-                          {job.current_item ??
-                            (job.stage ? uiText(job.stage) : uiText("Waiting for a worker"))}
-                          {job.total !== null ? ` · ${job.processed} / ${job.total}` : ""}
-                        </>
-                      )}
-                      {job.progress !== null ? ` · ${Math.round(job.progress)}%` : ""}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {job.started_at
-                        ? uiText("Started {when}", { when: formatDateTime(job.started_at) })
-                        : uiText("Queued {when}", { when: formatDateTime(job.created_at) })}
-                    </p>
-                    {job.model_id !== null && (
-                      <Link
-                        to={`/models/${job.model_id}`}
-                        className="mt-1 inline-block text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {uiText("Open model")}
-                      </Link>
-                    )}
-                    {job.progress !== null && (
-                      <div
-                        role="progressbar"
-                        aria-label={job.label ?? job.kind}
-                        aria-valuenow={job.progress}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
-                      >
-                        <div className="h-full bg-primary" style={{ width: `${job.progress}%` }} />
-                      </div>
-                    )}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPending({ kind: "cancel-job", job })}
-                  >
-                    {uiText("Cancel job")}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {activeJobs.length === 0 && (
-            <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
-              {uiText("Nothing is running or waiting right now.")}
-            </p>
-          )}
 
           {staleWorkers ? (
             <div
@@ -601,7 +484,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                     <Button
                       size="sm"
                       variant="outline"
-                      loading={busy === `retry:${job.job_id}`}
+                      loading={busy.has(`retry:${job.job_id}`)}
                       onClick={() => retry(job)}
                     >
                       {uiText("Retry")}
@@ -655,9 +538,9 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                 <ul className="divide-y divide-border border-b">
                   {overview.lanes.map((lane) => (
                     <LaneRow
-                      key={`${lane.name}:${lane.concurrency}`}
+                      key={lane.name}
                       lane={lane}
-                      busy={busy === `lane:${lane.name}`}
+                      busy={busy.has(`lane:${lane.name}`)}
                       onSave={(concurrency) => saveLane(lane, concurrency)}
                     />
                   ))}
@@ -762,7 +645,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
                             <Button
                               size="sm"
                               variant="outline"
-                              loading={busy === `missing:${kind}`}
+                              loading={busy.has(`missing:${kind}`)}
                               onClick={() => deriveMissing(kind)}
                             >
                               {uiText("Derive missing")}
@@ -790,7 +673,7 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
         open={pending !== null}
         onClose={() => setPending(null)}
         onConfirm={confirmPending}
-        busy={busy === "confirm"}
+        busy={busy.has("confirm")}
         title={
           pending?.kind === "cancel"
             ? uiText("Cancel queued {label} Jobs?", { label: pending.definition.label })
@@ -818,5 +701,95 @@ export function BackgroundWorkPanel({ api = WORK_API }: { api?: BackgroundWorkAp
         }
       />
     </Card>
+  );
+}
+
+function ActiveWorkJobs({
+  activeJobs,
+  onCancel,
+}: {
+  activeJobs: JobStatus[];
+  onCancel: (job: JobStatus) => void;
+}) {
+  return (
+    <>
+      <SectionHeader
+        icon={Activity}
+        title={uiText("In progress")}
+        description={uiText("Work that is running or waiting to start.")}
+      />
+      {activeJobs.length > 0 && (
+        <ul className="divide-y divide-border border-b">
+          {activeJobs.map((job) => (
+            <li
+              key={job.job_id}
+              className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium">{job.label ?? job.kind}</span>
+                  <Badge variant={job.state === "running" ? "secondary" : "outline"}>
+                    {job.state === "running" ? uiText("Running now") : uiText("Waiting to start")}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {job.kind === "backups.create" || job.kind === "backups.automatic" ? (
+                    <>
+                      {job.stage ? uiText(job.stage) : uiText("Waiting for a worker")}
+                      {job.stage === "publishing" && job.current_item
+                        ? ` · ${knownUiText(job.current_item)}`
+                        : ""}
+                      {job.total !== null && job.stage === "archiving"
+                        ? ` · ${job.processed} / ${job.total}`
+                        : ""}
+                    </>
+                  ) : (
+                    <>
+                      {job.current_item ??
+                        (job.stage ? uiText(job.stage) : uiText("Waiting for a worker"))}
+                      {job.total !== null ? ` · ${job.processed} / ${job.total}` : ""}
+                    </>
+                  )}
+                  {job.progress !== null ? ` · ${Math.round(job.progress)}%` : ""}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {job.started_at
+                    ? uiText("Started {when}", { when: formatDateTime(job.started_at) })
+                    : uiText("Queued {when}", { when: formatDateTime(job.created_at) })}
+                </p>
+                {job.model_id !== null && (
+                  <Link
+                    to={`/models/${job.model_id}`}
+                    className="mt-1 inline-block text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {uiText("Open model")}
+                  </Link>
+                )}
+                {job.progress !== null && (
+                  <div
+                    role="progressbar"
+                    aria-label={job.label ?? job.kind}
+                    aria-valuenow={job.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+                  >
+                    <div className="h-full bg-primary" style={{ width: `${job.progress}%` }} />
+                  </div>
+                )}
+              </div>
+              <Button size="sm" variant="outline" onClick={() => onCancel(job)}>
+                {uiText("Cancel job")}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {activeJobs.length === 0 && (
+        <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
+          {uiText("Nothing is running or waiting right now.")}
+        </p>
+      )}
+    </>
   );
 }
