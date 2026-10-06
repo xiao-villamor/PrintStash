@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add real database contracts for mesh continuation recovery, cache lease deferral and current Job withdrawal authority.
+
 - Add authenticated HTTP contracts for outliner printer-filter authority and contradictory query scopes.
 
 - Add real ZIP preview contracts for embedded 3MF budgets, unsafe member names, CRC recovery and strict PNG validation.
