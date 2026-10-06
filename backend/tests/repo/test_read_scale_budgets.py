@@ -48,6 +48,7 @@ BUDGET_SECONDS = {
     "/api/v1/collections/search": 0.5,
     "/api/v1/tags": 1.0,
     "/api/v1/models/page": 1.5,
+    "/api/v1/models/browse": 1.5,
     "/api/v1/models/outliner": 0.5,
     "/api/v1/models/facets": 0.5,
     "/api/v1/models/stats": 0.5,

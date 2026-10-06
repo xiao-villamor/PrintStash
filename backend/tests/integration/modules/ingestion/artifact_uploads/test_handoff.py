@@ -152,20 +152,27 @@ class TestRunVerifiedUploadIngestion:
         ).one()
         assert artifact.file_type == FileType.GCODE
 
+    @pytest.mark.parametrize("empty_quarantine", [False, True])
     def test_completes_the_upload_session(
         self,
         db_session: Session,
         make_job: MakeJob,
         owner: User,
         work_engine: InlineJobEngine,
+        empty_quarantine: bool,
     ) -> None:
-        upload, _job_id = _verified(db_session, make_job, owner)
+        upload, job_id = _verified(db_session, make_job, owner)
+        directory = settings.incoming_dir / "artifact-uploads" / upload.id
+        if empty_quarantine:
+            (directory / ".printstash-staging-quarantine").mkdir(mode=0o700)
 
         _run(work_engine, db_session)
 
         assert db_session.get(ArtifactUploadSession, upload.id).state == (
             ArtifactUploadState.COMPLETED
         )
+        assert db_session.get(Job, job_id).state == JobState.COMPLETED
+        assert not directory.exists()
 
     def test_releases_the_staged_bytes_of_a_completed_upload(
         self,

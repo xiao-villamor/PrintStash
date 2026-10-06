@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -152,6 +152,7 @@ class ModelSimilarityRead(BaseModel):
 
 class ModelRead(BaseModel):
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
+    edit_version: int
     id: int
     name: str
     slug: str
@@ -255,6 +256,7 @@ class PrintSummaryRead(BaseModel):
 
 class ModelListItem(BaseModel):
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
+    edit_version: int
     id: int
     name: str
     slug: str
@@ -423,10 +425,18 @@ class ModelBatchResult(BaseModel):
     failed_count: int = 0
 
 
+class ModelEditBatchResult(ModelBatchResult):
+    # Exact versions acknowledged by this mutation, captured before commit.
+    succeeded_versions: dict[str, int]
+
+
 class ModelBatchMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_ids: List[int] = Field(min_length=1, max_length=500)
+    expected_versions: dict[int, Annotated[int, Field(strict=True, gt=0)]] | None = (
+        Field(default=None, max_length=500)
+    )
     # Same semantics as ModelUpdate.collection: "" (or missing) means root.
     collection: str = Field(default="", max_length=1024)
 
@@ -435,6 +445,9 @@ class ModelBatchTags(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_ids: List[int] = Field(min_length=1, max_length=500)
+    expected_versions: dict[int, Annotated[int, Field(strict=True, gt=0)]] | None = (
+        Field(default=None, max_length=500)
+    )
     add: List[str] = Field(default_factory=list, max_length=100)
     remove: List[str] = Field(default_factory=list, max_length=100)
 

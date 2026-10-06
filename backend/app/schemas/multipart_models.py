@@ -12,6 +12,7 @@ from app.schemas.documents import DocumentListItem
 
 
 class MultipartModelListItem(BaseModel):
+    edit_version: int
     id: int
     name: str
     slug: str

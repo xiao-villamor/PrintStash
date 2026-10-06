@@ -74,6 +74,7 @@ def _guides(
     ).all()
     return [
         DocumentListItem(
+            edit_version=row.edit_version,
             id=int(row.id),
             name=row.name,
             kind=row.kind,
@@ -302,6 +303,7 @@ def _list_item(
     )
     guides = _guides(session, user, int(aggregate.id))
     return MultipartModelListItem(
+        edit_version=aggregate.edit_version,
         id=int(aggregate.id),
         name=aggregate.name,
         slug=aggregate.slug,
@@ -431,6 +433,160 @@ def list_visible(
         _list_item(session, user, row, starred=int(row.id) in starred, labels=labels)
         for row in rows
     ]
+
+
+def read_items_by_ids(
+    session: Session, user: User, ids: list[int]
+) -> list[MultipartModelListItem]:
+    """Project one bounded card page with a fixed number of SQL statements.
+
+    Member authorization remains in SQL; a private member never supplies a
+    cover, member identity or structured filter match. Full composition is a
+    detail concern, so this does not download every Part just to count cards.
+    """
+    if not ids:
+        return []
+    from sqlalchemy import or_
+    from sqlalchemy.orm import lazyload
+
+    visible = rbac.accessible_collection_ids_stmt(session, user)
+    allowed = or_(
+        col(MultipartModel.collection_id).in_(visible),
+        col(MultipartModel.collection_id).is_(None) if user.is_superuser else False,
+    )
+    rows = list(
+        session.exec(
+            select(MultipartModel).where(col(MultipartModel.id).in_(ids), allowed)
+        )
+    )
+    paths = dict(
+        session.exec(
+            select(col(Collection.id), col(Collection.path)).where(
+                col(Collection.id).in_(
+                    select(col(MultipartModel.collection_id)).where(
+                        col(MultipartModel.id).in_(ids)
+                    )
+                )
+            )
+        ).all()
+    )
+    labels = collection_tree.collection_labels(session, user, paths.values())
+    roles = rbac.effective_roles_for_collections(
+        session, user, (row.collection_id for row in rows)
+    )
+    starred = _starred_ids(session, user, ids)
+    parts = dict(
+        session.exec(
+            select(col(MultipartPart.multipart_model_id), func.count())
+            .where(col(MultipartPart.multipart_model_id).in_(ids))
+            .group_by(col(MultipartPart.multipart_model_id))
+        ).all()
+    )
+    counts = dict(
+        session.exec(
+            select(
+                col(MultipartModelChoice.multipart_model_id),
+                func.count(func.distinct(col(MultipartModelChoice.model_id))),
+            )
+            .where(col(MultipartModelChoice.multipart_model_id).in_(ids))
+            .group_by(col(MultipartModelChoice.multipart_model_id))
+        ).all()
+    )
+    guide_scope = or_(
+        col(Document.collection_id).in_(visible),
+        col(Document.collection_id).is_(None) if user.is_superuser else False,
+    )
+    guides = dict(
+        session.exec(
+            select(col(Document.multipart_model_id), func.count())
+            .where(
+                col(Document.multipart_model_id).in_(ids), live(Document), guide_scope
+            )
+            .group_by(col(Document.multipart_model_id))
+        ).all()
+    )
+    tags: dict[int, list[str]] = defaultdict(list)
+    for group_id, name in session.exec(
+        select(col(MultipartModelTagLink.multipart_model_id), col(Tag.name))
+        .join(Tag, col(Tag.id) == col(MultipartModelTagLink.tag_id))
+        .where(col(MultipartModelTagLink.multipart_model_id).in_(ids), live(Tag))
+        .order_by(col(Tag.name))
+    ):
+        tags[group_id].append(name)
+    member_scope = or_(
+        col(Model.collection_id).in_(visible),
+        col(Model.collection_id).is_(None) if user.is_superuser else False,
+    )
+    source_is_live = or_(
+        col(MultipartModelChoice.source_file_id).is_(None),
+        col(MultipartModelChoice.source_file_id).in_(
+            select(col(File.id)).where(live(File))
+        ),
+    )
+    members: dict[int, dict[int, Model]] = defaultdict(dict)
+    first_thumbnail: dict[int, str] = {}
+    for group_id, model in session.exec(
+        select(col(MultipartModelChoice.multipart_model_id), Model)
+        .join(Model, col(Model.id) == col(MultipartModelChoice.model_id))
+        .where(
+            col(MultipartModelChoice.multipart_model_id).in_(ids),
+            live(Model),
+            member_scope,
+            source_is_live,
+        )
+        .options(lazyload(Model.tags), lazyload(Model.collection_rel))
+        .order_by(
+            col(MultipartModelChoice.multipart_part_id),
+            col(MultipartModelChoice.sort_order),
+            col(MultipartModelChoice.id),
+        )
+    ):
+        members[group_id][int(model.id)] = model
+        thumbnail = models_projections.thumb_url(model)
+        if thumbnail is not None:
+            first_thumbnail.setdefault(group_id, thumbnail)
+    output = []
+    for row in rows:
+        group_id = int(row.id)
+        member_map = members[group_id]
+        cover = member_map.get(row.cover_model_id)
+        cover_thumbnail = (
+            models_projections.thumb_url(cover) if cover is not None else None
+        )
+        path = paths.get(row.collection_id)
+        uploaded = (
+            f"/api/v1/multipart-models/{group_id}/cover/content?v={row.cover_filename}"
+            if row.cover_filename is not None
+            else None
+        )
+        output.append(
+            MultipartModelListItem(
+                edit_version=row.edit_version,
+                id=group_id,
+                name=row.name,
+                slug=row.slug,
+                description=row.description,
+                collection=path,
+                collection_id=row.collection_id,
+                collection_label=labels.get(path) if path is not None else None,
+                part_count=parts.get(group_id, 0),
+                model_count=counts.get(group_id, 0),
+                guide_count=guides.get(group_id, 0),
+                cover_model_id=row.cover_model_id,
+                cover_image_url=row.cover_image_url,
+                cover_image_uploaded=row.cover_filename is not None,
+                cover_thumbnail_url=uploaded
+                or row.cover_image_url
+                or cover_thumbnail
+                or first_thumbnail.get(group_id),
+                member_model_ids=sorted(member_map),
+                tags=tags[group_id],
+                starred=group_id in starred,
+                effective_role=roles[row.collection_id],
+                updated_at=row.updated_at,
+            )
+        )
+    return output
 
 
 def _choice_inputs(part: MultipartPartWrite) -> list[MultipartChoiceWrite]:

@@ -92,3 +92,30 @@ class TestLibraryReads:
         assert large.max_bound_parameters == small_bound, (
             "a read binds a parameter per visible row; filter by a subquery"
         )
+
+    @pytest.mark.parametrize(
+        "metric", ["count", "max_bound_parameters"], ids=["statements", "binds"]
+    )
+    def test_keeps_multipart_projection_bounded(
+        self, client, db_session, sql_statements, reader, metric
+    ):
+        headers, root = reader
+        build_library_at_scale(
+            db_session, under=root, collections=10, models=30, multipart_models=10
+        )
+        params = {"view": "multipart", "limit": 10}
+        client.get("/api/v1/models/browse", params=params, headers=headers)
+        small = getattr(
+            _read(client, sql_statements, "/api/v1/models/browse", params, headers),
+            metric,
+        )
+        build_library_at_scale(
+            db_session, under=root, collections=90, models=270, multipart_models=90
+        )
+
+        large = getattr(
+            _read(client, sql_statements, "/api/v1/models/browse", params, headers),
+            metric,
+        )
+
+        assert large == small

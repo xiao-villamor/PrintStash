@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, col, delete, select
 
 import app.modules.library.revision_labels as models_revision_labels
 from app.core.errors import ErrorKind, OperationError
@@ -27,11 +27,18 @@ from app.db.models import (
 )
 from app.db.projections import content_changed
 from app.db.scopes import live
-from app.db.transactions import rollback_on_failure
+from app.db.transactions import begin_write, rollback_on_failure
 from app.modules.identity import rbac
 from app.modules.library import (
     taxonomy,
 )
+from app.modules.library.edit_preconditions import (
+    EditKind,
+    EditPrecondition,
+    etag,
+    validate_batch,
+)
+from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.trash import (
     soft_delete_models,
 )
@@ -42,6 +49,7 @@ from app.schemas.models import (
     ModelBatchMove,
     ModelBatchResult,
     ModelBatchTags,
+    ModelEditBatchResult,
     ModelUpdate,
     RevisionBatchLabels,
     RevisionBatchResult,
@@ -182,14 +190,67 @@ def _require_all_editable_models(
     return editable
 
 
+def _claim_batch_models(
+    session: Session, user: User, rows: list[Model], versions: dict[int, int] | None
+) -> tuple[list[Model], list[ModelBatchFailure]]:
+    if versions is None:
+        return rows, []
+    begin_write(session, immediate=True)
+    claimed = []
+    failed = []
+    for row in rows:
+        row_id = row.id
+        try:
+            with session.begin_nested():
+                claim_edit(
+                    session,
+                    user,
+                    row,
+                    EditPrecondition(
+                        if_match=etag(EditKind.MODEL, row_id, versions[row_id])
+                    ),
+                )
+            claimed.append(row)
+        except OperationError as exc:
+            if exc.detail != "edit_conflict":
+                raise
+            failed.append(ModelBatchFailure(model_id=row_id, reason=exc.detail))
+    return claimed, failed
+
+
+def _edit_batch_result(
+    session: Session, succeeded: list[int], failed: list[ModelBatchFailure]
+) -> ModelEditBatchResult:
+    session.flush()
+    versions = {
+        str(row.id): row.edit_version
+        for row in session.execute(
+            select(col(Model.id), col(Model.edit_version)).where(
+                col(Model.id).in_(succeeded)
+            )
+        )
+    }
+    if len(versions) != len(succeeded):
+        raise RuntimeError("batch_edit_version_missing")
+    return ModelEditBatchResult(
+        succeeded_ids=succeeded,
+        succeeded_versions=versions,
+        failed=failed,
+        succeeded_count=len(succeeded),
+        failed_count=len(failed),
+    )
+
+
 def batch_move_models(
     payload: ModelBatchMove,
     current_user: User,
     session: Session,
     *,
     commit: bool = True,
-) -> ModelBatchResult:
+    edit_contract: str | None = None,
+) -> ModelEditBatchResult:
     with rollback_on_failure(session):
+        validate_batch(edit_contract, payload.model_ids, payload.expected_versions)
         if not current_user.is_active:
             raise OperationError(
                 "collection_permission_denied", kind=ErrorKind.FORBIDDEN
@@ -220,6 +281,17 @@ def batch_move_models(
         editable = _require_all_editable_models(
             session, current_user, payload.model_ids
         )
+        editable, failed = _claim_batch_models(
+            session, current_user, editable, payload.expected_versions
+        )
+        if not editable:
+            return ModelEditBatchResult(
+                succeeded_versions={},
+                succeeded_ids=[],
+                failed=failed,
+                succeeded_count=0,
+                failed_count=len(failed),
+            )
 
         if dest_is_root:
             dest_id: Optional[int] = None
@@ -240,16 +312,12 @@ def batch_move_models(
             succeeded.append(m.id)  # type: ignore[arg-type]
 
         content_changed(session, "model", succeeded)
+        # Read trigger-produced versions while this transaction still owns
+        # the rows. Reading after commit could acknowledge an external edit.
+        result = _edit_batch_result(session, succeeded, failed)
         if commit:
             session.commit()
-        else:
-            session.flush()
-        return ModelBatchResult(
-            succeeded_ids=succeeded,
-            failed=[],
-            succeeded_count=len(succeeded),
-            failed_count=0,
-        )
+        return result
 
 
 def batch_tag_models(
@@ -258,8 +326,10 @@ def batch_tag_models(
     session: Session,
     *,
     commit: bool = True,
-) -> ModelBatchResult:
+    edit_contract: str | None = None,
+) -> ModelEditBatchResult:
     with rollback_on_failure(session):
+        validate_batch(edit_contract, payload.model_ids, payload.expected_versions)
         if not current_user.is_active:
             raise OperationError(
                 "collection_permission_denied", kind=ErrorKind.FORBIDDEN
@@ -267,6 +337,17 @@ def batch_tag_models(
         editable = _require_all_editable_models(
             session, current_user, payload.model_ids
         )
+        editable, failed = _claim_batch_models(
+            session, current_user, editable, payload.expected_versions
+        )
+        if not editable:
+            return ModelEditBatchResult(
+                succeeded_versions={},
+                succeeded_ids=[],
+                failed=failed,
+                succeeded_count=0,
+                failed_count=len(failed),
+            )
 
         add_tags = (
             taxonomy.resolve_or_create_tags_in_transaction(session, payload.add)
@@ -314,16 +395,12 @@ def batch_tag_models(
             succeeded.append(model_id)
 
         content_changed(session, "model", succeeded)
+        # Read trigger-produced versions while this transaction still owns
+        # the rows. Reading after commit could acknowledge an external edit.
+        result = _edit_batch_result(session, succeeded, failed)
         if commit:
             session.commit()
-        else:
-            session.flush()
-        return ModelBatchResult(
-            succeeded_ids=succeeded,
-            failed=[],
-            succeeded_count=len(succeeded),
-            failed_count=0,
-        )
+        return result
 
 
 def batch_set_revision_labels(
@@ -392,7 +469,11 @@ def batch_delete_models(
 
 
 def update_model(
-    model_id: int, payload: ModelUpdate, current_user: User, session: Session
+    model_id: int,
+    payload: ModelUpdate,
+    current_user: User,
+    session: Session,
+    precondition: EditPrecondition = EditPrecondition(),
 ) -> None:
     with rollback_on_failure(session):
         if not current_user.is_active:
@@ -400,6 +481,8 @@ def update_model(
                 "collection_permission_denied", kind=ErrorKind.FORBIDDEN
             )
         m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+
+        claim_edit(session, current_user, m, precondition)
 
         if payload.name is not None:
             m.name = payload.name.strip() or m.name

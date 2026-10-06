@@ -9,6 +9,7 @@ from app.db.models import CollectionRole, DocumentKind
 
 
 class DocumentListItem(BaseModel):
+    edit_version: int
     id: int
     name: str
     kind: DocumentKind

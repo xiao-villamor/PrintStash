@@ -14,12 +14,13 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from fastapi import (
     APIRouter,
     Depends,
     Form,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -53,6 +54,7 @@ from app.api.command_actor import (
     require_command_writer,
 )
 from app.api.command_execution import bounded_command
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
 from app.core.security import require_auth, require_superuser, require_user
 from app.db.models import (
@@ -83,6 +85,14 @@ from app.modules.library import (
     revisions,
     source_covers,
 )
+from app.modules.library.edit_preconditions import (
+    EditKind,
+    EditPrecondition,
+    etag,
+    expected_version,
+)
+from app.modules.library.edit_preconditions import claim as claim_edit
+from app.modules.library.model_views import browse as models_browse
 from app.modules.library.trash import (
     PurgeConflictError,
     SourceFileLifecycleError,
@@ -112,6 +122,13 @@ from app.modules.storage.storage_ownership import (
 from app.modules.work import nudge
 from app.modules.work import service as work_service
 from app.schemas.jobs import JobAccepted
+from app.schemas.library_browse import (
+    BrowsePage,
+    BrowseQuery,
+    BrowseRevisionRead,
+    BrowseThumbnailQuery,
+    BrowseThumbnailsRead,
+)
 from app.schemas.models import (
     ArtifactOutcomeRead,
     FileRevisionUpdate,
@@ -121,6 +138,7 @@ from app.schemas.models import (
     ModelBatchMove,
     ModelBatchResult,
     ModelBatchTags,
+    ModelEditBatchResult,
     ModelFacetsRead,
     ModelFilters,
     ModelListItem,
@@ -330,6 +348,42 @@ def list_models(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/browse/revision",
+    response_model=BrowseRevisionRead,
+    summary="Check library catalog and authorization revisions",
+)
+def browse_revision(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowseRevisionRead:
+    return models_browse.revision(session)
+
+
+@router.get(
+    "/browse/thumbnails",
+    response_model=BrowseThumbnailsRead,
+    summary="Read bounded authorized thumbnail arrivals without rebuilding cards",
+)
+def browse_thumbnails(
+    query: Annotated[BrowseThumbnailQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowseThumbnailsRead:
+    return models_browse.thumbnail_items(session, current_user, query.model_id)
+
+
+@router.get(
+    "/browse", response_model=BrowsePage, summary="Revision-checked mixed library cards"
+)
+def browse_models(
+    query: Annotated[BrowseQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowsePage:
+    return models_browse.page_items(session, current_user, query)
 
 
 @router.get(
@@ -834,10 +888,13 @@ def purge_expired_trash(
 )
 def get_model(
     model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    return _detail_or_404(session, model_id, current_user)
+    result = _detail_or_404(session, model_id, current_user)
+    response.headers["ETag"] = etag(EditKind.MODEL, result.id, result.edit_version)
+    return result
 
 
 @router.get(
@@ -863,11 +920,13 @@ def get_model_provenance(
 def patch_model_provenance(
     model_id: int,
     source_id: int,
+    response: Response,
     payload: ModelProvenancePatch,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelProvenanceRead:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     source = session.exec(
         select(ModelProvenanceSource).where(
             ModelProvenanceSource.id == source_id,
@@ -878,6 +937,7 @@ def patch_model_provenance(
         raise HTTPException(status_code=404, detail="provenance_source_not_found")
     if set(payload.overrides) & set(payload.clear_overrides):
         raise HTTPException(status_code=422, detail="provenance_override_conflict")
+    claim_edit(session, current_user, model, precondition)
     for field_name, value in payload.overrides.items():
         provenance.set_user_override(
             session,
@@ -894,6 +954,8 @@ def patch_model_provenance(
             actor_id=current_user.id,
         )
     session.commit()
+    session.refresh(model)
+    response.headers["ETag"] = etag(EditKind.MODEL, model_id, model.edit_version)
     return models_detail.provenance_detail(session, model_id)
 
 
@@ -958,11 +1020,16 @@ def stream_model_source_cover(
 def put_model_source_cover(
     model_id: int,
     source_id: int,
+    response: Response,
     file: UploadFile = UploadFileParam(...),
     actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelSourceCoverRead:
     with command_session(actor) as (session, current_user):
-        _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        expected_version(EditKind.MODEL, model_id, precondition)
         _provenance_source_or_404(session, model_id, source_id)
         data = file.file.read(15 * 1024 * 1024 + 1)
         try:
@@ -977,6 +1044,7 @@ def put_model_source_cover(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
         try:
+            claim_edit(session, current_user, model, precondition)
             cover = source_covers.attach_candidate(session, candidate)
             source_covers.adopt_candidate(session, candidate)
             session.commit()
@@ -989,6 +1057,8 @@ def put_model_source_cover(
             abandon_publication(session, candidate.publication)
             raise
         session.refresh(cover)
+        session.refresh(model)
+        response.headers["ETag"] = etag(EditKind.MODEL, model_id, model.edit_version)
         return ModelSourceCoverRead.model_validate(cover)
 
 
@@ -1002,9 +1072,11 @@ def delete_model_source_cover(
     source_id: int,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> Response:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     _provenance_source_or_404(session, model_id, source_id)
+    claim_edit(session, current_user, model, precondition)
     try:
         removed = source_covers.delete(session, get_backend(), source_id)
     except source_covers.SourceCoverChangedError as exc:
@@ -1013,7 +1085,11 @@ def delete_model_source_cover(
     if not removed:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    session.refresh(model)
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={"ETag": etag(EditKind.MODEL, model_id, model.edit_version)},
+    )
 
 
 @router.post(
@@ -1334,49 +1410,65 @@ async def import_print_jobs_from_printer(
 
 @router.post(
     "/batch/move",
-    response_model=ModelBatchResult,
+    response_model=ModelEditBatchResult,
     dependencies=[Depends(require_auth)],
     summary="Move several models to a collection",
     description=(
         "Moves the given models into one destination collection. The destination "
         "is resolved once: an empty path means root (superuser only) and a missing "
         "path is created (superuser only). Every model is preflighted for existence "
-        "and edit access; any failure rejects the whole request without writes."
+        "and edit access; preflight failure rejects the whole request without writes. "
+        "Conditional version conflicts skip only stale Models; succeeded_versions "
+        "records the exact versions acknowledged by this transaction."
     ),
 )
 def batch_move_models(
     payload: ModelBatchMove,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
-) -> ModelBatchResult:
+    edit_contract: str | None = Header(
+        default=None, alias="X-PrintStash-Edit-Contract"
+    ),
+) -> ModelEditBatchResult:
     # Validate the shared destination up front — these are whole-request errors,
     # not per-item, because the destination is the same for everyone. Creating a
     # *missing* collection is deferred until we know at least one model will move
     # (below), so a fully-failed batch never leaves an orphan empty collection.
     return model_commands.batch_move_models(
-        payload=payload, current_user=current_user, session=session
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        edit_contract=edit_contract,
     )
 
 
 @router.post(
     "/batch/tags",
-    response_model=ModelBatchResult,
+    response_model=ModelEditBatchResult,
     dependencies=[Depends(require_auth)],
     summary="Add and/or remove tags on several models",
     description=(
         "Additive tag editing across a selection: tags in `add` are created if "
         "missing and appended (idempotent); tags in `remove` are detached if "
         "present. Each model keeps its other tags. Every model is preflighted; any "
-        "missing or non-editable model rejects the whole request without writes."
+        "missing or non-editable model rejects the whole request without writes. "
+        "Conditional version conflicts skip only stale Models; succeeded_versions "
+        "records the exact versions acknowledged by this transaction."
     ),
 )
 def batch_tag_models(
     payload: ModelBatchTags,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
-) -> ModelBatchResult:
+    edit_contract: str | None = Header(
+        default=None, alias="X-PrintStash-Edit-Contract"
+    ),
+) -> ModelEditBatchResult:
     return model_commands.batch_tag_models(
-        payload=payload, current_user=current_user, session=session
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        edit_contract=edit_contract,
     )
 
 
@@ -1424,14 +1516,22 @@ def batch_delete_models(
 )
 def update_model(
     model_id: int,
+    response: Response,
     payload: ModelUpdate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelRead:
     model_commands.update_model(
-        model_id=model_id, payload=payload, current_user=current_user, session=session
+        model_id=model_id,
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        precondition=precondition,
     )
-    return _detail_or_404(session, model_id, current_user)
+    result = _detail_or_404(session, model_id, current_user)
+    response.headers["ETag"] = etag(EditKind.MODEL, result.id, result.edit_version)
+    return result
 
 
 @router.patch(

@@ -1052,3 +1052,39 @@ class TestBuildIngestionScratchWindow:
             factories.build_ingestion_scratch_window(
                 db_session, directory=tmp_path / "window", job=job
             )
+
+
+class TestBuildCollection:
+    def test_trash_intent_obeys_production_scope(self, db_session):
+        collection = factories.build_collection(db_session, "Trash", trashed=True)
+
+        found = db_session.exec(
+            select(Collection).where(Collection.id == collection.id, live(Collection))
+        ).first()
+
+        assert found is None
+        assert (
+            db_session.exec(
+                select(Collection).where(
+                    Collection.id == collection.id, trashed(Collection)
+                )
+            )
+            .one()
+            .id
+            == collection.id
+        )
+
+
+class TestMultipartScaleBuilder:
+    def test_seeds_versioned_sets(self, db_session):
+        from app.db.models import MultipartModel
+
+        build_library_at_scale(db_session, collections=3, models=0, multipart_models=30)
+
+        groups = db_session.exec(select(MultipartModel)).all()
+
+        assert len(groups) == 30
+        assert all(
+            group.edit_version == 1 and group.collection_id is not None
+            for group in groups
+        )

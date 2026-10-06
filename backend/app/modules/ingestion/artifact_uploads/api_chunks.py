@@ -145,6 +145,13 @@ class ApiChunkUploadAdapter:
             temporary.unlink(missing_ok=True)
         for temporary in directory.glob(".assembly-*"):
             temporary.unlink(missing_ok=True)
+        # Lease cleanup may leave its reserved directory after losing the
+        # staged-path race. Remove only an empty directory: retained receipt
+        # evidence, symlinks and unknown names must still prevent root removal.
+        try:
+            (directory / ".printstash-staging-quarantine").rmdir()
+        except FileNotFoundError:
+            pass
         directory.rmdir()
 
     @staticmethod

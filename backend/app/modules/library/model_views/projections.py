@@ -331,6 +331,7 @@ def _hydrate_list_rows(
         rec_status, rec_label = recommended.get(model.id, (None, None))
         out.append(
             ModelListItem(
+                edit_version=model.edit_version,
                 id=model.id,
                 similarity=similarity.get(model.id, {}),
                 name=model.name,

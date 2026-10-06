@@ -113,6 +113,7 @@ def build_model(
     has to reach for `.id` on something it just built.
     """
     reject_aliases(overrides, {"deleted_at": "trashed"} if trashed else {})
+    overrides.setdefault("edit_version", 1)
     index = nth("model")
     if collection is not None:
         overrides.setdefault("collection_id", collection.id)
@@ -133,6 +134,7 @@ def build_multipart_model(
     **overrides: Any,
 ) -> MultipartModel:
     """A standalone empty multipart grouping; members are API/service state."""
+    overrides.setdefault("edit_version", 1)
     index = nth("multipart_model")
     if collection is not None:
         overrides.setdefault("collection_id", collection.id)
@@ -299,6 +301,7 @@ def build_collection(
     name: str = "Parts",
     *,
     parent: Collection | None = None,
+    trashed: bool | datetime = False,
     **overrides: Any,
 ) -> Collection:
     """A collection.
@@ -307,6 +310,8 @@ def build_collection(
     passing `parent` keeps it consistent instead of leaving a child whose path
     claims it is at the root.
     """
+    if trashed:
+        overrides.setdefault("deleted_at", utcnow() if trashed is True else trashed)
     slug = overrides.pop("slug", None) or f"{name.lower().replace(' ', '-')}"
     if parent is not None:
         overrides.setdefault("parent_id", parent.id)

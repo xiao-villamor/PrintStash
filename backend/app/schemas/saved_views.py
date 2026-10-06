@@ -5,12 +5,15 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.library_browse import LibraryView
 from app.schemas.models import ModelFilters, ModelSort
 
 
 class SavedViewFilters(ModelFilters):
     model_config = ConfigDict(extra="forbid")
 
+    # Omitted by existing API clients; their historical presentation is Everything.
+    library_view: LibraryView = LibraryView.ALL
     sort: ModelSort | None = None
 
 

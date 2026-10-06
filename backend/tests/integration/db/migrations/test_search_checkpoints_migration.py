@@ -9,6 +9,7 @@ from alembic import command
 from app.db.models import Model, SearchPassage, SearchReconciliationState
 from app.modules.search.reconciliation import reconcile_partition
 from tests.factories import build_model, build_search_passage
+from tests.factories.migration_rows import seed_schema_row
 from tests.paths import ALEMBIC_INI
 
 
@@ -20,8 +21,15 @@ class TestSearchCheckpointsMigration:
         command.upgrade(config, "bf435683b126")
         engine = create_engine(url)
         try:
-            with Session(engine) as session:
-                build_model(session, "Existing bracket")
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "models",
+                    id=1,
+                    name="Existing bracket",
+                    slug="existing-bracket",
+                    hash="a" * 64,
+                )
             command.upgrade(config, "head")
             with Session(engine) as session:
                 reconcile_partition(session, SubjectType.MODEL)

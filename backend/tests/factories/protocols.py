@@ -232,6 +232,7 @@ class MakeCollection(Protocol):
         name: str = "Parts",
         *,
         parent: Collection | None = None,
+        trashed: bool | datetime = False,
         **overrides: Any,
     ) -> Collection: ...
 

@@ -1807,6 +1807,165 @@
         "title": "Body_upload_document_image_api_v1_documents__document_id__images_post",
         "type": "object"
       },
+      "BrowseModel": {
+        "properties": {
+          "kind": {
+            "const": "model",
+            "default": "model",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "$ref": "#/components/schemas/ModelListItem"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "BrowseModel",
+        "type": "object"
+      },
+      "BrowseMultipart": {
+        "properties": {
+          "kind": {
+            "const": "multipart",
+            "default": "multipart",
+            "title": "Kind",
+            "type": "string"
+          },
+          "multipart": {
+            "$ref": "#/components/schemas/MultipartModelListItem"
+          }
+        },
+        "required": [
+          "multipart"
+        ],
+        "title": "BrowseMultipart",
+        "type": "object"
+      },
+      "BrowsePage": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "browse_revision": {
+            "title": "Browse Revision",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "model": "#/components/schemas/BrowseModel",
+                  "multipart": "#/components/schemas/BrowseMultipart"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/BrowseModel"
+                },
+                {
+                  "$ref": "#/components/schemas/BrowseMultipart"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "description": "Combined Model and Multipart Model card count.",
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "total",
+          "browse_revision",
+          "authorization_revision"
+        ],
+        "title": "BrowsePage",
+        "type": "object"
+      },
+      "BrowseRevisionRead": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "browse_revision": {
+            "title": "Browse Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "browse_revision",
+          "authorization_revision"
+        ],
+        "title": "BrowseRevisionRead",
+        "type": "object"
+      },
+      "BrowseThumbnail": {
+        "properties": {
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "model_id",
+          "thumbnail_url"
+        ],
+        "title": "BrowseThumbnail",
+        "type": "object"
+      },
+      "BrowseThumbnailsRead": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseThumbnail"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "authorization_revision"
+        ],
+        "title": "BrowseThumbnailsRead",
+        "type": "object"
+      },
       "BrowserDevicePatch": {
         "additionalProperties": false,
         "properties": {
@@ -4285,6 +4444,10 @@
             ],
             "title": "Collection Id"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -4335,6 +4498,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "kind",
@@ -4378,6 +4542,10 @@
             ],
             "title": "Collection Id"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -4428,6 +4596,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "kind",
@@ -7654,6 +7823,14 @@
         "title": "LibraryUpdate",
         "type": "object"
       },
+      "LibraryView": {
+        "enum": [
+          "all",
+          "multipart"
+        ],
+        "title": "LibraryView",
+        "type": "string"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9439,6 +9616,22 @@
             "title": "Collection",
             "type": "string"
           },
+          "expected_versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "exclusiveMinimum": 0.0,
+                  "type": "integer"
+                },
+                "maxProperties": 500,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Versions"
+          },
           "model_ids": {
             "items": {
               "type": "integer"
@@ -9498,6 +9691,22 @@
             "title": "Add",
             "type": "array"
           },
+          "expected_versions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "exclusiveMinimum": 0.0,
+                  "type": "integer"
+                },
+                "maxProperties": 500,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Versions"
+          },
           "model_ids": {
             "items": {
               "type": "integer"
@@ -9520,6 +9729,48 @@
           "model_ids"
         ],
         "title": "ModelBatchTags",
+        "type": "object"
+      },
+      "ModelEditBatchResult": {
+        "properties": {
+          "failed": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelBatchFailure"
+            },
+            "title": "Failed",
+            "type": "array"
+          },
+          "failed_count": {
+            "default": 0,
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "succeeded_count": {
+            "default": 0,
+            "title": "Succeeded Count",
+            "type": "integer"
+          },
+          "succeeded_ids": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Succeeded Ids",
+            "type": "array"
+          },
+          "succeeded_versions": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Succeeded Versions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "succeeded_versions"
+        ],
+        "title": "ModelEditBatchResult",
         "type": "object"
       },
       "ModelFacetsRead": {
@@ -9860,6 +10111,10 @@
             ],
             "title": "Collection Label"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -9981,6 +10236,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "slug",
@@ -10458,6 +10714,10 @@
             ],
             "title": "Description"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -10545,6 +10805,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "slug",
@@ -11042,6 +11303,10 @@
             ],
             "title": "Description"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -11105,6 +11370,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "slug",
@@ -11202,6 +11468,10 @@
             ],
             "title": "Description"
           },
+          "edit_version": {
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_role": {
             "anyOf": [
               {
@@ -11279,6 +11549,7 @@
           }
         },
         "required": [
+          "edit_version",
           "id",
           "name",
           "slug",
@@ -15903,6 +16174,10 @@
               }
             ],
             "title": "Has Similar Candidates"
+          },
+          "library_view": {
+            "$ref": "#/components/schemas/LibraryView",
+            "default": "all"
           },
           "material_type": {
             "items": {
@@ -25592,6 +25867,42 @@
               "title": "Document Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "requestBody": {
@@ -30559,8 +30870,26 @@
     },
     "/api/v1/models/batch/move": {
       "post": {
-        "description": "Moves the given models into one destination collection. The destination is resolved once: an empty path means root (superuser only) and a missing path is created (superuser only). Every model is preflighted for existence and edit access; any failure rejects the whole request without writes.",
+        "description": "Moves the given models into one destination collection. The destination is resolved once: an empty path means root (superuser only) and a missing path is created (superuser only). Every model is preflighted for existence and edit access; preflight failure rejects the whole request without writes. Conditional version conflicts skip only stale Models; succeeded_versions records the exact versions acknowledged by this transaction.",
         "operationId": "batch_move_models_api_v1_models_batch_move_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -30576,7 +30905,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModelBatchResult"
+                  "$ref": "#/components/schemas/ModelEditBatchResult"
                 }
               }
             },
@@ -30652,8 +30981,26 @@
     },
     "/api/v1/models/batch/tags": {
       "post": {
-        "description": "Additive tag editing across a selection: tags in `add` are created if missing and appended (idempotent); tags in `remove` are detached if present. Each model keeps its other tags. Every model is preflighted; any missing or non-editable model rejects the whole request without writes.",
+        "description": "Additive tag editing across a selection: tags in `add` are created if missing and appended (idempotent); tags in `remove` are detached if present. Each model keeps its other tags. Every model is preflighted; any missing or non-editable model rejects the whole request without writes. Conditional version conflicts skip only stale Models; succeeded_versions records the exact versions acknowledged by this transaction.",
         "operationId": "batch_tag_models_api_v1_models_batch_tags_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -30669,7 +31016,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModelBatchResult"
+                  "$ref": "#/components/schemas/ModelEditBatchResult"
                 }
               }
             },
@@ -30692,6 +31039,509 @@
           }
         ],
         "summary": "Add and/or remove tags on several models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse": {
+      "get": {
+        "operationId": "browse_models_api_v1_models_browse_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Collection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direct",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Direct",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Tag",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "printer_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Printer Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "printer_presence",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Printer Presence"
+            }
+          },
+          {
+            "in": "query",
+            "name": "favorites",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Favorites",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "file_type",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/FileType"
+              },
+              "title": "File Type",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "material_type",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Material Type",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "slicer_name",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Slicer Name",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "printer_model",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Printer Model",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision_status",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/FileRevisionStatus"
+              },
+              "title": "Revision Status",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "printed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Printed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "print_outcome",
+            "required": false,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/PrintJobState"
+              },
+              "title": "Print Outcome",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "storage",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "vault",
+                  "external"
+                ],
+                "type": "string"
+              },
+              "title": "Storage",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uploaded_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Uploaded After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "uploaded_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Uploaded Before"
+            }
+          },
+          {
+            "description": "Inclusive finished_at lower bound; UTC when no offset is supplied.",
+            "in": "query",
+            "name": "printed_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive finished_at lower bound; UTC when no offset is supplied.",
+              "title": "Printed After"
+            }
+          },
+          {
+            "description": "Exclusive finished_at upper bound.",
+            "in": "query",
+            "name": "printed_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exclusive finished_at upper bound.",
+              "title": "Printed Before"
+            }
+          },
+          {
+            "description": "Inclusive actual PrintJob duration; null durations do not match.",
+            "in": "query",
+            "name": "print_duration_min_s",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2147483647,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive actual PrintJob duration; null durations do not match.",
+              "title": "Print Duration Min S"
+            }
+          },
+          {
+            "description": "Exclusive actual PrintJob duration: under three hours is 10800.",
+            "in": "query",
+            "name": "print_duration_max_s",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2147483647,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exclusive actual PrintJob duration: under three hours is 10800.",
+              "title": "Print Duration Max S"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_similar_candidates",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Similar Candidates"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LibraryView",
+              "default": "all"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ModelSort",
+              "default": "date-desc"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 60,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowsePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Revision-checked mixed library cards",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse/revision": {
+      "get": {
+        "operationId": "browse_revision_api_v1_models_browse_revision_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowseRevisionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check library catalog and authorization revisions",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse/thumbnails": {
+      "get": {
+        "operationId": "browse_thumbnails_api_v1_models_browse_thumbnails_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "items": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 24,
+              "minItems": 1,
+              "title": "Model Id",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowseThumbnailsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read bounded authorized thumbnail arrivals without rebuilding cards",
         "tags": [
           "models"
         ]
@@ -32398,6 +33248,42 @@
               "title": "Model Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "requestBody": {
@@ -33151,6 +34037,42 @@
               "title": "Source Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "requestBody": {
@@ -33216,6 +34138,42 @@
             "schema": {
               "title": "Source Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],
@@ -33317,6 +34275,42 @@
             "schema": {
               "title": "Source Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],
@@ -34690,6 +35684,42 @@
               "title": "Multipart Model Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "requestBody": {
@@ -34744,6 +35774,42 @@
             "schema": {
               "title": "Multipart Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],
@@ -34920,6 +35986,42 @@
               "title": "Multipart Model Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "responses": {
@@ -34964,6 +36066,42 @@
             "schema": {
               "title": "Multipart Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],
@@ -35066,6 +36204,42 @@
             "schema": {
               "title": "Multipart Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],
@@ -35215,6 +36389,42 @@
             "schema": {
               "title": "Multipart Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
             }
           }
         ],

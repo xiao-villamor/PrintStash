@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, insert
 from sqlmodel import Session, select
 
-from app.db.models import Collection, Model
+from app.db.models import Collection, Model, MultipartModel
 
 _BATCH = 500
 
@@ -30,7 +30,7 @@ class ScaledLibrary:
     model_count: int
 
 
-def _columns(row: Collection | Model) -> dict:
+def _columns(row: Collection | Model | MultipartModel) -> dict:
     """The row's column values, defaults included, ready for a bulk insert."""
     return {
         column.name: getattr(row, column.name)
@@ -43,6 +43,7 @@ def build_library_at_scale(
     *,
     collections: int,
     models: int,
+    multipart_models: int = 0,
     under: Collection | None = None,
     fanout: int = 8,
 ) -> ScaledLibrary:
@@ -54,7 +55,7 @@ def build_library_at_scale(
     it the first level is *fanout* roots. Models are spread round-robin over
     every seeded collection. Commits, like every builder.
     """
-    if collections < 1 or models < 0 or fanout < 1:
+    if collections < 1 or models < 0 or multipart_models < 0 or fanout < 1:
         raise ValueError("library_scale_shape_invalid")
     next_id = (session.exec(select(func.max(Collection.id))).one() or 0) + 1
     level: list[tuple[int | None, str | None]] = [
@@ -107,6 +108,25 @@ def build_library_at_scale(
             model_rows = []
     if model_rows:
         session.execute(insert(Model.__table__), model_rows)  # type: ignore[arg-type]
+    first_group = (session.exec(select(func.max(MultipartModel.id))).one() or 0) + 1
+    group_template = _columns(MultipartModel(name="", slug="", collection_id=None))
+    group_rows = []
+    for offset in range(multipart_models):
+        group_id = first_group + offset
+        group_rows.append(
+            group_template
+            | {
+                "id": group_id,
+                "name": f"Scale set {group_id}",
+                "slug": f"scale-set-{group_id}",
+                "collection_id": seeded[offset % len(seeded)].id,
+            }
+        )
+        if len(group_rows) == _BATCH:
+            session.execute(insert(MultipartModel.__table__), group_rows)
+            group_rows = []
+    if group_rows:
+        session.execute(insert(MultipartModel.__table__), group_rows)
     session.commit()
     return ScaledLibrary(
         collection_ids=tuple(int(c.id) for c in seeded if c.id is not None),

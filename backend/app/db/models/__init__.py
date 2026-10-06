@@ -1,5 +1,8 @@
 """Register every domain table and expose the shared SQLModel metadata."""
 
+# Versioned database contracts also install on the direct create_all path.
+from app.db import library_contracts_v1 as _library_contracts_v1  # noqa: F401, E402
+
 from .administration import (
     AuditLog as AuditLog,
 )
@@ -110,6 +113,7 @@ from .library import (
 from .library import (
     FileTagLink as FileTagLink,
 )
+from .library import LibraryRevision as LibraryRevision
 from .library import (
     Metadata as Metadata,
 )

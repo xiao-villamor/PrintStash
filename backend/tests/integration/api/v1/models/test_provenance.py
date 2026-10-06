@@ -818,3 +818,90 @@ class TestCoverCommandOwnership:
             )
         assert response.status_code == 200, response.text
         assert observations == [200]
+
+
+class TestConditionalProvenance:
+    def test_rejects_stale_override(self, client, auth_headers, model, source):
+        changed = client.patch(
+            f"/api/v1/models/{model.id}",
+            headers=auth_headers,
+            json={"name": "Concurrent name"},
+        )
+        assert changed.status_code == 200, changed.text
+
+        response = client.patch(
+            f"/api/v1/models/{model.id}/provenance/{source.id}",
+            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            json={"overrides": {"title": "Old draft"}},
+        )
+
+        assert response.status_code == 412, response.text
+        assert (
+            client.get(f"/api/v1/models/{model.id}", headers=auth_headers).json()[
+                "name"
+            ]
+            == "Concurrent name"
+        )
+
+    def test_conditions_source_cover_edit(self, client, auth_headers, model, source):
+        from tests.factories.content import png
+
+        uploaded = client.put(
+            f"/api/v1/models/{model.id}/provenance/{source.id}/cover",
+            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            files={"file": ("cover.png", png(), "image/png")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        stale = client.delete(
+            f"/api/v1/models/{model.id}/provenance/{source.id}/cover",
+            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+        )
+
+        assert stale.status_code == 412, stale.text
+        assert (
+            client.get(
+                f"/api/v1/models/{model.id}/provenance/{source.id}/cover",
+                headers=auth_headers,
+            ).status_code
+            == 200
+        )
+
+    def test_conflicts_after_external_override_writer(
+        self, client, auth_headers, model, source, db_session
+    ):
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "UPDATE model_provenance_fields SET user_value_json='\"External\"', user_override_set=1 WHERE provenance_source_id=:source"
+            ),
+            {"source": source.id},
+        )
+        db_session.commit()
+
+        response = client.patch(
+            f"/api/v1/models/{model.id}",
+            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            json={"name": "Old draft"},
+        )
+
+        assert response.status_code == 412, response.text
+
+    def test_keeps_version_for_capture_refresh(
+        self, client, auth_headers, model, source, db_session
+    ):
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "UPDATE model_provenance_fields SET captured_value_json='\"Refreshed capture\"' WHERE provenance_source_id=:source"
+            ),
+            {"source": source.id},
+        )
+        db_session.commit()
+
+        response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["edit_version"] == 1

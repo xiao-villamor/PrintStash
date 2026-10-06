@@ -10,6 +10,8 @@ _STATUS = {
     ErrorKind.FORBIDDEN: 403,
     ErrorKind.NOT_FOUND: 404,
     ErrorKind.CONFLICT: 409,
+    ErrorKind.PRECONDITION_FAILED: 412,
+    ErrorKind.PRECONDITION_REQUIRED: 428,
     ErrorKind.GONE: 410,
     ErrorKind.CAPACITY: 507,
     ErrorKind.TOO_LARGE: 413,

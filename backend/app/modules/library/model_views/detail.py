@@ -161,12 +161,13 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         is not None
     )
     collection_path = collection_name_for(m)
-    collection_label = collection_tree.collection_labels(session, user, [collection_path]).get(
-        collection_path
-    )
+    collection_label = collection_tree.collection_labels(
+        session, user, [collection_path]
+    ).get(collection_path)
 
     return ModelRead(
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
+        edit_version=m.edit_version,
         id=m.id,  # type: ignore[arg-type]
         name=m.name,
         slug=m.slug,

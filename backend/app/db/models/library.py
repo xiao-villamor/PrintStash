@@ -11,6 +11,7 @@ from printstash_core.mesh.measurements import (
     VolumeUnavailableCause,
 )
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     ForeignKey,
@@ -490,6 +491,9 @@ class Model(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(index=True, max_length=255)
     slug: str = Field(index=True, unique=True, max_length=255)
     hash: str = Field(index=True, unique=True, max_length=64)
@@ -549,6 +553,9 @@ class MultipartModel(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("slug", name="uq_multipart_models_slug"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(max_length=255, index=True)
     slug: str = Field(max_length=255, index=True)
     description: Optional[str] = Field(default=None, sa_column=Column(Text))
@@ -696,6 +703,9 @@ class Document(SQLModel, table=True):
     __tablename__ = "documents"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(index=True, max_length=255)
     kind: DocumentKind = Field(index=True)
     collection_id: Optional[int] = Field(
@@ -723,3 +733,19 @@ class Document(SQLModel, table=True):
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class LibraryRevision(SQLModel, table=True):
+    """Transactionally maintained authority for revision-checked browse pages."""
+
+    __tablename__ = "library_revision"
+    __table_args__ = (CheckConstraint("id = 1", name="library_revision_singleton"),)
+
+    id: int = Field(default=1, primary_key=True)
+    epoch: str = Field(max_length=32)
+    authorization_revision: int = Field(
+        default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )
+    revision: int = Field(
+        default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )

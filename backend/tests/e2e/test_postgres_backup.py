@@ -67,6 +67,11 @@ class TestPostgresBackup:
         )
         assert created.status_code == 201, created.text
         document_id = created.json()["id"]
+        original_version = created.json()["edit_version"]
+        before_restore = await api.get(
+            "/api/v1/models/browse/revision", headers=headers
+        )
+        assert before_restore.status_code == 200, before_restore.text
         # A backup is a Job: the route answers 202, the Job builds the archive.
         backup_id = (await create_backup(api, headers))["backup_id"]
         postgres_e2e_db.execute(text("UPDATE documents SET name='Lost',body='Missing'"))
@@ -79,6 +84,17 @@ class TestPostgresBackup:
         assert result.status_code == 200, result.text
         assert result.json()["name"] == "Bracket instructions"
         assert result.json()["body"] == "Mount the shelf"
+        assert result.json()["edit_version"] == original_version
+        after_restore = await api.get("/api/v1/models/browse/revision", headers=headers)
+        assert after_restore.status_code == 200, after_restore.text
+        assert (
+            after_restore.json()["browse_revision"].split(":")[0]
+            != before_restore.json()["browse_revision"].split(":")[0]
+        )
+        assert (
+            after_restore.json()["authorization_revision"].split(":")[0]
+            == after_restore.json()["browse_revision"].split(":")[0]
+        )
         # ASGITransport does not start the background projection worker.
         drain_search(postgres_e2e_db)
         found = await api.get(

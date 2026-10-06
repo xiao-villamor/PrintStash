@@ -26,6 +26,7 @@ from sqlmodel import Session, delete, select
 
 from app.api.command_actor import CommandActor, command_session, require_command_writer
 from app.api.command_execution import bounded_command
+from app.api.edit_preconditions import edit_precondition
 from app.core.security import require_auth, require_user
 from app.core.time import utcnow
 from app.db.models import (
@@ -41,6 +42,13 @@ from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import rbac
 from app.modules.library import multipart_models, taxonomy
+from app.modules.library.edit_preconditions import (
+    EditKind,
+    EditPrecondition,
+    etag,
+    expected_version,
+)
+from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.media.source_cover_processing import (
     MAX_SOURCE_COVER_BYTES,
     SourceCoverProcessingError,
@@ -198,13 +206,16 @@ def create_multipart_model(
 )
 def replace_multipart_model_tags(
     multipart_model_id: int,
+    response: Response,
     payload: TagSetUpdate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    claim_edit(session, current_user, aggregate, precondition)
     session.exec(
         delete(MultipartModelTagLink).where(
             MultipartModelTagLink.multipart_model_id == multipart_model_id
@@ -224,7 +235,9 @@ def replace_multipart_model_tags(
     content_changed(session, "multipart_model", [aggregate.id])
     session.commit()
     session.refresh(aggregate)
-    return multipart_models.read(session, current_user, aggregate)
+    result = multipart_models.read(session, current_user, aggregate)
+    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
+    return result
 
 
 @router.get(
@@ -234,13 +247,16 @@ def replace_multipart_model_tags(
 )
 def get_multipart_model(
     multipart_model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.VIEW
     )
-    return multipart_models.read(session, current_user, aggregate)
+    result = multipart_models.read(session, current_user, aggregate)
+    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
+    return result
 
 
 @router.get(
@@ -280,13 +296,16 @@ def get_multipart_model_cover(
 @bounded_command
 def put_multipart_model_cover(
     multipart_model_id: int,
+    response: Response,
     file: UploadFile = UploadFileParam(...),
     actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     with command_session(actor) as (session, current_user):
         aggregate = multipart_models.require(
             session, current_user, multipart_model_id, CollectionRole.EDIT
         )
+        expected_version(EditKind.MULTIPART, multipart_model_id, precondition)
         data = file.file.read(MAX_SOURCE_COVER_BYTES + 1)
         try:
             processed = process_source_cover_upload(data, file.content_type)
@@ -295,7 +314,6 @@ def put_multipart_model_cover(
                 status_code=422, detail="multipart_cover_invalid"
             ) from exc
 
-        old_cover_key = _uploaded_cover_key(aggregate)
         # The ownership ledger reserves through an independent session. Release
         # this read-only transaction first so SQLite never has two writers waiting
         # on the same connection while the cover publication becomes durable.
@@ -314,6 +332,8 @@ def put_multipart_model_cover(
                 object_kind="multipart_model_cover",
                 sha256=digest,
             )
+            claim_edit(session, current_user, aggregate, precondition)
+            old_cover_key = _uploaded_cover_key(aggregate)
             retirement = (
                 _prepare_uploaded_cover_delete(session, aggregate, key=old_cover_key)
                 if old_cover_key is not None
@@ -341,6 +361,9 @@ def put_multipart_model_cover(
         if old_cover_key is not None:
             process_storage_delete_intents()
         session.refresh(aggregate)
+        response.headers["ETag"] = etag(
+            EditKind.MULTIPART, aggregate.id, aggregate.edit_version
+        )
         return multipart_models.read(session, current_user, aggregate)
 
 
@@ -352,12 +375,15 @@ def put_multipart_model_cover(
 )
 def delete_multipart_model_cover(
     multipart_model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    claim_edit(session, current_user, aggregate, precondition)
     retirement = _prepare_uploaded_cover_delete(session, aggregate)
     if retirement is None:
         raise HTTPException(status_code=404, detail="multipart_cover_not_found")
@@ -370,6 +396,9 @@ def delete_multipart_model_cover(
     session.commit()
     process_storage_delete_intents()
     session.refresh(aggregate)
+    response.headers["ETag"] = etag(
+        EditKind.MULTIPART, aggregate.id, aggregate.edit_version
+    )
     return multipart_models.read(session, current_user, aggregate)
 
 
@@ -381,13 +410,16 @@ def delete_multipart_model_cover(
 )
 def update_multipart_model(
     multipart_model_id: int,
+    response: Response,
     payload: MultipartModelUpdate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    claim_edit(session, current_user, aggregate, precondition)
     if payload.name is not None:
         name = " ".join(payload.name.split())
         if not name:
@@ -426,6 +458,7 @@ def update_multipart_model(
     result = multipart_models.read(session, current_user, aggregate)
     if removed_uploaded_cover:
         process_storage_delete_intents()
+    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
     return result
 
 
@@ -437,17 +470,24 @@ def update_multipart_model(
 )
 def replace_multipart_parts(
     multipart_model_id: int,
+    response: Response,
     payload: MultipartPartsReplace,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    claim_edit(session, current_user, aggregate, precondition)
     try:
-        return multipart_models.replace_parts(
+        result = multipart_models.replace_parts(
             session, current_user, aggregate, payload.parts
         )
+        response.headers["ETag"] = etag(
+            EditKind.MULTIPART, result.id, result.edit_version
+        )
+        return result
     except multipart_models.MultipartModelError as exc:
         session.rollback()
         code = exc.code
@@ -467,13 +507,16 @@ def replace_multipart_parts(
 )
 def save_multipart_model(
     multipart_model_id: int,
+    response: Response,
     payload: MultipartModelSave,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> MultipartModelRead:
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    claim_edit(session, current_user, aggregate, precondition)
     name: str | None = None
     slug: str | None = None
     if payload.name is not None:
@@ -512,6 +555,9 @@ def save_multipart_model(
         )
         if removed_uploaded_cover:
             process_storage_delete_intents()
+        response.headers["ETag"] = etag(
+            EditKind.MULTIPART, result.id, result.edit_version
+        )
         return result
     except multipart_models.MultipartModelError as exc:
         session.rollback()

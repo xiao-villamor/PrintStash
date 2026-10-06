@@ -230,6 +230,7 @@ def build_document(
     The builder fills whichever set matches `kind`, because a PDF row with a body
     and no filename is a shape the app never produces.
     """
+    overrides.setdefault("edit_version", 1)
     if kind is DocumentKind.MARKDOWN:
         overrides.setdefault("body", "# Manual\n")
     else:

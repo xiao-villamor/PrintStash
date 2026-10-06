@@ -31,6 +31,7 @@ from sqlmodel import Session, select
 from app.api.artifact_responses import serve_stored_file
 from app.api.command_actor import CommandActor, command_session, require_command_writer
 from app.api.command_execution import bounded_command
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_superuser, require_user
@@ -48,6 +49,8 @@ from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.modules.identity import rbac
 from app.modules.library import multipart_models
+from app.modules.library.edit_preconditions import EditKind, EditPrecondition, etag
+from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.trash import (
     StorageRiskConfirmationRequired,
     hard_delete_document,
@@ -111,6 +114,7 @@ def _collection_path(session: Session, collection_id: Optional[int]) -> Optional
 
 def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
     return DocumentListItem(
+        edit_version=doc.edit_version,
         id=doc.id,
         name=doc.name,
         kind=doc.kind,
@@ -435,11 +439,14 @@ def upload_document(
 @router.get("/{document_id}", response_model=DocumentRead, summary="Get a document")
 def get_document(
     document_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
     doc = _require_doc(session, current_user, document_id, CollectionRole.VIEW)
-    return _read(session, current_user, doc)
+    result = _read(session, current_user, doc)
+    response.headers["ETag"] = etag(EditKind.DOCUMENT, result.id, result.edit_version)
+    return result
 
 
 @router.put(
@@ -450,12 +457,15 @@ def get_document(
 )
 def update_document(
     document_id: int,
+    response: Response,
     payload: DocumentUpdate,
     current_user: User = Depends(require_user),
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> DocumentRead:
     doc = _require_doc(session, current_user, document_id, CollectionRole.EDIT)
+    claim_edit(session, current_user, doc, precondition)
     if payload.name is not None:
         doc.name = payload.name.strip()
     if payload.body is not None:
@@ -468,7 +478,9 @@ def update_document(
     content_changed(session, "document", (row.id for row in (doc,)))
     session.commit()
     session.refresh(doc)
-    return _read(session, current_user, doc)
+    result = _read(session, current_user, doc)
+    response.headers["ETag"] = etag(EditKind.DOCUMENT, result.id, result.edit_version)
+    return result
 
 
 @router.delete(
