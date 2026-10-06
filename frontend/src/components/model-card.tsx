@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { starModel, unstarModel } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Localized } from "@/components/ui/localized";
 import { MODEL_DND_MIME } from "@/lib/model-dnd";
 
@@ -201,11 +201,6 @@ function ModelCardInner({
       ? starOverride.value
       : model.starred;
   const [starBusy, setStarBusy] = useState(false);
-  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
-  // Lazy thumbnails used to snap in at full opacity the instant their bytes
-  // arrived. Fade each one in on load so scrolling/searching settles smoothly
-  // instead of popping card by card.
-  const [thumbLoaded, setThumbLoaded] = useState(false);
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;
@@ -316,32 +311,18 @@ function ModelCardInner({
           }}
         >
           {/* Thumbnail */}
-          <div
-            data-library-thumbnail={model.thumbnail_url ? (thumb ? "ready" : "pending") : "missing"}
+          <ProtectedThumbnail
+            path={model.thumbnail_url}
+            alt={model.name}
+            fade
             className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0"
-          >
-            {thumb ? (
-              <img
-                alt={model.name}
-                draggable={false}
-                className={`w-full h-full object-cover transition-opacity duration-slow ease-out ${
-                  thumbLoaded ? "opacity-90 group-hover:opacity-100" : "opacity-0"
-                }`}
-                src={thumb}
-                loading="lazy"
-                decoding="async"
-                onLoad={() => setThumbLoaded(true)}
-                // Cached images can finish before React attaches onLoad; catch that
-                // case so they don't stay stuck at opacity-0.
-                ref={(node) => {
-                  if (node?.complete && node.naturalWidth > 0) setThumbLoaded(true);
-                }}
-              />
-            ) : (
+            imageClassName="w-full h-full object-cover"
+            placeholder={
               <div className="flex h-full w-full items-center justify-center">
                 <FileText className="h-10 w-10 text-muted-foreground/40" />
               </div>
-            )}
+            }
+          >
             {hasPrinter && (
               <div className="absolute bottom-2 right-2">
                 <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
@@ -349,7 +330,7 @@ function ModelCardInner({
                 </span>
               </div>
             )}
-          </div>
+          </ProtectedThumbnail>
 
           {/* Title + revision */}
           <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">

@@ -156,3 +156,86 @@ M7 manual review additions:
 | `frontend/src/components/__tests__/printer-detail.test.tsx` | controls/config/job/material behavior; realistic close callbacks; unmount/switch/account connection races |
 
 The sole printer socket connection owner is PrinterDetailPage. Other event subscribers (task-center, thumbnail/preview/derivative hooks, background-work panel, gcode-viewer) were inventoried by search, not claimed as manually audited in this checkpoint. Their subscription cleanup API remains unchanged.
+
+## Protected asset requirements
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 52 | limits simultaneous protected image downloads to four | Edge | six admitted distinct leases; pending responses | four fetches; fifth starts only after completion | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::limits simultaneous protected image downloads to four` |
+| 53 | removes abandoned queued image work | Edge | four active downloads; fifth lease released | fifth never fetched | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::removes abandoned queued image work` |
+| 54 | aborts an unneeded active download | Error | only consumer releases pending asset | fetch signal aborted; lease rejected | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::aborts an unneeded active download` |
+| 55 | keeps shared work for the remaining image consumer | Happy | two consumers same path; one leaves | one fetch, retained consumer receives URL | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::keeps shared work for the remaining image consumer` |
+| 56 | keeps a mounted image URL under count pressure | Edge | leased image plus 405 inactive assets | leased URL usable and not revoked | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::keeps a mounted image URL under count pressure` |
+| 57 | bounds inactive image bytes | Edge | inactive blobs exceed 32MiB | oldest inactive URL revoked; newest retained | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::bounds inactive image bytes` |
+| 58 | observes caller cancellation independently | Error | two shared consumers; caller aborts one | cancelled caller rejected; other completes | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::observes caller cancellation independently` |
+| 59 | disposes active and queued assets on scope retirement | Error | four active; queued leases; auth event | old signals aborted, URLs discarded, queued HTTP never starts | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::disposes active and queued assets on scope retirement` |
+| 60 | acquires a lease for an already cached image | Happy | remount cached path then cache pressure | immediate URL remains leased until unmount | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::acquires a lease for an already cached image` |
+| 61 | clears a resolved image after private scope retirement | Error | mounted hook with resolved private URL | old image removed immediately | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::clears a resolved image after private scope retirement` |
+| 62 | admits an image only near the viewport | Happy | offscreen element then intersecting observer frame | no fetch before admission; fetch afterward | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::admits an image only near the viewport` |
+| 63 | rejects late image state after a path switch | Error | A pending, switch to cached B | B URL remains visible after old A settles | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::rejects late image state after a path switch` |
+| 64 | reports an image ready only after decode | Happy | protected image loads then decode resolves | startup data marker ready after actual decode | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::reports an image ready only after decode` |
+| 65 | admits visible thumbnails before distant cards | Happy | browser grid beyond viewport; delayed images | maximum four active; offscreen requests deferred; visible images decoded | Playwright | ✅ `frontend/tests/e2e/protected-assets.spec.ts::admits visible thumbnails before distant cards` |
+
+Provisional asset settings: four simultaneous protected blob downloads; inactive cache at most 400 entries and 32MiB of encoded Blob bytes. Mounted lease bytes are excluded from inactive eviction; this bounds retained encoded data, not browser decoded-image memory. Decoded readiness is tracked separately at the image element. These initial budgets await isolated measurement.
+
+| 66 | refetches a mounted image after explicit invalidation | Edge | mounted cached path replaced | old URL hidden; fresh bytes displayed | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::refetches a mounted image after explicit invalidation` |
+| 67 | starts current scope work before an old aborted response settles | Error | four retired requests ignore abort temporarily | current scope request starts immediately | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::starts current scope work before an old aborted response settles` |
+| 68 | reports leased and inactive encoded bytes separately | Happy | resolved lease then release | live/inactive counters move exact bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::reports leased and inactive encoded bytes separately` |
+
+| 69 | admits images when intersection observation is unavailable | Edge | supported API absent in fallback environment | image fetched and displayed | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::admits images when intersection observation is unavailable` |
+| 70 | unobserves a removed thumbnail | Edge | queued viewport target unmounts | observer releases target; zero fetch | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::unobserves a removed thumbnail` |
+| 71 | keeps missing image and alternative text semantics | Edge | no thumbnail path | existing placeholder; no empty src image | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps missing image and alternative text semantics` |
+| 72 | keeps external covers outside authenticated transport | Happy | external HTTPS cover | native image URL; no protected blob fetch | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps external covers outside authenticated transport` |
+| 73 | leases Multipart covers through viewport admission | Happy | shared Cover in Multipart lists/cards | leased protected image with original alt | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::leases Multipart covers through viewport admission` |
+| 74 | leases Search previews through viewport admission | Happy | Document preview in search list | protected preview image displayed | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::leases Search previews through viewport admission` |
+
+| 75 | excludes referenced image bytes from inactive eviction | Edge | mounted 8MiB image; inactive bytes exceed cap | mounted URL survives; live8MiB reported outside inactive32MiB | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::excludes referenced image bytes from inactive eviction` |
+
+M6 baseline evidence: lease/admission API tests **8 failed / 18 passed** (new lease API absent, count-only cache); hook owner tests **3 failed / 1 passed** (cached mount unleased, retired resolved URL retained, eager unadmitted read). Additional explicit-invalidation/current-scope admission regressions were red **2 failed / 1 passed** before fixes. The first byte-test arrangement used jsdom Blob with native Response, which serialized the wrapper rather than eight MiB; it was corrected to Uint8Array before final validation. No byte-bound conclusion is drawn from that initial malformed arrangement.
+
+M6 local evidence: focused asset/thumbnail/card/Multipart/similarity/startup tests green; Chromium headline admission test **1 passed** with actual decoded visible images, four held requests, and distant thumbnail deferred until scroll. App/UI/domain typechecks green; lint zero diagnostics; format:check green. The browser run is a deterministic functional check against Vite, not a timing measurement.
+
+The baseline source was independently materialized from committed `710e4eb7` under the ignored worktree reports directory, frozen dependencies independently installed (no cross-worktree node_modules symlink), and production Vite build passed. Comparable timing remains pending until the final integrated grid/backend is ready and qualification processes are idle. Machine observed: AMD Ryzen 5 1600, 12 logical CPUs; Node24.19.0, manifest-selected pnpm10.18.1. The existing startup corpus is 91 Models/27 Collections, distributed or 90+1 dense, real local SQLite/FS thumbnails (160x160 WebP), production nginx, Chromium1440x900 with active service worker, repeated cold-context and warm-context navigation. No optimization percentage, p95 or final budget tuning is claimed here.
+
+M6 manual review additions:
+
+| Exact path | Symbols / notes inspected |
+|---|---|
+| `frontend/src/lib/asset-cache.ts` | shared lease acquisition/release, queued/active cancellation, immediate retired-slot release, inactive count+encoded-byte eviction, explicit invalidation subscriptions, live/inactive stats and global disposal |
+| `frontend/src/lib/use-authenticated-asset-url.ts` | cached mount lease, admitted acquisition, scope snapshot and path-specific invalidation, stale completion suppression |
+| `frontend/src/lib/use-viewport-admission.ts` | one observer with200px margin, persistent admission, unobserve/disconnect cleanup, absent-API fallback and shared adapter |
+| `frontend/src/components/protected-thumbnail.tsx` | alt/native external URL semantics, actual decode readiness, cached onload recovery and existing fade tokens |
+| `frontend/src/components/model-card.tsx` | thumbnail extraction only; drag, Shift-selection, optimistic star, tag button and hover route prefetch retained |
+| `frontend/src/components/multipart-model-presentation.tsx` | Count localization; Cover placeholder/layout/alt and admitted URL owner |
+| `frontend/src/components/search-evidence.tsx` | SearchSubjectPreview icon/frame and image admission |
+| `frontend/src/components/similarity-queue.tsx` | ModelLabel thumbnail admission; linked model semantics; remaining queue untouched |
+| `frontend/src/components/multipart-model-browser.tsx` | four Cover call sites for cards, candidates, live member and unavailable-member presentations; no edits |
+| `frontend/src/components/model-grid.tsx` | baseline MultipartModelListRow and ModelListRow thumbnail hook/frame; no edits; integrated Document owner assigned to root |
+| `frontend/src/components/model-detail/index.tsx` | thumbUrl detail hero; base lease hook retained for detail visibility |
+| `frontend/src/components/model-detail/source-tab.tsx` | SourceCover content path, upload/delete explicit invalidation; base lease hook retained |
+| `frontend/src/components/markdown-view.tsx` | AuthImage local versus external content URL; base lease hook retained for document/content images |
+| `frontend/src/lib/__tests__/asset-cache.test.ts` | existing reuse/error/session/LRU assertions plus leases, scheduler, caller cancellation, encoded bytes and stats |
+| `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx` | cached mount pressure, scope retirement, path race, admission, replacement bytes |
+| `frontend/src/lib/__tests__/use-viewport-admission.test.tsx` | fake observer admission/unmount/fallback contracts |
+| `frontend/src/components/__tests__/protected-thumbnail.test.tsx` | deferred decode, alt/missing/external, Cover and Search preview semantics |
+| `frontend/src/components/__tests__/model-card.test.tsx` | revision/star/selection existing assertions; no edits |
+| `frontend/src/components/__tests__/similarity-queue.test.tsx` | review/status/list existing assertions; no edits |
+| `frontend/src/components/__tests__/multipart-model-browser.test.tsx` | shared Cover compatibility assertions; no edits |
+| `frontend/src/lib/__tests__/use-startup-thumbnails.test.tsx` | visible completed-image reporting and cleanup; no edits |
+| `frontend/tests/e2e/protected-assets.spec.ts` | 24-card admission, valid PNG decoding, held HTTP concurrency and scroll admission |
+| `frontend/tests/e2e/_setup.ts` | authenticated mock server lifecycle, per-test resets and browser metadata |
+| `frontend/tests/e2e/mock-api.ts` | ModelPage shape, native PNG fixture and route server; no edits |
+| `frontend/src/test-support/factories.ts` | aModelListItem defaults for headline browser corpus; no edits |
+| `frontend/playwright.config.ts` | Chromium, single worker, strict port, Vite/API proxy and test directory; no edits |
+| `frontend/playwright.startup.config.ts` | production build, real backend/nginx startup and sample runner; no edits |
+| `frontend/tests/performance/library-startup.spec.ts` | cold/warm context lifecycle, SW, actual completed-image milestone and resource/server timing observations; no edits |
+| `frontend/tests/performance/scripts/start-backend.sh` | owned throwaway data root and exact corpus seed; no edits |
+| `frontend/tests/performance/scripts/start-frontend.sh` | production nginx caching/delivery and cleanup; no edits |
+| `backend/tests/factories/library_startup.py` | distribution/cardinality, derivative rows and completed160pxWebP fixture; no edits |
+
+All base protected-asset hook consumers now acquire leases and share max4 admission. List thumbnail viewport adapters in root-owned integrated ModelGrid (Model, Multipart, Document rows/cards) remain a coordinator cutover dependency; this checkpoint does not claim that final grid migration or final measurements are complete.
+
+| 76 | keeps a failed decode out of the readiness milestone | Error | loaded image decoder fails | pending marker; no false decoded-ready claim | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps a failed decode out of the readiness milestone` |
+| 77 | ignores a previous URL decode after image reassignment | Error | decoder A pending; URL B displayed | A cannot mark B ready; B decode establishes readiness | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::ignores a previous URL decode after image reassignment` |
+
+Final M6 combined qualification: **281 passed (14 files)** across assets, thumbnails, existing card/Multipart/similarity/startup, M7 sockets, and integrated AuthProvider/store retirement contracts; final focused decoder lane **7 passed**, including two additional error/reassignment cases. Scope/presentation prerequisite is coordinator commit2facc0c3 (content cherry-picked locally as16613e66).

@@ -1,4 +1,4 @@
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
 import { Box, Boxes, FileText, Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchSubjectType } from "@/types/search";
@@ -12,7 +12,7 @@ export function SearchSubjectPreview({
   subjectType: SearchSubjectType;
   large?: boolean;
 }) {
-  const source = useAuthenticatedAssetUrl(path);
+  const { url: source, ref } = useViewportAssetUrl(path);
   const frame = large ? "aspect-[4/3] w-full" : "h-16 w-16 shrink-0";
   const Icon =
     subjectType === "collection"
@@ -24,6 +24,7 @@ export function SearchSubjectPreview({
           : Box;
   return source ? (
     <img
+      ref={ref}
       src={source}
       alt=""
       loading="lazy"
@@ -31,6 +32,7 @@ export function SearchSubjectPreview({
     />
   ) : (
     <div
+      ref={ref}
       className={cn(
         frame,
         "flex items-center justify-center rounded-md bg-muted/30 text-muted-foreground",

@@ -23,7 +23,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getCachedAssetUrl, invalidateCachedAsset, peekCachedAssetUrl } from "@/lib/asset-cache";
+import {
+  acquireAssetUrl,
+  getAssetCacheStats,
+  getCachedAssetUrl,
+  invalidateCachedAsset,
+  peekCachedAssetUrl,
+} from "@/lib/asset-cache";
 
 /** Resolve `count` distinct assets, to push the cache past its cap. */
 async function fill(prefix: string, count: number) {
@@ -230,4 +236,160 @@ describe("assetCache", () => {
       expect(peekCachedAssetUrl("/files/keep-404/thumbnail")).not.toBeNull();
     });
   });
+});
+
+describe("asset leases and admission", () => {
+  it("limits simultaneous protected image downloads to four", async () => {
+    const responses = Array.from({ length: 6 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const leases = responses.map((_, i) => acquireAssetUrl(`/lease/limit-${i}`));
+    expect(fetch).toHaveBeenCalledTimes(4);
+    responses[0].resolve(new Response("png"));
+    await leases[0].url;
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+    responses.slice(1).forEach((response) => response.resolve(new Response("png")));
+    await Promise.all(leases.map((lease) => lease.url));
+    leases.forEach((lease) => lease.release());
+  });
+
+  it("removes abandoned queued image work", async () => {
+    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const active = responses.map((_, i) => acquireAssetUrl(`/lease/queue-${i}`));
+    const queued = acquireAssetUrl("/lease/abandoned");
+    const abandoned = queued.url.catch((error: Error) => error);
+    queued.release();
+    responses.forEach((response) => response.resolve(new Response("png")));
+    await Promise.all(active.map((lease) => lease.url));
+    expect(await abandoned).toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    active.forEach((lease) => lease.release());
+  });
+
+  it("aborts an unneeded active download", async () => {
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(response.promise);
+    const lease = acquireAssetUrl("/lease/active");
+    const outcome = lease.url.catch((error: Error) => error);
+    lease.release();
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    response.resolve(new Response("discard"));
+  });
+
+  it("keeps shared work for the remaining image consumer", async () => {
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(response.promise);
+    const first = acquireAssetUrl("/lease/shared");
+    const other = acquireAssetUrl("/lease/shared");
+    const outcome = first.url.catch((error: Error) => error);
+    first.release();
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    response.resolve(new Response("shared"));
+    expect(await other.url).toBe(created[0]);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledOnce();
+    other.release();
+  });
+
+  it("keeps a mounted image URL under count pressure", async () => {
+    const mounted = acquireAssetUrl("/lease/mounted");
+    const url = await mounted.url;
+    await fill("pressure", 405);
+    expect(peekCachedAssetUrl("/lease/mounted")).toBe(url);
+    expect(revoked).not.toContain(url);
+    mounted.release();
+  });
+
+  it("bounds inactive image bytes", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
+    const urls: string[] = [];
+    for (let i = 0; i < 5; i++) urls.push(await getCachedAssetUrl(`/lease/bytes-${i}`));
+    expect(revoked).toContain(urls[0]);
+    expect(peekCachedAssetUrl("/lease/bytes-4")).toBe(urls[4]);
+  });
+
+  it("observes caller cancellation independently", async () => {
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(response.promise);
+    const controller = new AbortController();
+    const first = acquireAssetUrl("/lease/caller", controller.signal);
+    const other = acquireAssetUrl("/lease/caller");
+    const outcome = first.url.catch((error: Error) => error);
+    const reason = new DOMException("left", "AbortError");
+    controller.abort(reason);
+    expect(await outcome).toBe(reason);
+    response.resolve(new Response("shared"));
+    expect(await other.url).toBe(created[0]);
+    other.release();
+  });
+
+  it("disposes active and queued assets on scope retirement", async () => {
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValue(response.promise);
+    const leases = Array.from({ length: 6 }, (_, i) => acquireAssetUrl(`/lease/session-${i}`));
+    const outcomes = leases.map((lease) => lease.url.catch((error: Error) => error));
+    window.dispatchEvent(new Event("printstash:auth-changed"));
+    for (const [, init] of vi.mocked(fetch).mock.calls) expect(init?.signal?.aborted).toBe(true);
+    response.resolve(new Response("obsolete"));
+    for (const outcome of await Promise.all(outcomes))
+      expect(outcome).toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(created).toHaveLength(0);
+    leases.forEach((lease) => lease.release());
+  });
+});
+
+it("starts current scope work before an old aborted response settles", async () => {
+  const previous = Promise.withResolvers<Response>();
+  vi.mocked(fetch)
+    .mockReturnValueOnce(previous.promise)
+    .mockReturnValueOnce(previous.promise)
+    .mockReturnValueOnce(previous.promise)
+    .mockReturnValueOnce(previous.promise);
+  const old = Array.from({ length: 4 }, (_, i) => acquireAssetUrl(`/lease/old-${i}`));
+  const outcomes = old.map((lease) => lease.url.catch((error: Error) => error));
+  window.dispatchEvent(new Event("printstash:auth-changed"));
+  const current = acquireAssetUrl("/lease/current");
+  try {
+    expect(fetch).toHaveBeenCalledTimes(5);
+    await expect(current.url).resolves.toBeTruthy();
+  } finally {
+    previous.resolve(new Response("obsolete"));
+    current.release();
+    await Promise.all(outcomes);
+  }
+});
+
+it("reports leased and inactive encoded bytes separately", async () => {
+  const lease = acquireAssetUrl("/lease/stats");
+  await lease.url;
+  expect(getAssetCacheStats()).toMatchObject({
+    liveBytes: 9,
+    inactiveBytes: 0,
+    inactiveEntries: 0,
+  });
+  lease.release();
+  expect(getAssetCacheStats()).toMatchObject({
+    liveBytes: 0,
+    inactiveBytes: 9,
+    inactiveEntries: 1,
+  });
+});
+
+it("excludes referenced image bytes from inactive eviction", async () => {
+  vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
+  const mounted = acquireAssetUrl("/lease/byte-mounted");
+  const url = await mounted.url;
+  for (let i = 0; i < 5; i++) await getCachedAssetUrl(`/lease/byte-pressure-${i}`);
+  expect(revoked).not.toContain(url);
+  expect(peekCachedAssetUrl("/lease/byte-mounted")).toBe(url);
+  expect(getAssetCacheStats()).toMatchObject({
+    liveBytes: 8 * 1024 * 1024,
+    inactiveBytes: 32 * 1024 * 1024,
+    inactiveEntries: 4,
+  });
+  mounted.release();
 });

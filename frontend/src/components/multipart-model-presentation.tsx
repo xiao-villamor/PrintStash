@@ -1,6 +1,6 @@
 import { Boxes } from "lucide-react";
 import { useUiLocale } from "@/lib/i18n";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
 export function Count({ count, one, many }: { count: number; one: string; many: string }) {
   useUiLocale();
@@ -9,22 +9,17 @@ export function Count({ count, one, many }: { count: number; one: string; many: 
 
 export function Cover({ src, alt }: { src: string | null; alt: string }) {
   useUiLocale();
-  const external = src?.startsWith("https://") || src?.startsWith("http://") ? src : null;
-  const authenticated = useAuthenticatedAssetUrl(external ? null : src);
-  const url = external ?? authenticated;
-  return url ? (
-    <img
-      data-library-thumbnail="ready"
-      src={url}
+  return (
+    <ProtectedThumbnail
+      path={src}
       alt={alt}
-      className="h-full w-full object-contain"
+      className="h-full w-full"
+      imageClassName="h-full w-full object-contain"
+      placeholder={
+        <div className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground">
+          <Boxes className="h-10 w-10" aria-hidden />
+        </div>
+      }
     />
-  ) : (
-    <div
-      data-library-thumbnail={src ? "pending" : "missing"}
-      className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground"
-    >
-      <Boxes className="h-10 w-10" aria-hidden />
-    </div>
   );
 }

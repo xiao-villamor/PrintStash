@@ -20,7 +20,7 @@ import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { evidenceDescription, evidenceLabel, isSimilarityRunActive } from "@/lib/similarity";
 import { toast } from "@/lib/toast";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
 import type { CollectionNodeRead } from "@/types";
 import {
   EVIDENCE_CLASSES,
@@ -34,7 +34,7 @@ const REVIEW_STATES: ReviewState[] = ["open", "confirmed", "later", "rejected"];
 const FILTER_DEBOUNCE_MS = 250;
 
 function ModelLabel({ model }: { model: SimilarityModel }) {
-  const image = useAuthenticatedAssetUrl(
+  const { url: image, ref } = useViewportAssetUrl(
     model.thumbnail_file_id ? `/api/v1/files/${model.thumbnail_file_id}/thumbnail` : null,
   );
   return (
@@ -42,7 +42,10 @@ function ModelLabel({ model }: { model: SimilarityModel }) {
       href={`/models/${model.id}`}
       className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+      <span
+        ref={ref}
+        className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted"
+      >
         {image ? (
           <img src={image} alt="" className="h-full w-full object-contain" />
         ) : (
