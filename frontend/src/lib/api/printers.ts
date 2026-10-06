@@ -3,7 +3,6 @@ import {
   getJson,
   GetJsonOptions,
   getWsUrl,
-  requestMutation,
   requestApi,
   jsonHeaders,
   sendAction,
@@ -108,8 +107,17 @@ export function sendToPrinter(id: number, payload: SendToPrinter): Promise<Print
   return sendJson<PrintJobRead>(`/api/v1/printers/${id}/send`, "POST", payload);
 }
 
-export function startPrinterFile(id: number, payload: StartPrinterFile): Promise<PrintJobRead> {
-  return sendJson<PrintJobRead>(`/api/v1/printers/${id}/start`, "POST", payload);
+export function startPrinterFile(
+  id: number,
+  payload: StartPrinterFile,
+  options?: GetJsonOptions,
+): Promise<PrintJobRead> {
+  return requestApi<PrintJobRead>(`/api/v1/printers/${id}/start`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  });
 }
 
 function printerControl(id: number, action: "pause" | "resume" | "cancel"): Promise<void> {
@@ -158,16 +166,23 @@ export function listPrinterFiles(id: number, options?: GetJsonOptions): Promise<
   return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`, options);
 }
 
-export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
-  return sendJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files/sync`, "POST", {});
+export function syncPrinterFiles(id: number, options?: GetJsonOptions): Promise<PrinterFileRead[]> {
+  return requestApi<PrinterFileRead[]>(`/api/v1/printers/${id}/files/sync`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
+  });
 }
 
 export async function deletePrinterFile(
   id: number,
   printerFileId: number,
+  options?: GetJsonOptions,
 ): Promise<PrinterFileRead[]> {
-  return requestMutation<PrinterFileRead[]>(`/api/v1/printers/${id}/files/${printerFileId}`, {
+  return requestApi<PrinterFileRead[]>(`/api/v1/printers/${id}/files/${printerFileId}`, {
     method: "DELETE",
+    signal: options?.signal,
   });
 }
 

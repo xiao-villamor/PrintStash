@@ -1,5 +1,11 @@
-import { useEffect, useSyncExternalStore } from "react";
-import { queryOptions, useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  queryOptions,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, withSessionRequest } from "@/lib/session-transport";
 import { subscribeEvents } from "@/lib/events";
@@ -13,9 +19,25 @@ import {
   updatePrinterRouting,
 } from "@/lib/api/fleet";
 
+import {
+  getPrinter,
+  listPrinterJobs,
+  listPrinterFiles,
+  getPrinterDiagnostics,
+  getMoonrakerConfig,
+  syncPrinterFiles,
+  deletePrinterFile,
+  startPrinterFile,
+} from "@/lib/api/printers";
+import type { PrinterRead, StartPrinterFile } from "@/types";
+
 export const printerKeys = {
   all: ["printers"] as const,
   detail: (id: number) => ["printers", id] as const,
+  jobs: (id: number) => ["printers", id, "jobs", 50] as const,
+  files: (id: number) => ["printers", id, "files"] as const,
+  diagnostics: (id: number) => ["printers", id, "diagnostics"] as const,
+  config: (id: number) => ["printers", id, "config"] as const,
   windows: (id: number) => ["printers", id, "maintenance", "windows"] as const,
   log: (id: number) => ["printers", id, "maintenance", "log"] as const,
 };
@@ -143,5 +165,164 @@ export function useMaintenanceMutation(api = maintenanceApi) {
         );
         request.assertCurrent();
       }),
+  });
+}
+
+export function printerDetailOptions(id: number) {
+  return queryOptions({
+    queryKey: printerKeys.detail(id),
+    queryFn: ({ signal }) => getPrinter(id, { signal }),
+    staleTime: 30_000,
+  });
+}
+export function printerJobsOptions(id: number) {
+  return queryOptions({
+    queryKey: printerKeys.jobs(id),
+    queryFn: ({ signal }) => listPrinterJobs(id, 50, { signal }),
+    staleTime: 30_000,
+  });
+}
+export function printerFilesOptions(id: number) {
+  return queryOptions({
+    queryKey: printerKeys.files(id),
+    queryFn: ({ signal }) => listPrinterFiles(id, { signal }),
+    staleTime: 30_000,
+  });
+}
+export function printerDiagnosticsOptions(id: number) {
+  return queryOptions({
+    queryKey: printerKeys.diagnostics(id),
+    queryFn: ({ signal }) => getPrinterDiagnostics(id, { signal }),
+    staleTime: 30_000,
+  });
+}
+export function printerConfigOptions(id: number) {
+  return queryOptions({
+    queryKey: printerKeys.config(id),
+    queryFn: ({ signal }) => getMoonrakerConfig(id, { signal }),
+    staleTime: 30_000,
+  });
+}
+
+/** HTTP state is shared; route snapshots seed only the incarnation that received them. */
+export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  const [initialSession] = useState(session);
+  const enabled = isLoggedIn();
+  const client = useQueryClient();
+  const detail = useQuery({
+    ...printerDetailOptions(id),
+    enabled,
+    initialData:
+      session === initialSession && initialPrinter?.id === id ? initialPrinter : undefined,
+    initialDataUpdatedAt: 0,
+  });
+  const printer = enabled ? (detail.data ?? null) : null;
+  const jobs = useQuery({ ...printerJobsOptions(id), enabled });
+  const files = useQuery({ ...printerFilesOptions(id), enabled });
+  const canAdmin = enabled && Boolean(printer?.access.can_admin);
+  const diagnostics = useQuery({ ...printerDiagnosticsOptions(id), enabled: canAdmin });
+  const canConfigure = canAdmin && printer?.provider === "moonraker";
+  const config = useQuery({ ...printerConfigOptions(id), enabled: canConfigure });
+  const refresh = useCallback(
+    async (queryKey: readonly unknown[]) => {
+      await client.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false });
+    },
+    [client],
+  );
+  const refreshAll = useCallback(async () => {
+    await Promise.all(
+      [
+        printerKeys.detail(id),
+        printerKeys.jobs(id),
+        printerKeys.files(id),
+        printerKeys.diagnostics(id),
+        printerKeys.config(id),
+      ].map(refresh),
+    );
+  }, [id, refresh]);
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeEvents((event) => {
+      if (event.type === "resync") void refreshAll();
+    });
+  }, [enabled, refreshAll]);
+  const publishPrinter = useCallback(
+    (updated: PrinterRead) =>
+      withSessionRequest(async (request) => {
+        if (updated.id !== id) throw new Error("printer_identity_mismatch");
+        await client.cancelQueries({ queryKey: printerKeys.detail(id), exact: true });
+        request.assertCurrent();
+        client.setQueryData(printerKeys.detail(id), updated);
+      }),
+    [client, id],
+  );
+  return {
+    printer,
+    jobs: enabled ? (jobs.data ?? []) : [],
+    files: enabled ? (files.data ?? []) : [],
+    diagnostics: canAdmin ? (diagnostics.data ?? null) : null,
+    config: canConfigure ? (config.data ?? null) : null,
+    checkingDiagnostics: diagnostics.isFetching,
+    loadingConfig: config.isFetching,
+    error:
+      [
+        detail,
+        jobs,
+        files,
+        ...(canAdmin ? [diagnostics] : []),
+        ...(canConfigure ? [config] : []),
+      ].find((query) => query.error)?.error ?? null,
+    refresh,
+    refreshAll,
+    publishPrinter,
+  };
+}
+
+type PrinterFileChange =
+  | { kind: "sync"; printerId: number; signal: AbortSignal }
+  | { kind: "delete"; printerId: number; fileId: number; signal: AbortSignal }
+  | { kind: "start"; printerId: number; payload: StartPrinterFile; signal: AbortSignal };
+
+/** Acknowledged file lists replace cancelled obsolete reads, within the caller's view lifetime. */
+export function usePrinterFileMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (change: PrinterFileChange) =>
+      withSessionRequest(async (request) => {
+        if (change.kind === "start") {
+          const job = await startPrinterFile(change.printerId, change.payload, {
+            signal: request.signal,
+          });
+          request.assertCurrent();
+          await Promise.all(
+            [printerKeys.jobs(change.printerId), printerKeys.detail(change.printerId)].map(
+              async (queryKey) => {
+                await client.cancelQueries({ queryKey, exact: true });
+                request.assertCurrent();
+                await client.invalidateQueries({ queryKey, exact: true });
+              },
+            ),
+          );
+          request.assertCurrent();
+          return job;
+        }
+        const files =
+          change.kind === "sync"
+            ? await syncPrinterFiles(change.printerId, { signal: request.signal })
+            : await deletePrinterFile(change.printerId, change.fileId, { signal: request.signal });
+        request.assertCurrent();
+        await client.cancelQueries({ queryKey: printerKeys.files(change.printerId), exact: true });
+        request.assertCurrent();
+        client.setQueryData(printerKeys.files(change.printerId), files);
+        await client.cancelQueries({ queryKey: printerKeys.detail(change.printerId), exact: true });
+        request.assertCurrent();
+        await client.invalidateQueries({
+          queryKey: printerKeys.detail(change.printerId),
+          exact: true,
+        });
+        request.assertCurrent();
+        return null;
+      }, change.signal),
   });
 }

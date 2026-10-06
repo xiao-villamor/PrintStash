@@ -22,11 +22,18 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearLogin, storeLogin } from "@/lib/auth-store";
+import { clearLogin, storeLogin, retirePrivateSessionScope } from "@/lib/auth-store";
 import { PrinterDetailPage } from "@/components/printer-detail";
-import { aPrinter, printerAccess, printerCapabilities } from "@/test-support/factories";
+import {
+  aPrinter,
+  aPrinterFile,
+  printerAccess,
+  printerCapabilities,
+} from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { PrinterFileRead, PrinterRead } from "@/types";
+import { queryClient } from "@/lib/query-client";
+import { setEventSocketFactory, type EventSocket } from "@/lib/events";
+import type { PrinterRead } from "@/types";
 
 /** The subset of a live snapshot these tests push, named so it is not a dictionary. */
 interface LiveSnapshot {
@@ -70,28 +77,6 @@ async function pushSnapshot(data: LiveSnapshot) {
   });
 }
 
-function aPrinterFile(over: Partial<PrinterFileRead> = {}): PrinterFileRead {
-  return {
-    id: 50,
-    printer_id: 4,
-    printer_name: "Voron",
-    file_id: 20,
-    model_id: 1,
-    model_name: "Bracket",
-    original_filename: "bracket.gcode",
-    remote_filename: "bracket.gcode",
-    size_bytes: 4096,
-    sha256: "b".repeat(64),
-    matched_by: "sha256",
-    modified_at: "2026-01-01T00:00:00Z",
-    last_seen_at: "2026-01-01T00:00:00Z",
-    missing_since: null,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
-
 /**
  * The body of the last temperature request. Several POSTs go out per gesture, so
  * matching the prefix alone reads whichever one happened to be last.
@@ -129,11 +114,15 @@ function renderPrinter(options: RenderAppOptions & { printer?: PrinterRead } = {
   });
 }
 
+let eventSocket: EventSocket;
+
 beforeEach(() => {
   window.localStorage.clear();
   FakeSocket.latest = null;
   FakeSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeSocket);
+  eventSocket = { onopen: null, onclose: null, onmessage: null, send() {}, close() {} };
+  setEventSocketFactory(async () => eventSocket);
 });
 
 afterEach(() => {
@@ -887,5 +876,271 @@ describe("printer page connection lifetimes", () => {
       page.requestsWithMethod("POST").filter(({ url }) => url.includes("ws-ticket")),
     ).toHaveLength(1);
     page.unmount();
+  });
+});
+
+describe("PrinterDetailPage HTTP ownership", () => {
+  it("revalidates an initially supplied printer", async () => {
+    renderPrinter({
+      routes: { "GET /api/v1/printers/4": json(aPrinter({ id: 4, name: "Fresh printer" })) },
+    });
+    expect(await screen.findByText("Fresh printer")).toBeInTheDocument();
+  });
+
+  it("aborts reads for a previous printer", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4/files": (_url, init) => {
+          signal ??= init?.signal;
+          return pending.promise;
+        },
+        "GET /api/v1/printers/5": json(aPrinter({ id: 5, name: "New machine" })),
+        "GET /api/v1/printers/5/jobs": json([]),
+        "GET /api/v1/printers/5/files": json([
+          aPrinterFile({ id: 51, printer_id: 5, remote_filename: "current.gcode" }),
+        ]),
+        "GET /api/v1/printers/5/diagnostics": json({ provider: "moonraker", checks: [] }),
+        "GET /api/v1/printers/5/config": json({ config: "" }),
+        "POST /api/v1/printers/5/ws-ticket": json({ ticket: "new", expires_in: 60 }),
+      },
+    });
+    await waitFor(() =>
+      expect(app.requestsWithMethod("GET").some((call) => call.url.includes("/4/files"))).toBe(
+        true,
+      ),
+    );
+    app.rerender(
+      <PrinterDetailPage printerId={5} initialPrinter={aPrinter({ id: 5, name: "New machine" })} />,
+    );
+    expect(signal?.aborted).toBe(true);
+    await userEvent.setup().click(await screen.findByRole("tab", { name: "Files" }));
+    expect(await screen.findByText("current.gcode")).toBeInTheDocument();
+    await act(async () =>
+      pending.resolve(json([aPrinterFile({ remote_filename: "obsolete.gcode" })])),
+    );
+    expect(screen.queryByText("obsolete.gcode")).not.toBeInTheDocument();
+  });
+
+  it("shares printer resources between mounted views", async () => {
+    const printer = aPrinter({ id: 4, name: "Voron" });
+    const app = renderApp(
+      <>
+        <PrinterDetailPage printerId={4} initialPrinter={printer} />
+        <PrinterDetailPage printerId={4} initialPrinter={printer} />
+      </>,
+      {
+        routes: {
+          "GET /api/v1/printers/4": json(printer),
+          "GET /api/v1/printers/4/jobs": json([]),
+          "GET /api/v1/printers/4/files": json([]),
+          "GET /api/v1/printers/4/diagnostics": json({ provider: "moonraker", checks: [] }),
+          "GET /api/v1/printers/4/config": json({ config: "" }),
+          "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
+        },
+      },
+    );
+    await waitFor(() => expect(app.requestsWithMethod("GET")).toHaveLength(5));
+    for (const path of ["/4/jobs", "/4/files", "/4/config", "/4/diagnostics"])
+      expect(app.requestsWithMethod("GET").filter((call) => call.url.includes(path))).toHaveLength(
+        1,
+      );
+  });
+
+  it("preserves settings drafts during revalidation", async () => {
+    const user = userEvent.setup();
+    renderPrinter();
+    await user.click(await screen.findByRole("tab", { name: "Settings" }));
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Unsaved machine");
+    await act(async () =>
+      queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
+    );
+    expect(name).toHaveValue("Unsaved machine");
+  });
+
+  it("refreshes printer resources after reconnect", async () => {
+    const app = renderPrinter();
+    await waitFor(() => expect(app.requestsWithMethod("GET")).toHaveLength(5));
+    const first = FakeSocket.latest;
+    await waitFor(() => expect(first?.onopen).not.toBeNull());
+    act(() => first?.onopen?.());
+    vi.useFakeTimers();
+    try {
+      act(() => first?.onclose?.());
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(FakeSocket.latest).not.toBe(first);
+      await act(async () => FakeSocket.latest?.onopen?.());
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      for (const path of ["/4/jobs", "/4/files", "/4/config", "/4/diagnostics"])
+        expect(
+          app.requestsWithMethod("GET").filter((call) => call.url.includes(path)),
+        ).toHaveLength(2);
+      expect(
+        app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/printers/4")),
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a file acknowledgement after a printer switch", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderPrinter({
+      routes: {
+        "POST /api/v1/printers/4/files/sync": (_url, init) => {
+          signal = init?.signal;
+          return pending.promise;
+        },
+        "GET /api/v1/printers/5": json(aPrinter({ id: 5, name: "Current machine" })),
+        "GET /api/v1/printers/5/jobs": json([]),
+        "GET /api/v1/printers/5/files": json([
+          aPrinterFile({ printer_id: 5, remote_filename: "current.gcode" }),
+        ]),
+        "GET /api/v1/printers/5/diagnostics": json({ provider: "moonraker", checks: [] }),
+        "GET /api/v1/printers/5/config": json({ config: "" }),
+        "POST /api/v1/printers/5/ws-ticket": json({ ticket: "t", expires_in: 60 }),
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Files" }));
+    await user.click(screen.getByRole("button", { name: "Sync" }));
+    await waitFor(() =>
+      expect(app.requestsWithMethod("POST").some((call) => call.url.includes("files/sync"))).toBe(
+        true,
+      ),
+    );
+    app.rerender(
+      <PrinterDetailPage
+        printerId={5}
+        initialPrinter={aPrinter({ id: 5, name: "Current machine" })}
+      />,
+    );
+    expect(signal?.aborted).toBe(true);
+    await user.click(await screen.findByRole("tab", { name: "Files" }));
+    expect(await screen.findByText("current.gcode")).toBeInTheDocument();
+    await act(async () =>
+      pending.resolve(json([aPrinterFile({ remote_filename: "obsolete.gcode" })])),
+    );
+    expect(screen.queryByText("obsolete.gcode")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sync" })).not.toBeDisabled();
+  });
+
+  it("surfaces printer lookup failure for retry", async () => {
+    let reads = 0;
+    renderApp(<PrinterDetailPage printerId={4} />, {
+      routes: {
+        "GET /api/v1/printers/4": () =>
+          ++reads === 1
+            ? json({ detail: "temporarily_unavailable" }, 503)
+            : json(aPrinter({ id: 4, name: "Recovered machine" })),
+        "GET /api/v1/printers/4/jobs": json([]),
+        "GET /api/v1/printers/4/files": json([]),
+        "GET /api/v1/printers/4/diagnostics": json({ provider: "moonraker", checks: [] }),
+        "GET /api/v1/printers/4/config": json({ config: "" }),
+        "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
+      },
+    });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Recovered machine")).toBeInTheDocument();
+    expect(reads).toBe(2);
+  });
+
+  it("refreshes printer resources after shared event resync", async () => {
+    const app = renderPrinter();
+    await waitFor(() => expect(app.requestsWithMethod("GET")).toHaveLength(5));
+    await waitFor(() => expect(eventSocket.onmessage).not.toBeNull());
+    await act(async () => eventSocket.onmessage?.({ data: JSON.stringify({ type: "resync" }) }));
+    await waitFor(() => expect(app.requestsWithMethod("GET")).toHaveLength(10));
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/printers/4")),
+    ).toHaveLength(2);
+  });
+
+  it("coalesces print state job revalidation", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderPrinter({ routes: { "GET /api/v1/printers/4/jobs": () => pending.promise } });
+    await pushSnapshot({ print_stats: { state: "printing" } });
+    await pushSnapshot({ print_stats: { state: "paused" } });
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.includes("/4/jobs")),
+    ).toHaveLength(1);
+    await act(async () => pending.resolve(json([])));
+  });
+
+  it("publishes confirmed files over obsolete reads", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4/files": (_url, init) => {
+          signal ??= init?.signal;
+          return pending.promise;
+        },
+        "POST /api/v1/printers/4/files/sync": json([
+          aPrinterFile({ remote_filename: "confirmed.gcode" }),
+        ]),
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Files" }));
+    await user.click(screen.getByRole("button", { name: "Sync" }));
+    expect(await screen.findByText("confirmed.gcode")).toBeInTheDocument();
+    expect(signal?.aborted).toBe(true);
+    await act(async () =>
+      pending.resolve(json([aPrinterFile({ remote_filename: "obsolete.gcode" })])),
+    );
+    expect(screen.queryByText("obsolete.gcode")).not.toBeInTheDocument();
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.includes("/4/files")),
+    ).toHaveLength(1);
+  });
+
+  it("retains files after a denied sync", async () => {
+    const app = renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4/files": json([aPrinterFile()]),
+        "POST /api/v1/printers/4/files/sync": json({ detail: "forbidden" }, 403),
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Files" }));
+    expect(await screen.findByText("bracket.gcode")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sync" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sync" })).not.toBeDisabled());
+    expect(screen.getByText("bracket.gcode")).toBeInTheDocument();
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/printers/4")),
+    ).toHaveLength(1);
+  });
+
+  it("retires printer HTTP data on scope changes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4/files": (_url, init) => {
+          signal ??= init?.signal;
+          return pending.promise;
+        },
+      },
+    });
+    await waitFor(() =>
+      expect(app.requestsWithMethod("GET").some((call) => call.url.includes("/4/files"))).toBe(
+        true,
+      ),
+    );
+    act(() => retirePrivateSessionScope());
+    expect(signal?.aborted).toBe(true);
+    await waitFor(() =>
+      expect(
+        app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/printers/4")),
+      ).toHaveLength(2),
+    );
+    await act(async () => pending.resolve(json([])));
   });
 });

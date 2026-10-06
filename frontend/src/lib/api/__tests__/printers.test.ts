@@ -47,6 +47,8 @@ import {
   updatePrinterManualMaterialState,
   updatePrinterPermission,
 } from "@/lib/api/printers";
+import { queryClient } from "@/lib/query-client";
+import { aPrinter } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { invalidateApiCache } from "@/lib/api/request";
 
@@ -375,5 +377,21 @@ describe("printer HTTP read cancellation", () => {
     expect(signal?.aborted).toBe(true);
     pending.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
     expect(await outcome).toBe(reason);
+  });
+});
+
+describe("printer file transport isolation", () => {
+  it.each([
+    {
+      label: "start",
+      write: () => startPrinterFile(4, { remote_filename: "bracket.gcode", file_id: 20 }),
+    },
+    { label: "sync", write: () => syncPrinterFiles(4) },
+    { label: "delete", write: () => deletePrinterFile(4, 50) },
+  ])("leaves caches untouched after printer file transport writes ($label)", async ({ write }) => {
+    queryClient.setQueryData(["printers", 99], aPrinter({ id: 99 }));
+    respondWith([]);
+    await write();
+    expect(queryClient.getQueryState(["printers", 99])?.isInvalidated).toBe(false);
   });
 });

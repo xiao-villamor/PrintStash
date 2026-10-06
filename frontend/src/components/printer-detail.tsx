@@ -10,13 +10,10 @@ import {
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "@/lib/link";
 import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
 import {
-  MoonrakerConfigRead,
-  PrintJobRead,
-  PrinterDiagnostics,
   PrinterFileRead,
   PrinterRead,
   PrinterSnapshot,
@@ -25,22 +22,21 @@ import {
 } from "@/types";
 import {
   cancelPrinter,
-  deletePrinterFile,
   emergencyStopPrinter,
-  getMoonrakerConfig,
-  getPrinterDiagnostics,
-  getPrinter,
   homePrinter,
-  listPrinterFiles,
-  listPrinterJobs,
   openPrinterWS,
   pausePrinter,
   resumePrinter,
   setPrinterTemperature,
-  startPrinterFile,
-  syncPrinterFiles,
   updatePrinter,
 } from "@/lib/api";
+import {
+  printerKeys,
+  usePrinterResources,
+  usePrinterFileMutation,
+} from "@/features/printers/queries";
+import { getSessionVersion } from "@/lib/session-transport";
+import { userMessage } from "@/lib/errors";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -147,14 +143,39 @@ export function PrinterDetailPage({
   printerId: number;
   initialPrinter?: PrinterRead;
 }) {
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  const [initialSession] = useState(session);
+  return (
+    <PrinterDetailView
+      key={`${printerId}:${session}`}
+      printerId={printerId}
+      initialPrinter={session === initialSession ? initialPrinter : undefined}
+    />
+  );
+}
+
+function PrinterDetailView({
+  printerId,
+  initialPrinter,
+}: {
+  printerId: number;
+  initialPrinter?: PrinterRead;
+}) {
   useUiLocale();
   const auth = useRequireAuth();
-  const [printer, setPrinter] = useState<PrinterRead | null>(initialPrinter ?? null);
-  const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
-  const [moonrakerConfig, setMoonrakerConfig] = useState<MoonrakerConfigRead | null>(null);
+  const resources = usePrinterResources(printerId, initialPrinter);
+  const fileMutation = usePrinterFileMutation();
+  const { refresh, refreshAll } = resources;
+  const {
+    printer,
+    jobs,
+    files: printerFiles,
+    diagnostics,
+    config: moonrakerConfig,
+    checkingDiagnostics,
+    loadingConfig,
+  } = resources;
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
-  const [jobs, setJobs] = useState<PrintJobRead[]>([]);
-  const [printerFiles, setPrinterFiles] = useState<PrinterFileRead[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
@@ -174,68 +195,14 @@ export function PrinterDetailPage({
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
-  const [checkingDiagnostics, setCheckingDiagnostics] = useState(false);
-  const [loadingConfig, setLoadingConfig] = useState(false);
   const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
   const lifetime = useRef(0);
 
-  async function loadJobs() {
-    const version = lifetime.current;
-    try {
-      const next = await listPrinterJobs(printerId);
-      if (version === lifetime.current) setJobs(next);
-    } catch (e) {
-      if (version === lifetime.current) console.warn("Failed to load jobs:", e);
-    }
-  }
-
-  async function loadPrinterFiles() {
-    const version = lifetime.current;
-    try {
-      const next = await listPrinterFiles(printerId);
-      if (version === lifetime.current) setPrinterFiles(next);
-    } catch (e) {
-      if (version === lifetime.current) console.warn("Failed to load printer files:", e);
-    }
-  }
-
-  async function loadPrinter() {
-    const version = lifetime.current;
-    try {
-      const next = await getPrinter(printerId);
-      if (version === lifetime.current) setPrinter(next);
-    } catch (e: any) {
-      if (version === lifetime.current) setError(e.message);
-    }
-  }
-
-  async function loadDiagnostics() {
-    const version = lifetime.current;
-    setCheckingDiagnostics(true);
-    try {
-      const next = await getPrinterDiagnostics(printerId);
-      if (version === lifetime.current) setDiagnostics(next);
-    } catch (e) {
-      if (version === lifetime.current) toast.error(e);
-    } finally {
-      if (version === lifetime.current) setCheckingDiagnostics(false);
-    }
-  }
-
-  async function loadMoonrakerConfig() {
-    const version = lifetime.current;
-    if (printer?.provider !== "moonraker" && initialPrinter?.provider !== "moonraker") return;
-    setLoadingConfig(true);
-    try {
-      const next = await getMoonrakerConfig(printerId);
-      if (version === lifetime.current) setMoonrakerConfig(next);
-    } catch (e) {
-      if (version === lifetime.current) toast.error(e);
-    } finally {
-      if (version === lifetime.current) setLoadingConfig(false);
-    }
-  }
+  const viewRequests = useRef(new AbortController());
+  const loadJobs = useCallback(() => refresh(printerKeys.jobs(printerId)), [refresh, printerId]);
+  const loadDiagnostics = () => resources.refresh(printerKeys.diagnostics(printerId));
+  const loadMoonrakerConfig = () => resources.refresh(printerKeys.config(printerId));
 
   useEffect(() => {
     let disposed = false;
@@ -243,10 +210,13 @@ export function PrinterDetailPage({
     let socket: WebSocket | null = null;
     let controller: AbortController | null = null;
     let reconnect: ReturnType<typeof setTimeout> | null = null;
+    let opened = false;
 
     function retire() {
       generation += 1;
       lifetime.current += 1;
+      viewRequests.current.abort();
+      viewRequests.current = new AbortController();
       controller?.abort();
       controller = null;
       if (reconnect !== null) clearTimeout(reconnect);
@@ -277,7 +247,10 @@ export function PrinterDetailPage({
         socket = ws;
         const current = () => !disposed && version === generation && socket === ws;
         ws.onopen = () => {
-          if (current()) setWsConnected(true);
+          if (!current()) return;
+          setWsConnected(true);
+          if (opened) void refreshAll();
+          opened = true;
         };
         ws.onclose = () => {
           if (!current()) return;
@@ -316,62 +289,35 @@ export function PrinterDetailPage({
       }
     }
 
-    function reload() {
-      void loadPrinter();
-      void loadJobs();
-      void loadPrinterFiles();
-      void connect();
-    }
-
     retire();
-    setSnapshot({});
-    setWsConnected(false);
-    setPrinter(initialPrinter?.id === printerId ? initialPrinter : null);
-    if (!initialPrinter || initialPrinter.id !== printerId) void loadPrinter();
-    void loadJobs();
-    void loadPrinterFiles();
     void connect();
     const stopAuth = onAuthChange(() => {
       retire();
       setSnapshot({});
-      setJobs([]);
-      setPrinterFiles([]);
-      setPrinter(null);
-      setDiagnostics(null);
-      setMoonrakerConfig(null);
-      setCheckingDiagnostics(false);
-      setLoadingConfig(false);
       setWsConnected(false);
       setError(null);
-      if (isLoggedIn()) reload();
+      if (isLoggedIn()) void connect();
     });
     return () => {
       disposed = true;
       stopAuth();
       retire();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerId]);
-
-  useEffect(() => {
-    if (!printer?.access.can_admin) return;
-    void loadDiagnostics();
-    if (printer.provider === "moonraker") void loadMoonrakerConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printer?.id, printer?.access.can_admin]);
+  }, [printerId, loadJobs, refreshAll]);
 
   async function control(action: "pause" | "resume" | "cancel", fn: () => Promise<void>) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setBusy(action);
     try {
       await fn();
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setBusy(null);
+      if (version === lifetime.current) setBusy(null);
     }
   }
 
@@ -380,14 +326,15 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setMachineBusy(key);
     try {
       await fn();
-      toast.success(uiText(success.key, success.values));
+      if (version === lifetime.current) toast.success(uiText(success.key, success.values));
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setMachineBusy(null);
+      if (version === lifetime.current) setMachineBusy(null);
     }
   }
 
@@ -438,12 +385,13 @@ export function PrinterDetailPage({
   }
 
   async function confirmEmergencyStopAction() {
+    const version = lifetime.current;
     await machineAction(
       "estop",
       () => emergencyStopPrinter(printerId),
       uiMessage("printer.emergencyStopSuccess"),
     );
-    setConfirmEmergencyStop(false);
+    if (version === lifetime.current) setConfirmEmergencyStop(false);
   }
 
   async function syncFiles() {
@@ -451,17 +399,21 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setSyncingFiles(true);
     setError(null);
     try {
-      setPrinterFiles(await syncPrinterFiles(printerId));
-      await loadPrinter();
+      await fileMutation.mutateAsync({
+        kind: "sync",
+        printerId,
+        signal: viewRequests.current.signal,
+      });
+      if (version !== lifetime.current) return;
       toast.success(uiText("Printer files synced"));
     } catch (e) {
-      toast.error(e);
-      await loadPrinter();
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setSyncingFiles(false);
+      if (version === lifetime.current) setSyncingFiles(false);
     }
   }
 
@@ -470,20 +422,26 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setStartingFileId(file.id);
     setError(null);
     try {
-      const job = await startPrinterFile(printerId, {
-        remote_filename: file.remote_filename,
-        file_id: file.file_id,
+      const job = await fileMutation.mutateAsync({
+        kind: "start",
+        printerId,
+        signal: viewRequests.current.signal,
+        payload: {
+          remote_filename: file.remote_filename,
+          file_id: file.file_id,
+        },
       });
-      await loadJobs();
+      if (version !== lifetime.current || !job) return;
       toast.success(uiText("Print started (job #{value1})", { value1: String(job.id) }));
       setActiveTab("status");
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setStartingFileId(null);
+      if (version === lifetime.current) setStartingFileId(null);
     }
   }
 
@@ -498,18 +456,25 @@ export function PrinterDetailPage({
   async function confirmDeleteRemoteFile() {
     if (!deleteTarget) return;
     const file = deleteTarget;
+    const version = lifetime.current;
     setDeletingFileId(file.id);
     setError(null);
     try {
-      setPrinterFiles(await deletePrinterFile(printerId, file.id));
-      await loadPrinter();
+      await fileMutation.mutateAsync({
+        kind: "delete",
+        printerId,
+        fileId: file.id,
+        signal: viewRequests.current.signal,
+      });
+      if (version !== lifetime.current) return;
       toast.success(uiText("Printer file deleted"));
     } catch (e) {
-      toast.error(e);
-      await loadPrinter();
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setDeletingFileId(null);
-      setDeleteTarget(null);
+      if (version === lifetime.current) {
+        setDeletingFileId(null);
+        setDeleteTarget(null);
+      }
     }
   }
 
@@ -523,6 +488,13 @@ export function PrinterDetailPage({
   const hasCurrentPrint = Boolean(ps.filename || ps.state === "printing" || ps.state === "paused");
 
   if (!printer) {
+    if (resources.error)
+      return (
+        <div role="alert">
+          {userMessage(resources.error)}
+          <Button onClick={() => void resources.refreshAll()}>{uiText("Retry")}</Button>
+        </div>
+      );
     return (
       <div className="w-full space-y-4">
         <div className="h-8 w-48 animate-pulse rounded bg-muted" />
@@ -627,9 +599,14 @@ export function PrinterDetailPage({
             </div>
           )}
 
-          {error && (
+          {(error || resources.error) && (
             <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
-              {error}
+              {error ?? userMessage(resources.error)}
+              {resources.error && (
+                <Button size="xs" onClick={() => void resources.refreshAll()}>
+                  {uiText("Retry")}
+                </Button>
+              )}
             </div>
           )}
 
@@ -718,8 +695,6 @@ export function PrinterDetailPage({
               active={activeTab}
               onChange={(k) => {
                 setActiveTab(k);
-                if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
-                if (k === "diagnostics" && !diagnostics) loadDiagnostics();
               }}
               className="gap-1 overflow-x-auto -mb-px"
               tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
@@ -1115,7 +1090,8 @@ export function PrinterDetailPage({
             <PrinterSettings
               printer={printer}
               canEdit={printer.access.can_admin}
-              onSaved={(updated) => setPrinter(updated)}
+              key={printer.id}
+              onSaved={resources.publishPrinter}
             />
           )}
 
@@ -1126,7 +1102,7 @@ export function PrinterDetailPage({
               <FleetMaintenancePanel
                 printers={[printer]}
                 onPrintersChanged={() => {
-                  void loadPrinter();
+                  void resources.refresh(printerKeys.detail(printerId));
                 }}
               />
             </div>
@@ -1469,9 +1445,16 @@ function PrinterSettings({
 }: {
   printer: PrinterRead;
   canEdit: boolean;
-  onSaved: (printer: PrinterRead) => void;
+  onSaved: (printer: PrinterRead) => void | Promise<void>;
 }) {
   useUiLocale();
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const [name, setName] = useState(printer.name);
   const [modelName, setModelName] = useState(printer.model_name ?? "");
   const [group, setGroup] = useState(printer.group ?? "");
@@ -1506,6 +1489,8 @@ function PrinterSettings({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!canEdit || saving) return;
+    const session = getSessionVersion();
+    const current = () => active.current && session === getSessionVersion();
     setSaving(true);
     setError(null);
     const payload: PrinterUpdate = {
@@ -1540,15 +1525,18 @@ function PrinterSettings({
     }
     try {
       const updated = await updatePrinter(printer.id, payload);
-      onSaved(updated);
+      if (!current()) return;
+      await onSaved(updated);
+      if (!current()) return;
       setSecret("");
       toast.success(uiText("Printer settings saved"));
     } catch (err) {
+      if (!current()) return;
       const message = err instanceof Error ? err.message : "Could not save printer settings";
       setError(message);
       toast.error(err);
     } finally {
-      setSaving(false);
+      if (current()) setSaving(false);
     }
   }
 

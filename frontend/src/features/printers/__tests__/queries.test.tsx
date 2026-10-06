@@ -3,7 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { printerKeys, useMaintenanceMutation, usePrinterMaintenance } from "../queries";
+import {
+  printerKeys,
+  useMaintenanceMutation,
+  usePrinterMaintenance,
+  usePrinterFileMutation,
+} from "../queries";
 import { ApiError } from "@/lib/errors";
 import { isLoggedIn } from "@/lib/auth-store";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
@@ -137,4 +142,58 @@ describe("printer Query ownership", () => {
     );
     expect(isLoggedIn()).toBe(false);
   });
+});
+
+function FileProbe({ kind }: { kind: "start" | "sync" | "delete" }) {
+  const mutation = usePrinterFileMutation();
+  const controller = new AbortController();
+  return (
+    <>
+      <output aria-label="File mutation status">
+        {mutation.error instanceof ApiError ? mutation.error.status : mutation.error?.name}
+      </output>
+      <button
+        onClick={() =>
+          void mutation
+            .mutateAsync(
+              kind === "start"
+                ? {
+                    kind,
+                    printerId: 4,
+                    signal: controller.signal,
+                    payload: { remote_filename: "bracket.gcode", file_id: 20 },
+                  }
+                : kind === "delete"
+                  ? { kind, printerId: 4, signal: controller.signal, fileId: 50 }
+                  : { kind, printerId: 4, signal: controller.signal },
+            )
+            .catch(() => {})
+        }
+      >
+        Change file
+      </button>
+    </>
+  );
+}
+
+describe("printer file Query ownership", () => {
+  it.each([
+    { kind: "start" as const, route: "POST /api/v1/printers/4/start" },
+    { kind: "sync" as const, route: "POST /api/v1/printers/4/files/sync" },
+    { kind: "delete" as const, route: "DELETE /api/v1/printers/4/files/50" },
+  ])(
+    "retains genuine auth failures through printer file mutations ($kind)",
+    async ({ kind, route }) => {
+      renderApp(<FileProbe kind={kind} />, {
+        routes: { [route]: json({ detail: "session_expired" }, 401) },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Change file" }));
+      await waitFor(() =>
+        expect(screen.getByRole("status", { name: "File mutation status" })).toHaveTextContent(
+          "401",
+        ),
+      );
+      expect(isLoggedIn()).toBe(false);
+    },
+  );
 });

@@ -365,3 +365,49 @@ M7 maintenance evidence: after correcting a text arrangement mismatch in the new
 The initial per-printer API cost is still two HTTP requests per printer. This checkpoint reduces redundant work and prevents obsolete reads from replacing confirmed maintenance, without claiming a lower initial fleet cost or aggregate backend behavior.
 
 Final M7 maintenance gates: full frontend lint reported zero diagnostics; full format check passed681files; git diff --check passed. The final typecheck included app, UI and domain packages.
+
+
+## M7 printer detail ownership plan (before tests)
+
+HTTP detail/jobs/files/diagnostics/config use stable printer/resource keys. Initial route data renders immediately but is revalidated. Socket state remains local and generation-owned. Reconnect/resync revalidate owned HTTP resources with pending reads coalesced. Confirmed file results cancel obsolete file reads before publication. Query updates preserve settings and temperature drafts.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 122 | revalidates an initially supplied printer | Happy | initial route printer; changed HTTP printer | fresh server name replaces initial name | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::revalidates an initially supplied printer` |
+| 123 | aborts reads for a previous printer | Edge | pending files; printer ID switch | signal abort; late old file absent | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::aborts reads for a previous printer` |
+| 124 | shares printer resources between mounted views | Edge | two same-printer pages | one read per HTTP resource | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::shares printer resources between mounted views` |
+| 125 | preserves settings drafts during revalidation | Happy | edited name; Query detail refresh | typed draft retained | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::preserves settings drafts during revalidation` |
+| 126 | refreshes printer resources after reconnect | Happy | completed initial resources; socket reconnect | detail/jobs/files re-read | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::refreshes printer resources after reconnect` |
+| 127 | coalesces print state job revalidation | Edge | pending jobs; multiple print state frames | one pending jobs read | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::coalesces print state job revalidation` |
+| 128 | publishes confirmed files over obsolete reads | Edge | old files read pending; syncack | oldsignal aborted; confirmed row retained after late oldresponse | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::publishes confirmed files over obsolete reads` |
+| 129 | retains files after a denied sync | Error | files loaded; sync403 | row retained; no additional read invalidation | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::retains files after a denied sync` |
+| 130 | rejects a file acknowledgement after a printer switch | Edge | pending sync; changed printer ID | old ack cannot replace new files or dismiss current UI | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::rejects a file acknowledgement after a printer switch` |
+| 131 | surfaces printer lookup failure for retry | Error | noinitialprinter; detail503then200 | error/retry visible then current printer recovered | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::surfaces printer lookup failure for retry` |
+| 132 | leaves caches untouched after printer file transport writes | Happy | start/sync/delete success | no HTTP-triggered Query invalidation | Frontend unit | ✅ `frontend/src/lib/api/__tests__/printers.test.ts::leaves caches untouched after printer file transport writes ($label)` |
+| 133 | retires printer HTTP data on scope changes | Edge | authenticated data; private scope retired | old requests abort and new scope verifies HTTP detail | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::retires printer HTTP data on scope changes` |
+| 134 | retains genuine auth failures through printer file mutations | Error | current start/sync/delete401 | owner retains ApiError401; identity expires | Frontend unit | ✅ `frontend/src/features/printers/__tests__/queries.test.tsx::retains genuine auth failures through printer file mutations ($kind)` |
+| 135 | refreshes printer resources after shared event resync | Happy | settled resources; resync | current detail/jobs/files/config/diagnostics re-read | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::refreshes printer resources after shared event resync` |
+
+
+M7 printer detail evidence: the corrected initial ownership test lane was red6failed/2passed/48skipped against the prior HTTP effects. Draft preservation and denied mutation data retention already passed; those are retained behavior. Two initial button-name arrangements and one overwritten signal capture were corrected before assessing that baseline. Pure file transport isolation was separately red3failed/37skipped after correcting a missing fixture import. The first implemented detail lane passed56cases. Final combined qualification passed160cases6files; after adding shared resync and three genuine401 mutation variants,71cases3files passed. Existing socket disposal/login/logout/late ticket regressions remain in that run. No benchmark, coverage or browser/CI result is inferred.
+
+### M7 printer detail manually inspected source, test and configuration ledger
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/components/printer-detail.tsx` | HTTP loader effects, socket effect generation/controller/reconnect/auth retirement, file actions, header errors, config/diagnostics refresh handlers, Settings state/save lifecycle. Presentation snapshots and drafts remain local; component identity is printer ID plus private scope. Untouched metrics/table layout was not counted as a new UI audit. |
+| `frontend/src/components/__tests__/printer-detail.test.tsx` | renderPrinter/fake Socket, existing settings/file/socket cases and new HTTP owner describe; canonical aPrinterFile replaces duplicate local fixture. |
+| `frontend/src/features/printers/queries.ts` | five HTTP options, usePrinterResources, private route seed fence, shared event resync, exact-resource refresh/publish, usePrinterFileMutation caller/scope fences and obsolete file cancellation. |
+| `frontend/src/features/printers/__tests__/queries.test.tsx` | FileProbe genuine401 for start/sync/delete, real Query/transport owner workflow; earlier maintenance cases preserved. |
+| `frontend/src/lib/api/printers.ts` | startPrinterFile/syncPrinterFiles/deletePrinterFile raw requestApi and caller options; private ticket factory unchanged. updatePrinter/control compatibility writes remain inventoried for final bridge removal. |
+| `frontend/src/lib/api/__tests__/printers.test.ts` | three raw file write cache isolation variants; earlier five read cancellation variants and private ticket retirement contracts preserved. |
+| `frontend/src/lib/auth-store.ts` | scope notifications/keyed view retirement; no edits. |
+| `frontend/src/lib/query-client.ts` | private cache clear lifecycle and defaults reviewed for enabled/refetch behavior; no edits. |
+| `frontend/src/lib/events.ts` | shared resync frames/subscriber retirement; no edits. |
+| `frontend/src/types/printers.ts` | PrinterRead, provider/admin capability boundaries, StartPrinterFile and response DTO contracts; no edits. |
+| `frontend/src/test-support/render.tsx` | route request capture, rerender provider scope, deferred response propagation; no edits. |
+| `frontend/tests/repo/suite-hygiene.test.ts` | final headers/names/mirror checks retained; no edits. |
+
+Printer file actions have a single production owner, PrinterDetail. Their HTTP wrappers now report acknowledgements without cache invalidation. The feature owner cancels obsolete files before publishing acknowledged lists and refreshes the printer read; start refreshes only the printer and jobs. A denied write preserves cached presentation. Page switch or private scope retirement aborts the caller workflow and suppresses old UI delivery. Settings/control wrappers still use the temporary compatibility bridge because they have other owners, but their page acknowledgements are lifetime-fenced.
+
+Final M7 printer detail gates: full app/UI/domain typecheck, full frontend lint (zero diagnostics), full format check681files and git diff --check passed after the final resync/auth variants.
