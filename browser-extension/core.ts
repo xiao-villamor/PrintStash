@@ -442,6 +442,14 @@ export async function verifyVaultConnection({
   return { base, accessToken, user };
 }
 
+/** A capture endpoint rejected the current browser or access credential. */
+export class CaptureAuthenticationError extends Error {
+  constructor() {
+    super("The PrintStash connection expired. Reconnect and try again.");
+    this.name = "CaptureAuthenticationError";
+  }
+}
+
 export async function captureModelPage({
   fetchImpl = fetch,
   vault,
@@ -503,6 +511,7 @@ export async function captureModelPage({
         : {}),
     }),
   });
+  if (captured.status === 401) throw new CaptureAuthenticationError();
   if (!captured.ok) {
     throw new Error(await responseDetail(captured, `PrintStash returned ${captured.status}.`));
   }

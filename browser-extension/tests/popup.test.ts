@@ -1051,6 +1051,169 @@ describe("popup browser adapters", () => {
     });
   });
 
+  describe("capture authentication retirement", () => {
+    const stages = ["slot_create", "slot_upload", "slot_finalize"] as const;
+    const stored = { vault: "https://vault-a.example.com", deviceCredential: "test-credential-a" };
+
+    async function startRichFailure(stage: (typeof stages)[number], status: number, hold = false) {
+      await fakeBrowser.storage.local.set(stored);
+      fakeBrowser.scripting.executeScript = vi
+        .fn()
+        .mockResolvedValue([{ frameId: 0, result: { pageTitle: "Part", jsonLd: [] } }]);
+      const held = deferred<Response>();
+      const requests: { url: string; method: string; authorization: string | null }[] = [];
+      let rejectionEnabled = false;
+      let rejectionReached = false;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, options = {}) => {
+          const url = String(input);
+          requests.push({
+            url,
+            method: options.method ?? "GET",
+            authorization: new Headers(options.headers).get("Authorization"),
+          });
+          if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+          if (url.endsWith("/claim")) return response({ credential: "test-credential-b" });
+          if (url.includes("api.printables.com")) return response({}, 503);
+          if (options.method === "DELETE") return new Response(null, { status: 204 });
+          const currentStage = url.endsWith("/capture-upload-slots")
+            ? "slot_create"
+            : options.method === "PUT"
+              ? "slot_upload"
+              : "slot_finalize";
+          if (rejectionEnabled && currentStage === stage) {
+            rejectionReached = true;
+            return hold
+              ? held.promise
+              : response(
+                  { detail: status === 401 ? "invalid_browser_credential" : "insufficient_scope" },
+                  status,
+                );
+          }
+          if (currentStage === "slot_create") {
+            const body = JSON.parse(stringBody(options));
+            return response({
+              item: { id: 44 },
+              slots: body.files.map(
+                (file: {
+                  id: string;
+                  filename: string;
+                  media_type: string;
+                  size_bytes: number;
+                  sha256: string;
+                }) => ({ ...file, id: "slot-a", role: "file", source_file_id: file.id }),
+              ),
+            });
+          }
+          return currentStage === "slot_finalize"
+            ? response({ id: 44, state: "review" })
+            : new Response(null, { status: 204 });
+        }),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      async function sendManualFile() {
+        button("#capture").click();
+        await vi.waitFor(() => expect(element("#manual-file-panel").hidden).toBe(false));
+        const input = requiredElement("#manual-file", HTMLInputElement);
+        const file = new File(["mesh"], "part.stl", { type: "model/stl" });
+        Object.defineProperty(input, "files", {
+          configurable: true,
+          value: { 0: file, length: 1, item: (index: number) => (index === 0 ? file : null) },
+        });
+        button("#capture").click();
+      }
+      await sendManualFile();
+      await vi.waitFor(() =>
+        expect(element("#status").textContent).toContain("sent to Pending Imports"),
+      );
+      expect(button("#open-inbox").hidden).toBe(false);
+      rejectionEnabled = true;
+      await sendManualFile();
+      await vi.waitFor(() => expect(rejectionReached).toBe(true));
+      return { held, requests };
+    }
+
+    it.each(stages)(
+      "retires the connection after rich capture authentication failure: %s",
+      async (stage) => {
+        await startRichFailure(stage, 401);
+        await settle();
+        expect(element("#connection-title").textContent).toBe("Connection failed");
+        expect(element("#connection-detail").textContent).toBe(
+          "Reconnect PrintStash to continue importing.",
+        );
+        expect(element("#connection-panel").hidden).toBe(false);
+        expect(button("#capture").disabled).toBe(true);
+        expect(button("#open-inbox").hidden).toBe(true);
+        expect(element("#manual-file-panel").hidden).toBe(true);
+        expect(element("#candidate-panel").hidden).toBe(true);
+        expect(await fakeBrowser.storage.local.get()).toEqual(stored);
+      },
+    );
+
+    it.each(stages)(
+      "keeps the connection after rich capture permission failure: %s",
+      async (stage) => {
+        await startRichFailure(stage, 403);
+        await settle();
+        expect(element("#connection-title").textContent).toBe("Connected");
+        expect(element("#status").textContent).toContain("capture_vault_");
+        expect(button("#capture").disabled).toBe(false);
+        expect(element("#manual-file-panel").hidden).toBe(false);
+        expect(await fakeBrowser.storage.local.get()).toEqual(stored);
+      },
+    );
+
+    it("ignores retired rich authentication failures", async () => {
+      const { held, requests } = await startRichFailure("slot_upload", 401, true);
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+      requiredElement("#pairing-code", HTMLInputElement).value = "test-code-b";
+      button("#connect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-detail").textContent).toContain("vault-b.example.com"),
+      );
+      held.resolve(response({ detail: "invalid_browser_credential" }, 401));
+      await settle();
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(element("#status").textContent).toContain("Connection verified");
+      expect(
+        requests.filter(
+          (request) =>
+            request.url.startsWith("https://vault-b.example.com") && request.authorization !== null,
+        ),
+      ).toEqual([]);
+      expect((await fakeBrowser.storage.local.get()).deviceCredential).toBe("test-credential-b");
+    });
+
+    it("retires the connection after direct capture authentication failure", async () => {
+      await fakeBrowser.storage.local.set(stored);
+      fakeBrowser.tabs.query = vi
+        .fn()
+        .mockResolvedValue([{ id: 42, title: "Part", url: "https://models.example.com/part.stl" }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (url) =>
+          String(url).endsWith("/health")
+            ? response({ status: "ok", name: "PrintStash" })
+            : response({ detail: "invalid_browser_credential" }, 401),
+        ),
+      );
+      await import("../popup.ts");
+      await settle();
+      button("#capture").click();
+      await settle();
+      expect(element("#connection-title").textContent).toBe("Connection failed");
+      expect(element("#connection-detail").textContent).toBe(
+        "Reconnect PrintStash to continue importing.",
+      );
+      expect(button("#capture").disabled).toBe(true);
+      expect(await fakeBrowser.storage.local.get()).toEqual(stored);
+    });
+  });
+
   it("falls back to a local Printables file without metadata-only capture", async () => {
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",

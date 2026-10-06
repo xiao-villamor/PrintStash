@@ -1,4 +1,5 @@
 import { runCaptureRequest } from "./capture-operation.ts";
+import { CaptureAuthenticationError } from "./core.ts";
 
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
@@ -179,6 +180,7 @@ export async function captureRichFiles({
         ...(preparedCover ? { cover: preparedCover.declaration } : {}),
       }),
     });
+    if (created.status === 401) throw new CaptureAuthenticationError();
     if (created.status === 507) {
       const detail = await created.json().catch(() => null);
       if (detail?.detail === "staging_capacity_unavailable")
@@ -216,6 +218,7 @@ export async function captureRichFiles({
             body: upload.file,
           },
         );
+        if (uploaded.status === 401) throw new CaptureAuthenticationError();
         if (!uploaded.ok)
           throw new Error(
             `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
@@ -233,6 +236,7 @@ export async function captureRichFiles({
           signal,
         },
       );
+      if (finalized.status === 401) throw new CaptureAuthenticationError();
       if (!finalized.ok)
         throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
       return finalized.json();

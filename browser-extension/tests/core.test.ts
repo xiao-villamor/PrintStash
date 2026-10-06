@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
@@ -553,4 +553,40 @@ test.each([
     }),
     /PrintStash did not return an access token/,
   );
+});
+
+describe("capture authentication boundary", () => {
+  it.each(["invalid_browser_credential", "not_authenticated", "malformed"])(
+    "rejects direct capture authentication failures: %s",
+    async (detail) => {
+      await expect(
+        captureModelPage({
+          vault: "https://prints.example.com",
+          deviceCredential: "test-device",
+          pageUrl: "https://models.example.com/part.stl",
+          fetchImpl: async () =>
+            detail === "malformed"
+              ? new Response("invalid JSON", { status: 401 })
+              : Response.json({ detail, secret: "test-secret" }, { status: 401 }),
+        }),
+      ).rejects.toMatchObject({
+        name: "CaptureAuthenticationError",
+        message: "The PrintStash connection expired. Reconnect and try again.",
+      });
+    },
+  );
+
+  it("keeps direct capture permission failures scoped", async () => {
+    await expect(
+      captureModelPage({
+        vault: "https://prints.example.com",
+        deviceCredential: "test-device",
+        pageUrl: "https://models.example.com/part.stl",
+        fetchImpl: async () => Response.json({ detail: "insufficient_scope" }, { status: 403 }),
+      }),
+    ).rejects.toMatchObject({
+      name: "Error",
+      message: "This PrintStash user does not have import permission.",
+    });
+  });
 });

@@ -6,6 +6,7 @@ import {
 } from "./capture-operation.ts";
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
+  CaptureAuthenticationError,
   captureModelPage,
   claimBrowserPairing,
   classifyModelPage,
@@ -247,7 +248,11 @@ async function runCaptureStage<T>(
       operationResult.then(resolve, reject);
     });
   } catch (error) {
-    if (error instanceof CaptureDiagnosticError || error instanceof CaptureRetiredError)
+    if (
+      error instanceof CaptureDiagnosticError ||
+      error instanceof CaptureRetiredError ||
+      error instanceof CaptureAuthenticationError
+    )
       throw error;
     const message = messageFrom(error);
     throw new CaptureDiagnosticError(
@@ -383,6 +388,17 @@ function retireCapture() {
   setButtonBusy(captureButton, false);
   clearCandidateSelection();
   clearManualFileSelection();
+}
+
+function recoverCaptureConnection() {
+  retireCapture();
+  clearInboxAction();
+  accessToken = null;
+  editingConnection = false;
+  connectionPanel.hidden = false;
+  cancelButton.hidden = true;
+  renderConnection("error", { detail: "Reconnect PrintStash to continue importing." });
+  showStatus();
 }
 
 function clearInboxAction() {
@@ -1651,6 +1667,10 @@ captureButton.addEventListener("click", async () => {
     showStatus(`Model from ${result.source} sent to Pending Imports.`, "success");
   } catch (error) {
     if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
+    if (error instanceof CaptureAuthenticationError) {
+      recoverCaptureConnection();
+      return;
+    }
     if (error instanceof CaptureDiagnosticError) {
       const fallback =
         pendingPrintablesCapture ||
@@ -1692,12 +1712,7 @@ captureButton.addEventListener("click", async () => {
       "browser connection is no longer valid",
     ].some((marker) => message.includes(marker));
     if (connectionLost) {
-      accessToken = null;
-      editingConnection = false;
-      connectionPanel.hidden = false;
-      cancelButton.hidden = true;
-      renderConnection("error", { detail: "Reconnect PrintStash to continue importing." });
-      showStatus();
+      recoverCaptureConnection();
     } else {
       showStatus(safeCaptureMessage(error), "error", "capture_failed");
     }

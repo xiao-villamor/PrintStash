@@ -484,3 +484,100 @@ describe("capture upload-slot transport", () => {
     }
   });
 });
+
+describe("rich capture authentication boundary", () => {
+  const stages = ["slot_create", "slot_upload", "slot_finalize"] as const;
+  function attempt(rejectedStage: (typeof stages)[number], status: number, cleanupStatus = 204) {
+    const requests: { path: string; method: string; authorization: string | null }[] = [];
+    const outcome = captureRichFiles({
+      vault: "https://vault-a.example.com",
+      authorization: "test-credential-a",
+      sourceUrl: "https://www.printables.com/model/9",
+      captureSource: {
+        provider: "printables",
+        canonical_url: "https://www.printables.com/model/9",
+        source_item_id: "9",
+        source_revision: null,
+        adapter_version: "browser-visible-v1",
+        tags: [],
+        fields: {},
+      },
+      files: [{ id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" }],
+      fetchImpl: async (input, options = {}) => {
+        const path = String(input);
+        requests.push({
+          path,
+          method: options.method ?? "GET",
+          authorization: new Headers(options.headers).get("Authorization"),
+        });
+        if (options.method === "DELETE") return new Response(null, { status: cleanupStatus });
+        const stage = path.endsWith("/capture-upload-slots")
+          ? "slot_create"
+          : options.method === "PUT"
+            ? "slot_upload"
+            : "slot_finalize";
+        if (stage === rejectedStage)
+          return Response.json(
+            {
+              detail: status === 401 ? "invalid_browser_credential" : "insufficient_scope",
+              secret: "test-secret",
+            },
+            { status },
+          );
+        if (stage === "slot_create")
+          return Response.json({
+            item: { id: 44 },
+            slots: [
+              {
+                id: "slot-a",
+                role: "file",
+                source_file_id: "part",
+                filename: "part.stl",
+                media_type: "model/stl",
+                size_bytes: 1,
+                sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+              },
+            ],
+          });
+        return new Response(null, { status: 204 });
+      },
+    });
+    return { outcome, requests };
+  }
+
+  it.each(stages)("rejects rich capture authentication failures: %s", async (stage) => {
+    const { outcome, requests } = attempt(stage, 401);
+    await expect(outcome).rejects.toMatchObject({
+      name: "CaptureAuthenticationError",
+      message: "The PrintStash connection expired. Reconnect and try again.",
+    });
+    expect(
+      requests.filter((request) => request.method !== "DELETE").map((request) => request.method),
+    ).toEqual(
+      stage === "slot_create"
+        ? ["POST"]
+        : stage === "slot_upload"
+          ? ["POST", "PUT"]
+          : ["POST", "PUT", "POST"],
+    );
+  });
+
+  it.each(stages)("keeps rich capture permission failures scoped: %s", async (stage) => {
+    await expect(attempt(stage, 403).outcome).rejects.toMatchObject({
+      name: "Error",
+      message: expect.stringContaining("403"),
+    });
+  });
+
+  it("preserves authentication failure through owned cleanup", async () => {
+    const { outcome, requests } = attempt("slot_upload", 401, 403);
+    await expect(outcome).rejects.toMatchObject({ name: "CaptureAuthenticationError" });
+    expect(requests.filter((request) => request.method === "DELETE")).toEqual([
+      {
+        path: "https://vault-a.example.com/api/v1/inbox/44/capture-upload",
+        method: "DELETE",
+        authorization: "Bearer test-credential-a",
+      },
+    ]);
+  });
+});
