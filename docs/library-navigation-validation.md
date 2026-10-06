@@ -67,7 +67,7 @@ Implementation order: first qualify exact source links and snapshot identity, th
 | 6 | restores list layout independently | Happy | Cached list, scroll, detail, Back/Forward on desktop/mobile | List reading position restored | Browser | ✅ |
 | 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ✅ |
 | 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Browser | ✅ |
-| 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ❌ |
+| 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ✅ `tests/e2e/library-navigation.spec.ts::preserves the grid/list reading anchor after removing a confirmed favorite` (available Model/Multipart gestures) |
 | 10 | retires private history metadata on session/access change | Edge | Session retired while detail open | No old restoration/cache/DOM reused | Feature/browser | ❌ |
 | 11 | chooses a safe fallback for direct detail links | Edge | No known history origin or unsafe return URL | Same-origin Library URL; no external redirect | Component | ✅ |
 | 12 | resolves rapid navigation using one displayed identity | Edge | A→B→C with out-of-order reads | Heading, cards, link target and restoration belong together | Component/browser | ❌ |
@@ -123,3 +123,58 @@ The regression failed before the pre-cancellation session guard: the next browse
 request had an aborted signal. After the guard, all 10 favorite-owner tests passed
 within the 27-case preferences/hygiene integration gate (3.43s). Domain preference
 mirrors independently passed all 29 cases (1.85s).
+
+## Confirmed favorite removal geometry
+
+Preserve the next visible surviving item's vertical reading position after the
+acknowledged favorite disappears. Test both nested list and grid containers in a
+real browser before deciding whether additional coordination is necessary.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | preserves the grid reading anchor after removing a confirmed favorite | Edge | Scrolled favorites; pending unstar then ACK | Pending card remains; ACK removes it; next visible survivor keeps its offset | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::preserves the grid reading anchor after removing a confirmed favorite` |
+| 2 | preserves the list reading anchor after removing a confirmed favorite | Edge | Scrolled favorites; pending unstar then ACK | Detail remains while pending; ACK removes the favorite from the list; Back preserves the next survivor offset | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::preserves the list reading anchor after removing a confirmed favorite` |
+
+The direct grid gesture passed before any change. The list has no inline favorite
+action, so its regression uses the actual detail action then Back. That flow failed:
+the surviving row returned at1821px instead of424px because the deleted anchor
+caused a reset. Retain one adjacent semantic anchor in history metadata; only an
+acknowledged own removal in a Favorites entry may promote it. External deletion
+keeps the existing explicit-reset contract.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 3 | promotes a neighboring anchor only in the affected Favorites entry | Edge | Favorite ACK for the recorded anchor; Everything and another item also recorded | Affected saved reading position uses its neighbor; other records unchanged | Frontend unit | ✅ `src/features/library/__tests__/navigation-state.test.tsx::promotes a neighboring anchor only for the affected $label` |
+| 4 | retains explicit reset when the removed favorite has no neighbor | Edge | One-item Favorites reading position | Missing primary remains available for the existing reset decision | Frontend unit | ✅ `src/features/library/__tests__/navigation-state.test.tsx::retains explicit reset when the removed favorite has no neighbor` |
+| 5 | rejects a retired favorite receipt for reading metadata | Edge | New session has its own position; previous receipt arrives | New position remains unchanged | Frontend unit | ✅ `src/features/library/__tests__/navigation-state.test.tsx::rejects a retired favorite receipt for reading metadata` |
+
+The first neighbor implementation exposed an additional geometry bug: the list
+container had no scroll range, while main owned the1400px offset. Correcting list
+scrollTop was clamped to zero and left a65px jump. Capture now selects the actual
+scroll container. Both favorite browser cases pass (15.9s); temporary tagged
+instrumentation was removed. This is correctness evidence, not a performance
+comparison. Explicit Refresh reconstruction and rapid navigation remain open.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 6 | preserves the grid reading anchor after removing a confirmed favorite Multipart | Edge | Scrolled Multipart favorites; pending unstar then ACK | Pending card remains; ACK removes it; next survivor keeps its offset | Playwright | ✅ `tests/e2e/library-navigation.spec.ts::preserves the grid reading anchor after removing a confirmed favorite Multipart` |
+
+## Rapid destination changes
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | keeps breadcrumbs with the displayed result across rapid destinations | Edge | Folder A settled; root B delayed; child C requested before B arrives | A heading, breadcrumb and return link stay paired until all C data arrives; late B never replaces C | Frontend unit | ✅ `src/components/__tests__/model-grid.test.tsx::keeps breadcrumbs with the displayed result across rapid destinations` |
+
+The rapid-navigation regression failed with a missing Parts breadcrumb while its
+cards were still displayed. The breadcrumb now derives entirely from the settled
+snapshot, independent of the requested destination. All18 focused folder/history
+cases passed11.74s. This covers the component/Query boundary; the original broader
+rapid-navigation browser row remains open.
+
+Final favorite qualification:11 full navigation browser cases passed1.2m; the
+expanded three available favorite gestures (Model grid/detail, Multipart grid)
+passed20.8s. Multipart's initial2px difference was hover translation when the
+neighbor moved under the pointer; comparison now uses the same unhovered state
+without changing product motion. The five-file navigation/grid/hygiene gate
+passed185tests68.60s before the one-line breadcrumb fix; its affected18cases were
+then rerun as above. No production performance improvement is asserted.

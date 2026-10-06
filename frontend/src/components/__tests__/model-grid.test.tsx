@@ -804,6 +804,77 @@ describe("ModelBrowser", () => {
       ).toBeNull();
     });
 
+    it("keeps breadcrumbs with the displayed result across rapid destinations", async () => {
+      const root = Promise.withResolvers<Response>();
+      const child = Promise.withResolvers<Response>();
+      const { requests } = renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: {
+          "GET /api/v1/models/browse": (url) => {
+            const collection = new URL(url, "http://test").searchParams.get("collection");
+            if (collection === null) return root.promise;
+            if (collection === "parts/brackets") return child.promise;
+            return json({
+              items: [{ kind: "model", model: aModelListItem({ name: "Displayed shelf" }) }],
+              total: 1,
+              next_cursor: null,
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            });
+          },
+        },
+      });
+      await screen.findByText("Displayed shelf");
+      const breadcrumb = within(screen.getByRole("main")).getByRole("navigation");
+      fireEvent.click(within(breadcrumb).getByRole("button", { name: "All Models" }));
+      await waitFor(() =>
+        expect(
+          requests().some(
+            (call) =>
+              call.url.startsWith("/api/v1/models/browse?") &&
+              !new URL(call.url, "http://test").searchParams.has("collection"),
+          ),
+        ).toBe(true),
+      );
+      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      fireEvent.click(await folderCard("parts/brackets"));
+      await waitFor(() =>
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
+      );
+      root.resolve(
+        json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Late root" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
+      );
+      expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
+      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      const href = new URL(
+        screen.getByRole("link", { name: /Displayed shelf/ }).getAttribute("href")!,
+        "http://test",
+      );
+      expect(href.searchParams.get("return")).toBe("/?c=parts&type=all&sort=date-desc");
+      expect(screen.queryByText("Late root")).not.toBeInTheDocument();
+      child.resolve(
+        json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        }),
+      );
+      await screen.findByText("Current bracket");
+      expect(screen.getByRole("heading", { name: "Brackets" })).toBeVisible();
+      expect(within(breadcrumb).getByRole("button", { name: "Brackets" })).toBeVisible();
+      expect(screen.queryByText("Displayed shelf")).not.toBeInTheDocument();
+      expect(screen.queryByText("Late root")).not.toBeInTheDocument();
+    });
+
     it("warms a folder when the pointer rests on its card", async () => {
       const user = userEvent.setup();
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });

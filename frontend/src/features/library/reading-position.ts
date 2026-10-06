@@ -104,6 +104,7 @@ export function useLibraryReadingPosition(
         main: 0,
         list: list ? 0 : null,
         anchor: null,
+        adjacent: null,
         pages: { models: pagination.models.count, folders: pagination.folders.count },
       });
     }
@@ -156,32 +157,48 @@ export function useLibraryReadingPosition(
         previous?.main === main.scrollTop && previous.list === (list?.scrollTop ?? null)
           ? previous.anchor
           : null;
+      let adjacent = anchor ? (previous?.adjacent ?? null) : null;
       // Scan visible entries only at a gesture, never for every scroll event.
       if (event.type === "click") {
         const target =
           event.target instanceof Element
             ? event.target.closest<HTMLElement>("[data-library-entry]")
             : null;
-        const container = list ?? main;
+        // A list may grow inside main instead of owning an independent scroll range.
+        const container = list && list.scrollHeight > list.clientHeight ? list : main;
         const bounds = container.getBoundingClientRect();
+        const candidates = Array.from(main.querySelectorAll<HTMLElement>("[data-library-entry]"));
         const visible =
           target ??
-          Array.from(main.querySelectorAll<HTMLElement>("[data-library-entry]")).find((node) => {
+          candidates.find((node) => {
             const rect = node.getBoundingClientRect();
             return rect.bottom > bounds.top && rect.top < bounds.bottom;
           });
         const key = visible?.dataset.libraryEntry;
-        if (visible && key)
+        if (visible && key) {
           anchor = {
             key,
             offset: visible.getBoundingClientRect().top - bounds.top,
-            container: list ? "list" : "main",
+            container: container === list ? "list" : "main",
           };
+          const index = candidates.indexOf(visible);
+          const neighbor = candidates[index + 1] ?? candidates[index - 1];
+          const neighborKey = neighbor?.dataset.libraryEntry;
+          adjacent =
+            neighbor && neighborKey
+              ? {
+                  key: neighborKey,
+                  offset: neighbor.getBoundingClientRect().top - bounds.top,
+                  container: container === list ? "list" : "main",
+                }
+              : null;
+        }
       }
       saveLibraryPosition(entry, layout, {
         main: main.scrollTop,
         list: list?.scrollTop ?? null,
         anchor,
+        adjacent,
         pages: { models: pagination.models.count, folders: pagination.folders.count },
       });
     };

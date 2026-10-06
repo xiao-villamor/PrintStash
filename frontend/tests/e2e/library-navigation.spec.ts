@@ -1,7 +1,7 @@
 /** Library detail return belongs to the exact displayed history entry. */
 import { expect, test } from "@playwright/test";
 import { useMockApi } from "./_setup";
-import { aModelListItem, aMultipartModel } from "../../src/test-support/factories";
+import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
@@ -172,5 +172,88 @@ for (const recovery of ["available", "removed", "stale"] as const) {
     }
     expect(restored.filter((cursor) => cursor !== null)).toEqual(["second"]);
     expect(restored).not.toContain("unvisited-third-page");
+  });
+}
+
+for (const { layout, kind } of [
+  { layout: "grid", kind: "model" },
+  { layout: "list", kind: "model" },
+  { layout: "grid", kind: "multipart" },
+] as const) {
+  test(`preserves the ${layout} reading anchor after removing a confirmed favorite${kind === "multipart" ? " Multipart" : ""}`, async ({
+    page,
+  }) => {
+    await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
+    const models = Array.from({ length: 40 }, (_, index) =>
+      aModelListItem({ id: index + 100, name: `Favorite ${index}`, starred: true }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: models.map((model) =>
+            kind === "model"
+              ? { kind: "model", model }
+              : {
+                  kind: "multipart",
+                  multipart: aMultipartModel({ id: model.id, name: model.name, starred: true }),
+                },
+          ),
+          total: models.length,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/120", (route) =>
+      route.fulfill({ json: aModel({ id: 120, name: "Favorite 20", starred: true }) }),
+    );
+    const acknowledgement = Promise.withResolvers<void>();
+    await page.route(
+      `**/api/v1/${kind === "model" ? "models" : "multipart-models"}/120/star`,
+      async (route) => {
+        await acknowledgement.promise;
+        await route.fulfill({
+          json:
+            kind === "model"
+              ? { model_id: 120, starred: false }
+              : { multipart_model_id: 120, starred: false },
+        });
+      },
+    );
+    await page.goto("/?c=maraio&type=all&sort=name-asc&favorites=true");
+    const target = page
+      .getByRole("main")
+      .getByRole("link", { name: /Favorite 20/ })
+      .first();
+    const remove =
+      layout === "grid"
+        ? page.getByRole("button", { name: "Remove Favorite 20 from favorites", exact: true })
+        : target;
+    await remove.scrollIntoViewIfNeeded();
+    const survivor = page
+      .getByRole("main")
+      .getByRole("link", { name: /Favorite 21/ })
+      .first();
+    await expect(survivor).toBeVisible();
+    const before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
+    const box = await remove.boundingBox();
+    if (!box) throw new Error("Favorite action has no visible box");
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    if (layout === "list") {
+      await page.getByRole("button", { name: "Favorited", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Favorite 20", exact: true })).toBeVisible();
+    } else await expect(target).toBeVisible();
+    // Compare the same unhovered geometry; the next card can move under the pointer.
+    await page.mouse.move(1, 1);
+    acknowledgement.resolve();
+    if (layout === "list") {
+      await expect(page.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Back", exact: true }).click();
+    }
+    await expect(page.getByRole("main").getByRole("link", { name: /Favorite 20/ })).toHaveCount(0);
+    await expect
+      .poll(async () => survivor.evaluate((node) => node.getBoundingClientRect().top))
+      .toBeCloseTo(before, 0);
   });
 }

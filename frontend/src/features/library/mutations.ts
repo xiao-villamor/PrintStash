@@ -4,6 +4,7 @@ import { starMultipartModel, unstarMultipartModel } from "@/lib/api/multipart-mo
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
 import { libraryBrowseKeys } from "./browse";
+import { acknowledgeFavoriteRemoval } from "./navigation-state";
 import type { LibraryBrowseEntry, LibraryBrowsePage } from "@/types/library-browse";
 import type { ModelRead, MultipartModelRead } from "@/types";
 
@@ -69,7 +70,11 @@ export function useLibraryStar() {
           },
       );
       requireSessionVersion(command.version);
-      if (!starred)
+      if (!starred) {
+        acknowledgeFavoriteRemoval(
+          command.kind === "model" ? `/models/${command.id}` : `/multipart-models/${command.id}`,
+          command.version,
+        );
         client.setQueriesData<InfiniteData<LibraryBrowsePage>>(
           { queryKey: [...libraryBrowseKeys.all, { favorites: true }] },
           (data) => {
@@ -87,6 +92,7 @@ export function useLibraryStar() {
             };
           },
         );
+      }
       requireSessionVersion(command.version);
       client.setQueryData<ModelRead | MultipartModelRead>(
         detailKey(command),

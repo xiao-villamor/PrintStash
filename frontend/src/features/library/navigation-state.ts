@@ -10,10 +10,16 @@ export type LibraryEntry = Readonly<{
   index: number | null;
 }>;
 export type LibraryLayout = "grid" | "list";
+export interface LibraryReadingAnchor {
+  key: string;
+  offset: number;
+  container: "main" | "list";
+}
 export interface LibraryReadingPosition {
   main: number;
   list: number | null;
-  anchor: { key: string; offset: number; container: "main" | "list" } | null;
+  anchor: LibraryReadingAnchor | null;
+  adjacent: LibraryReadingAnchor | null;
   pages: { models: number; folders: number };
 }
 interface RegisteredEntry {
@@ -91,4 +97,21 @@ export function saveLibraryPosition(
   const registered = entries.get(entry.key);
   if (entry.session !== getSessionVersion() || registered?.entry.href !== entry.href) return;
   registered.positions[layout] = position;
+}
+
+/** Own confirmed removals may preserve a neighbor; external missing anchors still reset. */
+export function acknowledgeFavoriteRemoval(key: string, session: number) {
+  if (session !== getSessionVersion()) return;
+  for (const registered of entries.values()) {
+    if (
+      new URL(registered.entry.href, window.location.origin).searchParams.get("favorites") !==
+      "true"
+    )
+      continue;
+    for (const layout of ["grid", "list"] as const) {
+      const position = registered.positions[layout];
+      if (position?.anchor?.key !== key || !position.adjacent) continue;
+      registered.positions[layout] = { ...position, anchor: position.adjacent, adjacent: null };
+    }
+  }
 }

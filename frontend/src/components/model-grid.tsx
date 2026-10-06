@@ -2041,7 +2041,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
           {/* Breadcrumb */}
           <nav className="px-4 sm:px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-sm tracking-tight">
-            {selectedCollection && breadcrumbs.length > 0 ? (
+            {breadcrumbs.length > 0 ? (
               <>
                 <button
                   onClick={() => handleCollectionChange(null)}
