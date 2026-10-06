@@ -3,7 +3,7 @@ import { ApiError } from "@/lib/errors";
 import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
 import {
   getSessionVersion,
-  requireSessionVersion,
+  expireSessionForFailure,
   withSessionRequest,
   type SessionRequest,
 } from "@/lib/session-transport";
@@ -79,8 +79,7 @@ async function withApiSession<T>(
     // The scoped error parser fenced the body before returning an ApiError.
     // Expire only after scope completion so this genuine 401 stays an ApiError.
     if (error instanceof ApiError && error.status === 401) {
-      requireSessionVersion(version);
-      emitUnauthorized();
+      expireSessionForFailure(version, error);
     }
     throw error;
   }

@@ -14,7 +14,7 @@ import {
   uploadArtifact,
   type ArtifactUploadApi,
 } from "@/lib/artifact-upload";
-import { clearLogin } from "@/lib/auth-store";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import type { ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 
 const NOW = "2026-09-09T00:00:00Z";
@@ -320,5 +320,47 @@ describe("upload session isolation", () => {
     expect(await outcome).toMatchObject({ name: "AbortError" });
     expect(api.recordArtifactUploadPart).not.toHaveBeenCalled();
     expect(api.finalizeArtifactUpload).not.toHaveBeenCalled();
+  });
+});
+
+/** Expiring the cookie session must not erase the server's genuine upload rejection. */
+describe("upload unauthorized failure", () => {
+  it("preserves a genuine unauthorized upload error", async () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('{"detail":"invalid_or_expired_token"}', { status: 401 })),
+    );
+    await expect(
+      uploadArtifact(
+        new File(["12345678"], "part.stl"),
+        { purpose: "model", target_role: "new_model" },
+        { digest },
+      ),
+    ).rejects.toMatchObject({ status: 401, code: "invalid_or_expired_token" });
+    expect(getUser()).toBeNull();
+  });
+});
+
+/** A retired upload failure remains cancellation, never a new account's expiry. */
+describe("retired upload unauthorized failure", () => {
+  it("ignores a retired upload's unauthorized response", async () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const headers = Promise.withResolvers<Response>();
+    const fetcher = vi.fn<typeof fetch>().mockReturnValueOnce(headers.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const pending = uploadArtifact(
+      new File(["12345678"], "part.stl"),
+      { purpose: "model", target_role: "new_model" },
+      { digest },
+    );
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    headers.resolve(new Response('{"detail":"invalid_or_expired_token"}', { status: 401 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
   });
 });

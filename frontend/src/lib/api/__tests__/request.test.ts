@@ -495,14 +495,19 @@ describe("getDerivedText", () => {
 
 describe("getAuthenticatedText", () => {
   it("preserves cancellation while revalidating protected text", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("G1 X10"));
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = options?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
     const controller = new AbortController();
-
-    const content = await getAuthenticatedText("/api/v1/files/7/download", controller.signal);
-
-    expect(content).toBe("G1 X10");
+    const content = getAuthenticatedText("/api/v1/files/7/download", controller.signal);
+    const reason = new DOMException("Navigation", "AbortError");
+    controller.abort(reason);
+    await expect(content).rejects.toBe(reason);
     expect(initOf(0).cache).toBe("no-cache");
-    controller.abort();
     expect(initOf(0).signal?.aborted).toBe(true);
   });
 });
