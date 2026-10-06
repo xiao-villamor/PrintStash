@@ -18,7 +18,9 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Link } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SetupGate } from "@/components/setup-gate";
@@ -152,5 +154,89 @@ describe("SetupGate", () => {
 
       expect(await screen.findByText("the vault")).toBeInTheDocument();
     });
+  });
+});
+
+describe("setup gate entry lifetime", () => {
+  it("holds a new navigation until its setup probe completes", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await screen.findByText("the vault");
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+
+    expect(screen.queryByText("the vault")).not.toBeInTheDocument();
+    await act(async () => next.resolve(json(CONFIGURED)));
+    expect(await screen.findByText("the vault")).toBeVisible();
+  });
+
+  it("aborts a superseded setup gate probe", async () => {
+    const user = userEvent.setup();
+    const old = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: {
+          "GET /api/v1/setup/status": (_url, options) => {
+            probes++;
+            if (probes === 1) {
+              signal = options?.signal;
+              return old.promise;
+            }
+            return json(CONFIGURED);
+          },
+        },
+      },
+    );
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    await act(async () => old.resolve(json(UNCONFIGURED)));
+
+    expect(signal?.aborted).toBe(true);
+    expect(await screen.findByTestId("path")).toHaveTextContent("/next");
+    expect(await screen.findByText("the vault")).toBeVisible();
+  });
+
+  it("aborts a setup gate probe when its view leaves", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderGate({
+      routes: {
+        "GET /api/v1/setup/status": (_url, options) => {
+          signal = options?.signal;
+          return pending.promise;
+        },
+      },
+    });
+
+    view.unmount();
+    await act(async () => pending.resolve(json(UNCONFIGURED)));
+
+    expect(signal?.aborted).toBe(true);
   });
 });

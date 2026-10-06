@@ -1,6 +1,5 @@
 "use client";
 
-import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 /**
@@ -16,16 +15,16 @@ import { useUiLocale } from "@/lib/i18n";
  *   `/login` (or `/` if already authenticated — layout handles that via the
  *   AuthProvider).
  *
- * The probe is cheap (a single SELECT count(*)) and runs once per full page
- * load. We don't keep polling — once we know the install is configured, the
- * state can only change by destroying and recreating the DB.
+ * The probe runs once per path entry. Query owns cancellation and retry;
+ * no background polling competes with explicit setup recovery.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { usePathname, useRouter } from "@/lib/navigation";
 import { Loader2 } from "lucide-react";
 
-import { getSetupStatus } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { setupGateOptions } from "@/features/setup/entry";
 import { useAuth } from "@/lib/auth-context";
 
 interface Props {
@@ -38,71 +37,46 @@ export function SetupGate({ children }: Props) {
   const pathname = usePathname();
   const auth = useAuth();
   const isSuperuser = auth.user?.is_superuser === true;
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The path whose probe found an owner who has not chosen storage yet.
-  const [choicePendingAt, setChoicePendingAt] = useState<string | null>(null);
-
-  // The probe runs per navigation, never on sign-in: finishing the wizard signs
-  // the owner in while still on /setup, and re-probing there would race the
-  // wizard's own redirect and send them to /login.
-  useEffect(() => {
-    let cancelled = false;
-    getSetupStatus()
-      .then((status) => {
-        if (cancelled) return;
-        if (!status.configured && pathname !== "/setup") {
-          router.replace("/setup");
-          return; // keep `ready=false` until the next navigation re-mounts us
-        }
-        if (status.configured && pathname === "/setup") {
-          router.replace("/login");
-          return;
-        }
-        if (status.storage_choice_required) {
-          setChoicePendingAt(pathname); // decided below, once auth is known
-          return;
-        }
-        setChoicePendingAt(null);
-        setReady(true);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        // If we can't even reach the backend, render children anyway so the
-        // existing AuthBanner / api-error UI can surface what went wrong.
-        // We just log this and unblock the tree.
-        console.warn("setup status probe failed:", err);
-        setError(err?.message ?? uiText("unknown"));
-        setReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // We intentionally re-run on pathname changes so navigating from /setup
-    // to / after completion re-validates immediately.
-  }, [pathname, router]);
-
-  // An owner provisioned from VAULT_SETUP_ADMIN_* signs in before any storage
-  // exists. Only a superuser can choose it, so only a superuser is sent there:
-  // anyone else would bounce back and forth. A full page load learns the user
-  // after the probe answers, so this waits for auth instead of reading it early.
-  const choiceDecided = choicePendingAt === pathname && !auth.loading;
+  const entry = useId();
+  const [navigation, setNavigation] = useState({ pathname, generation: 0 });
+  if (navigation.pathname !== pathname)
+    setNavigation({ pathname, generation: navigation.generation + 1 });
+  const probe = useQuery(setupGateOptions(entry, navigation.generation));
+  // This is the accepted entry decision, not a second status snapshot. A public
+  // credential entry must survive its own intentional auth/cache retirement.
+  const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
+  const status = probe.data;
+  const choiceDecided = Boolean(status?.storage_choice_required) && !auth.loading;
   const toStorageStep = choiceDecided && isSuperuser && pathname !== "/getting-started";
-  useEffect(() => {
-    if (toStorageStep) router.replace("/getting-started");
-  }, [toStorageStep, router]);
+  let redirect: "/setup" | "/login" | "/getting-started" | null = null;
+  if (!probe.isPending && !probe.error && status) {
+    if (!status.configured && pathname !== "/setup") redirect = "/setup";
+    else if (status.configured && pathname === "/setup") redirect = "/login";
+    else if (toStorageStep) redirect = "/getting-started";
+  }
+  const admitted =
+    !probe.isPending &&
+    (Boolean(probe.error) ||
+      (Boolean(status) &&
+        redirect === null &&
+        (!status?.storage_choice_required || choiceDecided)));
+  if (admitted && acceptedAt !== navigation.generation) setAcceptedAt(navigation.generation);
+  const ready = admitted || acceptedAt === navigation.generation;
 
-  if (!ready && !(choiceDecided && !toStorageStep)) {
+  useEffect(() => {
+    if (probe.error) {
+      // Preserve the existing fail-open policy so the auth/API error UI remains usable.
+      console.warn("setup status probe failed:", probe.error);
+    } else if (redirect) router.replace(redirect);
+  }, [probe.error, redirect, router]);
+
+  if (!ready) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-surface-container-lowest">
         <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
       </div>
     );
   }
-
-  // `error` is intentionally swallowed here — surfaced only via console — so
-  // that a transient backend hiccup doesn't lock the user out of the cached UI.
-  void error;
 
   return <>{children}</>;
 }

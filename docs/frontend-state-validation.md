@@ -642,17 +642,17 @@ Public credential entries retain their own view through the intentional login tr
 | 207 | aborts sign-in when the entry route leaves | Edge | login pending, leave route | signal aborted; no late stored identity/navigation | Frontend unit | ✅ `frontend/src/pages/__tests__/login.test.tsx::aborts sign-in when the entry route leaves` |
 | 208 | aborts the $label authentication endpoint | Edge | provider/login/identity/logout body pending | caller abort rejects late body; cookie transport retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/auth.test.ts::aborts the $label authentication endpoint` |
 | 209 | aborts the $label setup endpoint | Edge | status/catalog/session/check/complete pending | caller abort rejects late body; CSRF retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/config.test.ts::aborts the $label setup endpoint` |
-| 210 | stops setup bootstrap after its session stage is disposed | Edge | beginSetup deferred, unmount | no next catalog request | Frontend unit | ❌ missing |
-| 211 | stops a disposed storage check before sending its payload | Edge | check's beginSetup deferred, unmount | check endpoint not invoked | Frontend unit | ❌ missing |
-| 212 | stops a disposed setup command before account creation | Edge | create's beginSetup deferred, unmount | complete endpoint not invoked | Frontend unit | ❌ missing |
-| 213 | discards late setup completion after entry disposal | Edge | create deferred; unmount | no task reset, stored login or navigation | Frontend unit | ❌ missing |
-| 214 | skips lost-ack recovery for an aborted setup command | Edge | completion rejects after caller abort | no recovery status request | Frontend unit | ❌ missing |
-| 215 | fences late setup recovery after entry disposal | Edge | lost ack; recovery status deferred, unmount | no reset, login offer or navigation | Frontend unit | ❌ missing |
-| 216 | holds setup fields until bootstrap preparation succeeds | Edge | catalog/session pending | no premature account/storage editing | Frontend unit | ❌ missing |
-| 217 | recovers setup bootstrap without losing a draft | Error | current bootstrap failure followed by explicit retry | retryable error, current form recovery preserved | Frontend unit | ❌ missing |
-| 218 | holds a new navigation until its setup probe completes | Edge | previous gate accepted, next path probe pending | previous ready state cannot admit new entry | Frontend unit | ❌ missing |
-| 219 | aborts a superseded setup gate probe | Edge | old path probe pending, new path | old request aborted, old redirect ignored | Frontend unit | ❌ missing |
-| 220 | aborts a setup gate probe when its view leaves | Edge | pending status; unmount | body cancellation, no stale redirect | Frontend unit | ❌ missing |
+| 210 | stops setup bootstrap after its session stage is disposed | Edge | beginSetup deferred, unmount | no next catalog request | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::stops setup bootstrap after its session stage is disposed` |
+| 211 | stops a disposed storage check before sending its payload | Edge | check's beginSetup deferred, unmount | check endpoint not invoked | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::stops a disposed storage check before sending its payload` |
+| 212 | stops a disposed setup command before account creation | Edge | create's beginSetup deferred, unmount | complete endpoint not invoked | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::stops a disposed setup command before account creation` |
+| 213 | discards late setup completion after entry disposal | Edge | create deferred; unmount | no task reset, stored login or navigation | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::discards late setup completion after entry disposal` |
+| 214 | skips lost-ack recovery for an aborted setup command | Edge | completion rejects after caller abort | no recovery status request | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::skips lost-ack recovery for an aborted setup command` |
+| 215 | fences late setup recovery after entry disposal | Edge | lost ack; recovery status deferred, unmount | no reset, login offer or navigation | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::fences late setup recovery after entry disposal` |
+| 216 | holds setup fields until bootstrap preparation succeeds | Edge | catalog/session pending | no premature account/storage editing | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::holds setup fields until bootstrap preparation succeeds` |
+| 217 | recovers failed setup bootstrap | Error | current bootstrap failure followed by explicit retry | retryable error, account fields admitted after successful retry | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::recovers failed setup bootstrap` |
+| 218 | holds a new navigation until its setup probe completes | Edge | previous gate accepted, next path probe pending | previous ready state cannot admit new entry | Frontend unit | ✅ `frontend/src/components/__tests__/setup-gate.test.tsx::holds a new navigation until its setup probe completes` |
+| 219 | aborts a superseded setup gate probe | Edge | old path probe pending, new path | old request aborted, old redirect ignored | Frontend unit | ✅ `frontend/src/components/__tests__/setup-gate.test.tsx::aborts a superseded setup gate probe` |
+| 220 | aborts a setup gate probe when its view leaves | Edge | pending status; unmount | body cancellation, no stale redirect | Frontend unit | ✅ `frontend/src/components/__tests__/setup-gate.test.tsx::aborts a setup gate probe when its view leaves` |
 
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
@@ -699,3 +699,42 @@ AuthProvider's explicit boundary defaults to private; only exact Login/Setup rou
 | `frontend/src/components/setup-folder.tsx` | Full caller audit: config/source/scan/waiter chain; not assigned/edited in this checkpoint. |
 | `frontend/src/lib/setup-storage.ts` | Full payload/error mapper: CSRF/setup failure recovery language retained. |
 | `frontend/src/lib/navigation.ts` | Full React Router shim: memoized callbacks and pathname changes. |
+
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 224 | discards bootstrap from a replaced setup port | Edge | old catalog pending; new port configured | old catalog cannot restore setup form | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::discards bootstrap from a replaced setup port` |
+| 225 | stops configured bootstrap before session preparation | Happy | status configured | no session/catalog request, configured result | Frontend unit | ✅ `frontend/src/features/setup/__tests__/entry.test.ts::stops configured bootstrap before session preparation` |
+| 226 | stops unavailable bootstrap before session preparation | Edge | setup disabled | no session/catalog request, unavailable result | Frontend unit | ✅ `frontend/src/features/setup/__tests__/entry.test.ts::stops unavailable bootstrap before session preparation` |
+| 227 | preserves a genuine unauthorized setup completion failure | Error | current cookie session; complete401 | original ApiError401, no recovery replay | Frontend unit | ✅ `frontend/src/features/setup/__tests__/entry.test.ts::preserves a genuine unauthorized setup completion failure` |
+| 228 | keeps setup credentials outside remote caches | Edge | successful completion includes access token/password | Query/Mutation caches have no credentials | Frontend unit | ✅ `frontend/src/pages/__tests__/setup.test.tsx::keeps setup credentials outside remote caches` |
+
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 229 | stops a $command command after private scope retirement | Edge | session preparation deferred, permission scope retires | AbortError, no check/create payload sent | Frontend unit | ✅ `frontend/src/features/setup/__tests__/entry.test.ts::stops a $command command after private scope retirement` |
+| 230 | suppresses recovery after private scope retirement | Edge | completion pending, scope retires, late lost acknowledgement | AbortError, no recovery status request | Frontend unit | ✅ `frontend/src/features/setup/__tests__/entry.test.ts::suppresses recovery after private scope retirement` |
+
+
+M1/M9 Setup/Gate increment evidence: the eight Setup lifetime/readiness/recovery cases were red against the preceding page. Two initial arrangements needed correction (the pre-existing task fixture shape and the Retry label); their corrected targeted cases were reproduced red before the page implementation. Three Gate navigation/disposal cases were red. The port replacement, configured/unavailable bootstrap, genuine401 and credential-cache exclusions were first assessed after the initial migration, so no red result is claimed for those. The later private-scope retirement cases were also first assessed after implementation and directly exercise the new multi-stage owner.
+
+Initial focused qualification passed63tests5files (Setup42, Gate13, setup owner3, real RootLayout1, unchanged hygiene4). Full checks exposed an invalid null test render, an unused import and Gate state-in-effect lint. Those were repaired without disabling checks. The revised Gate, RootLayout and setup owner passed17tests3files. The final setup owner mirror passed6tests (including two command variants and lost-ack scope retirement); full app/UI/domain typecheck, full frontend lint, formatting688files and git diff --check passed. These gates cover66distincttests overall; repeated cases are not claimed as additional distinct coverage. No browser, coverage, CI or performance result is inferred.
+
+Setup bootstrap is a closed Query projection, admitted only after status, cookie session preparation and provider catalog settle in the same entry. Configured/unavailable states stop early. Local account/storage drafts remain local, preserve current failure recovery and cannot be replaced by a late old port response. Credential-bearing check/create commands deliberately do not enter MutationCache; each stage carries session and view cancellation, captures inputs before awaiting, and validates before publication. Current lost-ack recovery checks configured status without replaying account creation; cancellation never starts recovery. The exact genuine401 remains an ApiError through enclosing session scopes. Gate has one Query probe per path entry and retains only an accepted generation certificate so intentional sign-in cache retirement cannot destroy its own form. A new path starts unaccepted, and old navigation probes abort.
+
+### M1/M9 Setup/Gate manually inspected paths (increment)
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/features/setup/entry.ts` | Full new owner: SetupEntryApi, SetupBootstrap, setupEntryOptions, checkSetupEntry, SetupCompletion, completeSetupEntry and setupGateOptions; cookie/CSRF stages, caller/session fences, no credential Query/Mutation cache and constrained lost-ack recovery. |
+| `frontend/src/features/setup/__tests__/entry.test.ts` | Full new mirror: configured/unavailable early admission, real endpoint401, two staged command retirement variants and lost-ack retirement. |
+| `frontend/src/pages/setup.tsx` | Full page: port replacement identity, Query bootstrap, account/storage drafts, validation/check proof, duplicate command guard, StrictMode-safe view controller and guarded task reset/identity/navigation. Existing storage picker/locale/form semantics retained. |
+| `frontend/src/pages/__tests__/setup.test.tsx` | Full mirror: all existing account/storage/form/locale/recovery contracts, eight disposal/readiness/recovery cases, replaced port and credential cache exclusions. Query provider added to the existing injected-port fixture. |
+| `frontend/src/components/setup-gate.tsx` | Full gate: path-generation Query probe, accepted certificate, derived redirect/admission and storage-owner/auth readiness; no remote DTO copy or competing polling scheduler. |
+| `frontend/src/components/__tests__/setup-gate.test.tsx` | Full mirror: configured/unconfigured/storage-owner/unreachable policy plus three navigation/disposal cases; old accepted entry cannot admit pending new path. |
+| `frontend/src/__tests__/root-layout.test.tsx` | Full existing prerequisite mirror rerun: real local sign-in survives Gate Query retirement, verifies identity and reaches private composition. No source change. |
+| `frontend/src/lib/session-transport.ts` | Full existing composition reviewed: outer workflow retains body cancellation/current checks and genuine401 retirement-failure identity; no change. |
+| `frontend/src/lib/auth-store.ts` | Full existing metadata/event contract reviewed: retirePrivateSessionScope preserves identity while aborting scoped work; no change. |
+| `frontend/src/lib/setup-storage.ts` | Full payload/error mapper rechecked: same CSRF/account/storage and failure-language contracts; no change. |
+| `frontend/src/test-support/render.tsx` | Existing renderApp/default identity/native mock routes inspected for genuine401 and real composition arrangements; no change. |
+| `frontend/package.json` | Existing gate commands rechecked; no config/dependency changes. |

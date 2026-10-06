@@ -1,7 +1,14 @@
 import { storageOperationMessage } from "@/lib/storage-operations";
-import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  setupEntryOptions,
+  checkSetupEntry,
+  completeSetupEntry,
+  type SetupEntryApi,
+} from "@/features/setup/entry";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -26,14 +33,9 @@ import { SetupUnavailable } from "@/components/setup-unavailable";
 import { setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 import { providerFormError } from "@/lib/storage-provider-form";
 import { formatBytes } from "@/lib/format";
-import type { SetupStatus, SetupStorageCheck, StorageProvider } from "@/types";
+import type { SetupStorageCheck } from "@/types";
 
-export interface SetupPageDeps {
-  getSetupStatus: typeof getSetupStatus;
-  getStorageProviders: typeof getStorageProviders;
-  beginSetup: typeof beginSetup;
-  checkSetupStorage: typeof checkSetupStorage;
-  completeSetup: typeof completeSetup;
+export interface SetupPageDeps extends SetupEntryApi {
   storeLogin: typeof storeLogin;
 }
 const LIVE_DEPS: SetupPageDeps = {
@@ -47,24 +49,52 @@ const LIVE_DEPS: SetupPageDeps = {
 type AccountField = "username" | "password" | "confirm" | "email";
 
 export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }) {
+  const [port, setPort] = useState({ deps, generation: 0 });
+  if (port.deps !== deps) setPort({ deps, generation: port.generation + 1 });
+  return <SetupEntry key={port.generation} deps={deps} />;
+}
+
+function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   useUiLocale();
   const router = useRouter();
   const { t } = useI18n();
-  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const entry = useId();
+  const client = useQueryClient();
+  const [bootAttempt, setBootAttempt] = useState(0);
+  const bootstrapOptions = setupEntryOptions(deps, entry, bootAttempt);
+  const bootstrap = useQuery(bootstrapOptions);
+  const status = bootstrap.data?.status ?? null;
+  const existing = bootstrap.data?.kind === "configured";
+  const providers = bootstrap.data?.kind === "ready" ? bootstrap.data.providers : [];
   const [step, setStep] = useState<1 | 2>(1);
   const [account, setAccount] = useState({ username: "", password: "", confirm: "", email: "" });
   const [visiblePasswords, setVisiblePasswords] = useState({ password: false, confirm: false });
-  const [providers, setProviders] = useState<StorageProvider[]>([]);
-  const [providerId, setProviderId] = useState("local");
-  const [values, setValues] = useState<ProviderValues>({});
+  const initialStorage = useMemo(() => {
+    const state = bootstrap.data;
+    if (!state || state.kind !== "ready") return { providerId: "local", values: {} };
+    const id = state.status.current_storage_provider ?? "local";
+    const provider = state.providers.find((item) => item.id === id);
+    const values = provider ? defaultProviderValues(provider) : {};
+    if (id === "local") {
+      values.data_dir = state.status.current_data_dir ?? state.status.default_data_dir ?? "";
+      values.thumb_dir = state.status.current_thumb_dir ?? state.status.default_thumb_dir ?? "";
+    }
+    Object.assign(values, state.status.current_storage_provider_config);
+    return { providerId: id, values };
+  }, [bootstrap.data]);
+  const [storageDraft, setStorageDraft] = useState<{
+    providerId: string;
+    values: ProviderValues;
+  } | null>(null);
+  const { providerId, values } = storageDraft ?? initialStorage;
   const [check, setCheck] = useState<SetupStorageCheck | null>(null);
   const [checkedDraft, setCheckedDraft] = useState("");
   const [operation, setOperation] = useState<"check" | "create" | null>(null);
   const busy = operation !== null;
   const [error, setError] = useState("");
   const [fieldError, setFieldError] = useState<AccountField | null>(null);
-  const [existing, setExisting] = useState(false);
-  const [bootAttempt, setBootAttempt] = useState(0);
+  const view = useRef<AbortController | null>(null);
+  const command = useRef(false);
   const form = useRef<HTMLFormElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -76,39 +106,10 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   }
 
   useEffect(() => {
-    let cancelled = false;
-    async function prepare() {
-      const state = await deps.getSetupStatus();
-      if (cancelled) return;
-      if (state.configured) {
-        setExisting(true);
-        setStatus(state);
-        return;
-      }
-      setStatus(state);
-      if (!state.setup_available) return;
-      await deps.beginSetup();
-      const catalog = await deps.getStorageProviders();
-      if (cancelled) return;
-      setProviders(catalog);
-      const id = state.current_storage_provider ?? "local";
-      setProviderId(id);
-      const provider = catalog.find((item) => item.id === id);
-      const initial = provider ? defaultProviderValues(provider) : {};
-      if (id === "local") {
-        initial.data_dir = state.current_data_dir ?? state.default_data_dir ?? "";
-        initial.thumb_dir = state.current_thumb_dir ?? state.default_thumb_dir ?? "";
-      }
-      Object.assign(initial, state.current_storage_provider_config);
-      setValues(initial);
-    }
-    void prepare().catch(() => {
-      if (!cancelled) setError(uiText("setup.failed"));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [deps, bootAttempt]);
+    const controller = new AbortController();
+    view.current = controller;
+    return () => controller.abort(new DOMException("setup_entry_disposed", "AbortError"));
+  }, []);
 
   useEffect(() => {
     if (fieldError) form.current?.querySelector<HTMLInputElement>(`#setup-${fieldError}`)?.focus();
@@ -136,6 +137,9 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
     return setupStorageBody(providerId, values);
   }
   async function checkStorage() {
+    const controller = view.current;
+    if (!controller || controller.signal.aborted || command.current) return;
+    const version = getSessionVersion();
     const provider = providers.find((item) => item.id === providerId);
     const invalid = !provider?.selectable
       ? provider?.disabled_reason
@@ -147,59 +151,73 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
       setError(invalid);
       return;
     }
+    command.current = true;
     setOperation("check");
     setError("");
     setCheck(null);
     try {
       const draft = storageBody();
       setCheckedDraft(JSON.stringify(draft));
-      const session = await deps.beginSetup();
-      setCheck(await deps.checkSetupStorage(draft, session.csrf));
+      const checked = await checkSetupEntry(deps, draft, controller.signal);
+      requireSessionVersion(version);
+      if (!controller.signal.aborted) setCheck(checked);
     } catch (error) {
-      setError(describeError(error instanceof Error ? error : new Error()));
+      if (!controller.signal.aborted && version === getSessionVersion())
+        setError(describeError(error instanceof Error ? error : new Error()));
     } finally {
-      setOperation(null);
+      command.current = false;
+      if (!controller.signal.aborted) setOperation(null);
     }
   }
   async function submit() {
-    if (busy || !check?.ready || checkedDraft !== JSON.stringify(storageBody())) return;
+    const controller = view.current;
+    if (
+      !controller ||
+      controller.signal.aborted ||
+      command.current ||
+      busy ||
+      !check?.ready ||
+      checkedDraft !== JSON.stringify(storageBody())
+    )
+      return;
+    const version = getSessionVersion();
+    const body = {
+      ...storageBody(),
+      username: account.username.trim(),
+      password: account.password,
+      email: account.email.trim() || undefined,
+    };
+    command.current = true;
     setOperation("create");
     setError("");
     try {
-      const session = await deps.beginSetup();
-      const result = await deps.completeSetup(
-        {
-          ...storageBody(),
-          username: account.username.trim(),
-          password: account.password,
-          email: account.email.trim() || undefined,
-        },
-        session.csrf,
-      );
+      const completion = await completeSetupEntry(deps, body, controller.signal);
+      requireSessionVersion(version);
+      if (controller.signal.aborted) return;
       resetTasksForNewSetup();
+      if (completion.kind === "configured") {
+        client.setQueryData(bootstrapOptions.queryKey, {
+          kind: "configured",
+          status: completion.status,
+        });
+        return;
+      }
+      const result = completion.response;
+      // This verified publication intentionally starts the authenticated scope.
       deps.storeLogin(result.access_token, {
         id: result.user_id,
         username: result.username,
-        email: account.email.trim() || null,
+        email: body.email ?? null,
         is_superuser: true,
       });
       setAccount({ username: "", password: "", confirm: "", email: "" });
       router.replace("/getting-started");
     } catch (error) {
-      // A lost HTTP response does not imply that the database rolled back.
-      try {
-        const state = await deps.getSetupStatus();
-        if (state.configured) {
-          resetTasksForNewSetup();
-          setExisting(true);
-          return;
-        }
-      } catch {
-        /* Keep the form for recovery. */
-      }
-      setError(describeError(error instanceof Error ? error : new Error()));
+      if (!controller.signal.aborted && version === getSessionVersion())
+        setError(describeError(error instanceof Error ? error : new Error()));
     } finally {
-      setOperation(null);
+      command.current = false;
+      if (!controller.signal.aborted) setOperation(null);
     }
   }
   const currentCheck = checkedDraft === JSON.stringify(storageBody()) ? check : null;
@@ -218,8 +236,8 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
         </div>
       ) : !status ? (
         <div role="status">
-          {error ? t("setup.failed") : t("setup.loading")}
-          {error && (
+          {bootstrap.error ? t("setup.failed") : t("setup.loading")}
+          {bootstrap.error && (
             <Button onClick={() => setBootAttempt((n) => n + 1)}>{t("setup.retry")}</Button>
           )}
         </div>
@@ -354,19 +372,21 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
                   providerId={providerId}
                   values={values}
                   onProviderChange={(provider) => {
-                    setProviderId(provider.id);
                     const defaults = defaultProviderValues(provider);
                     if (provider.id === "local") {
                       defaults.data_dir = status.current_data_dir ?? status.default_data_dir ?? "";
                       defaults.thumb_dir =
                         status.current_thumb_dir ?? status.default_thumb_dir ?? "";
                     }
-                    setValues(defaults);
+                    setStorageDraft({ providerId: provider.id, values: defaults });
                     setCheck(null);
                     setError("");
                   }}
                   onValueChange={(name, value) => {
-                    setValues((current) => ({ ...current, [name]: value }));
+                    setStorageDraft((current) => ({
+                      providerId,
+                      values: { ...(current?.values ?? values), [name]: value },
+                    }));
                     setCheck(null);
                     setError("");
                   }}

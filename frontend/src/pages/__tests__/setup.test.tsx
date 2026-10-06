@@ -15,8 +15,10 @@
  * thread.
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/query-client";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -205,13 +207,15 @@ function currentPath(): string {
 }
 
 function renderSetup() {
-  render(
-    <MemoryRouter initialEntries={["/setup"]}>
-      <I18nProvider>
-        <SetupPage deps={deps} />
-      </I18nProvider>
-      <CurrentPath />
-    </MemoryRouter>,
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/setup"]}>
+        <I18nProvider>
+          <SetupPage deps={deps} />
+        </I18nProvider>
+        <CurrentPath />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -227,6 +231,7 @@ async function reachStorage() {
 }
 
 beforeEach(() => {
+  queryClient.clear();
   localStorage.setItem("printstash.locale", "en");
   deps = stubDeps();
   vi.mocked(deps.getSetupStatus).mockResolvedValue(status);
@@ -569,5 +574,163 @@ describe("Storage form recovery", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(screen.getByLabelText("Data directory")).toBeDisabled();
     expect(screen.getByRole("button", { name: "S3-compatible object storage" })).toBeDisabled();
+  });
+});
+
+describe("setup entry lifetime", () => {
+  it("stops setup bootstrap after its session stage is disposed", async () => {
+    const session = Promise.withResolvers<Awaited<ReturnType<SetupPageDeps["beginSetup"]>>>();
+    vi.mocked(deps.beginSetup).mockReturnValueOnce(session.promise);
+    const view = renderSetup();
+    await waitFor(() => expect(deps.beginSetup).toHaveBeenCalledTimes(1));
+
+    view.unmount();
+    await act(async () => session.resolve({ csrf: "late", expires_in: 3600 }));
+
+    expect(deps.getStorageProviders).not.toHaveBeenCalled();
+  });
+
+  it("stops a disposed storage check before sending its payload", async () => {
+    const user = await reachStorage();
+    const session = Promise.withResolvers<Awaited<ReturnType<SetupPageDeps["beginSetup"]>>>();
+    vi.mocked(deps.beginSetup).mockReturnValueOnce(session.promise);
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+
+    cleanup();
+    await act(async () => session.resolve({ csrf: "late", expires_in: 3600 }));
+
+    expect(deps.checkSetupStorage).not.toHaveBeenCalled();
+  });
+
+  it("stops a disposed setup command before account creation", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    const session = Promise.withResolvers<Awaited<ReturnType<SetupPageDeps["beginSetup"]>>>();
+    vi.mocked(deps.beginSetup).mockReturnValueOnce(session.promise);
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    cleanup();
+    await act(async () => session.resolve({ csrf: "late", expires_in: 3600 }));
+
+    expect(deps.completeSetup).not.toHaveBeenCalled();
+  });
+
+  it("discards late setup completion after entry disposal", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    const completed = Promise.withResolvers<SetupResponse>();
+    vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
+    const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    cleanup();
+    await act(async () => completed.resolve(setupResponse));
+
+    expect(deps.storeLogin).not.toHaveBeenCalled();
+    expect(listTasks().map((item) => item.id)).toContain(task);
+  });
+
+  it("skips lost-ack recovery for an aborted setup command", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    const completed = Promise.withResolvers<SetupResponse>();
+    vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+
+    cleanup();
+    await act(async () => completed.reject(new Error("late failure")));
+
+    expect(deps.getSetupStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences late setup recovery after entry disposal", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    const recovered = Promise.withResolvers<SetupStatus>();
+    vi.mocked(deps.getSetupStatus).mockReturnValueOnce(recovered.promise);
+    vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("lost response"));
+    const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await waitFor(() => expect(deps.getSetupStatus).toHaveBeenCalledTimes(2));
+
+    cleanup();
+    await act(async () => recovered.resolve({ configured: true, user_count: 1 }));
+
+    expect(listTasks().map((item) => item.id)).toContain(task);
+    expect(deps.storeLogin).not.toHaveBeenCalled();
+  });
+
+  it("holds setup fields until bootstrap preparation succeeds", async () => {
+    const catalog = Promise.withResolvers<StorageProvider[]>();
+    vi.mocked(deps.getStorageProviders).mockReturnValueOnce(catalog.promise);
+    renderSetup();
+    await waitFor(() => expect(deps.getStorageProviders).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+    await act(async () => catalog.resolve(providers));
+
+    expect(await screen.findByLabelText("Username")).toBeVisible();
+  });
+
+  it("recovers failed setup bootstrap", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deps.getStorageProviders).mockRejectedValueOnce(new Error("catalog offline"));
+    renderSetup();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByLabelText("Username")).toBeVisible();
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+  });
+});
+
+describe("setup source ownership", () => {
+  it("discards bootstrap from a replaced setup port", async () => {
+    const old = Promise.withResolvers<StorageProvider[]>();
+    vi.mocked(deps.getStorageProviders).mockReturnValueOnce(old.promise);
+    const view = renderSetup();
+    await waitFor(() => expect(deps.getStorageProviders).toHaveBeenCalledTimes(1));
+    const replacement = stubDeps();
+    vi.mocked(replacement.getSetupStatus).mockResolvedValue({ configured: true, user_count: 1 });
+
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/setup"]}>
+          <I18nProvider>
+            <SetupPage deps={replacement} />
+          </I18nProvider>
+          <CurrentPath />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("button", { name: "Sign in" });
+    await act(async () => old.resolve(providers));
+
+    expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeVisible();
+  });
+
+  it("keeps setup credentials outside remote caches", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+
+    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+
+    const cached = JSON.stringify(
+      queryClient
+        .getQueryCache()
+        .findAll()
+        .map((query) => query.state.data),
+    );
+    expect(cached).not.toContain('"access_token"');
+    expect(cached).not.toContain("Password123");
+    expect(queryClient.getMutationCache().getAll()).toEqual([]);
   });
 });
