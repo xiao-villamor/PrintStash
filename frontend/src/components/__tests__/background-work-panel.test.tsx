@@ -838,3 +838,123 @@ describe("work drafts", () => {
     }
   });
 });
+
+describe("work recovery authority", () => {
+  it.each([
+    { source: "overview" as const, status: 403 },
+    { source: "overview" as const, status: 404 },
+    { source: "jobs" as const, status: 403 },
+    { source: "jobs" as const, status: 404 },
+  ])(
+    "hides cached administrator work after $source returns $status",
+    async ({ source, status }) => {
+      const user = userEvent.setup();
+      const api = stubApi(aWorkOverview(), {
+        jobs: vi
+          .fn<BackgroundWorkApi["jobs"]>()
+          .mockResolvedValue([aJob({ label: "Private admin job", state: "running" })]),
+      });
+      renderPanel(api);
+      expect(await screen.findByText("Private admin job")).toBeVisible();
+      vi.mocked(api[source]).mockRejectedValue(new ApiError(status, "forbidden", "forbidden"));
+
+      await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+      expect(await screen.findByRole("alert")).toBeVisible();
+      expect(screen.queryByText("Private admin job")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "What's happening now" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(["overview", "jobs"] as const)(
+    "retains cached work after transient %s failure",
+    async (source) => {
+      const user = userEvent.setup();
+      const api = stubApi(aWorkOverview(), {
+        jobs: vi
+          .fn<BackgroundWorkApi["jobs"]>()
+          .mockResolvedValue([aJob({ label: "Private admin job", state: "running" })]),
+      });
+      renderPanel(api);
+      expect(await screen.findByText("Private admin job")).toBeVisible();
+      vi.mocked(api[source]).mockRejectedValue(new ApiError(503, "offline", "offline"));
+
+      await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+      expect(await screen.findByRole("alert")).toBeVisible();
+      expect(screen.getByText("Private admin job")).toBeVisible();
+      expect(screen.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    },
+  );
+
+  it("distinguishes unavailable Jobs from an empty queue", async () => {
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi
+        .fn<BackgroundWorkApi["jobs"]>()
+        .mockRejectedValue(new ApiError(503, "offline", "offline")),
+    });
+
+    renderPanel(api);
+
+    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(await screen.findByText("Could not load this list.")).toBeVisible();
+    expect(screen.queryByText("Nothing is running or waiting right now.")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes pending Jobs from an empty queue", async () => {
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockImplementation(() => new Promise(() => {})),
+    });
+
+    renderPanel(api);
+
+    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(screen.getByText("Loading…")).toBeVisible();
+    expect(screen.queryByText("Nothing is running or waiting right now.")).not.toBeInTheDocument();
+  });
+});
+
+describe("work authority recovery", () => {
+  it("hides a private work confirmation after read denial", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi
+        .fn<BackgroundWorkApi["jobs"]>()
+        .mockResolvedValue([aJob({ label: "Private admin job", state: "running" })]),
+    });
+    renderPanel(api);
+    await screen.findByText("Private admin job");
+    await user.click(screen.getByRole("button", { name: "Cancel job" }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    vi.mocked(api.overview).mockRejectedValue(new ApiError(403, "forbidden", "forbidden"));
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancel Private admin job?")).not.toBeInTheDocument();
+  });
+
+  it("restores work after both administrative readers recover", async () => {
+    const user = userEvent.setup();
+    const api = stubApi(aWorkOverview(), {
+      jobs: vi
+        .fn<BackgroundWorkApi["jobs"]>()
+        .mockResolvedValue([aJob({ label: "Current admin job", state: "running" })]),
+      overview: vi
+        .fn<BackgroundWorkApi["overview"]>()
+        .mockRejectedValue(new ApiError(403, "forbidden", "forbidden")),
+    });
+    renderPanel(api);
+    await screen.findByRole("alert");
+    vi.mocked(api.overview).mockResolvedValue(aWorkOverview());
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByText("Current admin job")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});

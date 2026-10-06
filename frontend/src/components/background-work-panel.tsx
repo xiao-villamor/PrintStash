@@ -37,6 +37,7 @@ import {
   type BackgroundWorkApi,
   type WorkChange,
   type WorkOutcome,
+  type WorkJobsPresentation,
 } from "@/features/work/queries";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, withSessionRequest } from "@/lib/session-transport";
@@ -186,12 +187,19 @@ function LaneRow({
 
 export function BackgroundWorkPanel({ api = workApi }: { api?: BackgroundWorkApi }) {
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
-  return <BackgroundWorkView key={session} api={api} />;
+  const work = useBackgroundWork(api);
+  return <BackgroundWorkView key={`${session}:${work.allowed}`} api={api} work={work} />;
 }
 
-function BackgroundWorkView({ api }: { api: BackgroundWorkApi }) {
+function BackgroundWorkView({
+  api,
+  work,
+}: {
+  api: BackgroundWorkApi;
+  work: ReturnType<typeof useBackgroundWork>;
+}) {
   useUiLocale();
-  const { overview, activeJobs, error: readError, loading, refresh } = useBackgroundWork(api);
+  const { overview, jobsState, error: readError, loading, refresh } = work;
   const error = readError ? userMessage(readError) : null;
   const mutation = useWorkMutation(api);
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -312,9 +320,9 @@ function BackgroundWorkView({ api }: { api: BackgroundWorkApi }) {
         </div>
       )}
 
-      {!overview && activeJobs.length > 0 && (
+      {!overview && jobsState.status === "ready" && jobsState.jobs.length > 0 && (
         <ActiveWorkJobs
-          activeJobs={activeJobs}
+          jobsState={jobsState}
           onCancel={(job) => setPending({ kind: "cancel-job", job })}
         />
       )}
@@ -431,7 +439,7 @@ function BackgroundWorkView({ api }: { api: BackgroundWorkApi }) {
           </div>
 
           <ActiveWorkJobs
-            activeJobs={activeJobs}
+            jobsState={jobsState}
             onCancel={(job) => setPending({ kind: "cancel-job", job })}
           />
 
@@ -705,10 +713,10 @@ function BackgroundWorkView({ api }: { api: BackgroundWorkApi }) {
 }
 
 function ActiveWorkJobs({
-  activeJobs,
+  jobsState,
   onCancel,
 }: {
-  activeJobs: JobStatus[];
+  jobsState: WorkJobsPresentation;
   onCancel: (job: JobStatus) => void;
 }) {
   return (
@@ -718,9 +726,19 @@ function ActiveWorkJobs({
         title={uiText("In progress")}
         description={uiText("Work that is running or waiting to start.")}
       />
-      {activeJobs.length > 0 && (
+      {jobsState.status !== "ready" && (
+        <p
+          className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5"
+          aria-busy={jobsState.status === "loading"}
+        >
+          {jobsState.status === "loading"
+            ? uiText("Loading…")
+            : uiText("Could not load this list.")}
+        </p>
+      )}
+      {jobsState.status === "ready" && jobsState.jobs.length > 0 && (
         <ul className="divide-y divide-border border-b">
-          {activeJobs.map((job) => (
+          {jobsState.jobs.map((job) => (
             <li
               key={job.job_id}
               className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
@@ -785,7 +803,7 @@ function ActiveWorkJobs({
           ))}
         </ul>
       )}
-      {activeJobs.length === 0 && (
+      {jobsState.status === "ready" && jobsState.jobs.length === 0 && (
         <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
           {uiText("Nothing is running or waiting right now.")}
         </p>

@@ -3,6 +3,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { getUser, onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, withSessionRequest } from "@/lib/session-transport";
 import { subscribeEvents } from "@/lib/events";
+import { ApiError } from "@/lib/errors";
 import {
   getWorkOverview,
   setLaneConcurrency,
@@ -66,6 +67,14 @@ export function workJobsOptions(api = workApi) {
     refetchOnReconnect: true,
   });
 }
+export type WorkJobsPresentation =
+  | { status: "ready"; jobs: JobStatus[] }
+  | { status: "loading" | "unavailable" };
+
+function accessDenied(error: Error | null): boolean {
+  return error instanceof ApiError && (error.status === 403 || error.status === 404);
+}
+
 export function useBackgroundWork(api = workApi) {
   useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const enabled = Boolean(getUser()?.is_superuser);
@@ -86,11 +95,26 @@ export function useBackgroundWork(api = workApi) {
         void refresh();
     });
   }, [enabled, refresh]);
+  // Either administrative endpoint can authoritatively deny this shared surface.
+  // A transient read failure keeps its last successful snapshot usable.
+  const denial = accessDenied(overview.error)
+    ? overview.error
+    : accessDenied(jobs.error)
+      ? jobs.error
+      : null;
+  const allowed = enabled && !denial;
+  const jobsState: WorkJobsPresentation =
+    allowed && jobs.data
+      ? { status: "ready", jobs: jobs.data.filter(activeJob) }
+      : allowed && jobs.isPending
+        ? { status: "loading" }
+        : { status: "unavailable" };
   return {
-    overview: enabled ? (overview.data ?? null) : null,
-    activeJobs: enabled ? (jobs.data ?? []).filter(activeJob) : [],
-    loading: enabled && (overview.isPending || jobs.isPending),
-    error: enabled ? (overview.error ?? jobs.error) : null,
+    allowed,
+    overview: allowed ? (overview.data ?? null) : null,
+    jobsState,
+    loading: allowed && (overview.isPending || jobs.isPending),
+    error: enabled ? (denial ?? overview.error ?? jobs.error) : null,
     refresh,
   };
 }
@@ -115,6 +139,7 @@ export type WorkOutcome =
 export function useWorkMutation(api = workApi) {
   const client = useQueryClient();
   return useMutation({
+    retry: false,
     mutationFn: (change: WorkChange) =>
       withSessionRequest(async (request) => {
         let keys: readonly (readonly string[])[] = [workKeys.overview, workKeys.jobs];

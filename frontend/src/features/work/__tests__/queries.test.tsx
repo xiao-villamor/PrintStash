@@ -197,3 +197,29 @@ describe("work acknowledgement identity", () => {
     expect(queryClient.getQueryState(workKeys.jobs)?.isInvalidated).toBe(false);
   });
 });
+
+describe("work command retries", () => {
+  it("does not repeat a failed work command", async () => {
+    const user = userEvent.setup();
+    let commands = 0;
+    const view = renderApp(<MutationProbe change={{ kind: "retry", jobId: "job" }} />, {
+      routes: {
+        "POST /api/v1/jobs/job/retry": () => {
+          commands++;
+          return json({ detail: "forbidden" }, 403);
+        },
+      },
+    });
+
+    queryClient.setDefaultOptions({
+      ...queryClient.getDefaultOptions(),
+      mutations: { retry: 1, retryDelay: 0 },
+    });
+    view.rerender(<MutationProbe change={{ kind: "retry", jobId: "job" }} />);
+
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(await screen.findByText("failure:403")).toBeVisible();
+    expect(commands).toBe(1);
+  });
+});

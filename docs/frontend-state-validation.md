@@ -603,3 +603,23 @@ The following is manual source/test inspection, not a new executed gate. It does
 | `frontend/src/components/external-libraries-panel.tsx` | Only pollScanJob and completion sections (282–510) inspected: scan polling also feeds task tracking; owner coordination needed before replacing it. This is not full-file review. |
 | `frontend/src/components/derivative-status.tsx` | Full existing derivative read/retry lifecycle inspected; root's dirty ModelDetail slice owns its replacement. |
 | `frontend/src/components/model-detail/use-derivative-refresh.ts` | Full existing notice/read lifecycle inspected; root's dirty ModelDetail slice owns its replacement. |
+
+
+## M7 Background work recovery correction (before tests)
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 192 | hides cached administrator work after $source returns $status | Error | overview or Jobs denies403/404 after seeded successful reads | both private projections hidden despite stored admin role | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::hides cached administrator work after $source returns $status` |
+| 193 | retains cached work after transient %s failure | Error | overview or Jobs503 after successful reads | useful cached overview/Jobs retained with error | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::retains cached work after transient %s failure` |
+| 194 | distinguishes unavailable Jobs from an empty queue | Error | overview succeeds, initial Jobs read fails | overview retained, Jobs unavailable, no empty-queue assertion | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::distinguishes unavailable Jobs from an empty queue` |
+| 195 | distinguishes pending Jobs from an empty queue | Edge | overview succeeds, initial Jobs deferred | loading Jobs visible, no empty-queue assertion | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::distinguishes pending Jobs from an empty queue` |
+| 196 | does not repeat a failed work command | Error | caller client mutation default retry1; denied command | one wire command, failure retained | Frontend unit | ✅ `frontend/src/features/work/__tests__/queries.test.tsx::does not repeat a failed work command` |
+| 197 | hides a private work confirmation after read denial | Error | open Job confirmation, overview403 | dialog/private label removed | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::hides a private work confirmation after read denial` |
+| 198 | restores work after both administrative readers recover | Happy | denied overview, then authorized overview/Jobs | current overview and Jobs visible again | Frontend unit | ✅ `frontend/src/components/__tests__/background-work-panel.test.tsx::restores work after both administrative readers recover` |
+
+
+Recovery correction evidence: the initial targeted lane was red6failed/3passed (four cached403/404 denial variants and unavailable/pending Jobs); the two transient503 cases already passed. The initial retry arrangement did not actually override the active observer's defaults. Correcting it to configure the application client then rerender reproduced2wire commands and failed the one-command assertion (red1case). Explicit retry:false fixed it. The open private confirmation separately failed on denial (red1failed/1passed); authorized-reader recovery already passed.
+
+Final focused gate passed79tests3files: work panel55, work owner20 and unchanged suite hygiene4. Full app/UI/domain typecheck, full frontend lint, full formatting683files and git diff --check passed. The previous endpoint mirrors were unchanged and were not repeated. No new browser/coverage/performance/CI qualification is claimed.
+
+The two admin reads share presentation authority: a current403/404 from either suppresses both cached projections and takes precedence over a transient error from the other read. No global identity or cache mutation was added. Query remains the one read/scheduler owner. Transient failures preserve successful snapshots. The Job presentation is a closed ready/loading/unavailable union, so a confirmed empty queue requires a successful Job snapshot. The private inner view is keyed by scope and authority availability; denial removes confirmations/drafts and aborts its pending caller lifetime immediately, and authorized recovery creates fresh local state. This extends the manually inspected BackgroundWork owner/component and both test ledger entries above; no additional production/config paths changed.
