@@ -1,3 +1,5 @@
+import { runCaptureRequest } from "./capture-operation.ts";
+
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
 export interface BrowserCaptureFile {
@@ -11,6 +13,7 @@ export interface BrowserCaptureFile {
 export const CAPTURE_MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
 export const CAPTURE_MAX_TOTAL_SIZE_BYTES = 1024 * 1024 * 1024;
 export const CAPTURE_MAX_FILES = 64;
+export const CAPTURE_CLEANUP_TIMEOUT_MS = 5_000;
 
 interface CaptureUploadSlot {
   id: string;
@@ -116,6 +119,7 @@ export async function captureRichFiles({
   files,
   cover,
   runStage,
+  signal,
 }: {
   fetchImpl?: typeof fetch;
   vault: string;
@@ -126,8 +130,17 @@ export async function captureRichFiles({
   files: BrowserCaptureFile[];
   cover?: BrowserCaptureFile;
   runStage?: CaptureStageRunner;
+  signal?: AbortSignal;
 }): Promise<unknown> {
   const base = vault.replace(/\/$/, "");
+  const stageRequest = <T>(
+    stage: CaptureUploadStage,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ) => {
+    const scoped = (stageSignal?: AbortSignal) =>
+      runCaptureRequest([signal, stageSignal], operation);
+    return runStage ? runStage(stage, scoped) : scoped();
+  };
   if (files.length === 0 || files.length > CAPTURE_MAX_FILES) {
     throw new Error("Capture file count is outside the supported limit.");
   }
@@ -176,8 +189,14 @@ export async function captureRichFiles({
       throw new Error(`PrintStash returned ${created.status} while creating upload slots.`);
     return (await created.json()) as CaptureSlotResponse;
   };
-  const payload = await (runStage ? runStage("slot_create", createSlot) : createSlot());
-  if (!payload?.item || !Array.isArray(payload.slots) || payload.slots.length !== uploads.length) {
+  const payload = await stageRequest("slot_create", createSlot);
+  if (
+    !payload?.item ||
+    !Number.isSafeInteger(payload.item.id) ||
+    payload.item.id <= 0 ||
+    !Array.isArray(payload.slots) ||
+    payload.slots.length !== uploads.length
+  ) {
     throw new Error("PrintStash returned invalid capture upload slots.");
   }
 
@@ -202,7 +221,7 @@ export async function captureRichFiles({
             `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
           );
       };
-      await (runStage ? runStage("slot_upload", uploadSlot) : uploadSlot());
+      await stageRequest("slot_upload", uploadSlot);
     }
 
     const finalize = async (signal?: AbortSignal) => {
@@ -218,18 +237,25 @@ export async function captureRichFiles({
         throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
       return finalized.json();
     };
-    return await (runStage ? runStage("slot_finalize", finalize) : finalize());
+    return await stageRequest("slot_finalize", finalize);
   } catch (error) {
     // A failed transfer owns no reviewable capture. Ask the vault to dismiss
     // the exact item and release any slots already uploaded in this batch.
+    const cleanup = new AbortController();
+    const deadline = setTimeout(() => cleanup.abort(), CAPTURE_CLEANUP_TIMEOUT_MS);
     try {
-      await fetchImpl(`${base}/api/v1/inbox/${payload.item.id}/capture-upload`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${authorization}` },
+      await runCaptureRequest([cleanup.signal], async (cleanupSignal) => {
+        await fetchImpl(`${base}/api/v1/inbox/${payload.item.id}/capture-upload`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${authorization}` },
+          signal: cleanupSignal,
+        });
       });
     } catch {
       // Preserve the original upload failure. The item remains visible for
       // manual dismissal if the cleanup request could not reach the vault.
+    } finally {
+      clearTimeout(deadline);
     }
     throw error;
   }

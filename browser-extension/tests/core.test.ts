@@ -536,3 +536,21 @@ test("rejects unsupported pages before sending credentials", async () => {
   );
   assert.equal(called, false);
 });
+
+test.each([
+  { label: "JSON null", body: "null" },
+  { label: "malformed JSON", body: "{" },
+])("rejects an invalid login body: $label", async ({ body }) => {
+  await assert.rejects(
+    verifyVaultConnection({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "synthetic-key",
+      fetchImpl: async (input) =>
+        requestUrl(input).endsWith("/health")
+          ? Response.json({ status: "ok", name: "PrintStash" })
+          : new Response(body, { headers: { "Content-Type": "application/json" } }),
+    }),
+    /PrintStash did not return an access token/,
+  );
+});

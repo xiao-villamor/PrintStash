@@ -1962,4 +1962,214 @@ describe("popup browser adapters", () => {
     ]);
     expect(element("#status").textContent).toContain("sent to Pending Imports");
   });
+
+  it.each(["visible_page", "thingiverse_files", "printables_metadata"])(
+    "retires the fallback after held %s metadata is cancelled",
+    async (stage) => {
+      fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+        {
+          id: 42,
+          title: "Whistle",
+          url:
+            stage === "printables_metadata"
+              ? "https://www.printables.com/model/3161-3d-benchy/files"
+              : "https://www.thingiverse.com/thing:763622/files",
+        },
+      ]);
+      let holdCapture = false;
+      let releaseMetadata: (() => void) | undefined;
+      let metadataSignal: AbortSignal | null | undefined;
+      fakeBrowser.scripting.executeScript = vi.fn(async (details) => {
+        const fileRead = details.func?.name === "requestThingiverseFilesInMainWorld";
+        const visibleRead =
+          Array.isArray(details.args) &&
+          details.args[0] &&
+          typeof details.args[0] === "object" &&
+          "maxScripts" in details.args[0];
+        if (
+          holdCapture &&
+          ((stage === "visible_page" && visibleRead) || (stage === "thingiverse_files" && fileRead))
+        ) {
+          await new Promise<void>((resolve) => {
+            releaseMetadata = resolve;
+          });
+        }
+        return [{ frameId: 0, result: { pageTitle: "Whistle", jsonLd: [] } }];
+      });
+      await fakeBrowser.storage.local.set({
+        vault: "https://vault-a.example.com",
+        deviceCredential: "credential-a",
+      });
+      const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+        const url = String(input);
+        if (url === "https://api.printables.com/graphql/") {
+          metadataSignal = options.signal;
+          return new Promise<Response>((resolve) => {
+            releaseMetadata = () => resolve(response({}));
+          });
+        }
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/browser-pairings/claim"))
+          return response({ credential: "credential-b" });
+        throw new Error(`Unexpected request ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      holdCapture = true;
+      button("#capture").click();
+      await vi.waitFor(() => expect(releaseMetadata).toBeTypeOf("function"));
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+      requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+      button("#connect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-detail").textContent).toContain("vault-b.example.com"),
+      );
+      releaseMetadata?.();
+      await settle();
+
+      if (stage === "printables_metadata") expect(metadataSignal?.aborted).toBe(true);
+      expect(element("#manual-file-panel").hidden).toBe(true);
+      expect(element("#candidate-panel").hidden).toBe(true);
+      expect(button("#capture").textContent).toBe("Send to Pending Imports");
+      expect(element("#status").textContent).toContain("Connection verified");
+      expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/inbox"))).toBe(false);
+    },
+  );
+
+  async function startHeldThingiverseCapture() {
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 42, title: "Whistle", url: "https://www.thingiverse.com/thing:763622/files" },
+      ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [
+            {
+              frameId: 0,
+              result: {
+                ok: true,
+                files: [
+                  {
+                    id: "991001",
+                    filename: "whistle.stl",
+                    fileType: "stl",
+                    url: "https://www.thingiverse.com/download:991001",
+                  },
+                ],
+              },
+            },
+          ]
+        : [{ frameId: 0, result: { pageTitle: "Whistle", jsonLd: [] } }],
+    );
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault-a.example.com",
+      deviceCredential: "credential-a",
+    });
+    const downloads: Array<{ signal: AbortSignal | null; release: (response: Response) => void }> =
+      [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      if (url.endsWith("/browser-pairings/claim")) return response({ credential: "credential-b" });
+      if (url === "https://www.thingiverse.com/download:991001") {
+        return new Promise<Response>((release) => {
+          downloads.push({ signal: options.signal ?? null, release });
+        });
+      }
+      if (url.endsWith("/capture-upload-slots")) return response({ item: { id: 99 }, slots: [] });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+    button("#capture").click();
+    await vi.waitFor(() => expect(element("#candidate-panel").hidden).toBe(false));
+    button("#capture").click();
+    await vi.waitFor(() => expect(downloads).toHaveLength(1));
+    const releaseDownload = (index: number) => {
+      const download = downloads[index];
+      if (!download) throw new Error("Download not started");
+      const downloaded = new Response("mesh", {
+        headers: { "Content-Length": "4", "Content-Type": "model/stl" },
+      });
+      Object.defineProperty(downloaded, "url", {
+        value: "https://cdn.thingiverse.com/assets/991001/whistle.stl",
+      });
+      download.release(downloaded);
+    };
+    return { fetchImpl, downloads, releaseDownload };
+  }
+
+  it("retires a held provider download when switching vaults", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+
+    button("#edit-connection").click();
+    requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+    requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+    button("#connect").click();
+    await vi.waitFor(async () =>
+      expect((await fakeBrowser.storage.local.get("vault")).vault).toBe(
+        "https://vault-b.example.com",
+      ),
+    );
+    releaseDownload(0);
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+    await settle();
+    expect(
+      fetchImpl.mock.calls.filter(([input]) => String(input).includes("/capture-upload")),
+    ).toEqual([]);
+    expect(downloads[0]?.signal?.aborted).toBe(true);
+    expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
+    expect(element("#status").textContent).not.toContain("sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Connection verified");
+  });
+
+  it("preserves disconnect feedback after a retired download completes", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+    button("#edit-connection").click();
+    button("#disconnect").click();
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Not connected"));
+    releaseDownload(0);
+    await settle();
+    expect(downloads[0]?.signal?.aborted).toBe(true);
+    expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/capture-upload"))).toBe(
+      false,
+    );
+    expect(element("#status").textContent).toContain("Disconnected");
+    expect(button("#capture").disabled).toBe(true);
+  });
+
+  it("keeps the newer capture busy after the retired download completes", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+    button("#edit-connection").click();
+    requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+    requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+    button("#connect").click();
+    await vi.waitFor(async () =>
+      expect((await fakeBrowser.storage.local.get("vault")).vault).toBe(
+        "https://vault-b.example.com",
+      ),
+    );
+    button("#capture").click();
+    await vi.waitFor(() => expect(element("#candidate-panel").hidden).toBe(false));
+    button("#capture").click();
+    await vi.waitFor(() => expect(downloads).toHaveLength(2));
+    releaseDownload(0);
+    await settle();
+    expect(button("#capture").disabled).toBe(true);
+    expect(downloads[1]?.signal?.aborted).toBe(false);
+    expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/capture-upload"))).toBe(
+      false,
+    );
+    expect(element("#import-hint").textContent).toContain("Keep this popup open");
+    button("#edit-connection").click();
+    button("#disconnect").click();
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Not connected"));
+    releaseDownload(1);
+    await settle();
+    expect(downloads[1]?.signal?.aborted).toBe(true);
+  });
 });

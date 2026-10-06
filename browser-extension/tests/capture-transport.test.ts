@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CAPTURE_CLEANUP_TIMEOUT_MS,
   CAPTURE_MAX_FILE_SIZE_BYTES,
   CAPTURE_MAX_TOTAL_SIZE_BYTES,
   captureRichFiles,
@@ -360,5 +361,126 @@ describe("capture upload-slot transport", () => {
     ).rejects.toThrow("aborted");
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("dismisses only the original capture when a held upload is retired", async () => {
+    const controller = new AbortController();
+    let entered: () => void = () => {};
+    const uploading = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+      const url = String(input);
+      if (url.endsWith("/capture-upload-slots"))
+        return Response.json({
+          item: { id: 44 },
+          slots: [
+            {
+              id: "slot-a",
+              role: "file",
+              source_file_id: "part",
+              filename: "part.stl",
+              media_type: "model/stl",
+              size_bytes: 1,
+              sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+            },
+          ],
+        });
+      if (options.method === "PUT") {
+        entered();
+        return new Promise<Response>(() => {});
+      }
+      if (options.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    const outcome = captureRichFiles({
+      fetchImpl,
+      vault: "https://vault-a.example.com",
+      authorization: "credential-a",
+      signal: controller.signal,
+      sourceUrl: "https://www.printables.com/model/9",
+      captureSource: {
+        provider: "printables",
+        canonical_url: "https://www.printables.com/model/9",
+        source_item_id: "9",
+        source_revision: null,
+        adapter_version: "browser-visible-v1",
+        tags: [],
+        fields: {},
+      },
+      files: [{ id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" }],
+    });
+    const rejected = expect(outcome).rejects.toThrow("aborted");
+    await uploading;
+    controller.abort();
+    await rejected;
+    const deletion = fetchImpl.mock.calls.filter(([, options]) => options?.method === "DELETE");
+    expect(deletion).toHaveLength(1);
+    expect(deletion[0]).toEqual([
+      "https://vault-a.example.com/api/v1/inbox/44/capture-upload",
+      expect.objectContaining({ headers: { Authorization: "Bearer credential-a" } }),
+    ]);
+    expect(deletion[0]?.[1]?.signal?.aborted).toBe(false);
+    expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("finalize"))).toBe(false);
+  });
+
+  it("bounds dismissal without replacing the original upload failure", async () => {
+    vi.useFakeTimers();
+    try {
+      let entered: () => void = () => {};
+      const cleaning = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+        if (String(input).endsWith("/capture-upload-slots"))
+          return Response.json({
+            item: { id: 44 },
+            slots: [
+              {
+                id: "slot-a",
+                role: "file",
+                source_file_id: "part",
+                filename: "part.stl",
+                media_type: "model/stl",
+                size_bytes: 1,
+                sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+              },
+            ],
+          });
+        if (options.method === "PUT") return new Response(null, { status: 503 });
+        if (options.method === "DELETE") {
+          entered();
+          return new Promise<Response>(() => {});
+        }
+        throw new Error("Unexpected request");
+      });
+      const outcome = captureRichFiles({
+        fetchImpl,
+        vault: "https://vault-a.example.com",
+        authorization: "credential-a",
+        sourceUrl: "https://www.printables.com/model/9",
+        captureSource: {
+          provider: "printables",
+          canonical_url: "https://www.printables.com/model/9",
+          source_item_id: "9",
+          source_revision: null,
+          adapter_version: "browser-visible-v1",
+          tags: [],
+          fields: {},
+        },
+        files: [
+          { id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" },
+        ],
+      });
+      const rejected = expect(outcome).rejects.toThrow("while uploading part.stl");
+      await cleaning;
+      await vi.advanceTimersByTimeAsync(CAPTURE_CLEANUP_TIMEOUT_MS);
+      await rejected;
+      const deletion = fetchImpl.mock.calls.find(([, options]) => options?.method === "DELETE");
+      expect(deletion?.[1]?.signal?.aborted).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

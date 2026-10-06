@@ -1,4 +1,10 @@
 import {
+  CaptureOperationOwner,
+  CaptureRetiredError,
+  runCaptureRequest,
+  type CaptureOperation,
+} from "./capture-operation.ts";
+import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
   captureModelPage,
   claimBrowserPairing,
@@ -142,6 +148,7 @@ let connectedProfile: Profile | null = null;
 let accessToken: string | null = null;
 let editingConnection = false;
 let importBusy = false;
+const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
 let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
@@ -213,10 +220,11 @@ async function runCaptureStage<T>(
   safeMessage: string,
   provider?: DiagnosticProvider,
   fallbackCode?: DiagnosticFallbackCode,
+  captureSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const operationResult = Promise.resolve().then(() => operation(controller.signal));
+  const operationResult = runCaptureRequest([controller.signal, captureSignal], operation);
   try {
     return await new Promise<T>((resolve, reject) => {
       timer = setTimeout(() => {
@@ -226,7 +234,8 @@ async function runCaptureStage<T>(
       operationResult.then(resolve, reject);
     });
   } catch (error) {
-    if (error instanceof CaptureDiagnosticError) throw error;
+    if (error instanceof CaptureDiagnosticError || error instanceof CaptureRetiredError)
+      throw error;
     const message = messageFrom(error);
     throw new CaptureDiagnosticError(
       failureCode,
@@ -279,34 +288,39 @@ function safeCaptureMessage(error: unknown) {
   return "Capture could not be completed.";
 }
 
-const runVaultStage: CaptureStageRunner = (stage: CaptureUploadStage, operation) => {
-  const timeoutCode: DiagnosticCode =
-    stage === "slot_create"
-      ? "capture_vault_slot_create_timeout"
-      : stage === "slot_upload"
-        ? "capture_vault_slot_upload_timeout"
-        : "capture_vault_finalize_timeout";
-  const failureCode: DiagnosticCode =
-    stage === "slot_create"
-      ? "capture_vault_slot_create_failed"
-      : stage === "slot_upload"
-        ? "capture_vault_slot_upload_failed"
-        : "capture_vault_finalize_failed";
-  return runCaptureStage(
-    async (signal) => {
-      try {
-        return await operation(signal);
-      } catch (error) {
-        if (error instanceof CaptureCapacityError)
-          throw new CaptureDiagnosticError(failureCode, error.message);
-        throw error;
-      }
-    },
-    timeoutCode,
-    failureCode,
-    "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
-  );
-};
+function vaultStage(capture: CaptureOperation<Config>): CaptureStageRunner {
+  return (stage: CaptureUploadStage, operation) => {
+    const timeoutCode: DiagnosticCode =
+      stage === "slot_create"
+        ? "capture_vault_slot_create_timeout"
+        : stage === "slot_upload"
+          ? "capture_vault_slot_upload_timeout"
+          : "capture_vault_finalize_timeout";
+    const failureCode: DiagnosticCode =
+      stage === "slot_create"
+        ? "capture_vault_slot_create_failed"
+        : stage === "slot_upload"
+          ? "capture_vault_slot_upload_failed"
+          : "capture_vault_finalize_failed";
+    return runCaptureStage(
+      async (signal) => {
+        try {
+          return await operation(signal);
+        } catch (error) {
+          if (error instanceof CaptureCapacityError)
+            throw new CaptureDiagnosticError(failureCode, error.message);
+          throw error;
+        }
+      },
+      timeoutCode,
+      failureCode,
+      "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
+      undefined,
+      undefined,
+      capture.signal,
+    );
+  };
+}
 
 function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -348,6 +362,14 @@ function showStatus(
 function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
   const diagnostic = diagnosticStatus(error, fallbackMessage);
   showStatus(diagnostic.message, "error", diagnostic.diagnosticCode, diagnostic.providerCode);
+}
+
+function retireCapture() {
+  captureOperations.retire();
+  importBusy = false;
+  setButtonBusy(captureButton, false);
+  clearCandidateSelection();
+  clearManualFileSelection();
 }
 
 function clearInboxAction() {
@@ -583,6 +605,7 @@ async function establishConnection(
     ? { config: connectedConfig, profile: connectedProfile, token: accessToken }
     : null;
   const preservePrevious = Boolean(previous && editingConnection);
+  retireCapture();
   renderConnection("checking", { config });
   setConnectionFormBusy(true);
   showStatus();
@@ -679,7 +702,10 @@ async function ensureOriginPermissions(origins: string[]) {
     throw new Error("Permission to download the selected source files was not granted.");
 }
 
-async function ensurePrintablesFilePermissions(links: readonly string[]) {
+async function ensurePrintablesFilePermissions(
+  links: readonly string[],
+  captureSignal: AbortSignal,
+) {
   const origins = [...new Set(links.map((link) => `${new URL(link).origin}/*`))];
   const alreadyGranted = await runCaptureStage(
     () => browser.permissions.contains({ origins }),
@@ -688,6 +714,7 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
     "Permission check for Printables files timed out. Attach downloaded files in Pending Imports.",
     "Printables",
     "cors_failure",
+    captureSignal,
   );
   if (alreadyGranted) return;
   const granted = await runCaptureStage(
@@ -697,6 +724,7 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
     "Permission request for Printables files timed out. Attach downloaded files in Pending Imports.",
     "Printables",
     "cors_failure",
+    captureSignal,
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -708,7 +736,11 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
   }
 }
 
-async function ensureMetadataPermission(origin: string, provider: "Printables" | "MakerWorld") {
+async function ensureMetadataPermission(
+  origin: string,
+  provider: "Printables" | "MakerWorld",
+  captureSignal: AbortSignal,
+) {
   const origins = [origin];
   const alreadyGranted = await runCaptureStage(
     () => browser.permissions.contains({ origins }),
@@ -717,6 +749,7 @@ async function ensureMetadataPermission(origin: string, provider: "Printables" |
     `Permission check for ${provider} metadata timed out. Choose a downloaded ${provider} file to attach it in Pending Imports.`,
     provider,
     "cors_failure",
+    captureSignal,
   );
   if (alreadyGranted) return;
   const granted = await runCaptureStage(
@@ -726,6 +759,7 @@ async function ensureMetadataPermission(origin: string, provider: "Printables" |
     `Permission request for ${provider} metadata timed out. Choose a downloaded ${provider} file to attach it in Pending Imports.`,
     provider,
     "cors_failure",
+    captureSignal,
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -790,6 +824,7 @@ function printablesMediaType(
 async function resolvePrintablesLinks(
   capture: BrowserCaptureMessage,
   selected: readonly PrintablesSelectedFile[],
+  captureSignal: AbortSignal,
 ): Promise<Array<{ id: string; url: string }>> {
   if (!activePage?.id || !capture.source.source_item_id) {
     throw new Error(
@@ -822,12 +857,14 @@ async function resolvePrintablesLinks(
     "Printables could not resolve the selected files. Choose a downloaded Printables file to attach it in Pending Imports.",
     "Printables",
     "request_failed",
+    captureSignal,
   );
 }
 
 async function resolveMakerWorldLinks(
   capture: BrowserCaptureMessage,
   selected: readonly BrowserCaptureMessage["candidates"][number][],
+  captureSignal: AbortSignal,
 ): Promise<Array<{ id: string; url: string }>> {
   if (!activePage?.id || !capture.source.source_item_id || !activePage.url) {
     throw new Error(makerWorldFailureMessage("contract_changed"));
@@ -872,6 +909,7 @@ async function resolveMakerWorldLinks(
     "MakerWorld could not resolve the selected package. Download it normally, then attach it in Pending Imports.",
     "MakerWorld",
     "request_failed",
+    captureSignal,
   );
 }
 
@@ -883,7 +921,9 @@ function isRichProvider(source: Source): source is Exclude<Source, "Direct file"
     source === "Cults"
   );
 }
-async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
+async function readVisibleCapture(
+  captureSignal: AbortSignal,
+): Promise<BrowserCaptureMessage | null> {
   if (!activePage?.id || !activePage.url || !isRichProvider(activeSource)) return null;
   const tabId = activePage.id;
   const pageUrl = activePage.url;
@@ -932,6 +972,9 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       "capture_visible_capture_timeout",
       "capture_visible_capture_failed",
       "The active page could not be read. Choose a downloaded file to attach it in Pending Imports.",
+      undefined,
+      undefined,
+      captureSignal,
     );
     const visible = results[0]?.result as VisibleCaptureResult | undefined;
     if (!visible || !Array.isArray(visible.jsonLd)) return fallbackVisibleCapture();
@@ -991,6 +1034,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         "MakerWorld metadata could not be read. Download the package normally, then attach it in Pending Imports.",
         "MakerWorld",
         "request_failed",
+        captureSignal,
       );
     }
     if (provider === "Thingiverse") {
@@ -1004,18 +1048,20 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       }
       const sourceItemId = capture.source.source_item_id;
       if (!sourceItemId) return capture;
-      const fileResults = await browser.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: requestThingiverseFilesInMainWorld,
-        args: [
-          {
-            sourceItemId,
-            endpoint: `${new URL(pageUrl).origin}/api/v2/things/${encodeURIComponent(sourceItemId)}/complete`,
-            maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
-          },
-        ],
-      });
+      const fileResults = await runCaptureRequest([captureSignal], () =>
+        browser.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: requestThingiverseFilesInMainWorld,
+          args: [
+            {
+              sourceItemId,
+              endpoint: `${new URL(pageUrl).origin}/api/v2/things/${encodeURIComponent(sourceItemId)}/complete`,
+              maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+            },
+          ],
+        }),
+      );
       const fileResult = fileResults[0]?.result as ThingiverseFilesPageResult | undefined;
       if (!fileResult?.ok) {
         const failureCode = fileResult?.reason || fileResult?.code || "request_failed";
@@ -1100,6 +1146,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       "Printables metadata could not be read. Choose a downloaded Printables file to attach it in Pending Imports.",
       "Printables",
       "request_failed",
+      captureSignal,
     );
     const enriched = buildBrowserCaptureMessage({
       provider,
@@ -1130,7 +1177,8 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
           }),
     };
   } catch (error) {
-    if (error instanceof CaptureDiagnosticError) throw error;
+    if (error instanceof CaptureDiagnosticError || error instanceof CaptureRetiredError)
+      throw error;
     return fallbackVisibleCapture("request_failed");
   }
 }
@@ -1245,6 +1293,7 @@ cancelButton.addEventListener("click", () => {
 
 disconnectButton.addEventListener("click", async () => {
   const previous = connectedConfig;
+  retireCapture();
   const loopbackPermission = previous ? isLocalVault(previous.vault) : false;
   try {
     await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
@@ -1300,40 +1349,55 @@ captureButton.addEventListener("click", async () => {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
-    try {
-      await ensureMetadataPermission(PRINTABLES_METADATA_PERMISSION_ORIGIN, "Printables");
-    } catch (error) {
-      const fallback = fallbackVisibleCapture("cors_failure");
-      if (fallback) {
-        renderManualFileSelection(fallback);
-        showDiagnosticStatus(error);
-      } else {
-        showDiagnosticStatus(error);
-      }
-      return;
-    }
+  if (importBusy) return;
+  const config = { ...connectedConfig };
+  const authorization = accessToken || config.deviceCredential;
+  if (!authorization) {
+    showStatus("The browser connection expired. Connect PrintStash again.", "error");
+    return;
   }
+  const capture = captureOperations.begin(config, authorization);
+  const runStage = vaultStage(capture);
   importBusy = true;
   setButtonBusy(captureButton, true, "Sending…");
   renderImportAvailability();
   showStatus();
   try {
+    if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
+      try {
+        await ensureMetadataPermission(
+          PRINTABLES_METADATA_PERMISSION_ORIGIN,
+          "Printables",
+          capture.signal,
+        );
+      } catch (error) {
+        capture.assertCurrent();
+        const fallback = fallbackVisibleCapture("cors_failure");
+        if (fallback) {
+          renderManualFileSelection(fallback);
+          showDiagnosticStatus(error);
+        } else {
+          showDiagnosticStatus(error);
+        }
+        return;
+      }
+    }
+    capture.assertCurrent();
     if (pendingManualCapture) {
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const file = selectedManualFile(pendingManualCapture);
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingManualCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingManualCapture.source,
-        files: [file],
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      const draft = pendingManualCapture;
+      const file = selectedManualFile(draft);
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files: [file],
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearManualFileSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1341,22 +1405,23 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingPrintablesCapture) {
-      const selected = selectedPrintablesCandidates(pendingPrintablesCapture);
+      const draft = pendingPrintablesCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one Printables file to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const links = await resolvePrintablesLinks(pendingPrintablesCapture, selected);
+      const links = await resolvePrintablesLinks(draft, selected, capture.signal);
       const linksById = new Map(links.map((link) => [link.id, link.url]));
       const selectedLinks = selected.map((candidate) => {
         const link = linksById.get(candidate.id);
         if (!link) throw new Error("Printables link mapping changed.");
         return { candidate, link };
       });
-      await ensurePrintablesFilePermissions(selectedLinks.map(({ link }) => link));
+      await ensurePrintablesFilePermissions(
+        selectedLinks.map(({ link }) => link),
+        capture.signal,
+      );
       const files = await Promise.all(
         selectedLinks.map(({ candidate, link }) =>
           runCaptureStage(
@@ -1366,19 +1431,22 @@ captureButton.addEventListener("click", async () => {
             "The selected Printables file could not be downloaded. Attach it manually in Pending Imports.",
             "Printables",
             "request_failed",
+            capture.signal,
           ),
         ),
       );
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingPrintablesCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingPrintablesCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1386,15 +1454,13 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingMakerWorldCapture) {
-      const selected = selectedPrintablesCandidates(pendingMakerWorldCapture);
+      const draft = pendingMakerWorldCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one MakerWorld package to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const links = await resolveMakerWorldLinks(pendingMakerWorldCapture, selected);
+      const links = await resolveMakerWorldLinks(draft, selected, capture.signal);
       const linksById = new Map(links.map((link) => [link.id, link.url]));
       const files: BrowserCaptureFile[] = [];
       let totalBytes = 0;
@@ -1420,20 +1486,23 @@ captureButton.addEventListener("click", async () => {
           "The selected MakerWorld package could not be downloaded. Attach it manually in Pending Imports.",
           "MakerWorld",
           "request_failed",
+          capture.signal,
         );
         totalBytes += file.file.size;
         files.push(file);
       }
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingMakerWorldCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingMakerWorldCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1441,14 +1510,12 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingThingiverseCapture) {
-      const selected = selectedPrintablesCandidates(pendingThingiverseCapture);
+      const draft = pendingThingiverseCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one Thingiverse file to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
       const files: BrowserCaptureFile[] = [];
       for (const candidate of selected) {
         const link = pendingThingiverseLinks.get(candidate.id);
@@ -1465,26 +1532,33 @@ captureButton.addEventListener("click", async () => {
             "capture_download_timeout",
             "capture_download_failed",
             "The selected Thingiverse file could not be downloaded. Attach it manually in Pending Imports.",
+            undefined,
+            undefined,
+            capture.signal,
           ),
         );
       }
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingThingiverseCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingThingiverseCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
       showStatus("Selected Thingiverse files sent to Pending Imports.", "success");
       return;
     }
-    const visibleCapture = (await readVisibleCapture()) ?? fallbackVisibleCapture();
+    const visibleCapture =
+      (await capture.run((signal) => readVisibleCapture(signal))) ?? fallbackVisibleCapture();
+    capture.assertCurrent();
     const captureRoute = browserCaptureRoute(visibleCapture);
     if (captureRoute === "manual_file") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
@@ -1513,17 +1587,21 @@ captureButton.addEventListener("click", async () => {
     }
     const pageUrl = activePage?.url;
     if (!pageUrl) throw new Error("The active tab has no capture URL.");
-    const result = await captureModelPage({
-      ...connectedConfig,
-      accessToken: accessToken ?? undefined,
-      pageUrl,
-      title: activePage?.title ?? undefined,
-      captureSource: visibleCapture?.source,
-    });
+    const result = await capture.run((signal) =>
+      captureModelPage({
+        ...capture.config,
+        accessToken: capture.authorization,
+        signal,
+        pageUrl,
+        title: activePage?.title ?? undefined,
+        captureSource: visibleCapture?.source,
+      }),
+    );
     inboxButton.hidden = false;
     inboxButton.dataset.url = result.inboxUrl;
     showStatus(`Model from ${result.source} sent to Pending Imports.`, "success");
   } catch (error) {
+    if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
     if (error instanceof CaptureDiagnosticError) {
       const fallback =
         pendingPrintablesCapture ||
@@ -1575,14 +1653,16 @@ captureButton.addEventListener("click", async () => {
       showStatus(safeCaptureMessage(error), "error", "capture_failed");
     }
   } finally {
-    importBusy = false;
-    setButtonBusy(captureButton, false);
-    if (pendingPrintablesCapture || pendingMakerWorldCapture || pendingThingiverseCapture) {
-      captureButton.textContent = "Confirm and upload selected files";
-    } else if (pendingManualCapture) {
-      captureButton.textContent = "Upload selected file";
+    if (captureOperations.finish(capture)) {
+      importBusy = false;
+      setButtonBusy(captureButton, false);
+      if (pendingPrintablesCapture || pendingMakerWorldCapture || pendingThingiverseCapture) {
+        captureButton.textContent = "Confirm and upload selected files";
+      } else if (pendingManualCapture) {
+        captureButton.textContent = "Upload selected file";
+      }
+      renderImportAvailability();
     }
-    renderImportAvailability();
   }
 });
 
