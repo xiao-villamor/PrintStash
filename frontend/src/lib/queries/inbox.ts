@@ -114,8 +114,9 @@ export function useInboxItem(
 export function useInboxCommands(api: InboxApi = inboxApi) {
   const client = useQueryClient();
   const cancel = () => client.cancelQueries({ queryKey: inboxKeys.all });
-  const prepare = async () => {
-    const version = getSessionVersion();
+  const prepare = async ({ session }: { session: number }) => {
+    const version = session;
+    requireSessionVersion(version);
     await cancel();
     requireSessionVersion(version);
     return version;
@@ -144,25 +145,39 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
   };
   return {
     dismiss: useMutation({
-      mutationFn: (id: number) => api.dismissPendingImport(id),
+      mutationFn: ({ id, session }: { id: number; session: number }) => {
+        requireSessionVersion(session);
+        return api.dismissPendingImport(id);
+      },
       onMutate: prepare,
-      onSuccess: async (_, id, version) => {
+      onSuccess: async (_, { id }, version) => {
         await cancel();
         remove([id], version);
       },
     }),
     batch: useMutation({
-      mutationFn: (payload: Parameters<InboxApi["batchPendingImports"]>[0]) =>
-        api.batchPendingImports(payload),
+      mutationFn: ({
+        payload,
+        session,
+      }: {
+        payload: Parameters<InboxApi["batchPendingImports"]>[0];
+        session: number;
+      }) => {
+        requireSessionVersion(session);
+        return api.batchPendingImports(payload);
+      },
       onMutate: prepare,
-      onSuccess: async (items, payload, version) => {
+      onSuccess: async (items, { payload }, version) => {
         await cancel();
         if (payload.action === "dismiss") remove(payload.item_ids, version);
         else for (const item of items) await publish(item, version);
       },
     }),
     retry: useMutation({
-      mutationFn: (id: number) => api.retryPendingImport(id),
+      mutationFn: ({ id, session }: { id: number; session: number }) => {
+        requireSessionVersion(session);
+        return api.retryPendingImport(id);
+      },
       onMutate: prepare,
       onSuccess: async (item, _, version) => {
         await publish(item, version);
@@ -174,16 +189,31 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
       mutationFn: ({
         id,
         payload,
+        session,
       }: {
         id: number;
         payload: Parameters<typeof updatePendingImport>[1];
-      }) => api.updatePendingImport(id, payload),
+        session: number;
+      }) => {
+        requireSessionVersion(session);
+        return api.updatePendingImport(id, payload);
+      },
       onMutate: prepare,
       onSuccess: (item, _, version) => publish(item, version),
     }),
     import: useMutation({
-      mutationFn: ({ id, selectedIds }: { id: number; selectedIds: string[] }) =>
-        api.importPendingImport(id, selectedIds),
+      mutationFn: ({
+        id,
+        selectedIds,
+        session,
+      }: {
+        id: number;
+        selectedIds: string[];
+        session: number;
+      }) => {
+        requireSessionVersion(session);
+        return api.importPendingImport(id, selectedIds);
+      },
       onMutate: prepare,
       onSuccess: (item, _, version) => publish(item, version),
     }),

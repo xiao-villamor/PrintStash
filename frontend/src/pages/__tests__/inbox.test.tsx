@@ -386,6 +386,25 @@ describe("InboxPage", () => {
     ]);
   });
 
+  it("never dispatches a retired Inbox gesture", async () => {
+    const app = renderApp(<InboxPage />, {
+      routes: {
+        "GET /api/v1/inbox": json([{ ...pendingImport, state: "failed", retryable: true }]),
+        "POST /api/v1/inbox/1/retry": json({ ...pendingImport, state: "review" }),
+      },
+    });
+    await screen.findByRole("button", { name: "Retry" });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      app.unmount();
+      clearLogin();
+    });
+
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    expect(app.client.getQueriesData({ queryKey: inboxKeys.all })).toEqual([]);
+  });
+
   it("does not publish retired Inbox commands after delayed cancellation", async () => {
     const user = userEvent.setup();
     const app = renderApp(<InboxPage />, {

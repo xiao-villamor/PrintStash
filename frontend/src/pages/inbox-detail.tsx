@@ -1,7 +1,7 @@
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { getErrorMessage, userMessage } from "@/lib/errors";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ExternalLink, FileBox, FolderPlus, Link2, Tags, Trash2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 
@@ -29,6 +29,7 @@ import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
 import { useRouter } from "@/lib/navigation";
 import { useCollectionLookupById } from "@/lib/queries";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type { CollectionNodeRead, InboxManifestFile, InboxItem } from "@/types";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
@@ -136,6 +137,10 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const { locale, t } = useI18n();
   const { id } = useParams();
   const inboxId = Number(id);
+  const routeRef = useRef(inboxId);
+  useLayoutEffect(() => {
+    routeRef.current = inboxId;
+  }, [inboxId]);
   const router = useRouter();
   const [submittedId, setSubmittedId] = useState<number | null>(null);
   const remote = useInboxItem(
@@ -195,9 +200,12 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const savedCollection = useCollectionLookupById(destinationId);
   const destinationCollection =
     pickedCollection?.id === destinationId ? pickedCollection : savedCollection.data?.collection;
-  const [busy, setBusy] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const busy = busyId === inboxId;
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const confirmDelete = confirmDeleteId === inboxId;
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const deleting = deletingId === inboxId;
   const choices = useMemo(() => (item ? files(item) : []), [item]);
   if (remote.isError && !item)
     return (
@@ -222,8 +230,9 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
     setSelected((current) =>
       current.includes(fileId) ? current.filter((value) => value !== fileId) : [...current, fileId],
     );
-  const saveReview = async (collectionId: number | null) => {
+  const saveReview = async (collectionId: number | null, session: number) => {
     await commands.update.mutateAsync({
+      session,
       id: item.id,
       payload: {
         collection_id: collectionId,
@@ -235,7 +244,8 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       },
     });
   };
-  const resolveDestination = async (): Promise<number | null> => {
+  const resolveDestination = async (session: number): Promise<number | null> => {
+    requireSessionVersion(session);
     if (destination === NO_COLLECTION) return null;
     if (destination === PICK_COLLECTION) throw new Error("Choose a collection before importing");
     if (destination !== NEW_COLLECTION) return Number(destination);
@@ -244,7 +254,10 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
     // Search is paged, so a same-named root cannot be missed behind nested matches.
     let cursor: string | null = null;
     do {
+      requireSessionVersion(session);
       const page = await api.searchCollections(name, "edit", cursor);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) throw new DOMException("Inbox route changed", "AbortError");
       const existing = page.items.find(
         (collection) => collection.parent_id === null && collection.name === name,
       );
@@ -254,41 +267,58 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       }
       cursor = page.next_cursor;
     } while (cursor !== null);
+    requireSessionVersion(session);
     const created = await api.createCollection({ name, parent_id: null });
+    requireSessionVersion(session);
+    if (routeRef.current !== inboxId) throw new DOMException("Inbox route changed", "AbortError");
     setDestination(String(created.id));
     return created.id;
   };
   const importSelected = async () => {
-    setBusy(true);
+    setBusyId(inboxId);
+    const session = getSessionVersion();
     try {
-      const collectionId = await resolveDestination();
-      await saveReview(collectionId);
-      const next = await commands.import.mutateAsync({ id: item.id, selectedIds: selected });
+      const collectionId = await resolveDestination(session);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) return;
+      await saveReview(collectionId, session);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) return;
+      const next = await commands.import.mutateAsync({
+        id: item.id,
+        selectedIds: selected,
+        session,
+      });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
       setSubmittedId(inboxIsTerminal(next) ? null : item.id);
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     } finally {
-      setBusy(false);
+      if (getSessionVersion() === session && routeRef.current === inboxId) setBusyId(null);
     }
   };
   const deleteItem = async () => {
-    setDeleting(true);
+    setDeletingId(inboxId);
+    const session = getSessionVersion();
     try {
-      await commands.dismiss.mutateAsync(item.id);
-      setConfirmDelete(false);
+      await commands.dismiss.mutateAsync({ id: item.id, session });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
+      setConfirmDeleteId(null);
       router.push("/inbox");
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     } finally {
-      setDeleting(false);
+      if (getSessionVersion() === session && routeRef.current === inboxId) setDeletingId(null);
     }
   };
   const retry = async () => {
+    const session = getSessionVersion();
     try {
-      const next = await commands.retry.mutateAsync(item.id);
+      const next = await commands.retry.mutateAsync({ id: item.id, session });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
       setSubmittedId(inboxIsTerminal(next) ? null : item.id);
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     }
   };
   const title = capturedTitle(item) || t("inbox.detailTitle");
@@ -318,7 +348,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             <Button variant="outline" asChild>
               <Link href="/inbox">{t("inbox.back")}</Link>
             </Button>
-            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+            <Button variant="destructive" onClick={() => setConfirmDeleteId(inboxId)}>
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               {t("inbox.delete")}
             </Button>
@@ -569,7 +599,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       )}
       <ConfirmModal
         open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
+        onClose={() => setConfirmDeleteId(null)}
         title={t("inbox.deleteTitle")}
         description={t("inbox.deleteDescription")}
         confirmLabel={t("inbox.deleteConfirm")}

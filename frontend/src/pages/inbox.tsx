@@ -31,6 +31,7 @@ import { inboxApi, useInboxSnapshot, useInboxCommands } from "@/lib/queries/inbo
 import { userMessage } from "@/lib/errors";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
+import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type { InboxItem } from "@/types";
 
@@ -124,11 +125,17 @@ function ImportList({
                   <Button
                     size="xs"
                     variant="outline"
-                    onClick={() =>
+                    onClick={() => {
+                      const session = getSessionVersion();
                       void retry(item.id)
-                        .then(() => toast.success(t("inbox.retryQueued")))
-                        .catch(toast.error)
-                    }
+                        .then(() => {
+                          if (getSessionVersion() === session)
+                            toast.success(t("inbox.retryQueued"));
+                        })
+                        .catch((error) => {
+                          if (getSessionVersion() === session) toast.error(error);
+                        });
+                    }}
                   >
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     {t("inbox.retry")}
@@ -258,14 +265,16 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   async function deleteImport() {
     if (!deleteTarget) return;
     setDeletingId(deleteTarget.id);
+    const session = getSessionVersion();
     try {
-      await commands.dismiss.mutateAsync(deleteTarget.id);
+      await commands.dismiss.mutateAsync({ id: deleteTarget.id, session });
+      if (getSessionVersion() !== session) return;
       setDeleteTarget(null);
       toast.success(t("inbox.deleteSuccess"));
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session) toast.error(error);
     } finally {
-      setDeletingId(null);
+      if (getSessionVersion() === session) setDeletingId(null);
     }
   }
 
@@ -276,14 +285,19 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
       return;
     }
     setClearingCompleted(true);
+    const session = getSessionVersion();
     try {
-      await commands.batch.mutateAsync({ item_ids: itemIds, action: "dismiss" });
+      await commands.batch.mutateAsync({
+        payload: { item_ids: itemIds, action: "dismiss" },
+        session,
+      });
+      if (getSessionVersion() !== session) return;
       setClearCompletedOpen(false);
       toast.success(t("inbox.clearCompletedSuccess"));
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session) toast.error(error);
     } finally {
-      setClearingCompleted(false);
+      if (getSessionVersion() === session) setClearingCompleted(false);
     }
   }
 
@@ -375,7 +389,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             items={visibleItems}
             locale={locale}
             t={t}
-            retry={(id) => commands.retry.mutateAsync(id)}
+            retry={(id) => commands.retry.mutateAsync({ id, session: getSessionVersion() })}
             deletingId={deletingId}
             onDelete={setDeleteTarget}
           />

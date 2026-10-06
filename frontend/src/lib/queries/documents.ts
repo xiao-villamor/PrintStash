@@ -7,7 +7,7 @@ import {
   updateDocument,
   uploadDocument,
 } from "@/lib/api/documents";
-import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { requireSessionVersion } from "@/lib/session-transport";
 import type { DocumentListItem, DocumentRead } from "@/types";
 
 export const documentKeys = {
@@ -39,8 +39,9 @@ export function useDocument(id: number | null) {
 export function useDocumentMutations() {
   const client = useQueryClient();
   const cancel = () => client.cancelQueries({ queryKey: documentKeys.all });
-  const prepare = async () => {
-    const version = getSessionVersion();
+  const prepare = async ({ session }: { session: number }) => {
+    const version = session;
+    requireSessionVersion(version);
     await cancel();
     requireSessionVersion(version);
     return version;
@@ -81,7 +82,16 @@ export function useDocumentMutations() {
   };
   return {
     create: useMutation({
-      mutationFn: (payload: Parameters<typeof createDocument>[0]) => createDocument(payload),
+      mutationFn: ({
+        payload,
+        session,
+      }: {
+        payload: Parameters<typeof createDocument>[0];
+        session: number;
+      }) => {
+        requireSessionVersion(session);
+        return createDocument(payload);
+      },
       onMutate: prepare,
       onSuccess: async (document, _, version) => {
         await publish(document, version);
@@ -89,8 +99,18 @@ export function useDocumentMutations() {
       },
     }),
     upload: useMutation({
-      mutationFn: ({ file, collectionId }: { file: File; collectionId: number | null }) =>
-        uploadDocument(file, collectionId),
+      mutationFn: ({
+        file,
+        collectionId,
+        session,
+      }: {
+        file: File;
+        collectionId: number | null;
+        session: number;
+      }) => {
+        requireSessionVersion(session);
+        return uploadDocument(file, collectionId);
+      },
       onMutate: prepare,
       onSuccess: async (document, _, version) => {
         await publish(document, version);
@@ -102,11 +122,16 @@ export function useDocumentMutations() {
         id,
         payload,
         editVersion,
+        session,
       }: {
         id: number;
         editVersion: number;
+        session: number;
         payload: Parameters<typeof updateDocument>[1];
-      }) => updateDocument(id, payload, editVersion),
+      }) => {
+        requireSessionVersion(session);
+        return updateDocument(id, payload, editVersion);
+      },
       onMutate: prepare,
       onSuccess: async (document, _, version) => {
         await publish(document, version);
@@ -114,9 +139,12 @@ export function useDocumentMutations() {
       },
     }),
     remove: useMutation({
-      mutationFn: (id: number) => deleteDocument(id),
+      mutationFn: ({ id, session }: { id: number; session: number }) => {
+        requireSessionVersion(session);
+        return deleteDocument(id);
+      },
       onMutate: prepare,
-      onSuccess: async (_, id, version) => {
+      onSuccess: async (_, { id }, version) => {
         await cancel();
         assertSession(version);
         client.removeQueries({ queryKey: documentKeys.detail(id) });

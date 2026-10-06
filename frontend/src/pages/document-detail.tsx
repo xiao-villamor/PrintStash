@@ -271,9 +271,12 @@ export default function DocumentDetailPage({
     try {
       if (isNew) {
         const created = await mutations.create.mutateAsync({
-          name: draftName.trim() || uiText("Untitled document"),
-          collection_id: collectionId,
-          body: draftBody,
+          session,
+          payload: {
+            name: draftName.trim() || uiText("Untitled document"),
+            collection_id: collectionId,
+            body: draftBody,
+          },
         });
         if (getSessionVersion() !== session || routeRef.current !== route) return;
         setModeChoice({ docId: created.id, mode: "edit" });
@@ -281,6 +284,7 @@ export default function DocumentDetailPage({
         return;
       }
       await mutations.update.mutateAsync({
+        session,
         id: doc.id,
         editVersion: liveDraft?.base.edit_version ?? doc.edit_version,
         payload: submitted,

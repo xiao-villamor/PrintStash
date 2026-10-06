@@ -29,6 +29,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import InboxDetailPage, { type InboxDetailApi } from "@/pages/inbox-detail";
 import { I18nProvider } from "@/lib/i18n";
 import { defaultQueryApi, QueryApiProvider } from "@/lib/queries";
+import { clearLogin } from "@/lib/auth-store";
 import { inboxKeys } from "@/lib/queries/inbox";
 import type { CollectionRead, InboxItem } from "@/types";
 
@@ -169,6 +170,31 @@ describe("InboxDetailPage", () => {
       selected_ids: ["file-1"],
     });
     await waitFor(() => expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]));
+  });
+
+  it("stops destination resolution after the import session retires", async () => {
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    let resume!: (page: Awaited<ReturnType<InboxDetailApi["searchCollections"]>>) => void;
+    const pending = new Promise<Awaited<ReturnType<InboxDetailApi["searchCollections"]>>>(
+      (resolve) => {
+        resume = resolve;
+      },
+    );
+    vi.mocked(api.searchCollections).mockReturnValue(pending);
+    const app = renderPage();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+    await waitFor(() => expect(api.searchCollections).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      app.unmount();
+      clearLogin();
+      resume({ items: [], next_cursor: null });
+      await pending;
+    });
+
+    expect(api.createCollection).not.toHaveBeenCalled();
+    expect(api.updatePendingImport).not.toHaveBeenCalled();
+    expect(api.importPendingImport).not.toHaveBeenCalled();
   });
 
   it("reuses an existing root collection found by name", async () => {
@@ -530,6 +556,40 @@ describe("InboxDetailPage", () => {
     expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Calibration cube",
     );
+  });
+
+  it("stops a previous route's destination workflow", async () => {
+    let resume!: (page: Awaited<ReturnType<InboxDetailApi["searchCollections"]>>) => void;
+    const pending = new Promise<Awaited<ReturnType<InboxDetailApi["searchCollections"]>>>(
+      (resolve) => {
+        resume = resolve;
+      },
+    );
+    vi.mocked(api.getPendingImport).mockImplementation((id) =>
+      Promise.resolve({
+        ...reviewItem,
+        id,
+        display_title: id === 8 ? "Current import" : reviewItem.display_title,
+      }),
+    );
+    vi.mocked(api.searchCollections).mockReturnValue(pending);
+    const user = userEvent.setup();
+    renderPage([], <Link to="/inbox/8">Another import</Link>);
+    await user.click(await screen.findByRole("button", { name: "Import selected" }));
+    await waitFor(() => expect(api.searchCollections).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("link", { name: "Another import" }));
+    expect(await screen.findByRole("heading", { name: "Current import" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import selected" })).toBeEnabled();
+    await act(async () => {
+      resume({ items: [], next_cursor: null });
+      await pending;
+    });
+
+    expect(api.createCollection).not.toHaveBeenCalled();
+    expect(api.updatePendingImport).not.toHaveBeenCalled();
+    expect(api.importPendingImport).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Current import");
   });
 
   it("ignores an Inbox detail from an obsolete route", async () => {

@@ -274,6 +274,23 @@ describe("DocumentDetailPage", () => {
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     });
 
+    it("never dispatches a retired document gesture", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "PUT /api/v1/documents/3": json(aDocument({ edit_version: 2 })) },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        app.unmount();
+        clearLogin();
+      });
+
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+      expect(app.client.getQueriesData({ queryKey: documentKeys.all })).toEqual([]);
+    });
+
     it("does not publish a retired save after delayed query cancellation", async () => {
       const user = userEvent.setup();
       const app = renderDocument({

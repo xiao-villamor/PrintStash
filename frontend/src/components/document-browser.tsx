@@ -12,6 +12,7 @@ import { userMessage } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { timeAgoShort } from "@/lib/format";
+import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type { DocumentKind, DocumentListItem } from "@/types";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -60,11 +61,13 @@ export function DocumentBrowser({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    const session = getSessionVersion();
     try {
-      const doc = await mutations.upload.mutateAsync({ file, collectionId });
+      const doc = await mutations.upload.mutateAsync({ file, collectionId, session });
+      if (getSessionVersion() !== session) return;
       router.push(`/documents/${doc.id}`);
     } catch (err) {
-      toast.error(err);
+      if (getSessionVersion() === session) toast.error(err);
     }
   }
 
@@ -75,11 +78,13 @@ export function DocumentBrowser({
   async function confirmRemove() {
     if (!deleteTarget) return;
     const doc = deleteTarget;
+    const session = getSessionVersion();
     try {
-      await mutations.remove.mutateAsync(doc.id);
+      await mutations.remove.mutateAsync({ id: doc.id, session });
+      if (getSessionVersion() !== session) return;
       setDeleteTarget(null);
     } catch (err) {
-      toast.error(err);
+      if (getSessionVersion() === session) toast.error(err);
     }
   }
 
