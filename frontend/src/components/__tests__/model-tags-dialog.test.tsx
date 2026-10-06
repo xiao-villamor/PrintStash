@@ -10,13 +10,14 @@
 
 import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
-import { json, renderApp } from "@/test-support/render";
-import { aModelListItem } from "@/test-support/factories";
+import { json, renderApp, type RouteAnswer } from "@/test-support/render";
+import { aModel, aModelListItem } from "@/test-support/factories";
+import { clearLogin } from "@/lib/auth-store";
 import type { ModelEditBatchResult, TagRead } from "@/types";
 
 const model = aModelListItem({ id: 1, name: "Cable guide", tags: ["Workshop"], edit_version: 3 });
@@ -32,19 +33,14 @@ const success: ModelEditBatchResult = {
   failed_count: 0,
 };
 
-function renderDialog(route = json(success)) {
-  const onSaved = vi.fn<(tags: string[]) => void>();
+function renderDialog(route: RouteAnswer = json(success)) {
+  const onSaved = vi.fn<(tags: string[], version: number) => void>();
+  const onClose = vi.fn<() => void>();
   const result = renderApp(
-    <ModelTagsDialog
-      model={model}
-      suggestions={tags}
-      open
-      onClose={vi.fn<() => void>()}
-      onSaved={onSaved}
-    />,
+    <ModelTagsDialog model={model} suggestions={tags} open onClose={onClose} onSaved={onSaved} />,
     { routes: { "POST /api/v1/models/batch/tags": route } },
   );
-  return { ...result, onSaved };
+  return { ...result, onSaved, onClose };
 }
 
 afterEach(() => {
@@ -181,5 +177,208 @@ describe("ModelTagsDialog", () => {
 
     expect(await screen.findByRole("dialog", { name: "Model tags" })).toBeInTheDocument();
     expect(screen.getByText("Prototype")).toBeInTheDocument();
+  });
+});
+
+describe("ModelTagsDialog conflict recovery", () => {
+  const conflict: ModelEditBatchResult = {
+    succeeded_versions: {},
+    succeeded_ids: [],
+    succeeded_count: 0,
+    failed: [{ model_id: 1, reason: "edit_conflict" }],
+    failed_count: 1,
+  };
+
+  it("requires explicit review after a conflict", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+    expect(screen.getByText("No tags assigned yet.")).toBeVisible();
+    expect(result.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("saves the reviewed draft against the exact reviewed version", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({
+      "GET /api/v1/models/1": json(
+        aModel({ id: 1, tags: ["Workshop", "Remote"], edit_version: 7, effective_role: "edit" }),
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByText("Workshop, Remote")).toBeVisible();
+    result.route({ "POST /api/v1/models/batch/tags": json(success) });
+    await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+    await waitFor(() => expect(result.onSaved).toHaveBeenCalledWith([], 9));
+    expect(JSON.parse(result.requestsWithMethod("POST")[1].body)).toEqual({
+      model_ids: [1],
+      add: [],
+      remove: ["Workshop", "Remote"],
+      expected_versions: { 1: 7 },
+    });
+  });
+
+  it("adopts the latest tags only by explicit choice", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({
+      "GET /api/v1/models/1": json(
+        aModel({ id: 1, tags: ["Remote"], edit_version: 7, effective_role: "edit" }),
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(await screen.findByRole("button", { name: "Use latest version" }));
+    expect(screen.getByRole("button", { name: "Remove Remote" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+    expect(result.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("keeps a failed review recoverable", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({ "GET /api/v1/models/1": json({ detail: "unavailable" }, 503) });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await waitFor(() => expect(result.requestsWithMethod("GET")).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled(),
+    );
+    expect(screen.getByText("No tags assigned yet.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+  });
+
+  it("prevents retry after reviewed edit permission loss", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({
+      "GET /api/v1/models/1": json(aModel({ id: 1, edit_version: 7, effective_role: "view" })),
+    });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    ).toBeDisabled();
+    expect(result.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("ignores acknowledgement after disposal", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const result = renderDialog(() => pending.promise);
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    result.unmount();
+    await act(async () => pending.resolve(json(success)));
+    expect(result.onSaved).not.toHaveBeenCalled();
+    expect(result.onClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending save open on Escape", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const result = renderDialog(() => pending.promise);
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.keyboard("{Escape}");
+    expect(result.onClose).not.toHaveBeenCalled();
+    await act(async () => pending.resolve(json(success)));
+  });
+
+  it("requires review after an unconfirmed write", async () => {
+    const user = userEvent.setup();
+    renderDialog(json({ detail: "unavailable" }, 503));
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+  });
+
+  it("retires private tag UI on session change", async () => {
+    renderDialog();
+    await act(async () => clearLogin());
+    expect(screen.queryByText("Cable guide")).toBeNull();
+    expect(screen.queryByLabelText("Search or create a tag")).toBeNull();
+  });
+
+  it.each([403, 404])("hides the private draft after a denied review (%s)", async (status) => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({ "GET /api/v1/models/1": json({ detail: "unavailable" }, status) });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await waitFor(() => expect(screen.queryByText("Cable guide")).toBeNull());
+    expect(screen.queryByLabelText("Search or create a tag")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("aborts review when the dialog closes", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const result = renderDialog(json(conflict));
+    result.route({
+      "GET /api/v1/models/1": (_url, options) => {
+        signal = options?.signal;
+        return pending.promise;
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await waitFor(() => expect(signal).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(aModel({ tags: ["Late private tag"] }))));
+    expect(screen.queryByText("Late private tag")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save my draft against this version" })).toBeNull();
+  });
+
+  it("freezes selection while save is pending", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const result = renderDialog(() => pending.promise);
+    await user.type(screen.getByLabelText("Search or create a tag"), "Functional");
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    expect(screen.getByLabelText("Search or create a tag")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove Functional" })).toBeDisabled();
+    await act(async () => pending.resolve(json(success)));
+    expect(result.onSaved).toHaveBeenCalledWith(["Workshop", "Functional"], 9);
+  });
+
+  it("requires a new review when the reviewed base changes again", async () => {
+    const user = userEvent.setup();
+    const result = renderDialog(json(conflict));
+    result.route({
+      "GET /api/v1/models/1": json(
+        aModel({ id: 1, tags: ["Remote"], edit_version: 7, effective_role: "edit" }),
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "Remove Workshop" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+    expect(result.requestsWithMethod("POST")).toHaveLength(2);
+    expect(JSON.parse(result.requestsWithMethod("POST")[1].body).expected_versions).toEqual({
+      1: 7,
+    });
   });
 });
