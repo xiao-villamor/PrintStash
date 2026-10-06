@@ -75,6 +75,7 @@ export function useProfileCommands() {
     context: MutationContext | undefined,
     append: boolean,
   ) => {
+    assertSession(context);
     await cancel();
     assertSession(context);
     client.setQueryData<FilamentProfileRead[]>(profileKeys.filaments, (rows) => {
@@ -95,6 +96,7 @@ export function useProfileCommands() {
     context: MutationContext | undefined,
     append: boolean,
   ) => {
+    assertSession(context);
     await cancel();
     assertSession(context);
     client.setQueryData<PrinterProfileRead[]>(profileKeys.printers, (rows) => {
@@ -150,6 +152,7 @@ export function useProfileCommands() {
       },
       onMutate: ({ id, session }) => prepare(session, { kind: "filament", id }),
       onSuccess: async (_, { id }, context) => {
+        assertSession(context);
         await cancel();
         assertSession(context);
         client.setQueryData<FilamentProfileRead[]>(profileKeys.filaments, (rows) => {
@@ -200,6 +203,7 @@ export function useProfileCommands() {
       },
       onMutate: ({ id, session }) => prepare(session, { kind: "printer", id }),
       onSuccess: async (_, { id }, context) => {
+        assertSession(context);
         await cancel();
         assertSession(context);
         client.setQueryData<PrinterProfileRead[]>(profileKeys.printers, (rows) => {
@@ -218,6 +222,7 @@ export function useProfileCommands() {
       },
       onMutate: (session) => prepare(session),
       onSuccess: async (_, _variables, context) => {
+        assertSession(context);
         await cancel();
         assertSession(context);
         await client.invalidateQueries({ queryKey: profileKeys.filaments });

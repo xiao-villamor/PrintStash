@@ -738,3 +738,106 @@ Setup bootstrap is a closed Query projection, admitted only after status, cookie
 | `frontend/src/lib/setup-storage.ts` | Full payload/error mapper rechecked: same CSRF/account/storage and failure-language contracts; no change. |
 | `frontend/src/test-support/render.tsx` | Existing renderApp/default identity/native mock routes inspected for genuine401 and real composition arrangements; no change. |
 | `frontend/package.json` | Existing gate commands rechecked; no config/dependency changes. |
+
+
+## M1 retired acknowledgement isolation plan (before tests)
+
+A private acknowledgement paused after HTTP success must validate its captured incarnation before touching the new incarnation's Query client. Reusing the same user id or subject key does not authorize the retired command to cancel new reads. Scope validation remains required after awaited cancellation too.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 231 | leaves a new document read active after retired $kind acknowledgement | Edge | create/upload/update/remove ACK paused at global success, retire and same-user read | new GET not aborted, current document visible | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/documents.test.tsx::leaves a new document read active after retired $kind acknowledgement` |
+| 232 | leaves a new inbox read active after retired $kind acknowledgement | Edge | dismiss/batch/retry/update/import ACK paused, retire and same-user read | new GET not aborted, current inbox projection visible | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/inbox.test.tsx::leaves a new inbox read active after retired $kind acknowledgement` |
+| 233 | leaves a new profile read active after retired $kind acknowledgement | Edge | filament/printer create/update/remove or Spoolman ACK paused, retire and same-user read | new GET not aborted, current catalog visible | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/profiles.test.tsx::leaves a new profile read active after retired $kind acknowledgement` |
+| 234 | discards a document acknowledgement after cancellation retires | Edge | publication cancellation deferred, then scope retirement | retired DTO not republished | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/documents.test.tsx::discards a document acknowledgement after cancellation retires` |
+| 235 | discards an inbox acknowledgement after cancellation retires | Edge | publication cancellation deferred, then scope retirement | retired row not republished | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/inbox.test.tsx::discards an inbox acknowledgement after cancellation retires` |
+| 236 | discards a profile acknowledgement after cancellation retires | Edge | publication cancellation deferred, then scope retirement | retired profile not republished | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/profiles.test.tsx::discards a profile acknowledgement after cancellation retires` |
+
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 237 | rejects an empty inbox batch after cancellation retires | Edge | empty batch ACK, cancellation pending, scope retires | retired command settles AbortError, not successful empty result | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/inbox.test.tsx::rejects an empty inbox batch after cancellation retires` |
+
+
+M1 acknowledgement audit/fix evidence: production was aligned locally to the integration's three owner files at a354f85d in baseline-only commit ca45cdfc. That commit is explicitly not a checkpoint for integration; the parent already has these owners and their gesture callers. No other prerequisite or caller files were copied. The forthcoming patch contains only guards, the three owner mirrors and this record.
+
+Before production guards, the targeted gate was red17failed/3passed: Documents create/upload/update/remove, Inbox dismiss/batch/batch-dismiss/retry/update/import and Profiles filament/printer create/update/remove plus Spoolman each cancelled the next same-user GET when an older ACK resumed. The three deferred-cancellation publication tests already passed. After pre-cancellation guards,20tests passed. The extra empty Inbox batch case then failed separately because an empty result skipped every post-await helper and settled success after scope retirement; an explicit post-await guard corrected that contract. The later affected21tests passed while the hygiene gate found three missing contract headers; those test headers were added. Final focused gate passed25tests4files (Documents5, Inbox8, Profiles8, hygiene4).
+
+Full frontend lint, format692files and git diff --check passed. Full local typecheck is **limited**, with11errors only in four pre-existing callers: `frontend/src/components/document-browser.tsx`, `frontend/src/pages/document-detail.tsx`, `frontend/src/pages/inbox-detail.tsx`, `frontend/src/pages/inbox.tsx` still have their pre-fc826322 gesture signatures in this worker branch. The root expressly declined copying them merely to qualify this branch; its integration already contains the current callers and will run full typecheck there. No new owner/mirror type diagnostic was reported. No browser, coverage, CI or performance qualification is claimed.
+
+The patch validates captured scope before any cancellation, retains validation after awaited cancellation and keeps the same confirmed-publication/invalidation contract. It adds no cache owner, timer, compatibility bypass, global auth mutation or server cancellation. Search/Similarity findings were handed to their feature owner; Library stays with root.
+
+### M0/M10 manually inspected paths (current integration audit and narrow patch)
+
+The current mutation inventory was read at `/home/local/PrintStash-library-contracts` HEADa354f85d without edits. The six assigned files below were then reviewed/edited only in this worker worktree. Search results alone are not counted as manual source review.
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/lib/queries/documents.ts` | Full owner: create/upload/update publish and remove success, gesture prepare, list/detail reads and collections refresh. Missing pre-cancel authority reproduced for all4commands; pre/post publication now guarded. |
+| `frontend/src/lib/queries/inbox.ts` | Full owner: snapshot/detail/read reconciliation and all commands. Missing pre-cancel authority reproduced for6variants; empty batch lacked post-await retirement rejection too. |
+| `frontend/src/lib/queries/profiles.ts` | Full owner: prepare/pending-row lock, filament/printer publication/delete, Spoolman sync and settled cleanup. Missing pre-cancel authority reproduced for7commands. |
+| `frontend/src/lib/queries/__tests__/documents.test.tsx` | Full new mirror: native four write routes, real owner/cache/global success seam, same-user new GET and post-cancel scope retirement. |
+| `frontend/src/lib/queries/__tests__/inbox.test.tsx` | Full new mirror: native six command routes, same-user new GET, post-cancel publication retirement and empty batch terminal error. |
+| `frontend/src/lib/queries/__tests__/profiles.test.tsx` | Full new mirror: native seven catalog/sync writes, same-user filament/printer GET and post-cancel publication retirement. |
+| `frontend/src/lib/queries/captions.ts` | Full current owner reviewed: prior correction validates captured session before/after cancellation and each projection invalidation. No edit. |
+| `frontend/src/lib/queries/__tests__/captions.test.tsx` | Command lifetime section0–185 manually reviewed: existing global MutationCache success pause reproduces the HTTP-success/feature-publication interval. Generation observation beyond185 not re-audited here. No edit. |
+| `frontend/src/lib/queries/search.ts` | Commands section190–387 manually reviewed: acknowledge and preferences.onSuccess share missing pre-cancel check. Reads/options0–189 only partially read; not full-file review. Feature worker notified; no edit. |
+| `frontend/src/lib/queries/similarity.ts` | Commands/options section160–370 manually reviewed: reconcile cancels before validating captured scope; later Library invalidation loop already checks before/after awaits. Feature worker notified; no edit. |
+| `frontend/src/features/library/mutations.ts` | Full current star owner manually reviewed: onSuccess cancels before current-scope assertion; root owns correction. No edit. |
+| `frontend/src/features/library/batch-edits.ts` | Full current receipt/conditional undo owner reviewed: captured session before each chunk/undo request and after await; no Query cancellation callback. No edit. |
+| `frontend/src/features/library/model-detail.ts` | Full current detail/history publication reviewed: session checked before/after cancellation. No edit. |
+| `frontend/src/features/library/multipart.ts` | Full current aggregate publication reviewed: mounted/session check before/after cancellation, receipt subject/version validation. No edit. |
+| `frontend/src/features/work/queries.ts` | Command section140–225 manually rechecked: request.assertCurrent before/after read cancellation/publication/invalidation inside scoped mutationFn. No edit. |
+| `frontend/src/features/printers/queries.ts` | Maintenance command section115–175 manually rechecked: scoped mutationFn guards before/after cancellation/invalidation. Remaining sections were qualified in prior worker ledgers, not re-reviewed by this search. No edit. |
+| `frontend/src/lib/artifact-upload.ts` | Native upload transfer section130–210 rechecked: signed remote fetch carries scope signal and guards digest/part acknowledgement/progress/finalization. Full source previously inspected in M1. No edit. |
+| `frontend/src/lib/api/documents.ts` | Full client: native document CRUD/upload/read paths, conditional update header and compatibility writer invalidation; no edit. |
+| `frontend/src/lib/api/filaments.ts` | Full client: catalog caller signal and profile create/update/delete wire paths; no edit. |
+| `frontend/src/lib/api/printer-profiles.ts` | Full client: catalog caller signal and printer-profile command paths; no edit. |
+| `frontend/src/lib/api/spoolman.ts` | Full client: status/config/test/spools and catalog sync writer; no edit. |
+| `frontend/src/lib/api/inbox.ts` | Full client reviewed: read parser, cancelled get/list, command endpoints and expected manifests. No edit. |
+| `frontend/src/test-support/render.tsx` | Full harness reviewed: shared application QueryClient, silent verified fixture identity, native fetch route table, cache retirement between roots. No edit. |
+| `frontend/src/pages/__tests__/document-detail.test.tsx` | Fixture section0–70 only reviewed for complete DocumentRead shape; not full mirror audit in this increment. |
+| `frontend/src/components/__tests__/filament-profiles-card.test.tsx` | Fixture section20–80 only reviewed for complete profile wire shapes; not full mirror audit here. |
+| `frontend/src/pages/__tests__/inbox.test.tsx` | Fixture section0–100 only reviewed for complete InboxItem wire shape; not full mirror audit here. |
+| `frontend/tests/repo/suite-hygiene.test.ts` | Contract-header result reviewed; unchanged gate. |
+
+### M0/M10 retained read-only bootstrap/package evidence
+
+No production change follows from this audit yet. Previously inspected PWA paths above were reread, including full `frontend/src/main.tsx`, `frontend/src/lib/pwa.ts`, `frontend/public/sw.js`, `frontend/vite.config.ts`, `frontend/package.json`, `frontend/pnpm-workspace.yaml`, `frontend/src/lib/__tests__/pwa.test.ts`, `frontend/tests/repo/service-worker.test.ts` and `frontend/tests/e2e/pwa.spec.ts`. main starts the task session scope once outside StrictMode and disposes it through Vite HMR; application composition owns one private QueryClient. The worker excludes cross-origin, nonGET and `/api/` routes before caching; this source contract is present, but the existing browser spec manually registers a worker under the dev server and does not prove production auto-registration/private-response exclusion. This is a validation gap, not a demonstrated production cache leak.
+
+Manual package review additionally covered full `frontend/packages/ui/src/lib/{use-combobox-nav,input-classes,utils,overlay,use-media-query}.ts`, UI barrel/package/config/tsconfig, full `frontend/packages/domain/src/{card-metrics,currency,format,provenance,index,last-collection,metadata-preferences}.ts` and domain package/config/tsconfig. UI's runtime dependencies are React/ReactDOM peers plus Radix Slot, CVA, clsx, tailwind-merge and lucide; it imports no app Query/transport/API. Domain has no declared framework/runtime dependencies; its preferences/last-collection use browser storage explicitly. This is full review of those listed modules, not of every UI primitive/test or every package consumer.
+
+A read-only Node24 native-TS experiment with a controlled `localStorage` getter throwing SecurityError **reproduced** synchronous failures in readMetadataPreferences/readCardMetrics and all three preference writers (metadata/card/preview). readLastCollection and readPreviewPreferences completed through their existing guarded fallback. No real browser-storage/UI flow or new regression suite was run for this finding. Current source consumers were inspected only at the relevant sections: ModelCard initializes readCardMetrics, ModelDetail initializes readMetadataPreferences, Settings initializes both plus preview and writes those preferences. Root/feature worker own those component files; they need no edit to fix the storage seam.
+
+Proposed next narrow slice, pending parent assignment: optional preference storage resilience in domain `card-metrics.ts`/`metadata-preferences.ts` plus app `preview-preferences.ts` and their existing mirrors, preserving same-session immediate presentation on blocked persistence. Reproduce blocked property/get/set separately, existing malformed/default/roundtrip behavior, no component or private-data policy changes. PWA production browser qualification is a separate test-only proposal; do not mix it with preference writes. A nested-overlay scroll-lock/second-animation-frame cleanup concern from reading overlay.ts remains an **unreproduced hypothesis**, outside the remote-state objective.
+
+Current integration direct transport inventory remains eight native sites across request.ts (private/public JSON/blob/text/stream/XHR), artifact-upload.ts (signed remote part upload), events.ts and api/printers.ts (ticketed WebSockets); source paths were checked against the earlier manually inspected M1/M7 ledgers. No additional native fetch/EventSource/axios owner was found by this search. Inventory is not proof that every typed endpoint consumer is manually reviewed. Public Share supplies getPublicDerivedBlob/Text and suppresses private viewer events; private viewer defaults remain private. Compatibility request.ts→Query invalidation is still inventoried until M10 cutover.
+
+
+| Path | Manually inspected symbols / actual boundaries |
+|---|---|
+| `frontend/src/main.tsx` | Full bootstrap: StrictMode, I18n, QueryClient, Router, DEV lazy devtools, startTaskCenterSessionScope and HMR disposal, production PWA registration. |
+| `frontend/pnpm-workspace.yaml` | Full workspace package globs and allowBuilds declarations; no change. |
+| `frontend/packages/ui/src/lib/use-combobox-nav.ts` | Full local keyboard/index/id/ARIA owner; no remote data. |
+| `frontend/packages/ui/src/lib/input-classes.ts` | Full shared input token/class primitive; no runtime state. |
+| `frontend/packages/ui/src/lib/utils.ts` | Full clsx/tailwind-merge boundary. |
+| `frontend/packages/ui/src/lib/overlay.ts` | Full transition/frame/timer/focus/Escape/scroll cleanup reviewed; nested-owner concern remains hypothesis. |
+| `frontend/packages/ui/src/lib/use-media-query.ts` | Full guarded matchMedia external store. |
+| `frontend/packages/ui/src/index.ts` | Full primitives and browser-helper export graph; no Query/API export. |
+| `frontend/packages/ui/package.json` | Full dependencies, React peers and source exports. |
+| `frontend/packages/ui/vitest.config.ts` | Full isolated jsdom/coverage setup; tests were not executed in this read-only audit. |
+| `frontend/packages/ui/tsconfig.json` | Full inherited app TypeScript and package-owned sources/config boundary. |
+| `frontend/packages/domain/src/card-metrics.ts` | Full closed metric tuple decoding and unguarded browser read/write; blocked getter failure reproduced. |
+| `frontend/packages/domain/src/metadata-preferences.ts` | Full closed visibility record decoding and unguarded storage read/write; blocked getter failure reproduced. |
+| `frontend/packages/domain/src/last-collection.ts` | Full guarded browser navigation preferences and legacy href; same-origin preference scope policy remains separate. |
+| `frontend/packages/domain/src/currency.ts` | Full currency choices/Intl fallback; no remote data. |
+| `frontend/packages/domain/src/format.ts` | Full bytes/time/units/cost/relative-time formatters; no remote state owner. |
+| `frontend/packages/domain/src/provenance.ts` | Full origin/completion display keys; no remote state owner. |
+| `frontend/packages/domain/src/index.ts` | Full pure/browser preference export graph. |
+| `frontend/packages/domain/package.json` | Full source exports with no declared framework/runtime dependencies. |
+| `frontend/packages/domain/vitest.config.ts` | Full package-owned jsdom/coverage setup; not executed in this read-only audit. |
+| `frontend/packages/domain/tsconfig.json` | Full inherited TypeScript/package-owned source/setup boundary. |
+| `frontend/src/lib/preview-preferences.ts` | Full guarded read, unguarded write and same-tab/storage event subscription; write blocked getter failure reproduced. |
+| `frontend/src/components/model-card.tsx` | Metric section428–441 read only: useState(readCardMetrics), storage-event refresh; thumbnail/star owner untouched. |
+| `frontend/src/components/model-detail/index.tsx` | Metadata initializer section190–202 read only; root's current component owner untouched. |
+| `frontend/src/components/settings-panel.tsx` | Preference initializers534–576 and handlers881,1342–1376 read only; Settings feature owner untouched. |

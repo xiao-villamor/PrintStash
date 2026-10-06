@@ -51,6 +51,7 @@ export function useDocumentMutations() {
     requireSessionVersion(version);
   };
   const publish = async (document: DocumentRead, version: number | undefined) => {
+    assertSession(version);
     await cancel();
     assertSession(version);
     client.setQueryData(documentKeys.detail(document.id), document);
@@ -145,6 +146,7 @@ export function useDocumentMutations() {
       },
       onMutate: prepare,
       onSuccess: async (_, { id }, version) => {
+        assertSession(version);
         await cancel();
         assertSession(version);
         client.removeQueries({ queryKey: documentKeys.detail(id) });

@@ -126,6 +126,7 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
     requireSessionVersion(version);
   };
   const publish = async (item: InboxItem, version: number | undefined) => {
+    assertSession(version);
     await cancel();
     assertSession(version);
     client.setQueryData(inboxKeys.detail(item.id), item);
@@ -151,6 +152,7 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
       },
       onMutate: prepare,
       onSuccess: async (_, { id }, version) => {
+        assertSession(version);
         await cancel();
         remove([id], version);
       },
@@ -168,7 +170,9 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
       },
       onMutate: prepare,
       onSuccess: async (items, { payload }, version) => {
+        assertSession(version);
         await cancel();
+        assertSession(version);
         if (payload.action === "dismiss") remove(payload.item_ids, version);
         else for (const item of items) await publish(item, version);
       },
