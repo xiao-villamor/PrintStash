@@ -51,34 +51,50 @@ export function getMe(options?: GetJsonOptions): Promise<UserRead> {
   return getJson<UserRead>("/api/v1/auth/me", options);
 }
 
-export function listApiKeys(): Promise<ApiKeyRead[]> {
-  return getJson<ApiKeyRead[]>("/api/v1/auth/api-keys");
+export function listApiKeys(options: GetJsonOptions = {}): Promise<ApiKeyRead[]> {
+  return getJson<ApiKeyRead[]>("/api/v1/auth/api-keys", { ...options, fresh: true });
 }
 
-export function listAdminUsers(): Promise<UserRead[]> {
-  return getJson<UserRead[]>("/api/v1/admin/users", { fresh: true });
+export function listAdminUsers(options: GetJsonOptions = {}): Promise<UserRead[]> {
+  return getJson<UserRead[]>("/api/v1/admin/users", { ...options, fresh: true });
 }
 
 export function createAdminUser(payload: UserCreate): Promise<UserRead> {
-  return sendJson<UserRead>("/api/v1/admin/users", "POST", payload);
+  return requestApi<UserRead>("/api/v1/admin/users", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
 export function updateAdminUser(id: number, payload: UserUpdate): Promise<UserRead> {
-  return sendJson<UserRead>(`/api/v1/admin/users/${id}`, "PATCH", payload);
+  return requestApi<UserRead>(`/api/v1/admin/users/${id}`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
 export function resetAdminUserPassword(id: number, payload: UserPasswordUpdate): Promise<UserRead> {
-  return sendJson<UserRead>(`/api/v1/admin/users/${id}/password`, "POST", payload);
+  return requestApi<UserRead>(`/api/v1/admin/users/${id}/password`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deactivateAdminUser(id: number): Promise<void> {
-  return sendAction(`/api/v1/admin/users/${id}`, "DELETE");
+  return requestApi<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" });
 }
 
 export function createApiKey(name: string): Promise<ApiKeyCreateResponse> {
-  return sendJson<ApiKeyCreateResponse>("/api/v1/auth/api-keys", "POST", { name });
+  return requestApi<ApiKeyCreateResponse>("/api/v1/auth/api-keys", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ name }),
+  });
 }
 
 export function revokeApiKey(id: number): Promise<void> {
-  return sendAction(`/api/v1/auth/api-keys/${id}`, "DELETE");
+  return requestApi<void>(`/api/v1/auth/api-keys/${id}`, { method: "DELETE" });
 }

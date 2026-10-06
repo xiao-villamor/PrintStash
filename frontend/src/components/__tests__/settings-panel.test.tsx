@@ -20,13 +20,16 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "@/components/settings-panel";
+import { aUser, aApiKey } from "@/test-support/account";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { queryKeys } from "@/lib/query-client";
+import { clearLogin } from "@/lib/auth-store";
+import { BROWSER_EXTENSION_SETUP_STORAGE_KEY } from "@/lib/browser-extension-setup";
 import {
   aCollection,
   aJob,
@@ -41,7 +44,7 @@ import {
   type RenderAppOptions,
   type RouteTable,
 } from "@/test-support/render";
-import type { CollectionPermissionRead, JobStatus, PrinterPermissionRead, UserRead } from "@/types";
+import type { CollectionPermissionRead, JobStatus, PrinterPermissionRead } from "@/types";
 
 const HEALTH = {
   status: "ok",
@@ -90,29 +93,10 @@ const GC_PLAN = {
   items: [],
 };
 
-const ISSUED_KEY = {
-  id: 9,
-  name: "Slicer",
-  prefix: "ps_test",
-  created_at: "2026-01-01T00:00:00Z",
-  last_used_at: null,
-};
+const ISSUED_KEY = aApiKey();
 
 /** The mint response, which carries the secret a listing never returns again. */
 const MINTED_KEY = { ...ISSUED_KEY, api_key: "ps_test_this-is-not-a-real-key" };
-
-function aUser(over: Partial<UserRead> = {}): UserRead {
-  return {
-    id: 2,
-    username: "maker",
-    email: null,
-    is_superuser: false,
-    is_active: true,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
 
 function aCollectionPermission(
   over: Partial<CollectionPermissionRead> = {},
@@ -2258,5 +2242,231 @@ describe("SettingsPanel", () => {
 
       expect(await screen.findByText("Metadata display reset.")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Settings account recovery", () => {
+  it("retries an unavailable API-key list without claiming it empty", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "GET /api/v1/auth/api-keys": json({ detail: "unavailable" }, 503) },
+    });
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("API keys could not be loaded.");
+    expect(screen.queryByText("No active API keys.")).toBeNull();
+    app.route({ "GET /api/v1/auth/api-keys": json([ISSUED_KEY]) });
+    await userEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Slicer")).toBeVisible();
+  });
+  it("retries an unavailable admin User list without claiming it empty", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "GET /api/v1/admin/users": json({ detail: "unavailable" }, 503) },
+    });
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("Users could not be loaded.");
+    expect(screen.queryByText("No users.")).toBeNull();
+    app.route({ "GET /api/v1/admin/users": json([aUser()]) });
+    await userEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("maker", { selector: "p" })).toBeVisible();
+  });
+  it("retires an owned extension handoff with its private session", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
+    await screen.findByText("Setup prepared");
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toContain(
+      MINTED_KEY.api_key,
+    );
+    app.unmount();
+    await act(async () => {
+      clearLogin();
+    });
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("Settings account intent", () => {
+  it("keeps an issued key copyable when extension handoff storage fails", async () => {
+    const store = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key === BROWSER_EXTENSION_SETUP_STORAGE_KEY)
+        throw new DOMException("Storage unavailable", "QuotaExceededError");
+      return store.call(this, key, value);
+    });
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
+    expect(await screen.findByTitle("Copy API key")).toBeVisible();
+    expect(screen.getByText(MINTED_KEY.api_key)).toBeVisible();
+    expect(screen.queryByText("Setup prepared")).toBeNull();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+  it("retains a failed User create draft without an automatic retry", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/admin/users": json({ detail: "User creation unavailable" }, 503),
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    fireEvent.change(username, { target: { value: "retry-maker" } });
+    fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(
+      await screen.findByText(
+        "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+      ),
+    ).toBeVisible();
+    expect(username).toHaveValue("retry-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+  it("suppresses an issued secret after the account read is denied", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Generate" }));
+    await screen.findByTitle("Copy API key");
+    app.route({ "GET /api/v1/auth/api-keys": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["api-keys"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("API keys could not be loaded.");
+    expect(screen.queryByText(MINTED_KEY.api_key)).toBeNull();
+    expect(screen.queryByTitle("Copy API key")).toBeNull();
+    expect(screen.queryByText("Slicer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+  });
+});
+
+describe("Settings account draft lifetime", () => {
+  it("preserves a User draft through background refresh", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    await userEvent.type(username, "new-maker");
+    await userEvent.type(screen.getByLabelText("Initial password"), "FakePassword123");
+    app.route({ "GET /api/v1/admin/users": json([aUser({ username: "changed elsewhere" })]) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    expect(username).toHaveValue("new-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(await screen.findByText("changed elsewhere", { selector: "p" })).toBeVisible();
+  });
+  it("preserves a newer create draft after the earlier command completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/admin/users": () => pending.promise,
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    fireEvent.change(username, { target: { value: "original-maker" } });
+    fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    fireEvent.change(username, { target: { value: "next-maker" } });
+    await act(async () => {
+      pending.resolve(json(aUser({ username: "original-maker" })));
+    });
+    expect(await screen.findByText("original-maker", { selector: "p" })).toBeVisible();
+    expect(username).toHaveValue("next-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).username).toBe("original-maker");
+  });
+  it("preserves a newer password draft after an earlier reset completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "POST /api/v1/admin/users/2/password": () => pending.promise,
+      },
+    });
+    const field = await screen.findByPlaceholderText("New password");
+    fireEvent.change(field, { target: { value: "OldFakePassword123" } });
+    await userEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    fireEvent.change(field, { target: { value: "NextFakePassword123" } });
+    await act(async () => {
+      pending.resolve(json(aUser()));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled(),
+    );
+    expect(field).toHaveValue("NextFakePassword123");
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
+  });
+  it("dismisses the one-time key receipt without revoking its key", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Generate" }));
+    await screen.findByTitle("Copy API key");
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss this secret" }));
+    expect(screen.queryByText(MINTED_KEY.api_key)).toBeNull();
+    expect(screen.getByText("Slicer")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+    expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+  });
+  it("keeps API keys usable while the User list is unavailable", async () => {
+    renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/auth/api-keys": json([ISSUED_KEY]),
+        "GET /api/v1/admin/users": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Users could not be loaded.");
+    expect(screen.getByText("Slicer")).toBeVisible();
+    expect(screen.getByTitle("Revoke API key")).toBeEnabled();
+  });
+  it("disables a selected collection grant after the User list is denied", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+      },
+    });
+    const selects = await screen.findAllByLabelText("User");
+    await userEvent.selectOptions(selects[0], "2");
+    await userEvent.click(screen.getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    expect(screen.getByRole("button", { name: "Grant" })).toBeEnabled();
+    app.route({ "GET /api/v1/admin/users": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Users could not be loaded.");
+    expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
+    expect(selects[0]).toBeDisabled();
+    expect(screen.queryByText("maker", { selector: "p" })).toBeNull();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
   });
 });

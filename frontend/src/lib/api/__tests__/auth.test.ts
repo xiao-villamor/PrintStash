@@ -251,3 +251,26 @@ describe("entry endpoint cancellation", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
+
+/** Account feature reads forward their caller cancellation through the existing private transport. */
+describe("account caller cancellation", () => {
+  it.each([
+    { label: "API keys", read: listApiKeys },
+    { label: "admin Users", read: listAdminUsers },
+  ])("cancels an active $label read", async ({ read }) => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = read({ signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+  });
+});

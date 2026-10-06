@@ -1,4 +1,7 @@
 {
+  "settings.accountUsersFailed": "No se pudieron cargar los usuarios.",
+  "settings.accountKeysFailed": "No se pudieron cargar las claves API.",
+  "settings.accountDismissSecret": "Ocultar este secreto",
   "auditSchedule.deferMaintenance": "Hay un mantenimiento activo",
   "auditSchedule.deferStorage": "El almacenamiento no está disponible",
   "auditSchedule.deferWindow": "Esperando a la siguiente ventana permitida",
@@ -4201,5 +4204,6 @@
   "aiSearch.statusError": "No se pudieron cargar las funciones de búsqueda.",
   "aiSearch.preferencesLoadError": "No se pudieron cargar tus preferencias de búsqueda.",
   "aiSearch.downloadsLoadError": "No se pudieron cargar las descargas de modelos.",
-  "aiSearch.estimateError": "No se pudo cargar la estimación de recursos."
+  "aiSearch.estimateError": "No se pudo cargar la estimación de recursos.",
+  "settings.accountHandoffFailed": "La clave se creó, pero no se pudo guardar la configuración de la extensión. Copia la clave antes de salir."
 }

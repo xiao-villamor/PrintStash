@@ -1,4 +1,7 @@
 {
+  "settings.accountUsersFailed": "Users could not be loaded.",
+  "settings.accountKeysFailed": "API keys could not be loaded.",
+  "settings.accountDismissSecret": "Dismiss this secret",
   "auditSchedule.deferMaintenance": "Maintenance is active",
   "auditSchedule.deferStorage": "Storage is unavailable",
   "auditSchedule.deferWindow": "Waiting for the next allowed window",
@@ -4201,5 +4204,6 @@
   "aiSearch.statusError": "Search capabilities could not be loaded.",
   "aiSearch.preferencesLoadError": "Your search preferences could not be loaded.",
   "aiSearch.downloadsLoadError": "Model downloads could not be loaded.",
-  "aiSearch.estimateError": "The resource estimate could not be loaded."
+  "aiSearch.estimateError": "The resource estimate could not be loaded.",
+  "settings.accountHandoffFailed": "The key was created, but extension setup could not be stored. Copy the key before leaving."
 }

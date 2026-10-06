@@ -6,9 +6,18 @@ import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { ApiError } from "@/lib/errors";
+import { ApiError, parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { useQuery } from "@tanstack/react-query";
+import {
+  apiKeysOptions,
+  adminUsersOptions,
+  useApiKeyCommand,
+  useAdminUserCommand,
+  type ApiKeyReceipt,
+} from "@/lib/queries/settings-account";
+import { getSessionVersion } from "@/lib/session-transport";
+import { onAuthChange } from "@/lib/auth-store";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
@@ -81,8 +90,6 @@ import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
-  createApiKey,
-  createAdminUser,
   createBackup,
   createGcPlan,
   approveGcPlan,
@@ -91,7 +98,6 @@ import {
   adoptLocalBackup,
   adoptRemoteBackup,
   adoptS3Backup,
-  deactivateAdminUser,
   deleteBackup,
   deleteCollectionPermission,
   deletePrinterPermission,
@@ -112,19 +118,14 @@ import {
   listCollectionPermissions,
   listPrinterPermissions,
   listPrinters,
-  listApiKeys,
-  listAdminUsers,
   listTrash,
   listStorageConnections,
   purgeModel,
-  resetAdminUserPassword,
   restoreBackup,
   restoreModel,
   restartPrintStash,
-  revokeApiKey,
   updateCollectionPermission,
   updatePrinterPermission,
-  updateAdminUser,
   updateVaultConfig,
   updateStorageConnection,
   uploadBackup,
@@ -171,9 +172,12 @@ import {
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
 import { waitForImportJob } from "@/lib/task-center";
-import { prepareBrowserExtensionSetup } from "@/lib/browser-extension-setup";
+import {
+  prepareBrowserExtensionSetup,
+  discardBrowserExtensionSetup,
+  type BrowserExtensionSetup,
+} from "@/lib/browser-extension-setup";
 import type {
-  ApiKeyRead,
   CollectionNodeRead,
   CollectionRole,
   PrinterPermissionRead,
@@ -185,7 +189,7 @@ import type {
   HealthResponse,
   TrashPurgeRead,
   TrashedModelRead,
-  UserRead,
+  UserUpdate,
 } from "@/types";
 
 type SettingsSection =
@@ -477,15 +481,29 @@ export function SettingsPanel() {
   const stats = useVaultStats().data ?? null;
   const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [archiveBusy, setArchiveBusy] = useState<"export" | "import" | null>(null);
-  const [loadedApiKeys, setApiKeys] = useState<ApiKeyRead[]>([]);
-  // A signed-out visitor has no keys to list, so that is derived rather than cleared
-  // from an effect on sign-out.
-  const apiKeys = user ? loadedApiKeys : [];
-  const [users, setUsers] = useState<UserRead[]>([]);
-  const [usersBusy, setUsersBusy] = useState<number | "create" | null>(null);
-  const [newUsername, setNewUsername] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
+  const apiKeysQuery = useQuery({
+    ...apiKeysOptions(user?.id ?? null),
+    enabled: user !== null && activeSection === "access",
+  });
+  const usersQuery = useQuery({
+    ...adminUsersOptions(user?.is_superuser ? user.id : null),
+    enabled: !!user?.is_superuser && activeSection === "access",
+  });
+  const keyCommand = useApiKeyCommand();
+  const userCommand = useAdminUserCommand();
+  const keysDenied =
+    apiKeysQuery.isError && [401, 403, 404].includes(parseApiError(apiKeysQuery.error).status);
+  const usersDenied =
+    usersQuery.isError && [401, 403, 404].includes(parseApiError(usersQuery.error).status);
+  const apiKeys = user && !keysDenied ? (apiKeysQuery.data ?? []) : [];
+  const users = user?.is_superuser && !usersDenied ? (usersQuery.data ?? []) : [];
+  const usersBusy = userCommand.isPending
+    ? userCommand.variables.kind === "create"
+      ? "create"
+      : userCommand.variables.id
+    : null;
+  const [createUserDraft, setCreateUserDraft] = useState({ username: "", email: "", password: "" });
+  const { username: newUsername, email: newUserEmail, password: newUserPassword } = createUserDraft;
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
   const [accessPickerOpen, setAccessPickerOpen] = useState(false);
@@ -509,12 +527,42 @@ export function SettingsPanel() {
   const [accessPrinterId, setAccessPrinterId] = useState<number | "">("");
   const [printerAccessRole, setPrinterAccessRole] = useState<PrinterRole>("view");
   const [printerAccessBusy, setPrinterAccessBusy] = useState<"load" | "save" | string | null>(null);
-  const [mintedApiKey, setNewApiKey] = useState<string | null>(null);
-  // Likewise the one-time secret: signing out hides it without a reset effect.
-  const newApiKey = user ? mintedApiKey : null;
+  const [ownedReceipt, setOwnedReceipt] = useState<
+    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null }) | null
+  >(null);
+  const receipt =
+    user &&
+    !keysDenied &&
+    ownedReceipt?.userId === user.id &&
+    ownedReceipt.session === getSessionVersion()
+      ? ownedReceipt
+      : null;
+  const newApiKey = receipt?.secret ?? null;
   const [keyName, setKeyName] = useState("Programmatic access");
-  const [keyBusy, setKeyBusy] = useState(false);
-  const [extensionSetupReady, setExtensionSetupReady] = useState(false);
+  const keyBusy = keyCommand.isPending;
+  const extensionSetupReady = receipt?.handoff !== null && receipt?.handoff !== undefined;
+  const accountLive = useRef(true);
+  const accountIdentity = useRef(user?.id ?? null);
+  useEffect(() => {
+    accountIdentity.current = user?.id ?? null;
+  }, [user?.id]);
+  useEffect(() => {
+    accountLive.current = true;
+    const release = onAuthChange(() => setOwnedReceipt(null));
+    return () => {
+      accountLive.current = false;
+      release();
+    };
+  }, []);
+  function accountCurrent(session: number) {
+    return (
+      accountLive.current && session === getSessionVersion() && accountIdentity.current === user?.id
+    );
+  }
+  function dismissReceipt() {
+    if (receipt?.handoff) discardBrowserExtensionSetup(receipt.handoff);
+    setOwnedReceipt(null);
+  }
   const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashPurgeResult, setTrashPurgeResult] = useState<TrashPurgeRead | null>(null);
@@ -590,11 +638,6 @@ export function SettingsPanel() {
     router.replace(query ? `/settings?${query}` : "/settings", { scroll: false });
   }
 
-  const refreshUsers = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setUsers(await listAdminUsers());
-  }, [user]);
-
   const refreshPrinterAccess = useCallback(async () => {
     if (!user?.is_superuser) return;
     setPrinterAccessBusy("load");
@@ -645,17 +688,12 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (!user) return;
-    listApiKeys()
-      .then(setApiKeys)
-      .catch(() => {});
     if (user.is_superuser) {
-      // Each refresher awaits its admin endpoint before writing results; the rule follows
-      // the call but not the `await` inside it, and reads the in-flight flags as cascades.
+      // Existing printer-access ownership migrates in its separate approved slice.
       // oxlint-disable-next-line react/set-state-in-effect -- results are applied after the fetch resolves
-      refreshUsers().catch(() => {});
       refreshPrinterAccess().catch(() => {});
     }
-  }, [user, refreshUsers, refreshPrinterAccess]);
+  }, [user, refreshPrinterAccess]);
 
   const loadTrash = useCallback(async () => {
     if (!user) {
@@ -1126,47 +1164,61 @@ export function SettingsPanel() {
     }
   }
 
-  async function generateApiKey() {
-    setKeyBusy(true);
+  async function issueApiKey(extension: boolean) {
+    if (!user || keyBusy || receipt || apiKeysQuery.isError || apiKeysQuery.isPending) return;
+    const session = getSessionVersion();
+    const username = user.username;
+    let handoffPrepared = false;
     try {
-      const created = await createApiKey(keyName.trim() || "Programmatic access");
-      setNewApiKey(created.api_key);
-      setApiKeys((current) => [created, ...current]);
-      toast.success(uiText("API key created. Copy it now; it will not be shown again."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
+      await keyCommand.mutateAsync({
+        kind: "create",
+        userId: user.id,
+        session,
+        name: extension ? "Browser extension" : keyName.trim() || "Programmatic access",
+        receiveReceipt: (result) => {
+          if (!accountCurrent(session)) return;
+          setOwnedReceipt({ ...result, handoff: null });
+          if (extension) {
+            try {
+              const handoff = prepareBrowserExtensionSetup(
+                window.location.origin,
+                username,
+                result.secret,
+              );
+              handoffPrepared = true;
+              setOwnedReceipt({ ...result, handoff });
+            } catch {
+              toast.error(t("settings.accountHandoffFailed"));
+            }
+          }
+        },
+      });
+      if (!accountCurrent(session)) return;
+      toast.success(
+        handoffPrepared
+          ? uiText("Extension setup prepared. Open the browser extension on this tab.")
+          : uiText("API key created. Copy it now; it will not be shown again."),
+      );
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function setupBrowserExtension() {
-    if (!user) return;
-    setKeyBusy(true);
-    try {
-      const created = await createApiKey("Browser extension");
-      setNewApiKey(created.api_key);
-      setApiKeys((current) => [created, ...current]);
-      prepareBrowserExtensionSetup(window.location.origin, user.username, created.api_key);
-      setExtensionSetupReady(true);
-      toast.success(uiText("Extension setup prepared. Open the browser extension on this tab."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
-    }
+  function generateApiKey() {
+    return issueApiKey(false);
   }
-
+  function setupBrowserExtension() {
+    return issueApiKey(true);
+  }
   async function deleteApiKey(id: number) {
-    setKeyBusy(true);
+    if (!user || keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending) return;
+    const session = getSessionVersion();
     try {
-      await revokeApiKey(id);
-      setApiKeys((current) => current.filter((key) => key.id !== id));
+      await keyCommand.mutateAsync({ kind: "revoke", id, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      if (receipt?.keyId === id) dismissReceipt();
       toast.success(uiText("API key revoked."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -1194,7 +1246,7 @@ export function SettingsPanel() {
   }
 
   async function saveCollectionAccess() {
-    if (!accessUserId || !accessCollection) return;
+    if (usersQuery.isError || usersQuery.isPending || !accessUserId || !accessCollection) return;
     setAccessBusy("save");
     try {
       await updateCollectionPermission(accessCollection.id, Number(accessUserId), {
@@ -1223,7 +1275,8 @@ export function SettingsPanel() {
   }
 
   async function savePrinterAccess() {
-    if (!printerAccessUserId || !accessPrinterId) return;
+    if (usersQuery.isError || usersQuery.isPending || !printerAccessUserId || !accessPrinterId)
+      return;
     setPrinterAccessBusy("save");
     try {
       await updatePrinterPermission(
@@ -1256,70 +1309,67 @@ export function SettingsPanel() {
   }
 
   async function createUser() {
-    const username = newUsername.trim();
-    const password = newUserPassword.trim();
-    if (!username || !password) return;
-    setUsersBusy("create");
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const captured = createUserDraft;
+    const username = captured.username.trim();
+    const password = captured.password.trim();
+    if (!username || password.length < 8) return;
+    const session = getSessionVersion();
     try {
-      await createAdminUser({
-        username,
-        password,
-        email: newUserEmail.trim() || null,
+      await userCommand.mutateAsync({
+        kind: "create",
+        userId: user.id,
+        session,
+        payload: { username, password, email: captured.email.trim() || null },
       });
-      setNewUsername("");
-      setNewUserEmail("");
-      setNewUserPassword("");
-      await refreshUsers();
+      if (!accountCurrent(session)) return;
+      setCreateUserDraft((current) =>
+        current === captured ? { username: "", email: "", password: "" } : current,
+      );
       toast.success(uiText("User created."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function patchUser(id: number, payload: Partial<UserRead>) {
-    setUsersBusy(id);
+  async function patchUser(id: number, payload: UserUpdate) {
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const session = getSessionVersion();
     try {
-      await updateAdminUser(id, {
-        email: payload.email,
-        is_active: payload.is_active,
-        is_superuser: payload.is_superuser,
-      });
-      await refreshUsers();
-      toast.success(uiText("User updated."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+      await userCommand.mutateAsync({ kind: "update", id, payload, userId: user.id, session });
+      if (accountCurrent(session)) toast.success(uiText("User updated."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function resetUserPassword(id: number) {
-    const password = passwordDrafts[id]?.trim();
-    if (!password) return;
-    setUsersBusy(id);
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const captured = passwordDrafts[id];
+    const password = captured?.trim();
+    if (!password || password.length < 8) return;
+    const session = getSessionVersion();
     try {
-      await resetAdminUserPassword(id, { password });
-      setPasswordDrafts((current) => ({ ...current, [id]: "" }));
+      await userCommand.mutateAsync({ kind: "password", id, password, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      setPasswordDrafts((current) =>
+        current[id] === captured ? { ...current, [id]: "" } : current,
+      );
       toast.success(uiText("Password reset."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function deactivateUser(id: number) {
-    setUsersBusy(id);
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const session = getSessionVersion();
     try {
-      await deactivateAdminUser(id);
-      await refreshUsers();
-      toast.success(uiText("User deactivated."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+      await userCommand.mutateAsync({ kind: "deactivate", id, userId: user.id, session });
+      if (accountCurrent(session)) toast.success(uiText("User deactivated."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -2064,7 +2114,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-username"
                             value={newUsername}
-                            onChange={(event) => setNewUsername(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                username: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             maxLength={128}
                             autoComplete="username"
@@ -2077,7 +2132,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-email"
                             value={newUserEmail}
-                            onChange={(event) => setNewUserEmail(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                email: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             type="email"
                             maxLength={255}
@@ -2091,7 +2151,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-password"
                             value={newUserPassword}
-                            onChange={(event) => setNewUserPassword(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                password: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             type="password"
                             minLength={8}
@@ -2104,7 +2169,9 @@ export function SettingsPanel() {
                           type="button"
                           onClick={createUser}
                           disabled={
-                            usersBusy === "create" ||
+                            usersBusy !== null ||
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
                             !newUsername.trim() ||
                             newUserPassword.trim().length < 8
                           }
@@ -2119,12 +2186,28 @@ export function SettingsPanel() {
                       </p>
 
                       <div className="space-y-2">
-                        {users.length === 0 ? (
+                        {usersQuery.isError && (
+                          <div role="alert" className="flex items-center gap-2 text-sm">
+                            <p>{t("settings.accountUsersFailed")}</p>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => void usersQuery.refetch()}
+                            >
+                              {t("Retry")}
+                            </Button>
+                          </div>
+                        )}
+                        {usersQuery.isPending ? (
+                          <p role="status">{t("Loading…")}</p>
+                        ) : usersQuery.isError && users.length === 0 ? null : users.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{uiText("No users.")}</p>
                         ) : (
                           users.map((row) => (
                             <div
                               key={row.id}
+                              role="group"
+                              aria-label={`${uiText("User")}: ${row.username}`}
                               className="rounded border border-border p-3 space-y-3"
                             >
                               <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -2154,7 +2237,11 @@ export function SettingsPanel() {
                                 <div className="flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    disabled={usersBusy === row.id}
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
                                     onClick={() =>
                                       patchUser(row.id, { is_superuser: !row.is_superuser })
                                     }
@@ -2166,7 +2253,11 @@ export function SettingsPanel() {
                                   </button>
                                   <button
                                     type="button"
-                                    disabled={usersBusy === row.id}
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
                                     onClick={() =>
                                       row.is_active
                                         ? deactivateUser(row.id)
@@ -2195,7 +2286,9 @@ export function SettingsPanel() {
                                   type="button"
                                   onClick={() => resetUserPassword(row.id)}
                                   disabled={
-                                    usersBusy === row.id ||
+                                    usersBusy !== null ||
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
                                     (passwordDrafts[row.id]?.trim().length ?? 0) < 8
                                   }
                                   className={BTN_SECONDARY}
@@ -2240,6 +2333,7 @@ export function SettingsPanel() {
                           </span>
                           <select
                             value={accessUserId}
+                            disabled={usersQuery.isError || usersQuery.isPending}
                             onChange={(event) => {
                               setAccessUserId(event.target.value ? Number(event.target.value) : "");
                             }}
@@ -2297,7 +2391,12 @@ export function SettingsPanel() {
                               setAccessRole(selectedOption(COLLECTION_ROLES, event.target.value))
                             }
                             className={INPUT}
-                            disabled={!accessUserId || !accessCollection}
+                            disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
+                              !accessUserId ||
+                              !accessCollection
+                            }
                           >
                             <option value="view">{uiText("View")}</option>
                             <option value="edit">{uiText("Edit")}</option>
@@ -2307,7 +2406,13 @@ export function SettingsPanel() {
                         <button
                           type="button"
                           onClick={saveCollectionAccess}
-                          disabled={!accessUserId || !accessCollection || accessBusy === "save"}
+                          disabled={
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
+                            !accessUserId ||
+                            !accessCollection ||
+                            accessBusy === "save"
+                          }
                           className={`${BTN_PRIMARY} self-end`}
                         >
                           {accessBusy === "save" ? (
@@ -2436,7 +2541,11 @@ export function SettingsPanel() {
                               setAccessPrinterId("");
                             }}
                             className={INPUT}
-                            disabled={printerAccessBusy === "load"}
+                            disabled={
+                              printerAccessBusy === "load" ||
+                              usersQuery.isError ||
+                              usersQuery.isPending
+                            }
                           >
                             <option value="">{uiText("Choose printer user")}</option>
                             {nonSuperUsers.map((row) => (
@@ -2465,7 +2574,12 @@ export function SettingsPanel() {
                               setPrinterAccessRole(existing?.role ?? "view");
                             }}
                             className={INPUT}
-                            disabled={!printerAccessUserId || printerAccessBusy === "load"}
+                            disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
+                              !printerAccessUserId ||
+                              printerAccessBusy === "load"
+                            }
                           >
                             <option value="">{uiText("Select printer")}</option>
                             {accessPrinters.map((row) => (
@@ -2488,6 +2602,8 @@ export function SettingsPanel() {
                             }
                             className={INPUT}
                             disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
                               !printerAccessUserId ||
                               !accessPrinterId ||
                               printerAccessBusy === "load"
@@ -2503,7 +2619,11 @@ export function SettingsPanel() {
                           type="button"
                           onClick={savePrinterAccess}
                           disabled={
-                            !printerAccessUserId || !accessPrinterId || printerAccessBusy === "save"
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
+                            !printerAccessUserId ||
+                            !accessPrinterId ||
+                            printerAccessBusy === "save"
                           }
                           className={`${BTN_PRIMARY} self-end`}
                         >
@@ -2623,6 +2743,9 @@ export function SettingsPanel() {
                                 size="xs"
                                 onClick={setupBrowserExtension}
                                 loading={keyBusy}
+                                disabled={
+                                  receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
+                                }
                                 className="font-mono uppercase tracking-wider"
                               >
                                 <Puzzle className="h-3.5 w-3.5" />
@@ -2655,7 +2778,12 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             onClick={generateApiKey}
-                            disabled={keyBusy}
+                            disabled={
+                              keyBusy ||
+                              receipt !== null ||
+                              apiKeysQuery.isError ||
+                              apiKeysQuery.isPending
+                            }
                             className={BTN_PRIMARY}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
@@ -2668,6 +2796,9 @@ export function SettingsPanel() {
                             <p className="text-xs text-muted-foreground">
                               {uiText("Copy this key now. It will only be shown once.")}
                             </p>
+                            <Button size="xs" variant="ghost" onClick={dismissReceipt}>
+                              {t("settings.accountDismissSecret")}
+                            </Button>
                             <div className="flex items-center gap-2">
                               <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
                                 {newApiKey}
@@ -2694,7 +2825,22 @@ export function SettingsPanel() {
                         )}
 
                         <div className="space-y-2">
-                          {apiKeys.length === 0 ? (
+                          {apiKeysQuery.isError && (
+                            <div role="alert" className="flex items-center gap-2 text-sm">
+                              <p>{t("settings.accountKeysFailed")}</p>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => void apiKeysQuery.refetch()}
+                              >
+                                {t("Retry")}
+                              </Button>
+                            </div>
+                          )}
+                          {apiKeysQuery.isPending ? (
+                            <p role="status">{t("Loading…")}</p>
+                          ) : apiKeysQuery.isError &&
+                            apiKeys.length === 0 ? null : apiKeys.length === 0 ? (
                             <p className="text-sm text-muted-foreground">
                               {uiText("No active API keys.")}
                             </p>
@@ -2702,6 +2848,8 @@ export function SettingsPanel() {
                             apiKeys.map((key) => (
                               <div
                                 key={key.id}
+                                role="group"
+                                aria-label={`${uiText("API key")}: ${key.name}`}
                                 className="flex items-center gap-3 border border-border rounded px-3 py-2"
                               >
                                 <div className="min-w-0 flex-1">
@@ -2714,7 +2862,9 @@ export function SettingsPanel() {
                                 <button
                                   type="button"
                                   onClick={() => deleteApiKey(key.id)}
-                                  disabled={keyBusy}
+                                  disabled={
+                                    keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
+                                  }
                                   className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
                                   title={uiText("Revoke API key")}
                                 >
