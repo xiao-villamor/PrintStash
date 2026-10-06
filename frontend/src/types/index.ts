@@ -70,6 +70,7 @@ export type {
   ArtifactFileType,
   FacetValueRead,
   ModelFacetsRead,
+  LibraryViewMode,
   SavedViewFilters,
   SavedViewRead,
   ModelStarRead,

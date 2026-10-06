@@ -5,6 +5,7 @@ import { historyFilters, readSearchFilters, writeSearchFilters } from "@/lib/sea
 describe("Search filter URLs", () => {
   it("roundtrips actual history including a zero lower bound", () => {
     const filters = {
+      library_view: "all" as const,
       direct: false,
       favorites: false,
       tag: ["fixtures"],

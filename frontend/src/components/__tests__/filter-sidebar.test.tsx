@@ -104,7 +104,7 @@ function renderSidebar({
           selectedTags={[]}
           selectedPrinterId={null}
           selectedPrinterPresence={null}
-          libraryView="organized"
+          libraryView="all"
           {...handlers}
           {...over}
           selectedCollection={selectedCollection}
@@ -253,7 +253,7 @@ describe("FilterSidebar", () => {
           selectedTags={[]}
           selectedPrinterId={null}
           selectedPrinterPresence={null}
-          libraryView="organized"
+          libraryView="all"
           onCollectionChange={vi.fn<FilterSidebarProps["onCollectionChange"]>()}
           onTagsChange={vi.fn<FilterSidebarProps["onTagsChange"]>()}
           onPrinterChange={vi.fn<FilterSidebarProps["onPrinterChange"]>()}
@@ -693,35 +693,38 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       const { onLibraryViewChange } = renderSidebar();
 
-      await user.click(screen.getByRole("button", { name: "Parts only" }));
+      await user.click(screen.getByRole("button", { name: "Multipart sets only" }));
 
-      expect(onLibraryViewChange).toHaveBeenCalledWith("components");
+      expect(onLibraryViewChange).toHaveBeenCalledWith("multipart");
     });
 
-    it("groups a referenced model beneath its multipart set", () => {
+    it("exposes only the supported library view controls", () => {
       renderSidebar({ models: [outlinerModel()], multipartModels: [multipartSet()] });
 
-      expect(screen.queryByText("Benchy")).toBeNull();
+      expect(screen.getByRole("button", { name: "Everything" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Multipart sets only" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Organized" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Parts only" })).not.toBeInTheDocument();
     });
 
-    it("shows referenced models in the parts-only view", async () => {
+    it("shows referenced models in Everything", async () => {
       renderSidebar({
         models: [outlinerModel({ collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
-        libraryView: "components",
+        libraryView: "all",
       });
 
       expect(await screen.findByText("Benchy")).toBeInTheDocument();
     });
 
-    it("hides unrelated models in the parts-only view", () => {
+    it("shows unrelated models in Everything", async () => {
       renderSidebar({
         models: [outlinerModel({ id: 2, collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
-        libraryView: "components",
+        libraryView: "all",
       });
 
-      expect(screen.queryByText("Benchy")).toBeNull();
+      expect(await screen.findByText("Benchy")).toBeInTheDocument();
     });
 
     it("hides regular models in the multipart-only view", () => {

@@ -20,6 +20,30 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("vault route", () => {
+  test("restores library mode after collection history", async ({ page }) => {
+    await page.goto("/?type=multipart&sort=name-asc");
+    await expect(
+      page.getByRole("button", { name: "Multipart sets only", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Organized", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Parts only", exact: true })).toHaveCount(0);
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /maraio/ })
+      .click();
+    await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
+    await page.getByRole("button", { name: "Everything", exact: true }).click();
+    await expect(page).toHaveURL(/[?&]type=all(?:&|$)/);
+
+    await page.goBack();
+
+    await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Multipart sets only", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Sort models" })).toContainText("Name A–Z");
+  });
+
   test("browser Back returns through collection navigation", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("link", { name: "PrintStash" }).click();
@@ -29,11 +53,11 @@ test.describe("vault route", () => {
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
-    await expect(page).toHaveURL(/\?c=maraio$/);
+    await expect(page).toHaveURL(/[?&]c=maraio(?:&|$)/);
     await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
 
     await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
     await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
 
     await page.goBack();
@@ -302,6 +326,7 @@ test.describe("vault route on a phone-width viewport", () => {
               id: 7,
               name: "Ready to print",
               filters: {
+                library_view: "all",
                 collection: null,
                 direct: true,
                 tag: [],

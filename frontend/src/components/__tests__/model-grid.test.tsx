@@ -92,6 +92,7 @@ function aMultipartSet(override: Partial<MultipartModelListItem> = {}): Multipar
 
 /** The filter set a view stores: every key present, nothing selected. */
 const EMPTY_VIEW_FILTERS: SavedViewRead["filters"] = {
+  library_view: "all",
   collection: null,
   direct: true,
   tag: [],
@@ -196,6 +197,13 @@ function HistoryProbe() {
     <>
       <output data-testid="vault-location">{location.pathname + location.search}</output>
       <button onClick={() => navigate(-1)}>History back</button>
+      <button onClick={() => navigate(1)}>History forward</button>
+      <button onClick={() => navigate("/?type=multipart&sort=name-asc")}>
+        Open multipart location
+      </button>
+      <button onClick={() => navigate("/?v=docs&type=all&sort=date-desc")}>
+        Open documents location
+      </button>
     </>
   );
 }
@@ -582,7 +590,9 @@ describe("ModelBrowser", () => {
       fireEvent.click(within(breadcrumb).getByRole("button", { name: "Parts" }));
       fireEvent.click(screen.getByRole("button", { name: "History back" }));
 
-      await waitFor(() => expect(screen.getByTestId("vault-location")).toHaveTextContent(/^\/$/));
+      await waitFor(() =>
+        expect(screen.getByTestId("vault-location")).toHaveTextContent("/?type=all&sort=date-desc"),
+      );
       expect(screen.getByRole("heading", { name: "All Models" })).toBeVisible();
     }, 20_000);
 
@@ -875,8 +885,8 @@ describe("ModelBrowser", () => {
       );
     });
 
-    it("does not warm the multipart list in the parts-only view", async () => {
-      // That view lists no multipart sets, so warming them is a wasted request.
+    it("warms multipart results after migrating the parts-only preference", async () => {
+      // The retired selection becomes Everything, including multipart cards.
       window.localStorage.setItem("ps-vault-library-view", "components");
       const user = userEvent.setup();
       const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
@@ -887,7 +897,7 @@ describe("ModelBrowser", () => {
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/page", "parts/brackets")).toHaveLength(1),
       );
-      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
+      expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(1);
     });
 
     it("warms a folder focused in the sidebar tree", async () => {
@@ -953,18 +963,18 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await screen.findByText("Benchy");
 
-      await user.click(screen.getAllByRole("button", { name: "Organized" })[0]);
+      await user.click(screen.getAllByRole("button", { name: "Multipart sets only" })[0]);
 
-      expect(window.localStorage.getItem("ps-vault-library-view")).toBe("organized");
+      expect(window.localStorage.getItem("ps-vault-library-view")).toBe("multipart");
     });
 
-    it("starts in the remembered library view", async () => {
+    it("migrates the retired parts-only preference to Everything", async () => {
       window.localStorage.setItem("ps-vault-library-view", "components");
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      const partsOnly = await screen.findAllByRole("button", { name: "Parts only" });
-      expect(partsOnly[0]).toHaveAttribute("aria-pressed", "true");
+      const everything = await screen.findAllByRole("button", { name: "Everything" });
+      expect(everything[0]).toHaveAttribute("aria-pressed", "true");
     });
 
     it("falls back to everything when the remembered library view is unknown", async () => {
@@ -1010,6 +1020,36 @@ describe("ModelBrowser", () => {
       expect(window.localStorage.getItem("ps-vault-view")).toBe("list");
     });
 
+    it("writes a sort choice into the URL", async () => {
+      const user = userEvent.setup();
+      renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
+      await screen.findByText("Benchy");
+
+      await user.click(sortButton());
+      await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
+
+      expect(screen.getByTestId("vault-location")).toHaveTextContent("sort=name-asc");
+    });
+
+    it("restores URL-owned mode on history navigation", async () => {
+      const user = userEvent.setup();
+      renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
+      await screen.findByText("Benchy");
+
+      await user.click(screen.getByRole("button", { name: "Open multipart location" }));
+      expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await user.click(screen.getByRole("button", { name: "History back" }));
+
+      expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(sortButton()).toHaveTextContent("Newest");
+    });
+
     it("remembers a sort choice", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
@@ -1053,6 +1093,26 @@ describe("ModelBrowser", () => {
   });
 
   describe("the documents tab", () => {
+    it("follows the document tab through browser history", async () => {
+      const user = userEvent.setup();
+      renderVault({ historyProbe: true });
+      await screen.findByRole("tab", { name: "Models" });
+
+      await user.click(screen.getByRole("button", { name: "Open documents location" }));
+      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      await user.click(screen.getByRole("button", { name: "History back" }));
+      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      await user.click(screen.getByRole("button", { name: "History forward" }));
+
+      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
     it("opens on the documents tab when the URL asks for it", async () => {
       renderVault({ at: "/?v=docs" });
 
@@ -1064,7 +1124,7 @@ describe("ModelBrowser", () => {
   });
 
   describe("the unified model library", () => {
-    it("groups component models below their multipart set in the organized view", async () => {
+    it("keeps referenced Models visible after retiring Organized", async () => {
       window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         models: [
@@ -1076,12 +1136,12 @@ describe("ModelBrowser", () => {
 
       expect(await screen.findByRole("link", { name: /Dragon figure/ })).toBeVisible();
       expect(screen.getByText("Calibration cube")).toBeVisible();
-      expect(screen.queryByText("Dragon body")).not.toBeInTheDocument();
+      expect(screen.getByText("Dragon body")).toBeVisible();
       expect(screen.getByText("Multipart")).toBeVisible();
       expect(screen.queryByRole("tab", { name: "Multipart sets" })).not.toBeInTheDocument();
     });
 
-    it("groups a root component under a multipart set stored in a collection", async () => {
+    it("keeps a root Model visible when its set belongs to another collection", async () => {
       window.localStorage.setItem("ps-vault-library-view", "organized");
       const nestedSet = aMultipartSet({ collection: "figures", collection_id: 1 });
       renderVault({
@@ -1099,7 +1159,7 @@ describe("ModelBrowser", () => {
       });
 
       expect(await screen.findByText("Calibration cube")).toBeVisible();
-      await waitFor(() => expect(screen.queryByText("Dragon body")).not.toBeInTheDocument());
+      expect(await screen.findByText("Dragon body")).toBeVisible();
     });
 
     it("reveals reusable component models in the everything view", async () => {
@@ -1116,7 +1176,7 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("Dragon body")).toBeVisible();
       expect(screen.getByRole("link", { name: /Dragon figure/ })).toHaveAttribute(
         "href",
-        "/multipart-models/40?return=%2F%3Ftype%3Dall",
+        "/multipart-models/40?return=%2F%3Ftype%3Dall%26sort%3Ddate-desc",
       );
     });
 
@@ -1135,7 +1195,7 @@ describe("ModelBrowser", () => {
       );
     });
 
-    it("shows only reusable pieces in the parts-only view", async () => {
+    it("shows only groupings in Multipart Sets", async () => {
       const user = userEvent.setup();
       renderVault({
         models: [
@@ -1146,14 +1206,14 @@ describe("ModelBrowser", () => {
       });
 
       await screen.findByRole("link", { name: /Dragon figure/ });
-      await user.click(screen.getAllByRole("button", { name: "Parts only" })[0]);
+      await user.click(screen.getAllByRole("button", { name: "Multipart sets only" })[0]);
 
-      expect(await screen.findByText("Dragon body")).toBeVisible();
+      await waitFor(() => expect(screen.queryByText("Dragon body")).not.toBeInTheDocument());
       expect(screen.queryByText("Calibration cube")).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: /Dragon figure/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Dragon figure/ })).toBeVisible();
     });
 
-    it("reveals a matching component model while searching the organised view", async () => {
+    it("reveals a matching Model with a retired Organized preference", async () => {
       window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         at: "/?q=dragon",
@@ -1164,7 +1224,7 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("Dragon body")).toBeVisible();
     });
 
-    it("surfaces a failed multipart grouping request in the organised view", async () => {
+    it("avoids the retired global grouping request", async () => {
       window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         models: [aModelListItem({ id: 1, name: "Dragon body" })],
@@ -1176,7 +1236,8 @@ describe("ModelBrowser", () => {
         },
       });
 
-      expect(await screen.findByText("[503] multipart_grouping_unavailable")).toBeVisible();
+      expect(await screen.findByText("Dragon body")).toBeVisible();
+      expect(screen.queryByText("[503] multipart_grouping_unavailable")).not.toBeInTheDocument();
     });
 
     it("keeps the normal workspace chrome for multipart-only bookmarks", async () => {
@@ -1778,6 +1839,53 @@ describe("ModelBrowser", () => {
   });
 
   describe("saved views", () => {
+    it("saves the library mode", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderVault({
+        at: "/?type=multipart",
+        multipartModels: [aMultipartSet()],
+        routes: { "POST /api/v1/saved-views": json(aSavedView()) },
+      });
+      await screen.findByRole("link", { name: /Dragon figure/ });
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByRole("textbox"), "Sets");
+
+      await user.click(within(dialog).getByRole("button", { name: "Save view" }));
+
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
+          filters: { library_view: "multipart" },
+        }),
+      );
+    });
+
+    it("restores the saved library mode", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        at: "/?type=all",
+        models: [aModelListItem({ name: "Benchy" })],
+        multipartModels: [aMultipartSet()],
+        routes: {
+          "GET /api/v1/saved-views": json([
+            aSavedView({ filters: { ...EMPTY_VIEW_FILTERS, library_view: "multipart" } }),
+          ]),
+        },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+
+      await user.click(await screen.findByRole("button", { name: "PETG only" }));
+
+      expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
     it("saves the current filters under a name", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderVault({

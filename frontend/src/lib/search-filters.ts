@@ -37,6 +37,7 @@ function values<T extends string>(
 export function readSearchFilters(params: URLSearchParams): SavedViewFilters {
   return {
     ...historyFilters(params),
+    library_view: params.get("library_view") === "multipart" ? "multipart" : "all",
     collection: params.get("c") || undefined,
     direct: params.get("direct") === "true",
     tag: params.getAll("tag"),
@@ -82,7 +83,13 @@ export function writeSearchFilters(
   if (q) params.set("q", q);
   if (sort !== "relevance") params.set("sort", sort);
   for (const [key, value] of Object.entries(filters)) {
-    if (key === "q" || key === "sort" || value == null) continue;
+    if (
+      key === "q" ||
+      key === "sort" ||
+      value == null ||
+      (key === "library_view" && value === "all")
+    )
+      continue;
     if (Array.isArray(value)) value.forEach((item) => params.append(key, item));
     else if (["printed", "has_similar_candidates"].includes(key))
       params.set(key, value ? "yes" : "no");

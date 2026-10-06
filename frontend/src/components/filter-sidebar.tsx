@@ -22,7 +22,6 @@ import type {
   OutlinerEntry,
   OutlinerFilters,
   OutlinerParams,
-  OutlinerView,
 } from "@/types/outliner";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
@@ -40,9 +39,10 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 
-export type LibraryViewMode = OutlinerView;
+import type { LibraryViewMode } from "@/features/library/url";
+export type { LibraryViewMode } from "@/features/library/url";
 
-const LIBRARY_VIEWS: LibraryViewMode[] = ["organized", "all", "multipart", "components"];
+const LIBRARY_VIEWS: LibraryViewMode[] = ["all", "multipart"];
 
 type DragPayload =
   | { type: "model"; model: OutlinerModelRead }
@@ -837,13 +837,7 @@ export function FilterSidebarContent({
                       : "text-foreground hover:bg-muted"
                   }`}
                 >
-                  {view === "organized"
-                    ? t("libraryView.organized")
-                    : view === "all"
-                      ? t("libraryView.all")
-                      : view === "multipart"
-                        ? t("libraryView.multipart")
-                        : t("libraryView.components")}
+                  {view === "all" ? t("libraryView.all") : t("libraryView.multipart")}
                 </button>
               ))}
             </div>

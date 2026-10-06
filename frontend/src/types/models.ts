@@ -848,7 +848,10 @@ export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
   cursor?: string;
 }
 
+export type LibraryViewMode = "all" | "multipart";
+
 export interface SavedViewFilters {
+  library_view: LibraryViewMode;
   sort?: ModelSort | null;
   collection?: string | null;
   direct: boolean;

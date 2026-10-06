@@ -38,7 +38,8 @@ import { CollectionReadme } from "@/components/collection-readme";
 import { MultipartModelCard } from "@/components/multipart-model-browser";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
-import { FilterSidebar, type LibraryViewMode } from "@/components/filter-sidebar";
+import { FilterSidebar } from "@/components/filter-sidebar";
+import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
 import type { UploadMode } from "@/components/upload-modal";
@@ -547,26 +548,6 @@ function writeRecentFolders(folders: RecentFolder[]): void {
   );
 }
 
-/** The remembered sort, resolved back to one of the options we render. */
-function readSortKey(): SortKey {
-  const stored = readVaultPreference("ps-vault-sort");
-  return SORT_OPTIONS.find((option) => option.value === stored)?.value ?? "date-desc";
-}
-
-/** Decode the persisted Library view without trusting browser-owned storage. */
-function readLibraryView(): LibraryViewMode | null {
-  const stored = readVaultPreference(LIBRARY_VIEW_KEY);
-  if (
-    stored === "organized" ||
-    stored === "all" ||
-    stored === "multipart" ||
-    stored === "components"
-  ) {
-    return stored;
-  }
-  return null;
-}
-
 function canWriteCollection(collection: CollectionRead | null | undefined): boolean {
   return collection?.effective_role === "edit" || collection?.effective_role === "admin";
 }
@@ -642,7 +623,40 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     readVaultPreference("ps-vault-view") === "list" ? "list" : "grid",
   );
-  const [sortKey, setSortKey] = useState<SortKey>(readSortKey);
+  const [initialLibraryPreferences] = useState(() => ({
+    view: readVaultPreference(LIBRARY_VIEW_KEY),
+    sort: readVaultPreference("ps-vault-sort"),
+  }));
+  const [initialLibrarySection] = useState<"models" | "docs">(() =>
+    readLastView() === "docs" ? "docs" : "models",
+  );
+  const libraryLocation = useMemo(
+    () =>
+      readLibraryLocation(
+        new URLSearchParams(filterQuery),
+        initialLibraryPreferences,
+        initialLibrarySection,
+      ),
+    [filterQuery, initialLibraryPreferences, initialLibrarySection],
+  );
+  const {
+    view: libraryView,
+    sort: sortKey,
+    section: docView,
+    href: canonicalLibraryHref,
+  } = libraryLocation;
+  const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
+  useEffect(() => {
+    if (currentLocationHref !== canonicalLibraryHref)
+      router.replace(canonicalLibraryHref, { scroll: false });
+  }, [currentLocationHref, canonicalLibraryHref, router]);
+  useEffect(() => {
+    if (
+      initialLibraryPreferences.view === "organized" ||
+      initialLibraryPreferences.view === "components"
+    )
+      localStorage.setItem(LIBRARY_VIEW_KEY, "all");
+  }, [initialLibraryPreferences.view]);
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -653,26 +667,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(readRecentFolders);
   const [recentFoldersOpen, setRecentFoldersOpen] = useState(false);
-  // Seed from the URL (`?v=docs`), falling back to the remembered tab, so
-  // returning from a document (Back or the logo) lands on the Documents tab
-  // instead of resetting to Models.
-  const requestedVaultView = searchParams.get("v");
-  const initialVaultView = requestedVaultView === "docs" ? "docs" : readLastView();
-  const [docView, setDocView] = useState<"models" | "docs">(
-    initialVaultView === "docs" ? "docs" : "models",
-  );
-  const requestedLibraryView = searchParams.get("type");
-  const [libraryView, setLibraryView] = useState<LibraryViewMode>(() => {
-    if (
-      requestedLibraryView === "all" ||
-      requestedLibraryView === "multipart" ||
-      requestedLibraryView === "components"
-    ) {
-      return requestedLibraryView;
-    }
-    if (requestedVaultView === "multipart") return "multipart";
-    return readLibraryView() ?? "all";
-  });
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
@@ -772,24 +766,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
 
   useEffect(() => {
-    function restoreFiltersFromHistory() {
-      const params = new URLSearchParams(window.location.search);
-      const nextLibraryView = params.get("type");
-      setLibraryView(
-        nextLibraryView === "all" ||
-          nextLibraryView === "multipart" ||
-          nextLibraryView === "components"
-          ? nextLibraryView
-          : params.get("v") === "multipart"
-            ? "multipart"
-            : "organized",
-      );
-    }
-    window.addEventListener("popstate", restoreFiltersFromHistory);
-    return () => window.removeEventListener("popstate", restoreFiltersFromHistory);
-  }, []);
-
-  useEffect(() => {
     if (!auth.isAuthenticated || !savedViewsEnabled) return;
     let active = true;
     listSavedViews()
@@ -853,14 +829,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function handleLibraryViewChange(view: LibraryViewMode) {
-    setLibraryView(view);
     localStorage.setItem(LIBRARY_VIEW_KEY, view);
-    setDocView("models");
     setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("v");
-    if (view === "organized") params.delete("type");
-    else params.set("type", view);
+    params.set("v", "models");
+    params.set("type", view);
     router.replace(params.size ? `/?${params}` : "/", { scroll: false });
   }
 
@@ -955,6 +928,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
     const params = new URLSearchParams();
+    params.set("type", filters.library_view);
+    params.set("sort", filters.sort ?? "date-desc");
     if (filters.collection) params.set("c", filters.collection);
     if (filters.q) params.set("q", filters.q);
     filters.tag.forEach((tag) => params.append("tag", tag));
@@ -986,7 +961,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   function applySavedView(view: SavedViewRead) {
     setFiltersExpanded(null);
     setActiveSavedViewId(view.id);
-    if (view.filters.sort) setSortKey(view.filters.sort);
     setSelectedIds(new Set());
     writeFilterUrl(view.filters);
   }
@@ -1014,6 +988,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     return {
       ...historyFilters(searchParams),
       sort: sortKey,
+      library_view: libraryView,
       collection: selectedCollection,
       direct: !searchQuery,
       tag: selectedTags,
@@ -1079,24 +1054,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // The paginated grid. `keepPreviousData` (in the hook) holds the current page
   // on screen while a new search/folder loads, and results are cached per filter
   // set so backspacing a query or re-entering a folder is instant.
-  const multipartListEnabled = libraryView !== "components";
+  const multipartListEnabled = true;
   const modelQuery = useModelList(folderModelFilters(), PAGE_SIZE, sortKey, true);
   const multipartQuery = useMultipartModels(folderMultipartFilters(), {
     enabled: multipartListEnabled,
   });
   const libraryPrefetch = useLibraryPrefetch();
-  const multipartMembershipQuery = useMultipartModels(
-    { limit: 500 },
-    { enabled: libraryView === "components" },
-  );
-  const multipartGroupingQuery = useMultipartModels(
-    {
-      tag: selectedTags.length ? selectedTags : undefined,
-      favorites: favoritesOnly || undefined,
-      limit: 500,
-    },
-    { enabled: libraryView === "organized" && !searchQuery },
-  );
 
   const selectedLookup = useCollectionLookup(selectedCollection);
   const selectedCollectionRow =
@@ -1117,48 +1080,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
     !modelQuery.isPlaceholderData &&
-    (!multipartListEnabled ||
-      (multipartQuery.data !== undefined && !multipartQuery.isPlaceholderData)) &&
-    (libraryView !== "organized" ||
-      !!searchQuery ||
-      (multipartGroupingQuery.data !== undefined && !multipartGroupingQuery.isPlaceholderData)) &&
-    (libraryView !== "components" ||
-      (multipartMembershipQuery.data !== undefined && !multipartMembershipQuery.isPlaceholderData));
+    multipartQuery.data !== undefined &&
+    !multipartQuery.isPlaceholderData;
 
   const models = useMemo(
     () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [modelQuery.data],
   );
   const multipartModels = useMemo(() => multipartQuery.data ?? [], [multipartQuery.data]);
-  const multipartMembership = useMemo(
-    () => multipartMembershipQuery.data ?? [],
-    [multipartMembershipQuery.data],
-  );
-  const memberModelIds = useMemo(
-    () => new Set(multipartMembership.flatMap((item) => item.member_model_ids)),
-    [multipartMembership],
-  );
-  const groupedModelIds = useMemo(
-    () => new Set((multipartGroupingQuery.data ?? []).flatMap((item) => item.member_model_ids)),
-    [multipartGroupingQuery.data],
-  );
   // Commit one coherent browsing result. Independent requests may settle in any
   // order; neither placeholder models nor a cached root folder page belongs to
   // a destination whose lookup/children have not completed yet.
-  const hideGroupedModels = libraryView === "organized" && searchQuery === undefined;
   const nextSnapshot = useMemo(() => {
     if (!browseReady) return null;
-    const displayedModels =
-      libraryView === "multipart"
-        ? []
-        : libraryView === "components"
-          ? models.filter((model) => memberModelIds.has(model.id))
-          : hideGroupedModels
-            ? models.filter((model) => !groupedModelIds.has(model.id))
-            : models;
+    const displayedModels = libraryView === "multipart" ? [] : models;
     return {
       models: displayedModels,
-      multipartModels: libraryView === "components" ? [] : multipartModels,
+      multipartModels,
       collections: folderPages.data?.pages.flatMap((page) => page.items) ?? [],
       collection: selectedCollectionRow,
       breadcrumbs:
@@ -1173,9 +1111,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     libraryView,
     models,
     multipartModels,
-    memberModelIds,
-    groupedModelIds,
-    hideGroupedModels,
     folderPages.data,
     folderPages.hasNextPage,
     selectedCollectionRow,
@@ -1193,8 +1128,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const error =
     modelQuery.error?.message ??
     multipartQuery.error?.message ??
-    multipartGroupingQuery.error?.message ??
-    multipartMembershipQuery.error?.message ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
     null;
@@ -1583,8 +1516,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // after changing Library view must not capture the previous URL.
   const returnParams = new URLSearchParams(searchParams.toString());
   returnParams.delete("v");
-  if (libraryView === "organized") returnParams.delete("type");
-  else returnParams.set("type", libraryView);
+  returnParams.set("type", libraryView);
   const currentLibraryHref = returnParams.size ? `/?${returnParams.toString()}` : "/";
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
@@ -1740,7 +1672,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function selectSort(value: SortKey) {
-    setSortKey(value);
+    const params = new URLSearchParams(searchParams);
+    params.set("sort", value);
+    router.replace(`/?${params}`, { scroll: false });
     localStorage.setItem("ps-vault-sort", value);
   }
 
@@ -2482,10 +2416,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             ]}
             active={docView}
             onChange={(view) => {
-              setDocView(view);
               const params = new URLSearchParams(searchParams.toString());
-              if (view === "models") params.delete("v");
-              else params.set("v", view);
+              params.set("v", view);
               router.replace(params.size ? `/?${params}` : "/", { scroll: false });
             }}
             className="border-b border-border px-4 pt-3 sm:px-6"

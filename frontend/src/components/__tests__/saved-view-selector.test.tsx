@@ -26,7 +26,7 @@ function view(id: number, name: string): SavedViewRead {
   return {
     id,
     name,
-    filters: { direct: true, tag: [], favorites: false },
+    filters: { library_view: "all", direct: true, tag: [], favorites: false },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };

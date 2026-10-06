@@ -49,6 +49,7 @@ describe("createSavedView", () => {
     respondWith({ id: 1, name: "PETG" });
 
     await createSavedView("PETG", {
+      library_view: "all",
       direct: false,
       tag: [],
       favorites: false,
@@ -58,7 +59,13 @@ describe("createSavedView", () => {
     expectRequest("/api/v1/saved-views", "POST");
     expect(lastBody()).toEqual({
       name: "PETG",
-      filters: { direct: false, tag: [], favorites: false, material_type: ["PETG"] },
+      filters: {
+        library_view: "all",
+        direct: false,
+        tag: [],
+        favorites: false,
+        material_type: ["PETG"],
+      },
     });
   });
 });
