@@ -1,11 +1,13 @@
 /** Multipart browser/editor behaviour for fixed parts, alternatives, and unavailable Models. */
 import "@testing-library/jest-dom/vitest";
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
-import { MultipartModelDetailPage } from "@/components/multipart-model-browser";
+import { clearLogin } from "@/lib/auth-store";
+import { queryKeys } from "@/lib/query-client";
+import { MultipartModelCard, MultipartModelDetailPage } from "@/components/multipart-model-browser";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { aCollectionNode } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
@@ -75,6 +77,292 @@ const collection: CollectionRead = {
 };
 
 describe("MultipartModelDetailPage", () => {
+  it("reflects an authorized Multipart refresh after a confirmed save", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: { "PUT /api/v1/multipart-models/7": json(aMultipart({ edit_version: 2 })) },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Edit multipart set" });
+
+    act(() =>
+      view.client.setQueryData(
+        queryKeys.multipartModel(7),
+        aMultipart({ name: "Authorized update", edit_version: 7 }),
+      ),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Authorized update" })).toBeVisible();
+  });
+
+  it("preserves the Multipart draft base during refresh", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "PUT /api/v1/multipart-models/7": (_url, init) => {
+          versions.push(new Headers(init?.headers).get("If-Match"));
+          return json({ detail: "edit_conflict" }, 412);
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "My composition");
+
+    act(() =>
+      view.client.setQueryData(
+        queryKeys.multipartModel(7),
+        aMultipart({ name: "Remote composition", edit_version: 7 }),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(versions).toEqual(['"multipart-7-v1"']);
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My composition");
+  });
+
+  it("preserves a Multipart draft on edit conflict", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [
+        [
+          queryKeys.multipartModel(7),
+          aMultipart({
+            parts: [{ id: 1, name: "Base", quantity: 2, sort_order: 0, models: [model] }],
+          }),
+        ],
+      ],
+      routes: { "PUT /api/v1/multipart-models/7": json({ detail: "edit_conflict" }, 412) },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "My composition");
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My composition");
+    expect(screen.getByDisplayValue("Base")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("retries Multipart editing only after explicit review", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({ name: "Other editor", edit_version: 7 }),
+        ),
+        "PUT /api/v1/multipart-models/7": (_url, init) => {
+          versions.push(new Headers(init?.headers).get("If-Match"));
+          return versions.length === 1
+            ? json({ detail: "edit_conflict" }, 412)
+            : json(aMultipart({ name: "My composition", edit_version: 9 }));
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "My composition");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByRole("dialog", { name: "Latest saved version" })).toHaveTextContent(
+      "Other editor",
+    );
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+
+    expect(await screen.findByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "My composition" })).toBeVisible();
+    expect(versions).toEqual(['"multipart-7-v1"', '"multipart-7-v7"']);
+  });
+
+  it("adopts reviewed Multipart values without a write", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({ name: "Reviewed composition", edit_version: 7 }),
+        ),
+        "PUT /api/v1/multipart-models/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(await screen.findByRole("button", { name: "Use latest version" }));
+
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Reviewed composition");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("keeps a Multipart draft when review fails", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "GET /api/v1/multipart-models/7": json({ detail: "unavailable" }, 503),
+        "PUT /api/v1/multipart-models/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("alert").some((alert) => alert.textContent?.includes("Couldn't load")),
+      ).toBe(true),
+    );
+
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Desk organiser");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("prevents a Multipart retry after losing edit permission", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({ effective_role: "view", edit_version: 7 }),
+        ),
+        "PUT /api/v1/multipart-models/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    ).toBeDisabled();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("suppresses Multipart feedback after session retirement", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: { "PUT /api/v1/multipart-models/7": () => held.promise },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(view.requestsWithMethod("PUT")).toHaveLength(1));
+
+    act(() => clearLogin());
+    await act(async () =>
+      held.resolve(json(aMultipart({ name: "Retired receipt", edit_version: 9 }))),
+    );
+
+    expect(screen.queryByText("Retired receipt")).toBeNull();
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toBeUndefined();
+    expect(screen.queryByText("Changes saved")).toBeNull();
+  });
+
+  it("retains a Multipart draft after an unknown save outcome", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "PUT /api/v1/multipart-models/7": () => {
+          throw new TypeError("Connection lost after commit");
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Unconfirmed draft");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The save was not confirmed");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Unconfirmed draft");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("requires review after a malformed Multipart acknowledgement", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: { "PUT /api/v1/multipart-models/7": json({ id: 7, name: "Incomplete receipt" }) },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Desk organiser");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.queryByText("Changes saved")).toBeNull();
+  });
+
+  it("retains authorized Multipart content through transient read failure", async () => {
+    const user = userEvent.setup();
+    let reads = 0;
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "GET /api/v1/multipart-models/7": () =>
+          ++reads === 1
+            ? json({ detail: "unavailable" }, 503)
+            : json(aMultipart({ edit_version: 3 })),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await act(async () => view.client.invalidateQueries({ queryKey: queryKeys.multipartModel(7) }));
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Desk organiser");
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry" })).toBeNull());
+    expect(reads).toBe(2);
+  });
+
+  it.each([403, 404])("hides denied Multipart content after HTTP%s", async (status) => {
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: { "GET /api/v1/multipart-models/7": json({ detail: "not_available" }, status) },
+    });
+    expect(await screen.findByRole("heading", { name: "Desk organiser" })).toBeVisible();
+    await act(async () => view.client.invalidateQueries({ queryKey: queryKeys.multipartModel(7) }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Desk organiser" })).toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: "Edit multipart set" })).toBeNull();
+  });
+
   it("offers the first part action from the empty overview", async () => {
     const user = userEvent.setup();
     renderApp(<MultipartModelDetailPage />, {
@@ -581,6 +869,41 @@ describe("MultipartModelDetailPage", () => {
     expect(screen.getByRole("button", { name: "Remove uploaded cover" })).toBeVisible();
   });
 
+  it("carries an own cover acknowledgement into the draft version", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "PUT /api/v1/multipart-models/7/cover": (_url, init) => {
+          versions.push(new Headers(init?.headers).get("If-Match"));
+          return json(aMultipart({ edit_version: 9, cover_image_uploaded: true }));
+        },
+        "PUT /api/v1/multipart-models/7": (_url, init) => {
+          versions.push(new Headers(init?.headers).get("If-Match"));
+          return json(aMultipart({ name: "My composition", edit_version: 12 }));
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "My composition");
+    const input = view.container.querySelector<HTMLInputElement>(
+      'input[type="file"][accept="image/png,image/jpeg,image/webp"]',
+    );
+    if (!input) throw new Error("Cover upload missing");
+    await user.upload(input, new File(["cover"], "figure.png", { type: "image/png" }));
+    await screen.findByText("Uploaded from your computer");
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My composition");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Edit multipart set" });
+
+    expect(versions).toEqual(['"multipart-7-v1"', '"multipart-7-v9"']);
+    expect(screen.getByRole("heading", { name: "My composition" })).toBeVisible();
+  });
+
   it("allows cancelling the delete confirmation", async () => {
     const user = userEvent.setup();
     renderApp(<MultipartModelDetailPage />, {
@@ -679,7 +1002,7 @@ describe("MultipartModelDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't save changes. Check your access and try again.",
+      "The save was not confirmed. Review the latest version before retrying.",
     );
     expect(screen.getByDisplayValue("Updated organiser")).toBeVisible();
   });
@@ -1164,5 +1487,25 @@ describe("ModelPicker", () => {
 
     expect(dialog).toHaveAttribute("data-state", "closed");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});
+
+describe("MultipartModelCard editing", () => {
+  it("publishes confirmed card tags into the canonical Multipart detail", async () => {
+    const user = userEvent.setup();
+    const saved = aMultipart({ tags: ["Confirmed"], edit_version: 9 });
+    const view = renderApp(<MultipartModelCard item={aMultipart()} />, {
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: { "PUT /api/v1/multipart-models/7/tags": json(saved) },
+    });
+    await user.click(screen.getByRole("button", { name: "Add tags to Desk organiser" }));
+    await user.type(await screen.findByLabelText("Tags to add"), "Confirmed{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
+      tags: ["Confirmed"],
+      edit_version: 9,
+    });
   });
 });

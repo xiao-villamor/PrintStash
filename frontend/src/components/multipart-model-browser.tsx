@@ -1,5 +1,8 @@
 "use client";
 
+import { useMultipartPublication } from "@/features/library/multipart";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { ApiError } from "@/lib/errors";
 import { useLibraryStar } from "@/features/library/mutations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -35,6 +38,7 @@ import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
 import { useCollectionChildren, useCollectionLookup, useTags } from "@/lib/queries";
 import {
+  getMultipartModel,
   deleteDocument,
   deleteMultipartModel,
   deleteMultipartModelCover,
@@ -83,6 +87,7 @@ export function MultipartModelCard({
   useUiLocale();
   const { t } = useI18n();
   const starMutation = useLibraryStar();
+  const { publish, isCurrent } = useMultipartPublication(item.id);
   const starBusy = starMutation.isPending;
   const starred =
     starMutation.isPending && starMutation.variables
@@ -91,21 +96,23 @@ export function MultipartModelCard({
   const canEditTags = item.effective_role === "edit" || item.effective_role === "admin";
 
   async function toggleStar() {
-    if (starBusy) return;
+    if (starBusy || !isCurrent()) return;
     try {
       await starMutation.mutateAsync({ kind: "multipart", id: item.id, starred: !starred });
     } catch (cause) {
-      toast.error(multipartError(cause, t, "multipart.favoriteError"));
+      if (isCurrent()) toast.error(multipartError(cause, t, "multipart.favoriteError"));
     }
   }
 
   async function saveCardTags(nextTags: string[]) {
     try {
-      await replaceMultipartModelTags(item.id, nextTags);
+      if (!isCurrent()) throw new DOMException("Editor retired", "AbortError");
+      const saved = await replaceMultipartModelTags(item.id, nextTags, item.edit_version);
+      if (!(await publish(saved)) || !isCurrent()) return;
       onDataChange?.();
       toast.success(t("multipart.tagsSaved"));
     } catch (cause) {
-      toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
+      if (isCurrent()) toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
       throw cause;
     }
   }
@@ -896,9 +903,12 @@ function PartEditorRow({
 }
 
 export function MultipartModelDetailPage() {
-  useUiLocale();
   const params = useParams<{ id: string }>();
-  const id = Number(params.id);
+  return <MultipartDetail key={params.id} id={Number(params.id)} />;
+}
+
+function MultipartDetail({ id }: { id: number }) {
+  useUiLocale();
   const { t } = useI18n();
   const { user } = useAuth();
   const { data: availableTags = [] } = useTags();
@@ -909,8 +919,12 @@ export function MultipartModelDetailPage() {
     data: serverModel,
     isLoading,
     error,
+    refetch,
   } = useMultipartModel(Number.isFinite(id) ? id : null);
-  const [persistedModel, setPersistedModel] = useState<MultipartModelRead | null>(null);
+  const { publish, active, isCurrent } = useMultipartPublication(id);
+  const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const [reviewed, setReviewed] = useState<MultipartModelRead | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const [draft, setDraft] = useState<MultipartModelRead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
@@ -928,10 +942,10 @@ export function MultipartModelDetailPage() {
   const [coverBusy, setCoverBusy] = useState(false);
   const guideInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
-  const savedModel = persistedModel ?? serverModel ?? null;
+  const savedModel = serverModel ?? null;
   const model = draft ?? savedModel;
   const canEdit =
-    !!user?.is_superuser || model?.effective_role === "edit" || model?.effective_role === "admin";
+    active && (savedModel?.effective_role === "edit" || savedModel?.effective_role === "admin");
   const usedIds = useMemo(
     () => new Set((model?.parts ?? []).flatMap((part) => part.models.map((member) => member.id))),
     [model?.parts],
@@ -940,18 +954,24 @@ export function MultipartModelDetailPage() {
     if (!savedModel || !canEdit) return;
     setDraft(savedModel);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     setIsEditing(true);
   }
   function beginAddingFirst() {
     if (!savedModel || !canEdit) return;
     setDraft(savedModel);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     setIsEditing(true);
     openPicker(-1);
   }
   function cancelEditing() {
     setDraft(null);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     closePicker();
     setIsEditing(false);
   }
@@ -1001,158 +1021,210 @@ export function MultipartModelDetailPage() {
     });
   }
   async function uploadGuide(file: File) {
-    if (!model || !canEdit || guideBusy) return;
+    if (!model || !canEdit || guideBusy || !isCurrent()) return;
     setGuideBusy(true);
     setSaveError(null);
     try {
       const guide = await uploadDocument(file, model.collection_id, undefined, model.id);
-      setDraft({
-        ...model,
-        guides: [guide, ...model.guides],
-        guide_count: model.guide_count + 1,
+      if (!isCurrent()) return;
+      const add = (base: MultipartModelRead) => ({
+        ...base,
+        guides: [guide, ...base.guides.filter((item) => item.id !== guide.id)],
+        guide_count: base.guide_count + (base.guides.some((item) => item.id === guide.id) ? 0 : 1),
       });
-      setPersistedModel((current) => {
-        const base = current ?? serverModel;
-        if (!base) return current;
-        return {
-          ...base,
-          guides: [guide, ...base.guides],
-          guide_count: base.guide_count + 1,
-        };
-      });
+      if (!(await publish(add)) || !isCurrent()) return;
+      setDraft((current) => (current ? add(current) : current));
       toast.success(t("multipart.guideUploaded"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.guideUploadError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.guideUploadError"));
     } finally {
-      setGuideBusy(false);
+      if (isCurrent()) setGuideBusy(false);
     }
   }
   async function removeGuide(guideId: number) {
-    if (!model || !canEdit || guideBusy) return;
+    if (!model || !canEdit || guideBusy || !isCurrent()) return;
     setGuideBusy(true);
     try {
       await deleteDocument(guideId);
-      setDraft({
-        ...model,
-        guides: model.guides.filter((guide) => guide.id !== guideId),
-        guide_count: Math.max(0, model.guide_count - 1),
+      if (!isCurrent()) return;
+      const remove = (base: MultipartModelRead) => ({
+        ...base,
+        guides: base.guides.filter((guide) => guide.id !== guideId),
+        guide_count: Math.max(
+          0,
+          base.guide_count - (base.guides.some((guide) => guide.id === guideId) ? 1 : 0),
+        ),
       });
-      setPersistedModel((current) => {
-        const base = current ?? serverModel;
-        if (!base) return current;
-        return {
-          ...base,
-          guides: base.guides.filter((guide) => guide.id !== guideId),
-          guide_count: Math.max(0, base.guide_count - 1),
-        };
-      });
+      if (!(await publish(remove)) || !isCurrent()) return;
+      setDraft((current) => (current ? remove(current) : current));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
     } finally {
-      setGuideBusy(false);
+      if (isCurrent()) setGuideBusy(false);
     }
   }
-  function applySavedCover(saved: MultipartModelRead) {
-    setPersistedModel(saved);
+  function refreshRelated() {
+    if (!isCurrent()) return;
+    // A detail receipt is authoritative. Refresh the other projections without
+    // starting another detail GET that can replace that acknowledgement.
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.multipartModels,
+      predicate: (query) => query.queryKey[1] !== id,
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.collections });
+    void queryClient.resetQueries({ queryKey: queryKeys.outliner });
+  }
+  async function applySavedCover(saved: MultipartModelRead, baseVersion: number) {
+    if (!(await publish(saved)) || !isCurrent()) return false;
     setDraft((current) =>
-      current
+      current && current.edit_version === baseVersion
         ? {
             ...current,
+            edit_version: saved.edit_version,
             cover_image_url: saved.cover_image_url,
             cover_image_uploaded: saved.cover_image_uploaded,
             cover_thumbnail_url: saved.cover_thumbnail_url,
           }
         : current,
     );
-    void queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels });
+    refreshRelated();
+    return true;
   }
   async function uploadCover(file: File) {
-    if (!model || !canEdit || coverBusy) return;
+    if (!model || !canEdit || coverBusy || editProblem || !isCurrent()) return;
     setCoverBusy(true);
     setSaveError(null);
     try {
-      const saved = await uploadMultipartModelCover(model.id, file);
-      applySavedCover(saved);
-      toast.success(t("multipart.coverUploaded"));
+      const saved = await uploadMultipartModelCover(model.id, file, model.edit_version);
+      if (await applySavedCover(saved, model.edit_version))
+        toast.success(t("multipart.coverUploaded"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.coverUploadError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.coverUploadError"));
     } finally {
-      setCoverBusy(false);
+      if (isCurrent()) setCoverBusy(false);
     }
   }
   async function removeCover() {
-    if (!model || !canEdit || coverBusy) return;
+    if (!model || !canEdit || coverBusy || editProblem || !isCurrent()) return;
     setCoverBusy(true);
     setSaveError(null);
     try {
-      applySavedCover(await deleteMultipartModelCover(model.id));
-      toast.success(t("multipart.coverRemoved"));
+      const saved = await deleteMultipartModelCover(model.id, model.edit_version);
+      if (await applySavedCover(saved, model.edit_version))
+        toast.success(t("multipart.coverRemoved"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.coverRemoveError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.coverRemoveError"));
     } finally {
-      setCoverBusy(false);
+      if (isCurrent()) setCoverBusy(false);
     }
   }
-  async function save() {
-    if (!model || !canEdit || busy) return;
+  async function save(version = model?.edit_version) {
+    if (!model || !canEdit || busy || version === undefined || !isCurrent()) return;
+    const session = getSessionVersion();
     setBusy(true);
     setSaveError(null);
     try {
-      const saved = await saveMultipartModel(model.id, {
-        name: model.name,
-        description: model.description ?? null,
-        collection_id: model.collection_id,
-        cover_model_id:
-          model.cover_model_id !== null && usedIds.has(model.cover_model_id)
-            ? model.cover_model_id
-            : null,
-        cover_image_url: model.cover_image_url,
-        parts: model.parts.map((part) => ({
-          name: part.name.trim(),
-          quantity: part.quantity,
-          choices: part.models.map((member) => {
-            return { model_id: member.id, choice_id: member.choice_id ?? undefined };
-          }),
-        })),
-      });
-      setPersistedModel(saved);
+      const saved = await saveMultipartModel(
+        model.id,
+        {
+          name: model.name,
+          description: model.description ?? null,
+          collection_id: model.collection_id,
+          cover_model_id:
+            model.cover_model_id !== null && usedIds.has(model.cover_model_id)
+              ? model.cover_model_id
+              : null,
+          cover_image_url: model.cover_image_url,
+          parts: model.parts.map((part) => ({
+            name: part.name.trim(),
+            quantity: part.quantity,
+            choices: part.models.map((member) => {
+              return { model_id: member.id, choice_id: member.choice_id ?? undefined };
+            }),
+          })),
+        },
+        version,
+      );
+      requireSessionVersion(session);
+      if (!(await publish(saved)) || !isCurrent()) return;
+      refreshRelated();
+      setReviewed(null);
+      setEditProblem(null);
       setDraft(null);
       setIsEditing(false);
       toast.success(t("multipart.saved"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.saveError"));
+      if (!isCurrent() || session !== getSessionVersion()) return;
+      if (cause instanceof ApiError && cause.status === 412) {
+        setEditProblem("conflict");
+        setReviewed(null);
+      } else if (
+        !(cause instanceof ApiError) ||
+        cause.status === 0 ||
+        cause.status === 408 ||
+        cause.status >= 500
+      ) {
+        setEditProblem("unconfirmed");
+        setReviewed(null);
+      } else setSaveError(multipartError(cause, t, "multipart.saveError"));
     } finally {
-      setBusy(false);
+      if (isCurrent() && session === getSessionVersion()) setBusy(false);
     }
   }
-  async function saveTags(nextTags: string[]) {
-    if (!model || !canEdit) return;
+  async function reviewLatest() {
+    const session = getSessionVersion();
+    setReviewing(true);
     try {
-      const saved = await replaceMultipartModelTags(model.id, nextTags);
-      setPersistedModel(saved);
-      setDraft((current) => (current ? { ...current, tags: saved.tags } : current));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-      ]);
+      const latest = await getMultipartModel(id);
+      requireSessionVersion(session);
+      if (isCurrent()) setReviewed(latest);
+    } catch (cause) {
+      if (isCurrent() && session === getSessionVersion())
+        setSaveError(multipartError(cause, t, "multipart.detailError"));
+    } finally {
+      if (isCurrent() && session === getSessionVersion()) setReviewing(false);
+    }
+  }
+  async function useReviewedVersion() {
+    if (!reviewed || !(await publish(reviewed)) || !isCurrent()) return;
+    setDraft(reviewed);
+    setReviewed(null);
+    setEditProblem(null);
+    setSaveError(null);
+  }
+  async function saveTags(nextTags: string[]) {
+    if (!model || !canEdit || !isCurrent()) throw new DOMException("Editor retired", "AbortError");
+    try {
+      const saved = await replaceMultipartModelTags(model.id, nextTags, model.edit_version);
+      if (!(await publish(saved)) || !isCurrent()) return;
+      setDraft((current) =>
+        current && current.edit_version === model.edit_version
+          ? { ...current, tags: saved.tags, edit_version: saved.edit_version }
+          : current,
+      );
+      refreshRelated();
       toast.success(t("multipart.tagsSaved"));
     } catch (cause) {
-      toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
+      if (isCurrent()) toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
       throw cause;
     }
   }
   async function remove() {
-    if (!model || busy) return;
+    if (!model || !canEdit || busy || !isCurrent()) return;
     setBusy(true);
     try {
       await deleteMultipartModel(model.id);
+      if (!isCurrent()) return;
       toast.success(t("multipart.deleted"));
       router.push(backHref);
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.deleteError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.deleteError"));
     } finally {
-      setBusy(false);
-      setDeleteOpen(false);
+      if (isCurrent()) {
+        setBusy(false);
+        setDeleteOpen(false);
+      }
     }
   }
   if (isLoading)
@@ -1161,7 +1233,8 @@ export function MultipartModelDetailPage() {
         <Card className="h-96 w-full max-w-5xl animate-pulse bg-muted/40" />
       </div>
     );
-  if (!model)
+  const denied = error instanceof ApiError && [401, 403, 404].includes(error.status);
+  if (!active || !model || denied)
     return (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
@@ -1180,6 +1253,66 @@ export function MultipartModelDetailPage() {
         : "/";
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
+      {error && !denied && (
+        <div role="alert" className="border-b border-border bg-muted px-4 py-3">
+          <p>{t("multipart.detailError")}</p>
+          <Button variant="outline" onClick={() => void refetch()}>
+            {uiText("Retry")}
+          </Button>
+        </div>
+      )}
+      {editProblem && (
+        <div role="alert" className="border-b border-border bg-muted px-4 py-3">
+          <p>
+            {uiText(
+              editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+            )}
+          </p>
+          <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
+            {uiText("library.reviewLatest")}
+          </Button>
+        </div>
+      )}
+      <Modal
+        open={reviewed !== null}
+        onClose={() => setReviewed(null)}
+        title={uiText("library.latestVersion")}
+      >
+        {reviewed && (
+          <div className="space-y-4">
+            <h3 className="font-semibold">{reviewed.name}</h3>
+            <p className="whitespace-pre-wrap text-sm">{reviewed.description}</p>
+            <p className="text-sm">
+              {reviewed.collection_label ?? t("multipart.vaultOnly")} · {reviewed.tags.join(", ")}
+            </p>
+            <ol className="space-y-2">
+              {reviewed.parts.map((part) => (
+                <li key={part.id} className="text-sm">
+                  {part.name} × {part.quantity}:{" "}
+                  {part.models
+                    .map((member) => (member.available ? member.name : t("multipart.unavailable")))
+                    .join(", ")}
+                </li>
+              ))}
+            </ol>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" onClick={() => setReviewed(null)}>
+                {uiText("library.keepDraft")}
+              </Button>
+              <Button variant="outline" onClick={() => void useReviewedVersion()}>
+                {uiText("library.useLatest")}
+              </Button>
+              <Button
+                loading={busy}
+                disabled={reviewed.effective_role !== "edit" && reviewed.effective_role !== "admin"}
+                onClick={() => void save(reviewed.edit_version)}
+              >
+                {uiText("library.retryDraft")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       <ConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -1578,7 +1711,7 @@ export function MultipartModelDetailPage() {
               type="button"
               onClick={() => void save()}
               loading={busy}
-              disabled={!canEdit || !model.name.trim()}
+              disabled={!canEdit || !model.name.trim() || editProblem !== null}
               className="h-11 sm:h-10"
             >
               {t("multipart.save")}

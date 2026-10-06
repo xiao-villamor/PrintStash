@@ -36,6 +36,28 @@ describe("EntityTagsDialog", () => {
     expect(onSave).toHaveBeenCalledWith(["Existing", "Workshop", "Painted"]);
   });
 
+  it("freezes the tag command with the selection opened for editing", async () => {
+    const original = vi.fn<(tags: string[]) => Promise<void>>().mockResolvedValue();
+    const refreshed = vi.fn<(tags: string[]) => Promise<void>>().mockResolvedValue();
+    const props = {
+      entityLabel: "Parts",
+      tags: ["Original"],
+      availableTags: [],
+      canEdit: true,
+      help: "Direct tags",
+    };
+    const view = render(<EntityTagsDialog {...props} onSave={original} />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit tags" }));
+    await screen.findByRole("button", { name: "Save tags" });
+
+    view.rerender(<EntityTagsDialog {...props} tags={["Refreshed"]} onSave={refreshed} />);
+    await userEvent.type(screen.getByLabelText("Tags to add"), "My tag{Enter}");
+    await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
+
+    expect(original).toHaveBeenCalledWith(["Original", "My tag"]);
+    expect(refreshed).not.toHaveBeenCalled();
+  });
+
   it("does not expose editing without permission", () => {
     render(
       <EntityTagsDialog

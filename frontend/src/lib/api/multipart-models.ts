@@ -1,6 +1,9 @@
 import {
   type GetJsonOptions,
   getJson,
+  requestApi,
+  authHeaders,
+  jsonHeaders,
   requestMutation,
   sendAction,
   sendJson,
@@ -50,16 +53,31 @@ export function createMultipartModel(payload: MultipartModelCreate): Promise<Mul
   return sendJson<MultipartModelRead>("/api/v1/multipart-models", "POST", payload);
 }
 
-export function getMultipartModel(id: number): Promise<MultipartModelRead> {
-  return getJson<MultipartModelRead>(`/api/v1/multipart-models/${id}`, { fresh: true });
+export function getMultipartModel(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<MultipartModelRead> {
+  return getJson<MultipartModelRead>(`/api/v1/multipart-models/${id}`, options);
+}
+
+function editHeaders(id: number, version: number) {
+  return {
+    "If-Match": `"multipart-${id}-v${version}"`,
+    "X-PrintStash-Edit-Contract": "conditional-v1",
+  };
 }
 
 /** Save metadata and the complete composition in one transaction. */
 export function saveMultipartModel(
   id: number,
   payload: MultipartPartsWrite,
+  version: number,
 ): Promise<MultipartModelRead> {
-  return sendJson<MultipartModelRead>(`/api/v1/multipart-models/${id}`, "PUT", payload);
+  return requestApi<MultipartModelRead>(`/api/v1/multipart-models/${id}`, {
+    method: "PUT",
+    headers: { ...jsonHeaders(), ...editHeaders(id, version) },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteMultipartModel(id: number): Promise<void> {
@@ -69,24 +87,39 @@ export function deleteMultipartModel(id: number): Promise<void> {
 export async function uploadMultipartModelCover(
   id: number,
   file: File,
+  version: number,
 ): Promise<MultipartModelRead> {
   const path = `/api/v1/multipart-models/${id}/cover`;
   const body = new FormData();
   body.append("file", file);
-  return requestMutation<MultipartModelRead>(path, {
+  return requestApi<MultipartModelRead>(path, {
     method: "PUT",
-
+    headers: { ...authHeaders(), ...editHeaders(id, version) },
     body,
   });
 }
 
-export async function deleteMultipartModelCover(id: number): Promise<MultipartModelRead> {
+export async function deleteMultipartModelCover(
+  id: number,
+  version: number,
+): Promise<MultipartModelRead> {
   const path = `/api/v1/multipart-models/${id}/cover`;
-  return requestMutation<MultipartModelRead>(path, { method: "DELETE" });
+  return requestApi<MultipartModelRead>(path, {
+    method: "DELETE",
+    headers: { ...authHeaders(), ...editHeaders(id, version) },
+  });
 }
 
-export function replaceMultipartModelTags(id: number, tags: string[]): Promise<MultipartModelRead> {
-  return sendJson<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, "PUT", { tags });
+export function replaceMultipartModelTags(
+  id: number,
+  tags: string[],
+  version: number,
+): Promise<MultipartModelRead> {
+  return requestApi<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, {
+    method: "PUT",
+    headers: { ...jsonHeaders(), ...editHeaders(id, version) },
+    body: JSON.stringify({ tags }),
+  });
 }
 
 export interface MultipartModelStarRead {

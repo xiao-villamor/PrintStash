@@ -40,10 +40,14 @@ export function EntityTagsDialog({
   useUiLocale();
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState(0);
+  // The command and the initial selection describe one edit intent, even while
+  // its parent receives a newer server snapshot or the lazy editor is loading.
+  const [intent, setIntent] = useState({ entityLabel, tags, help, onSave });
   const startup = useLibraryStartup();
 
   function openDialog() {
     startup.request("filters");
+    setIntent({ entityLabel, tags, help, onSave });
     setSession((value) => value + 1);
     setOpen(true);
   }
@@ -89,18 +93,18 @@ export function EntityTagsDialog({
       )}
 
       <DeferredDialog
-        open={open}
-        title={uiText("Tags · {value1}", { value1: String(entityLabel) })}
+        open={open && canEdit}
+        title={uiText("Tags · {value1}", { value1: String(intent.entityLabel) })}
         onClose={() => setOpen(false)}
       >
         <EntityTagsEditor
           key={session}
-          open={open}
-          entityLabel={entityLabel}
-          tags={tags}
+          open={open && canEdit}
+          entityLabel={intent.entityLabel}
+          tags={intent.tags}
           availableTags={availableTags}
-          help={help}
-          onSave={onSave}
+          help={intent.help}
+          onSave={intent.onSave}
           onClose={() => setOpen(false)}
         />
       </DeferredDialog>

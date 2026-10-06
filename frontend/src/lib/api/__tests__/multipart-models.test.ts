@@ -28,6 +28,39 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("multipart model wire contract", () => {
+  it.each([
+    {
+      label: "composition",
+      write: () =>
+        saveMultipartModel(
+          4,
+          {
+            name: "Draft",
+            description: null,
+            collection_id: null,
+            cover_model_id: null,
+            cover_image_url: null,
+            parts: [],
+          },
+          7,
+        ),
+    },
+    { label: "tags", write: () => replaceMultipartModelTags(4, ["Draft"], 7) },
+    {
+      label: "cover upload",
+      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 7),
+    },
+    { label: "cover removal", write: () => deleteMultipartModelCover(4, 7) },
+  ])("sends the editor's Multipart version for $label", async ({ write }) => {
+    respondWith({ id: 4, edit_version: 9 });
+
+    await write();
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("If-Match")).toBe('"multipart-4-v7"');
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+  });
+
   it("encodes list filters", async () => {
     respondWith([]);
     await listMultipartModels({
@@ -65,20 +98,24 @@ describe("multipart model wire contract", () => {
 
   it("saves the complete multipart draft atomically", async () => {
     respondWith({ id: 4, parts: [] });
-    await saveMultipartModel(4, {
-      name: "Updated",
-      description: "Description",
-      collection_id: 3,
-      cover_model_id: 8,
-      cover_image_url: "https://images.example.test/desk.webp",
-      parts: [
-        {
-          name: "Base",
-          quantity: 1,
-          choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }],
-        },
-      ],
-    });
+    await saveMultipartModel(
+      4,
+      {
+        name: "Updated",
+        description: "Description",
+        collection_id: 3,
+        cover_model_id: 8,
+        cover_image_url: "https://images.example.test/desk.webp",
+        parts: [
+          {
+            name: "Base",
+            quantity: 1,
+            choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }],
+          },
+        ],
+      },
+      1,
+    );
     expectRequest("/api/v1/multipart-models/4", "PUT");
     expect(lastBody()).toEqual({
       name: "Updated",
@@ -96,7 +133,7 @@ describe("multipart model wire contract", () => {
     respondWith({ id: 4, cover_image_uploaded: true });
     const image = new File(["cover"], "cover.png", { type: "image/png" });
 
-    await uploadMultipartModelCover(4, image);
+    await uploadMultipartModelCover(4, image, 1);
 
     expectRequest("/api/v1/multipart-models/4/cover", "PUT");
     const body = fetchMock.mock.calls[0]?.[1]?.body;
@@ -108,7 +145,7 @@ describe("multipart model wire contract", () => {
   it("removes the uploaded multipart cover", async () => {
     respondWith({ id: 4, cover_image_uploaded: false });
 
-    await deleteMultipartModelCover(4);
+    await deleteMultipartModelCover(4, 1);
 
     expectRequest("/api/v1/multipart-models/4/cover", "DELETE");
   });
@@ -149,7 +186,7 @@ describe("multipart model wire contract", () => {
 
   it("replaces the grouping's own tags", async () => {
     respondWith({ id: 4, tags: ["Display"] });
-    await replaceMultipartModelTags(4, ["Display"]);
+    await replaceMultipartModelTags(4, ["Display"], 1);
     expectRequest("/api/v1/multipart-models/4/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Display"] });
   });
@@ -172,9 +209,9 @@ describe("multipart mutation isolation", () => {
   it.each([
     {
       label: "cover upload",
-      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png")),
+      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 1),
     },
-    { label: "cover deletion", write: () => deleteMultipartModelCover(4) },
+    { label: "cover deletion", write: () => deleteMultipartModelCover(4, 1) },
     { label: "favourite removal", write: () => unstarMultipartModel(4) },
   ])("discards a retired $label acknowledgement", async ({ write }) => {
     const headers = Promise.withResolvers<Response>();
@@ -190,7 +227,13 @@ describe("multipart mutation isolation", () => {
 });
 
 describe("reader cancellation", () => {
-  it("aborts an active Multipart destinations read", async () => {
+  it.each([
+    {
+      label: "destinations",
+      read: (signal: AbortSignal) => listMultipartModels({ limit: 30 }, { signal }),
+    },
+    { label: "detail", read: (signal: AbortSignal) => getMultipartModel(4, { signal }) },
+  ])("aborts an active Multipart $label read", async ({ read }) => {
     const controller = new AbortController();
     let delivered: AbortSignal | null = null;
     fetchMock.mockImplementation(
@@ -202,9 +245,7 @@ describe("reader cancellation", () => {
           signal.addEventListener("abort", () => reject(signal.reason), { once: true });
         }),
     );
-    const outcome = listMultipartModels({ limit: 30 }, { signal: controller.signal }).catch(
-      (error: Error) => error,
-    );
+    const outcome = read(controller.signal).catch((error: Error) => error);
     controller.abort();
     await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
     expect(delivered).toMatchObject({ aborted: true });

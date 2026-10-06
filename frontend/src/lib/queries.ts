@@ -1,3 +1,4 @@
+import { multipartDetailOptions } from "@/features/library/multipart";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
 import { printStatisticsOptions } from "@/lib/queries/statistics";
 import { markStartup } from "@/lib/startup-timing";
@@ -54,7 +55,6 @@ import type {
   ModelFacetsRead,
   MultipartModelCandidate,
   MultipartModelListItem,
-  MultipartModelRead,
   OutlinerModelRead,
   PrinterRead,
   PrintJobRead,
@@ -322,17 +322,7 @@ export function useMultipartModels(
 
 export function useMultipartModel(id: number | null) {
   const api = useQueryApi();
-  return useQuery<MultipartModelRead>({
-    queryKey:
-      id === null
-        ? [...queryKeys.multipartModels, "detail", "empty"]
-        : queryKeys.multipartModel(id),
-    queryFn: () => {
-      if (id === null) return Promise.reject(new Error("Multipart model id is required"));
-      return api.getMultipartModel(id);
-    },
-    enabled: id !== null,
-  });
+  return useQuery(multipartDetailOptions(id, api.getMultipartModel));
 }
 
 export const MULTIPART_CANDIDATE_PAGE_SIZE = 48;

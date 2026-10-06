@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import type { LibraryBrowsePage } from "../../src/types/library-browse";
 import type { MultipartModelCandidate, MultipartModelRead } from "../../src/types";
 
 useMockApi();
@@ -83,6 +84,49 @@ const populatedMobileDetail: MultipartModelRead = {
 };
 
 test.describe("multipart models", () => {
+  test("reviews a conflicting composition before saving the preserved draft", async ({ page }) => {
+    let detail = { ...populatedMobileDetail };
+    const versions: (string | undefined)[] = [];
+    await page.route("**/api/v1/multipart-models/90", async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await route.fulfill({ json: detail });
+        return;
+      }
+      if (request.method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      const headers = await request.allHeaders();
+      versions.push(headers["if-match"]);
+      expect(headers["x-printstash-edit-contract"]).toBe("conditional-v1");
+      if (versions.length === 1) {
+        detail = { ...detail, name: "Other editor's composition", edit_version: 7 };
+        await route.fulfill({ status: 412, json: { detail: "edit_conflict" } });
+      } else {
+        detail = { ...detail, name: "My composition", edit_version: 9 };
+        await route.fulfill({ json: detail });
+      }
+    });
+    await page.goto("/multipart-models/90");
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("My composition");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+      "My composition",
+    );
+    await expect(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
+      "Other editor's composition",
+    );
+    expect(versions).toEqual(['"multipart-90-v1"']);
+    await page.getByRole("button", { name: "Save my draft against this version" }).click();
+    await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My composition", exact: true })).toBeVisible();
+    expect(versions).toEqual(['"multipart-90-v1"', '"multipart-90-v7"']);
+  });
+
   test("keeps populated editor controls in the mobile flow", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.route("**/api/v1/multipart-models/90", async (route) => {
@@ -166,6 +210,20 @@ test.describe("multipart models", () => {
       parts: [],
       guides: [],
     };
+
+    // The Library now reads one server-ordered browse projection. Keep this
+    // scenario's created aggregate in that projection as well as its detail.
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      const response = await route.fetch();
+      // SAFETY: the mock server implements the LibraryBrowsePage wire contract.
+      const browse = (await response.json()) as LibraryBrowsePage;
+      const added =
+        detail.part_count > 0 ? [{ kind: "multipart" as const, multipart: detail }] : [];
+      await route.fulfill({
+        response,
+        json: { ...browse, items: [...browse.items, ...added], total: browse.total + added.length },
+      });
+    });
 
     await page.route("**/api/v1/multipart-models**", async (route) => {
       const request = route.request();
@@ -340,7 +398,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();
-    await expect(page).toHaveURL(/\?c=maraio$/);
+    await expect(page).toHaveURL(/\?c=maraio&type=all&sort=date-desc$/);
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
   });
 });
