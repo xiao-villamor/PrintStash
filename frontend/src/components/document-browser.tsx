@@ -3,10 +3,12 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { FileText, FileType2, Loader2, Plus, Trash2, Upload } from "lucide-react";
 
-import { deleteDocument, listDocuments, uploadDocument } from "@/lib/api";
+import { useDocuments, useDocumentMutations } from "@/lib/queries/documents";
+import { Button } from "@/components/ui/button";
+import { userMessage } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { timeAgoShort } from "@/lib/format";
@@ -25,14 +27,6 @@ function canEditItem(doc: DocumentListItem): boolean {
   return doc.effective_role === "edit" || doc.effective_role === "admin";
 }
 
-/** The documents one completed fetch returned, tagged with its collection. */
-interface LoadedDocuments {
-  path: string | null;
-  docs: DocumentListItem[];
-}
-
-const EMPTY_DOCUMENTS: DocumentListItem[] = [];
-
 export function DocumentBrowser({
   collectionId,
   collectionPath,
@@ -44,32 +38,14 @@ export function DocumentBrowser({
 }) {
   useUiLocale();
   const router = useRouter();
-  // One state for "which collection these documents were loaded for", so the
-  // spinner is derived from the fetch that has actually completed instead of a
-  // flag flipped on every `collectionPath` change.
-  const [loaded, setLoaded] = useState<LoadedDocuments | null>(null);
-  const [busy, setBusy] = useState(false);
+  const documents = useDocuments(collectionPath);
+  const mutations = useDocumentMutations();
   const [deleteTarget, setDeleteTarget] = useState<DocumentListItem | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const loading = loaded === null || loaded.path !== collectionPath;
-  const docs = loading ? EMPTY_DOCUMENTS : loaded.docs;
-
-  useEffect(() => {
-    let current = true;
-    const settle = (items: DocumentListItem[]) => {
-      // A response for a collection the browser has already left must not
-      // claim to be this collection's list.
-      if (current) setLoaded({ path: collectionPath, docs: items });
-    };
-    listDocuments(collectionPath, { fresh: true })
-      .then(settle)
-      .catch(() => settle([]));
-    return () => {
-      current = false;
-    };
-  }, [collectionPath]);
+  const docs = documents.data ?? [];
+  const loading = documents.isPending;
+  const busy = mutations.upload.isPending;
+  const deleteBusy = mutations.remove.isPending;
 
   function newMarkdown() {
     // No DB row until the user saves — open the editor on the "new" route.
@@ -84,13 +60,11 @@ export function DocumentBrowser({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    setBusy(true);
     try {
-      const doc = await uploadDocument(file, collectionId);
+      const doc = await mutations.upload.mutateAsync({ file, collectionId });
       router.push(`/documents/${doc.id}`);
     } catch (err) {
       toast.error(err);
-      setBusy(false);
     }
   }
 
@@ -101,17 +75,11 @@ export function DocumentBrowser({
   async function confirmRemove() {
     if (!deleteTarget) return;
     const doc = deleteTarget;
-    setDeleteBusy(true);
     try {
-      await deleteDocument(doc.id);
-      setLoaded((prev) =>
-        prev === null ? prev : { ...prev, docs: prev.docs.filter((d) => d.id !== doc.id) },
-      );
+      await mutations.remove.mutateAsync(doc.id);
       setDeleteTarget(null);
     } catch (err) {
       toast.error(err);
-    } finally {
-      setDeleteBusy(false);
     }
   }
 
@@ -157,7 +125,14 @@ export function DocumentBrowser({
           </div>
         )}
 
-        {loading ? (
+        {documents.isError ? (
+          <div role="alert" className="py-8 text-sm text-destructive">
+            <p>{userMessage(documents.error)}</p>
+            <Button variant="outline" onClick={() => void documents.refetch()}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>

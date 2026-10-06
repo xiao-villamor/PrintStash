@@ -23,12 +23,13 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InboxDetailPage, { type InboxDetailApi } from "@/pages/inbox-detail";
 import { I18nProvider } from "@/lib/i18n";
 import { defaultQueryApi, QueryApiProvider } from "@/lib/queries";
+import { inboxKeys } from "@/lib/queries/inbox";
 import type { CollectionRead, InboxItem } from "@/types";
 
 const api: InboxDetailApi = {
@@ -79,16 +80,17 @@ function itemInState(state: string): InboxItem {
   return { ...reviewItem, state } as InboxItem;
 }
 
-function renderPage(collections: CollectionRead[] = []) {
+function renderPage(collections: CollectionRead[] = [], extra: React.ReactNode = null) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const nodes = collections.map((collection) => ({
     ...collection,
     child_count: 0,
     descendant_count: 0,
     display_path: collection.name,
   }));
-  return render(
+  const result = render(
     <I18nProvider>
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <QueryApiProvider
           value={{
             ...defaultQueryApi,
@@ -104,6 +106,7 @@ function renderPage(collections: CollectionRead[] = []) {
           }}
         >
           <MemoryRouter initialEntries={["/inbox/7"]}>
+            {extra}
             <Routes>
               <Route path="/inbox/:id" element={<InboxDetailPage api={api} />} />
               <Route path="/inbox" element={<p>Inbox destination</p>} />
@@ -113,6 +116,7 @@ function renderPage(collections: CollectionRead[] = []) {
       </QueryClientProvider>
     </I18nProvider>,
   );
+  return { ...result, client };
 }
 
 describe("InboxDetailPage", () => {
@@ -164,7 +168,7 @@ describe("InboxDetailPage", () => {
       tags: [],
       selected_ids: ["file-1"],
     });
-    expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]);
+    await waitFor(() => expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]));
   });
 
   it("reuses an existing root collection found by name", async () => {
@@ -335,17 +339,13 @@ describe("InboxDetailPage", () => {
       .mockResolvedValueOnce(completedItem);
     vi.mocked(api.importPendingImport).mockResolvedValue(reviewItem);
     renderPage();
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Import selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Import selected" }));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]);
+    await waitFor(() => expect(api.importPendingImport).toHaveBeenCalledWith(7, ["file-1"]));
 
     await waitFor(() => expect(api.getPendingImport).toHaveBeenCalledTimes(2), { timeout: 2_500 });
 
@@ -511,5 +511,55 @@ describe("InboxDetailPage", () => {
 
       expect(await screen.findByText("Web")).toBeInTheDocument();
     });
+  });
+  it("preserves an Inbox review draft during polling", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    const app = renderPage();
+    const tagsInput = await screen.findByRole("textbox", { name: "Tags" });
+    await user.type(tagsInput, "my draft");
+    vi.mocked(api.getPendingImport).mockResolvedValue({
+      ...reviewItem,
+      requested_tags: ["server value"],
+      display_title: "Server title",
+    });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: inboxKeys.detail(7) });
+    });
+    expect(tagsInput).toHaveValue("my draft");
+    expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
+      "Calibration cube",
+    );
+  });
+
+  it("ignores an Inbox detail from an obsolete route", async () => {
+    let resolveOld!: (item: InboxItem) => void;
+    const oldResponse = new Promise<InboxItem>((resolve) => {
+      resolveOld = resolve;
+    });
+    vi.mocked(api.getPendingImport).mockImplementation((id) =>
+      id === 7
+        ? oldResponse
+        : Promise.resolve({ ...reviewItem, id: 8, display_title: "Current import" }),
+    );
+    const user = userEvent.setup();
+    renderPage([], <Link to="/inbox/8">Another import</Link>);
+    await user.click(screen.getByRole("link", { name: "Another import" }));
+    expect(await screen.findByRole("heading", { name: "Current import" })).toBeInTheDocument();
+    await act(async () => {
+      resolveOld(reviewItem);
+    });
+    expect(screen.getByRole("heading", { name: "Current import" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Calibration cube" })).toBeNull();
+  });
+
+  it("surfaces Inbox detail read failure", async () => {
+    vi.mocked(api.getPendingImport).mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("heading", { name: "Calibration cube" })).toBeInTheDocument();
   });
 });

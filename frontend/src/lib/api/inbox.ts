@@ -92,14 +92,20 @@ export function capturePendingImport(payload: {
   return sendJson<InboxItem>("/api/v1/inbox", "POST", payload);
 }
 
-export function listPendingImports(includeCompleted = true): Promise<InboxItem[]> {
+export function listPendingImports(
+  includeCompleted = true,
+  signal?: AbortSignal,
+): Promise<InboxItem[]> {
   return getJson<InboxItem[]>(`/api/v1/inbox?include_completed=${includeCompleted}`, {
     fresh: true,
+    signal,
   });
 }
 
-export function getPendingImport(id: number): Promise<InboxItem> {
-  return getJson<InboxItemWire>(`/api/v1/inbox/${id}`, { fresh: true }).then(parsedInboxItem);
+export function getPendingImport(id: number, signal?: AbortSignal): Promise<InboxItem> {
+  return getJson<InboxItemWire>(`/api/v1/inbox/${id}`, { fresh: true, signal }).then(
+    parsedInboxItem,
+  );
 }
 
 /**

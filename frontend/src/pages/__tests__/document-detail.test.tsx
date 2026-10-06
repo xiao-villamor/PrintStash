@@ -18,13 +18,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import DocumentDetailPage from "@/pages/document-detail";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { documentKeys } from "@/lib/queries/documents";
 import type { DocumentRead } from "@/types";
 
 function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
@@ -161,6 +162,126 @@ describe("DocumentDetailPage", () => {
       await user.click(screen.getByRole("button", { name: /Save/ }));
 
       expect(await screen.findByPlaceholderText(/Write markdown/)).toBeInTheDocument();
+    });
+  });
+
+  describe("read recovery", () => {
+    it("distinguishes document detail failure from not found", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "GET /api/v1/documents/3": json({ detail: "offline" }, 500) },
+      });
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      app.route({ "GET /api/v1/documents/3": json(aDocument()) });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByRole("heading", { name: "Assembly notes" })).toBeInTheDocument();
+    });
+
+    it("preserves a document draft on background read", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      const editor = screen.getByPlaceholderText(/Write markdown/);
+      await user.clear(editor);
+      await user.type(editor, "# My draft");
+      app.route({
+        "GET /api/v1/documents/3": json(
+          aDocument({ name: "Server rename", body: "# Changed remotely" }),
+        ),
+      });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# My draft");
+      expect(screen.getByDisplayValue("Assembly notes")).toHaveValue("Assembly notes");
+    });
+
+    it("keeps a captured document base before the first keystroke", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      app.route({ "GET /api/v1/documents/3": json(aDocument({ body: "# Changed remotely" })) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes");
+    });
+  });
+
+  describe("background freshness", () => {
+    it("keeps an editor draft available after a failed refetch", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " locally edited");
+      app.route({ "GET /api/v1/documents/3": json({ detail: "offline" }, 500) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes locally edited");
+    });
+
+    it("keeps a confirmed document save across a late read", async () => {
+      let resolveRead!: (response: Response) => void;
+      let resolveWrite!: (response: Response) => void;
+      const lateRead = new Promise<Response>((resolve) => {
+        resolveRead = resolve;
+      });
+      const write = new Promise<Response>((resolve) => {
+        resolveWrite = resolve;
+      });
+      const user = userEvent.setup();
+      const app = renderDocument({ routes: { "PUT /api/v1/documents/3": () => write } });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      const name = screen.getByDisplayValue("Assembly notes");
+      await user.clear(name);
+      await user.type(name, "Saved title");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+      app.route({ "GET /api/v1/documents/3": () => lateRead });
+      const refetch = app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      await waitFor(() =>
+        expect(app.requests().filter((request) => request.method === "GET")).toHaveLength(2),
+      );
+      await act(async () => {
+        resolveWrite(json(aDocument({ name: "Saved title" })));
+      });
+      expect(await screen.findByRole("heading", { name: "Saved title" })).toBeInTheDocument();
+      await act(async () => {
+        resolveRead(json(aDocument()));
+        await refetch;
+      });
+      expect(screen.getByRole("heading", { name: "Saved title" })).toBeInTheDocument();
+    });
+
+    it("keeps binary preview bytes across a metadata refresh", async () => {
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:guide-image");
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
+      const binary = aDocument({ kind: "other", filename: "diagram.png", body: null });
+      const app = renderDocument({
+        document: binary,
+        routes: {
+          "GET /api/v1/documents/3/file": new Response("png", {
+            headers: { "content-type": "image/png" },
+          }),
+        },
+      });
+      expect(await screen.findByRole("img", { name: "Assembly notes" })).toHaveAttribute(
+        "src",
+        "blob:guide-image",
+      );
+      app.route({ "GET /api/v1/documents/3": json({ ...binary, name: "Renamed image" }) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(await screen.findByRole("img", { name: "Renamed image" })).toHaveAttribute(
+        "src",
+        "blob:guide-image",
+      );
+      expect(app.requests().filter((request) => request.url.endsWith("/file"))).toHaveLength(1);
+      app.unmount();
+      expect(revoke).toHaveBeenCalledWith("blob:guide-image");
     });
   });
 

@@ -10,17 +10,14 @@ import { useParams } from "react-router-dom";
 import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
 
 import { MarkdownView } from "@/components/markdown-view";
-import {
-  createDocument,
-  getAuthenticatedBlob,
-  getDocument,
-  updateDocument,
-  uploadDocumentImage,
-} from "@/lib/api";
+import { getAuthenticatedBlob, uploadDocumentImage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { toast } from "@/lib/toast";
+import { useDocument, useDocumentMutations } from "@/lib/queries/documents";
+import { Button } from "@/components/ui/button";
+import { ApiError, userMessage } from "@/lib/errors";
 import type { DocumentRead } from "@/types";
 import NotFound from "./not-found";
 
@@ -32,7 +29,7 @@ const DefaultPdfViewer = lazy(() =>
 type ViewMode = "preview" | "edit";
 
 /** The name and body the editor is holding, tagged with the document it belongs to. */
-type Draft = { docId: number; name: string; body: string };
+type Draft = { docId: number; base: DocumentRead; name: string; body: string };
 type BinaryPreview = {
   documentId: number;
   kind: DocumentRead["kind"];
@@ -80,8 +77,8 @@ export default function DocumentDetailPage({
     [collectionParam, collectionId, locale],
   );
 
-  const [loadedDoc, setLoadedDoc] = useState<DocumentRead | null>(null);
-  const [failedDocId, setFailedDocId] = useState<number | null>(null);
+  const documentQuery = useDocument(isNew || invalidId ? null : docId);
+  const mutations = useDocumentMutations();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [modeChoice, setModeChoice] = useState<ViewMode | null>(null);
   const [saving, setSaving] = useState(false);
@@ -92,8 +89,9 @@ export default function DocumentDetailPage({
   // Tagging the fetch results with their document id makes every derived value
   // below reset itself when the route moves to another document, so nothing from
   // the previous one survives into this render.
-  const doc = isNew ? newDocument : loadedDoc?.id === docId ? loadedDoc : null;
-  const notFound = invalidId || failedDocId === docId;
+  const doc = isNew ? newDocument : (documentQuery.data ?? null);
+  const notFound =
+    invalidId || (documentQuery.error instanceof ApiError && documentQuery.error.status === 404);
   const docKey = doc?.id ?? 0;
   const liveDraft = draft?.docId === docKey ? draft : null;
   const draftName = liveDraft?.name ?? doc?.name ?? "";
@@ -112,13 +110,17 @@ export default function DocumentDetailPage({
     : "/?v=docs";
 
   function setDraftName(name: string) {
-    setDraft({ docId: docKey, name, body: draftBody });
+    if (!doc) return;
+    setDraft({ docId: docKey, base: liveDraft?.base ?? doc, name, body: draftBody });
   }
 
   function editDraftBody(next: (current: string) => string) {
+    if (!doc) return;
     setDraft((current) => {
       const base =
-        current?.docId === docKey ? current : { docId: docKey, name: draftName, body: draftBody };
+        current?.docId === docKey
+          ? current
+          : { docId: docKey, base: doc, name: draftName, body: draftBody };
       return { ...base, body: next(base.body) };
     });
   }
@@ -127,41 +129,39 @@ export default function DocumentDetailPage({
     editDraftBody(() => body);
   }
 
-  useEffect(() => {
-    if (isNew || invalidId) return;
-    let alive = true;
-    getDocument(docId)
-      .then((d) => {
-        if (alive) setLoadedDoc(d);
-      })
-      .catch(() => {
-        if (alive) setFailedDocId(docId);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [docId, isNew, invalidId]);
-
   const isImage = !!doc?.filename && /\.(png|jpe?g|gif|webp)$/i.test(doc.filename);
+
+  const previewDocumentId = doc?.id;
+  const previewDocumentKind = doc?.kind;
 
   // Fetch protected previews as blobs because an ordinary image/iframe URL
   // cannot carry the API authorization header.
   useEffect(() => {
-    if (!doc || (doc.kind !== "pdf" && !isImage)) return;
+    if (
+      previewDocumentId === undefined ||
+      previewDocumentKind === undefined ||
+      (previewDocumentKind !== "pdf" && !isImage)
+    )
+      return;
     let alive = true;
     let url: string | null = null;
-    getAuthenticatedBlob(`/api/v1/documents/${doc.id}/file`)
+    getAuthenticatedBlob(`/api/v1/documents/${previewDocumentId}/file`)
       .then((blob) => {
         if (!alive) return;
         if (isImage) url = URL.createObjectURL(blob);
-        setBinaryPreview({ documentId: doc.id, kind: doc.kind, blob, imageUrl: url });
+        setBinaryPreview({
+          documentId: previewDocumentId,
+          kind: previewDocumentKind,
+          blob,
+          imageUrl: url,
+        });
       })
       .catch(() => alive && toast.error(uiText("Could not load PDF")));
     return () => {
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [doc, isImage]);
+  }, [previewDocumentId, previewDocumentKind, isImage]);
 
   function insertAtCursor(text: string) {
     const el = textareaRef.current;
@@ -198,7 +198,7 @@ export default function DocumentDetailPage({
     setSaving(true);
     try {
       if (isNew) {
-        const created = await createDocument({
+        const created = await mutations.create.mutateAsync({
           name: draftName.trim() || uiText("Untitled document"),
           collection_id: collectionId,
           body: draftBody,
@@ -209,11 +209,14 @@ export default function DocumentDetailPage({
         router.replace(`/documents/${created.id}`);
         return;
       }
-      const updated = await updateDocument(doc.id, {
-        name: draftName.trim() || doc.name,
-        body: draftBody,
+      await mutations.update.mutateAsync({
+        id: doc.id,
+        payload: {
+          name: draftName.trim() || doc.name,
+          body: draftBody,
+        },
       });
-      setLoadedDoc(updated);
+      setDraft(null);
       setModeChoice("preview");
     } catch (err) {
       toast.error(err);
@@ -238,6 +241,16 @@ export default function DocumentDetailPage({
   }
 
   if (notFound) return <NotFound />;
+  if (documentQuery.isError && !doc && !isNew) {
+    return (
+      <div role="alert" className="p-6">
+        <p>{userMessage(documentQuery.error)}</p>
+        <Button variant="outline" onClick={() => void documentQuery.refetch()}>
+          {uiText("Retry")}
+        </Button>
+      </div>
+    );
+  }
   if (!doc) {
     return <div className="min-h-screen bg-background" aria-busy="true" />;
   }
@@ -246,6 +259,14 @@ export default function DocumentDetailPage({
 
   return (
     <div className="h-full flex flex-col bg-background">
+      {documentQuery.isError && (
+        <div role="alert" className="p-4 text-sm text-destructive">
+          <p>{userMessage(documentQuery.error)}</p>
+          <Button variant="outline" onClick={() => void documentQuery.refetch()}>
+            {uiText("Retry")}
+          </Button>
+        </div>
+      )}
       <div className="mx-auto w-full max-w-4xl flex flex-col flex-1 min-h-0 px-4 sm:px-6 py-6">
         <div className="flex items-center gap-3 mb-4">
           <Link
@@ -257,6 +278,7 @@ export default function DocumentDetailPage({
           </Link>
           {mode === "edit" ? (
             <input
+              disabled={saving}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
               className="flex-1 bg-surface text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring"
@@ -267,7 +289,10 @@ export default function DocumentDetailPage({
 
           {isMarkdown && canEdit && mode === "preview" && (
             <button
-              onClick={() => setModeChoice("edit")}
+              onClick={() => {
+                setDraft({ docId: doc.id, base: doc, name: doc.name, body: doc.body ?? "" });
+                setModeChoice("edit");
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
             >
               <Pencil className="w-3.5 h-3.5" />
@@ -285,7 +310,7 @@ export default function DocumentDetailPage({
               </button>
               <button
                 onClick={save}
-                disabled={saving}
+                disabled={saving || !canEdit}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
               >
                 {saving ? (
@@ -314,6 +339,7 @@ export default function DocumentDetailPage({
             (mode === "edit" ? (
               <div className="flex flex-col h-full">
                 <textarea
+                  disabled={saving}
                   ref={textareaRef}
                   value={draftBody}
                   onChange={(e) => setDraftBody(e.target.value)}

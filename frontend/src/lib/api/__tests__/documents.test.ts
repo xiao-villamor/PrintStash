@@ -69,6 +69,12 @@ describe("getDocument", () => {
     // A document someone is editing must not come from cache.
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
+  it("carries cancellation to the document request", async () => {
+    respondWith({ id: 1, name: "Manual" });
+    const controller = new AbortController();
+    await getDocument(1, controller.signal);
+    expect(lastCall().init.signal).toBe(controller.signal);
+  });
 });
 
 describe("createDocument", () => {

@@ -9,8 +9,8 @@ export function listDocuments(
   return getJson<DocumentListItem[]>(`/api/v1/documents${qs}`, options);
 }
 
-export function getDocument(id: number): Promise<DocumentRead> {
-  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { fresh: true });
+export function getDocument(id: number, signal?: AbortSignal): Promise<DocumentRead> {
+  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { fresh: true, signal });
 }
 
 export function createDocument(payload: {

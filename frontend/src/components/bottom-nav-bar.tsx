@@ -29,7 +29,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { TaskList } from "@/components/task-list";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { clearCompletedTasks, listTasks, subscribeTasks, type TaskItem } from "@/lib/task-center";
-import { listPendingImports } from "@/lib/api";
+import { useInboxCount } from "@/lib/queries/inbox";
 
 type NavItem = {
   href: string;
@@ -81,30 +81,14 @@ export function BottomNavBar() {
   const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
   const moreOpen = openedOnPath === pathname;
   const [tasks, setTasks] = useState<TaskItem[]>(listTasks);
-  const [pendingImports, setPendingImports] = useState(0);
+  const inbox = useInboxCount(inboxEnabled);
+  const pendingImports = inbox.data ?? 0;
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user?.is_superuser);
 
   useEffect(() => subscribeTasks(() => setTasks(listTasks())), []);
 
   useEffect(() => subscribeArchiveReviewRequests(() => setOpenedOnPath(null)), []);
-
-  useEffect(() => {
-    if (!inboxEnabled) return;
-    let active = true;
-    const refresh = () =>
-      listPendingImports(false)
-        .then((rows) => {
-          if (active) setPendingImports(rows.filter((row) => row.state !== "dismissed").length);
-        })
-        .catch(() => {});
-    void refresh();
-    const timer = window.setInterval(refresh, 30000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [pathname, inboxEnabled]);
 
   const tabs = visibleItems.slice(0, MAX_TABS);
   const overflow = visibleItems.slice(MAX_TABS);

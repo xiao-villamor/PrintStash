@@ -186,6 +186,12 @@ describe("getPendingImport", () => {
     // explanation; the caller needs to know the parse failed.
     await expect(getPendingImport(1)).rejects.toThrow("Invalid inbox manifest response");
   });
+  it("carries cancellation to the Inbox detail request", async () => {
+    respondWith(ITEM);
+    const controller = new AbortController();
+    await getPendingImport(1, controller.signal);
+    expect(lastCall().init.signal).toBe(controller.signal);
+  });
 });
 
 describe("updatePendingImport", () => {
