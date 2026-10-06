@@ -1,5 +1,6 @@
 /** Semantic neighbors are opt-in, authorized links without equivalence actions. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { SimilaritySearch } from "@/components/similarity-search";
@@ -51,6 +52,60 @@ function renderSearch({
   });
 }
 describe("SimilaritySearch", () => {
+  it("retries the submitted semantic description", async () => {
+    const app = renderSearch({ code: 503 });
+    await userEvent.type(await screen.findByRole("textbox"), "a cup");
+    await userEvent.click(screen.getByRole("button", { name: "Search by description" }));
+    await screen.findByRole("alert");
+    app.route({ "POST /api/v1/similarity/search": json(neighbors) });
+    await userEvent.clear(screen.getByRole("textbox"));
+    await userEvent.type(screen.getByRole("textbox"), "an unsent draft");
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: "Cup" })).toBeVisible();
+    expect(app.requestsWithMethod("POST").map((request) => JSON.parse(request.body))).toEqual([
+      { text: "a cup" },
+      { text: "a cup" },
+    ]);
+    expect(screen.getByRole("textbox")).toHaveValue("an unsent draft");
+  });
+  it("disposes a previous Model neighbor read", async () => {
+    let finish: (response: Response) => void = () => {
+      throw new Error("Read not started");
+    };
+    let signal: AbortSignal | null = null;
+    function Subject() {
+      const [id, setId] = useState(7);
+      return (
+        <>
+          <button onClick={() => setId(8)}>Next Model</button>
+          <SimilaritySearch modelId={id} />
+        </>
+      );
+    }
+    renderApp(<Subject />, {
+      routes: {
+        "GET /api/v1/similarity/status": json(
+          similarityStatus({
+            capabilities: { multipart_resolution: true, step: true, local_embeddings: true },
+          }),
+        ),
+        "POST /api/v1/similarity/search": (_url, init) => {
+          signal = init?.signal ?? null;
+          return new Promise<Response>((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Find visual neighbors" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next Model" }));
+    expect(signal).toMatchObject({ aborted: true });
+    await act(async () => {
+      finish(json(neighbors));
+    });
+    expect(screen.queryByRole("link", { name: "Cup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Find visual neighbors" })).toBeEnabled();
+  });
   it("submits the entered description", async () => {
     const app = renderSearch();
     const user = userEvent.setup();

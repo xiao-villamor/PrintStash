@@ -1,5 +1,6 @@
 /** The queue distinguishes disabled, empty, stale and incomplete work while keeping review filters on the wire. */
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aCollection } from "@/test-support/factories";
@@ -24,6 +25,116 @@ afterEach(() => {
 });
 
 describe("SimilarityQueue", () => {
+  it("keeps a new Model actionable while an old find resolves", async () => {
+    function Subject() {
+      const [id, setId] = useState(7);
+      return (
+        <>
+          <button onClick={() => setId(8)}>Next Model</button>
+          <SimilarityQueue modelId={id} />
+        </>
+      );
+    }
+    let finish!: (response: Response) => void;
+    const app = renderApp(<Subject />, {
+      routes: {
+        "GET /api/v1/similarity/status": json(similarityStatus()),
+        "GET /api/v1/similarity/candidates": json({ items: [], next_cursor: null }),
+        "POST /api/v1/models/7/similar/query": () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve;
+          }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Find similar" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next Model" }));
+    expect(screen.getByRole("button", { name: "Find similar" })).toBeEnabled();
+    await act(async () => {
+      finish(
+        json({
+          items: [],
+          next_cursor: null,
+          run: aSimilarityRun({ id: 7, state: "completed", counters: { embedded: 99 } }),
+        }),
+      );
+    });
+    expect(screen.queryByText("99 visual vectors indexed")).not.toBeInTheDocument();
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.includes("/runs/7")),
+    ).toEqual([]);
+  });
+  it("retries unavailable analysis status", async () => {
+    const app = renderQueue(
+      { routes: { "GET /api/v1/similarity/status": json({ detail: "unavailable" }, 503) } },
+      7,
+    );
+    await screen.findByRole("alert");
+    expect(screen.getByRole("button", { name: "Find similar" })).toBeDisabled();
+    app.route({ "GET /api/v1/similarity/status": json(similarityStatus()) });
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Find similar" })).toBeEnabled());
+  });
+  it("retries an unavailable active run", async () => {
+    const app = renderQueue(
+      {
+        routes: {
+          "POST /api/v1/models/7/similar/query": json({
+            items: [],
+            next_cursor: null,
+            run: aSimilarityRun({ id: 2, state: "running" }),
+          }),
+          "GET /api/v1/similarity/runs/2": json({ detail: "unavailable" }, 503),
+        },
+      },
+      7,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Find similar" }));
+    await screen.findByRole("alert");
+    app.route({
+      "GET /api/v1/similarity/runs/2": json(
+        aSimilarityRun({ id: 2, state: "completed", counters: { embedded: 3 } }),
+      ),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("3 visual vectors indexed")).toBeVisible();
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/runs/2")),
+    ).toHaveLength(2);
+  });
+  it("retains candidates after a continuation failure", async () => {
+    let fail = true;
+    renderQueue({
+      routes: {
+        "GET /api/v1/similarity/candidates": (url) => {
+          if (!new URL(url, "http://test").searchParams.has("cursor"))
+            return json({ items: [aSimilarityCandidate()], next_cursor: "next" });
+          return fail
+            ? json({ detail: "unavailable" }, 503)
+            : json({
+                items: [
+                  aSimilarityCandidate({
+                    id: 2,
+                    model_b: {
+                      id: 3,
+                      name: "Recovered",
+                      slug: "recovered",
+                      thumbnail_file_id: null,
+                    },
+                  }),
+                ],
+                next_cursor: null,
+              });
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Could not load similarity results")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Bracket" })).toBeVisible();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: "Recovered" })).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Bracket" })).toHaveLength(2);
+  });
   it("explains disabled analysis", async () => {
     renderQueue({
       routes: { "GET /api/v1/similarity/status": json(similarityStatus({ enabled: false })) },

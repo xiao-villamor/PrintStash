@@ -1,5 +1,5 @@
 /** Evidence-only review preserves each Model. Stale evidence and missing previews remain explicit. */
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import SimilarModelComparisonPage from "@/pages/similar-model-comparison";
@@ -42,6 +42,79 @@ afterEach(() => {
 });
 
 describe("SimilarModelComparisonPage", () => {
+  it("reuses the canonical Model detail snapshot", async () => {
+    const app = renderComparison(aSimilarityCandidate(), { seed: [[["models", 1], aModel()]] });
+    await screen.findByRole("table");
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/models/1"),
+    ).toEqual([]);
+    expect(app.client.getQueryData(["model", 1])).toBeUndefined();
+  });
+  it.each([
+    { label: "Model metadata", endpoint: "/api/v1/models/1", response: aModel() },
+    { label: "print history", endpoint: "/api/v1/models/1/print-jobs", response: [] },
+  ])("retries failed $label alongside the comparison", async ({ endpoint, response }) => {
+    const app = renderComparison(aSimilarityCandidate(), {
+      routes: { [`GET ${endpoint}`]: json({ detail: "unavailable" }, 503) },
+    });
+    await screen.findByRole("alert");
+    expect(screen.getByRole("table")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Confirm evidence" })).toBeEnabled();
+    app.route({ [`GET ${endpoint}`]: json(response) });
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url === endpoint),
+    ).toHaveLength(2);
+  });
+  it.each([403, 404])("suppresses an inaccessible cached review after %s", async (code) => {
+    const app = renderComparison();
+    await screen.findByRole("button", { name: "Confirm evidence" });
+    app.route({
+      "GET /api/v1/similarity/candidates/1": json({ detail: "candidate_not_found" }, code),
+    });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["similarity", "candidate", 1] });
+    });
+    await screen.findByText("Could not load similarity results");
+    expect(screen.queryByRole("button", { name: "Confirm evidence" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bracket · Bracket copy")).not.toBeInTheDocument();
+  });
+  it("keeps a failed background review draft read-only until retry", async () => {
+    const app = renderComparison(
+      aSimilarityCandidate({
+        allowed_actions: ["create_multipart"],
+        summary: { composition: [{ model_id: 1, quantity: 6 }] },
+      }),
+      { routes: { "GET /api/v1/multipart-models": json([]) } },
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Create multipart model" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await userEvent.clear(dialog.getByRole("textbox"));
+    await userEvent.type(dialog.getByRole("textbox"), "My proposed assembly");
+    app.route({ "GET /api/v1/similarity/candidates/1": json({ detail: "unavailable" }, 503) });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["similarity", "candidate", 1] });
+    });
+    await dialog.findByRole("alert");
+    expect(dialog.getByRole("textbox")).toHaveValue("My proposed assembly");
+    expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeDisabled();
+    app.route({
+      "GET /api/v1/similarity/candidates/1": json(
+        aSimilarityCandidate({
+          allowed_actions: ["create_multipart"],
+          summary: { composition: [{ model_id: 1, quantity: 6 }] },
+        }),
+      ),
+    });
+    await userEvent.click(dialog.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeEnabled(),
+    );
+    expect(dialog.getByRole("textbox")).toHaveValue("My proposed assembly");
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
   it("confirms evidence with a durable request identity", async () => {
     const user = userEvent.setup();
     const rendered = renderComparison();
@@ -127,6 +200,44 @@ describe("SimilarModelComparisonPage", () => {
 });
 
 describe("Multipart resolution", () => {
+  it("replays the captured composition after a lost acknowledgement", async () => {
+    const candidate = aSimilarityCandidate({
+      evidence_class: "plate_of",
+      summary: { composition: [{ model_id: 1, quantity: 6 }] },
+      allowed_actions: ["create_multipart"],
+    });
+    const app = renderComparison(candidate, {
+      routes: {
+        "GET /api/v1/multipart-models": json([]),
+        "POST /api/v1/similarity/candidates/1/decision": json(
+          { detail: "temporarily_unavailable" },
+          503,
+        ),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Create multipart model" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await userEvent.click(dialog.getByRole("button", { name: "Create multipart model" }));
+    await waitFor(() =>
+      expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeEnabled(),
+    );
+    app.route({
+      "GET /api/v1/similarity/candidates/1": json({
+        ...candidate,
+        version: 2,
+        model_a: { ...candidate.model_a, name: "Renamed remotely" },
+        summary: { composition: [{ model_id: 1, quantity: 8 }] },
+      }),
+    });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["similarity", "candidate", 1] });
+    });
+    await screen.findByText("Renamed remotely · Bracket copy");
+    expect(dialog.getByText("Quantity: 6")).toBeVisible();
+    await userEvent.click(dialog.getByRole("button", { name: "Create multipart model" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(2));
+    expect(app.requestsWithMethod("POST")[1].body).toBe(app.requestsWithMethod("POST")[0].body);
+  });
   it("adds verified quantities to an existing composition", async () => {
     const user = userEvent.setup();
     const app = renderComparison(
@@ -160,6 +271,28 @@ describe("Multipart resolution", () => {
 });
 
 describe("Multipart destination discovery", () => {
+  it("retries unavailable Multipart destinations", async () => {
+    const app = renderComparison(
+      aSimilarityCandidate({
+        allowed_actions: ["create_multipart"],
+        summary: { composition: [{ model_id: 1, quantity: 2 }] },
+      }),
+      { routes: { "GET /api/v1/multipart-models": json({ detail: "unavailable" }, 503) } },
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Create multipart model" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await dialog.findByText(
+      "Could not load existing multipart models. You can still create a new one.",
+    );
+    app.route({
+      "GET /api/v1/multipart-models": json([
+        aMultipartModel({ id: 31, name: "Recovered assembly", effective_role: "edit" }),
+      ]),
+    });
+    await userEvent.click(dialog.getByRole("button", { name: "Try again" }));
+    expect(await dialog.findByRole("option", { name: "Recovered assembly" })).toBeInTheDocument();
+    expect(app.requestsWithMethod("POST")).toEqual([]);
+  });
   const composition = () =>
     aSimilarityCandidate({
       evidence_class: "plate_of",
