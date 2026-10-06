@@ -1,4 +1,4 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import type {
   LibrarySourceKind,
   StorageConnection,
@@ -14,33 +14,62 @@ export interface StorageConnectionCreate {
   secrets: Record<string, string>;
 }
 
-export function listStorageConnections(): Promise<StorageConnection[]> {
-  return getJson<StorageConnection[]>("/api/v1/storage-connections", { fresh: true });
+export function listStorageConnections(options: GetJsonOptions = {}): Promise<StorageConnection[]> {
+  return getJson<StorageConnection[]>("/api/v1/storage-connections", { ...options, fresh: true });
 }
 
-export function createStorageConnection(body: StorageConnectionCreate): Promise<StorageConnection> {
-  return sendJson<StorageConnection>("/api/v1/storage-connections", "POST", body);
+export function createStorageConnection(
+  body: StorageConnectionCreate,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<StorageConnection> {
+  return requestApi<StorageConnection>("/api/v1/storage-connections", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
-export function probeStorageConnection(id: number): Promise<{ ok: boolean }> {
-  return sendJson<{ ok: boolean }>(`/api/v1/storage-connections/${id}/probe`, "POST", {});
+export function probeStorageConnection(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<{ ok: boolean }> {
+  return requestApi<{ ok: boolean }>(`/api/v1/storage-connections/${id}/probe`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 }
 
+export interface StorageConnectionUpdate {
+  name?: string;
+  configuration?: StorageConnectionConfiguration;
+  secrets?: Record<string, string>;
+  enabled?: boolean;
+  purpose?: StorageConnectionPurpose;
+  manual_backup_enabled?: boolean;
+  automatic_backup_enabled?: boolean;
+}
 export function updateStorageConnection(
   id: number,
-  body: {
-    name?: string;
-    configuration?: StorageConnectionConfiguration;
-    secrets?: Record<string, string>;
-    enabled?: boolean;
-    purpose?: StorageConnectionPurpose;
-    manual_backup_enabled?: boolean;
-    automatic_backup_enabled?: boolean;
-  },
+  body: StorageConnectionUpdate,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<StorageConnection> {
-  return sendJson<StorageConnection>(`/api/v1/storage-connections/${id}`, "PATCH", body);
+  return requestApi<StorageConnection>(`/api/v1/storage-connections/${id}`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
-export function deleteStorageConnection(id: number): Promise<void> {
-  return sendAction(`/api/v1/storage-connections/${id}`, "DELETE");
+export function deleteStorageConnection(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<void> {
+  return requestApi<void>(`/api/v1/storage-connections/${id}`, {
+    method: "DELETE",
+    signal: options.signal,
+  });
 }

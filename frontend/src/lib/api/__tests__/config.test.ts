@@ -225,3 +225,22 @@ describe("configuration caller cancellation", () => {
     expect(signal?.aborted).toBe(true);
   });
 });
+
+describe("storage provider caller boundary", () => {
+  it("cancels a provider read at its caller boundary", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const read = getStorageProviders({ fresh: true, signal: controller.signal });
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+});

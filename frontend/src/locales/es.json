@@ -4213,5 +4213,8 @@
   "settings.accessPrinterFailed": "No se pudieron cargar los permisos de {name}.",
   "settings.accessPrinterLoading": "Cargando permisos de {name}…",
   "settings.configLoadFailed": "No se pudo cargar la configuración.",
-  "stats.costUnavailable": "Coste no disponible"
+  "stats.costUnavailable": "Coste no disponible",
+  "storage.connectionsLoadFailed": "No se pudieron cargar las conexiones.",
+  "storage.providersLoadFailed": "No se pudieron cargar los proveedores de almacenamiento.",
+  "storage.connectionUnavailable": "Esta conexión ya no está disponible. Copia el borrador que necesites antes de cancelar."
 }

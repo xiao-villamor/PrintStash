@@ -1,7 +1,18 @@
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth-context";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+import { parseApiError } from "@/lib/errors";
+import {
+  storageConnectionsOptions,
+  storageProvidersOptions,
+  storageReadDenied,
+  useStorageConnectionCommand,
+} from "@/lib/queries/settings-storage";
 import {
   CheckCircle2,
   Cloud,
@@ -20,14 +31,6 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  createStorageConnection,
-  deleteStorageConnection,
-  listStorageConnections,
-  getStorageProviders,
-  probeStorageConnection,
-  updateStorageConnection,
-} from "@/lib/api";
 import { StorageProviderFields } from "@/components/storage-provider-fields";
 import {
   providerDefaults,
@@ -37,7 +40,7 @@ import {
 } from "@/lib/storage-provider-form";
 import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
 import { toast } from "@/lib/toast";
-import { useOptionalI18n } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 import { storageOperationMessage } from "@/lib/storage-operations";
 import { cn } from "@/lib/utils";
 import type {
@@ -109,12 +112,32 @@ function purposeLabel(purpose: StorageConnectionPurpose): string {
 
 export function RemoteStorageConnections({ disabled = false }: { disabled?: boolean }) {
   useUiLocale();
-  const i18n = useOptionalI18n();
-  const [connections, setConnections] = useState<StorageConnection[]>([]);
-  const [providers, setProviders] = useState<StorageProvider[]>([]);
-  const [catalogueFailed, setCatalogueFailed] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<number | "create" | null>(null);
+  const i18n = useI18n();
+  const { user } = useAuth();
+  const live = useRef(true);
+  const generation = useRef(0);
+  const [retired, setRetired] = useState(false);
+  const connectionQuery = useQuery({
+    ...storageConnectionsOptions(),
+    enabled: !!user?.is_superuser && !retired,
+  });
+  const providerQuery = useQuery({ ...storageProvidersOptions(), enabled: !retired });
+  const command = useStorageConnectionCommand();
+  const connectionsDenied =
+    connectionQuery.isError && storageReadDenied(parseApiError(connectionQuery.error));
+  const providersDenied =
+    providerQuery.isError && storageReadDenied(parseApiError(providerQuery.error));
+  const connections = !user?.is_superuser || connectionsDenied ? [] : (connectionQuery.data ?? []);
+  const providers = providersDenied ? [] : (providerQuery.data ?? []);
+  const catalogueFailed = providerQuery.isError;
+  const connectionsFailed = connectionQuery.isError || !user?.is_superuser;
+  const loading = !!user?.is_superuser && (connectionQuery.isPending || providerQuery.isPending);
+  const busy =
+    command.pending === null
+      ? null
+      : command.pending.kind === "create"
+        ? "create"
+        : command.pending.id;
   const [name, setName] = useState("");
   const [providerId, setProviderId] = useState("s3");
   const [category, setCategory] = useState<ProviderCategory>("s3_compatible");
@@ -128,26 +151,32 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   const [removeTarget, setRemoveTarget] = useState<StorageConnection | null>(null);
 
   useEffect(() => {
-    let active = true;
-    void Promise.allSettled([listStorageConnections(), getStorageProviders()])
-      .then(([rows, catalogue]) => {
-        if (active) {
-          if (rows.status === "fulfilled") setConnections(rows.value);
-          else toast.error(rows.reason);
-          if (catalogue.status === "fulfilled") setProviders(catalogue.value);
-          else setCatalogueFailed(true);
-        }
-      })
-      .catch((error) => {
-        if (active) toast.error(error);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    live.current = true;
+    const release = onAuthChange(() => {
+      generation.current += 1;
+      setValues({});
+      setName("");
+      setEditing(null);
+      setRemoveTarget(null);
+      setPurpose("library");
+      setRetired(true);
+    });
     return () => {
-      active = false;
+      live.current = false;
+      release();
     };
   }, []);
+  const unavailable =
+    disabled ||
+    retired ||
+    connectionsFailed ||
+    catalogueFailed ||
+    !connectionQuery.data ||
+    !providerQuery.data;
+  const editUnavailable = editing !== null && !connections.some((row) => row.id === editing.id);
+  function current(session: number) {
+    return live.current && !retired && session === getSessionVersion();
+  }
 
   const selected = providers.find((provider) => provider.id === providerId);
   const remoteProviders = providers.filter((provider) =>
@@ -169,6 +198,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     );
   }
   function changeValue(field: string, value: string | number) {
+    generation.current += 1;
     setValues((current) => {
       const next = { ...current, [field]: value };
       if (
@@ -182,6 +212,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     });
   }
   function edit(connection: StorageConnection) {
+    generation.current += 1;
     setEditing(connection);
     setName(connection.name);
     setPurpose(connection.purpose);
@@ -195,12 +226,14 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     setValues(editableValues);
   }
   function resetForm() {
+    generation.current += 1;
     setEditing(null);
     setName("");
     setPurpose("library");
     setValues(selected ? providerDefaults(selected, "library") : {});
   }
   function chooseProvider(provider: StorageProvider) {
+    generation.current += 1;
     setProviderId(provider.id);
     setCategory(provider.category);
     setValues(providerDefaults(provider, use));
@@ -215,104 +248,112 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     if (first) chooseProvider(first);
   }
   async function addConnection() {
-    if (!canCreateConnection() || !selected) return;
+    if (unavailable || editUnavailable || busy !== null || !canCreateConnection() || !selected)
+      return;
     const transport = selected.transport ?? selected.id;
     if (!isRemoteKind(transport)) return;
-    setBusy("create");
+    const session = getSessionVersion();
+    const captured = generation.current;
+    const body: StorageConnectionCreate = {
+      name: name.trim(),
+      kind: transport,
+      purpose,
+      ...splitProviderValues(selected, values, use),
+    };
     try {
-      const body: StorageConnectionCreate = {
-        name: name.trim(),
-        kind: transport,
-        purpose,
-        ...splitProviderValues(selected, values, use),
-      };
-      const created = editing
-        ? await updateStorageConnection(editing.id, {
-            name: body.name,
-            purpose,
-            configuration: body.configuration,
-            secrets: body.secrets,
-          })
-        : await createStorageConnection(body);
-      setConnections((current) =>
+      const receipt = await command.mutateAsync(
         editing
-          ? current.map((row) => (row.id === created.id ? created : row))
-          : [...current, created],
+          ? {
+              session,
+              kind: "update",
+              id: editing.id,
+              payload: {
+                name: body.name,
+                purpose: body.purpose,
+                configuration: body.configuration,
+                secrets: body.secrets,
+              },
+            }
+          : { session, kind: "create", payload: body },
       );
-      resetForm();
+      if (!current(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected a saved storage connection");
+      if (generation.current === captured) resetForm();
       toast.success(uiText("Remote storage connection saved."));
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(null);
+      if (current(session)) toast.error(error);
     }
   }
-
   async function probe(connection: StorageConnection) {
-    setBusy(connection.id);
+    if (unavailable || busy !== null) return;
+    const session = getSessionVersion();
     try {
-      await probeStorageConnection(connection.id);
-      toast.success(uiText("{value1} is reachable.", { value1: String(connection.name) }));
+      await command.mutateAsync({ session, kind: "probe", id: connection.id });
+      if (current(session))
+        toast.success(uiText("{value1} is reachable.", { value1: connection.name }));
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(null);
+      if (current(session)) toast.error(error);
     }
   }
-
   async function toggle(connection: StorageConnection) {
-    setBusy(connection.id);
+    if (unavailable || busy !== null) return;
+    const session = getSessionVersion();
     try {
-      const updated = await updateStorageConnection(connection.id, {
-        enabled: !connection.enabled,
+      const receipt = await command.mutateAsync({
+        session,
+        kind: "update",
+        id: connection.id,
+        payload: { enabled: !connection.enabled },
       });
-      setConnections((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      if (!current(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected a saved storage connection");
       toast.success(
-        updated.enabled
+        receipt.connection.enabled
           ? uiText("Remote connection resumed.")
           : uiText("Remote connection paused."),
       );
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(null);
+      if (current(session)) toast.error(error);
     }
   }
-
   async function changePurpose(
     connection: StorageConnection,
     nextPurpose: StorageConnectionPurpose,
   ) {
-    setBusy(connection.id);
+    if (unavailable || busy !== null) return;
+    const session = getSessionVersion();
     try {
-      const updated = await updateStorageConnection(connection.id, { purpose: nextPurpose });
-      setConnections((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      const receipt = await command.mutateAsync({
+        session,
+        kind: "update",
+        id: connection.id,
+        payload: { purpose: nextPurpose },
+      });
+      if (!current(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected a saved storage connection");
       toast.success(
         uiText("{value1} will serve {value2}.", {
-          value1: String(connection.name),
-          value2: String(purposeLabel(nextPurpose).toLowerCase()),
+          value1: receipt.connection.name,
+          value2: purposeLabel(receipt.connection.purpose).toLowerCase(),
         }),
       );
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(null);
+      if (current(session)) toast.error(error);
     }
   }
-
   async function remove(connection: StorageConnection) {
-    setBusy(connection.id);
+    if (unavailable || busy !== null) return;
+    const session = getSessionVersion();
     try {
-      await deleteStorageConnection(connection.id);
-      setConnections((current) => current.filter((row) => row.id !== connection.id));
-      setRemoveTarget(null);
+      await command.mutateAsync({ session, kind: "delete", id: connection.id });
+      if (!current(session)) return;
+      setRemoveTarget((target) => (target?.id === connection.id ? null : target));
       toast.success(uiText("Remote storage connection removed."));
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(null);
+      if (current(session)) toast.error(error);
     }
   }
+  if (retired) return null;
 
   return (
     <Localized>
@@ -335,6 +376,32 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         </header>
 
+        {connectionsFailed && connections.length > 0 && (
+          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
+            <p>{i18n.t("storage.connectionsLoadFailed")}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!user?.is_superuser}
+              onClick={() => void connectionQuery.refetch()}
+            >
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
+        {catalogueFailed && (
+          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
+            <p>{i18n.t("storage.providersLoadFailed")}</p>
+            <Button variant="outline" size="sm" onClick={() => void providerQuery.refetch()}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
+        {editUnavailable && !connectionsFailed && (
+          <p role="alert" className="px-4 py-3 text-sm sm:px-5">
+            {i18n.t("storage.connectionUnavailable")}
+          </p>
+        )}
         <div className="border-b border-border">
           <div className="px-4 py-3 sm:px-5">
             <h3 className="text-sm font-semibold text-foreground">{uiText("Connections")}</h3>
@@ -354,6 +421,18 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             >
               <Skeleton className="h-14 w-full" />
               <span className="sr-only">{uiText("Loading connections…")}</span>
+            </div>
+          ) : connectionsFailed && connections.length === 0 ? (
+            <div role="alert" className="flex items-center gap-2 px-4 pb-4 text-sm sm:px-5">
+              <p>{i18n.t("storage.connectionsLoadFailed")}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!user?.is_superuser}
+                onClick={() => void connectionQuery.refetch()}
+              >
+                {uiText("Retry")}
+              </Button>
             </div>
           ) : connections.length === 0 ? (
             <p className="mx-4 mb-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground sm:mx-5">
@@ -408,7 +487,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         className={SELECT}
                         aria-label={uiText("Use {value1} for", { value1: String(connection.name) })}
                         value={connection.purpose}
-                        disabled={disabled || busy !== null}
+                        disabled={unavailable || busy !== null}
                         onChange={(event) => {
                           if (isPurpose(event.target.value)) {
                             void changePurpose(connection, event.target.value);
@@ -427,7 +506,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={disabled || busy !== null || catalogueFailed}
+                        disabled={unavailable || busy !== null}
                         onClick={() => edit(connection)}
                       >
                         {uiText("Edit")}
@@ -436,7 +515,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={disabled || busy !== null || !connection.enabled}
+                        disabled={unavailable || busy !== null || !connection.enabled}
                         onClick={() => void probe(connection)}
                       >
                         <CheckCircle2 className="h-4 w-4" aria-hidden />
@@ -446,7 +525,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={disabled || busy !== null}
+                        disabled={unavailable || busy !== null}
                         onClick={() => void toggle(connection)}
                       >
                         {connection.enabled ? (
@@ -460,7 +539,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={disabled || busy !== null}
+                        disabled={unavailable || busy !== null}
                         onClick={() => setRemoveTarget(connection)}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
@@ -497,7 +576,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             </div>
             <span className="sr-only">{uiText("Loading connections…")}</span>
           </div>
-        ) : (
+        ) : connectionsDenied || !user?.is_superuser ? null : (
           <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
             <div>
               <h3 className="text-sm font-semibold text-foreground">
@@ -520,7 +599,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                       variant="outline"
                       aria-pressed={category === choice.id}
                       disabled={
-                        disabled ||
+                        unavailable ||
+                        editUnavailable ||
                         editing !== null ||
                         !remoteProviders.some((provider) => provider.category === choice.id)
                       }
@@ -545,8 +625,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               <div className="grid gap-2 sm:grid-cols-2">
                 {categoryProviders.map((provider) => {
                   const providerAvailability = availability(provider.id);
-                  const unavailable = providerAvailability?.available === false;
-                  const reason = unavailable ? providerAvailability.reason : undefined;
+                  const providerUnavailable = providerAvailability?.available === false;
+                  const reason = providerUnavailable ? providerAvailability.reason : undefined;
                   return (
                     <Button
                       key={provider.id}
@@ -554,7 +634,9 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                       variant="outline"
                       aria-label={knownUiText(provider.label)}
                       aria-pressed={provider.id === providerId}
-                      disabled={disabled || editing !== null || unavailable}
+                      disabled={
+                        unavailable || editUnavailable || editing !== null || providerUnavailable
+                      }
                       onClick={() => chooseProvider(provider)}
                       className={cn(
                         "h-auto min-h-12 justify-start whitespace-normal px-3 py-3 text-left",
@@ -583,9 +665,12 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 <Input
                   value={name}
                   maxLength={128}
-                  disabled={disabled}
+                  disabled={unavailable || editUnavailable}
                   placeholder={uiText("Workshop storage")}
-                  onChange={(event) => setName(event.target.value)}
+                  onChange={(event) => {
+                    generation.current += 1;
+                    setName(event.target.value);
+                  }}
                 />
               </label>
               <fieldset className="space-y-1.5">
@@ -599,8 +684,11 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                       type="button"
                       variant="outline"
                       aria-pressed={purpose === value}
-                      disabled={disabled}
-                      onClick={() => setPurpose(value)}
+                      disabled={unavailable || editUnavailable}
+                      onClick={() => {
+                        generation.current += 1;
+                        setPurpose(value);
+                      }}
                       className={cn(
                         "h-auto min-h-10 whitespace-normal px-2 py-2 text-xs",
                         purpose === value &&
@@ -620,10 +708,13 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   values={values}
                   onChange={changeValue}
                   use={use}
-                  disabled={disabled || busy !== null}
+                  disabled={unavailable || editUnavailable || busy !== null}
                   storedSecrets={storedSecrets}
                   editing={editing !== null}
-                  onClear={(field) => setValues((current) => ({ ...current, [field]: "" }))}
+                  onClear={(field) => {
+                    generation.current += 1;
+                    setValues((current) => ({ ...current, [field]: "" }));
+                  }}
                 />
                 {selected.consequences.length > 0 && (
                   <ul className="space-y-1 text-xs text-muted-foreground">
@@ -668,7 +759,8 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               <Button
                 type="button"
                 disabled={
-                  disabled ||
+                  unavailable ||
+                  editUnavailable ||
                   loading ||
                   catalogueFailed ||
                   busy !== null ||
@@ -688,24 +780,26 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         )}
 
-        <ConfirmModal
-          open={removeTarget !== null}
-          onClose={() => setRemoveTarget(null)}
-          onConfirm={() => {
-            if (removeTarget) void remove(removeTarget);
-          }}
-          title={uiText("Remove remote connection?")}
-          description={
-            removeTarget
-              ? uiText(
-                  "“{value1}” can only be removed when no Library source or owned backup still depends on it.",
-                  { value1: String(removeTarget.name) },
-                )
-              : ""
-          }
-          confirmLabel={uiText("Remove connection")}
-          busy={removeTarget !== null && busy === removeTarget.id}
-        />
+        {!connectionsDenied && user?.is_superuser && (
+          <ConfirmModal
+            open={removeTarget !== null && !unavailable}
+            onClose={() => setRemoveTarget(null)}
+            onConfirm={() => {
+              if (removeTarget) void remove(removeTarget);
+            }}
+            title={uiText("Remove remote connection?")}
+            description={
+              removeTarget
+                ? uiText(
+                    "“{value1}” can only be removed when no Library source or owned backup still depends on it.",
+                    { value1: String(removeTarget.name) },
+                  )
+                : ""
+            }
+            confirmLabel={uiText("Remove connection")}
+            busy={removeTarget !== null && busy === removeTarget.id}
+          />
+        )}
       </section>
     </Localized>
   );

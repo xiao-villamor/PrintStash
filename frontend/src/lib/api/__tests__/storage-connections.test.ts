@@ -128,3 +128,42 @@ describe("deleteStorageConnection", () => {
     expectRequest("/api/v1/storage-connections/4", "DELETE");
   });
 });
+
+describe("storage connection caller cancellation", () => {
+  it.each(["read", "create", "update", "probe", "delete"] as const)(
+    "cancels an active %s request",
+    async (operation) => {
+      const controller = new AbortController();
+      let signal: AbortSignal | null | undefined;
+      fetchMock.mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            signal = init?.signal;
+            signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+          }),
+      );
+      const options = { signal: controller.signal };
+      const request =
+        operation === "read"
+          ? listStorageConnections(options)
+          : operation === "create"
+            ? createStorageConnection(
+                {
+                  name: "Create",
+                  kind: "s3",
+                  configuration: { bucket: "printstash" },
+                  secrets: { secret_key: "FakeWireStorageSecret" },
+                },
+                options,
+              )
+            : operation === "update"
+              ? updateStorageConnection(4, { name: "Update" }, options)
+              : operation === "probe"
+                ? probeStorageConnection(4, options)
+                : deleteStorageConnection(4, options);
+      controller.abort();
+      await expect(request).rejects.toMatchObject({ name: "AbortError" });
+      expect(signal?.aborted).toBe(true);
+    },
+  );
+});

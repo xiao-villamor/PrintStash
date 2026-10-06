@@ -5,14 +5,16 @@
  * narrow a shared profile or send a secret back in a later update.
  */
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { RemoteStorageConnections } from "@/components/remote-storage-connections";
+import { clearLogin } from "@/lib/auth-store";
+import { AuthContext } from "@/lib/auth-context";
 import { storageProviderCatalogue } from "@/test-support/storage-provider-catalogue";
 import { aStorageConnection } from "@/test-support/factories";
-import { json, renderApp } from "@/test-support/render";
+import { adminSession, memberSession, json, renderApp } from "@/test-support/render";
 
 describe("RemoteStorageConnections", () => {
   it("explains disabled transport selection", async () => {
@@ -415,5 +417,247 @@ describe("RemoteStorageConnections preset selection", () => {
       configuration: { provider: "hetzner_storage_box", port: 23 },
       secrets: { password: "test-password" },
     });
+  });
+});
+
+describe("RemoteStorageConnections ownership recovery", () => {
+  it("recovers failed connection reads without claiming an empty list", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const region = screen.getByRole("region", { name: "Remote storage" });
+    expect(await within(region).findByRole("alert")).toHaveTextContent(
+      "Connections could not be loaded.",
+    );
+    expect(within(region).queryByText("No remote storage connected yet.")).not.toBeInTheDocument();
+    expect(within(region).getByRole("button", { name: "Save connection" })).toBeDisabled();
+    app.route({ "GET /api/v1/storage-connections": json([aStorageConnection()]) });
+    await userEvent.click(within(region).getByRole("button", { name: "Retry" }));
+    expect(await within(region).findByText("Workshop storage")).toBeVisible();
+  });
+  it("preserves a newer connection draft after an earlier save", async () => {
+    const response = Promise.withResolvers<Response>();
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": () => response.promise,
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText("Connection name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Captured name");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+    await userEvent.clear(name);
+    await userEvent.type(name, "Newer draft");
+    await userEvent.click(screen.getByRole("button", { name: "Backup replicas" }));
+    await act(async () => response.resolve(json(aStorageConnection({ name: "Saved old intent" }))));
+    expect(await screen.findByText("Saved old intent")).toBeVisible();
+    expect(name).toHaveValue("Newer draft");
+    expect(screen.getByRole("button", { name: "Backup replicas" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toMatchObject({
+      name: "Captured name",
+      purpose: "both",
+    });
+  });
+  it("discards typed connection credentials on private retirement", async () => {
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeRetiredStorageSecret");
+    expect(screen.getByDisplayValue("FakeRetiredStorageSecret")).toBeVisible();
+    await act(async () => clearLogin());
+    expect(screen.queryByDisplayValue("FakeRetiredStorageSecret")).not.toBeInTheDocument();
+  });
+  it("cancels connection reads when their view is disposed", async () => {
+    let signal: AbortSignal | null | undefined;
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": (_url, init) => {
+          signal = init?.signal;
+          return new Promise(() => {});
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("RemoteStorageConnections authoritative lifetimes", () => {
+  it("hides warm private connections on a non-admin mount", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      auth: memberSession(),
+      seed: [
+        [["storage-connections"], [aStorageConnection()]],
+        [["storage-providers"], storageProviderCatalogue],
+      ],
+    });
+    expect(screen.queryByText("Workshop storage")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Connections could not be loaded.");
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry).toBeDisabled();
+    await userEvent.click(retry);
+    expect(app.requestsWithMethod("GET")).toHaveLength(0);
+  });
+  it("hides cached connection content immediately after role loss", async () => {
+    const app = renderApp(
+      <AuthContext.Provider value={adminSession()}>
+        <RemoteStorageConnections />
+      </AuthContext.Provider>,
+      {
+        routes: {
+          "GET /api/v1/storage-connections": json([aStorageConnection()]),
+          "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        },
+      },
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeRoleLostStorageSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await screen.findByRole("dialog");
+    app.rerender(
+      <AuthContext.Provider value={memberSession()}>
+        <RemoteStorageConnections />
+      </AuthContext.Provider>,
+    );
+    expect(screen.queryByText("Workshop storage")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("FakeRoleLostStorageSecret")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Connections could not be loaded.");
+  });
+  it("retries a failed provider catalogue while preserving healthy connections", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Workshop storage")).toBeVisible();
+    const region = screen.getByRole("region", { name: "Remote storage" });
+    expect(within(region).getByRole("alert")).toHaveTextContent(
+      "Storage providers could not be loaded.",
+    );
+    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
+    app.route({ "GET /api/v1/storage/providers": json(storageProviderCatalogue) });
+    await userEvent.click(within(region).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    expect(
+      app
+        .requestsWithMethod("GET")
+        .filter((request) => request.url.endsWith("/storage-connections")),
+    ).toHaveLength(1);
+  });
+  it("preserves a transient-failure draft read-only until recovery", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText("Connection name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Keep this draft");
+    app.route({ "GET /api/v1/storage-connections": json({ detail: "unavailable" }, 503) });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["storage-connections"] });
+    });
+    await screen.findByRole("alert");
+    expect(name).toHaveValue("Keep this draft");
+    expect(name).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Workshop storage")).toBeVisible();
+    app.route({
+      "GET /api/v1/storage-connections": json([aStorageConnection({ name: "Changed remotely" })]),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(name).toBeEnabled());
+    expect(name).toHaveValue("Keep this draft");
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+  });
+  it("hides denied cached connections", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeDeniedStorageSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await screen.findByRole("dialog");
+    app.route({ "GET /api/v1/storage-connections": json({ detail: "forbidden" }, 403) });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["storage-connections"] });
+    });
+    await screen.findByRole("alert");
+    expect(screen.queryByText("Workshop storage")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("FakeDeniedStorageSecret")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("does not let a disposed save clear a new editor draft", async () => {
+    const response = Promise.withResolvers<Response>();
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "PATCH /api/v1/storage-connections/1": () => response.promise,
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeOldStorageSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+    app.unmount();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeNewStorageSecret");
+    await act(async () => response.resolve(json(aStorageConnection({ name: "Old ACK" }))));
+    expect(screen.getByDisplayValue("FakeNewStorageSecret")).toBeVisible();
+    expect(screen.queryByText("Remote storage connection saved.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Old ACK")).not.toBeInTheDocument();
+  });
+  it("blocks an edit whose connection disappeared from a current read", async () => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = screen.getByLabelText("Connection name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Kept removed draft");
+    app.route({ "GET /api/v1/storage-connections": json([]) });
+    await act(async () => {
+      await app.client.invalidateQueries({ queryKey: ["storage-connections"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This connection is no longer available.",
+    );
+    expect(name).toHaveValue("Kept removed draft");
+    expect(name).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 });

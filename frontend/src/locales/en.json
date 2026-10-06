@@ -4213,5 +4213,8 @@
   "settings.accessPrinterFailed": "Access for {name} could not be loaded.",
   "settings.accessPrinterLoading": "Loading access for {name}…",
   "settings.configLoadFailed": "Configuration could not be loaded.",
-  "stats.costUnavailable": "Cost unavailable"
+  "stats.costUnavailable": "Cost unavailable",
+  "storage.connectionsLoadFailed": "Connections could not be loaded.",
+  "storage.providersLoadFailed": "Storage providers could not be loaded.",
+  "storage.connectionUnavailable": "This connection is no longer available. Copy any draft you need before cancelling."
 }
