@@ -1,0 +1,16 @@
+# Thumbnail engine failure boundaries
+
+The engine must retain useful independent outputs when native allocation or telemetry is unavailable, and propagate publication failure. Actual factory STL/3MF/PNG bytes exercise parsing, rendering and output delivery. Only external NumPy allocation/resource counters and the caller-supplied sink refuse work; owner strategy/refusal logic is not mocked.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | `missing_source_returns_typed_refusals` | Error | Actually absent STL | Conservative geometry resource refusal/cache source-unavailable, no image; two basic outputs | Integration | ✅ `integration/modules/media/test_thumbnail_engine.py::TestThumbnailFailureBoundaries::test_missing_source_returns_typed_refusals` |
+| 2 | `allocator_refusal_preserves_document_preview` | Partial failure | External NumPy array allocator MemoryError with/without actual embedded PNG | Resource refusal; original PNG preserved when available; source bytes intact | Integration | ✅ `integration/modules/media/test_thumbnail_engine.py::TestThumbnailFailureBoundaries::test_allocator_refusal_preserves_document_preview` |
+| 3 | `unavailable_rss_does_not_discard_real_outputs` | Telemetry | External getrusage OSError/ValueError; actual STL/render | Real geometry/image retained; RSS explicitly unavailable | Integration | ✅ `integration/modules/media/test_thumbnail_engine.py::TestThumbnailFailureBoundaries::test_unavailable_rss_does_not_discard_real_outputs` |
+| 4 | `propagates_publication_failure_after_allocator_refusal` | Publication | External allocator refused; final output sink raises RuntimeError/MemoryError | Original exception identity propagated; one refused output; source unchanged | Integration | ✅ `integration/modules/media/test_thumbnail_engine.py::TestThumbnailFailureBoundaries::test_propagates_publication_failure_after_allocator_refusal` |
+
+Seven new cases cover four behaviors. No application, dependency, floor or native budget changes. External failures are controlled API failures, not a simulation of operating-system exhaustion or complete RSS attribution. Final measured coverage remains pending GitHub Deep CI.
+
+The missing-source case exercises conservative admission: unavailable source size refuses geometry as resource_limit, while fingerprint reading reports source_unavailable. NumPy array construction is refused before mesh facts exist; the prior asarray injection occurred later during topology and could retain valid dimensions. This distinction is asserted, not a change to the production classification.
+
+Validation: affected integration engine, staged outputs and unit engine selection:109 passed,1 deprecation warning,81.62s; bounded89.67s. New cases alone7 passed9.30s overlap this selection and are not added. Ruff check/format and whitespace checks pass. Initial5 failed2 passed9.93s and following5 failed104 passed82.25s preserve errors in new test setup: NumPy asarray refusal happened during later topology; missing-source geometry uses conservative resource refusal. The second run preceded the intended edit because its relative path was wrong. Corrected NumPy array-construction seam and explicit source refusal expectation; no production RED or changes.

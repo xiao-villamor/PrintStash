@@ -1570,3 +1570,115 @@ class TestRetainedThreeMFScene:
             result.fingerprint_result.failure_code
             is FingerprintFailureCode.NUMERIC_RANGE
         )
+
+
+class TestThumbnailFailureBoundaries:
+    def test_missing_source_returns_typed_refusals(self, tmp_path):
+        source = tmp_path / "missing.stl"
+        outputs = []
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(source, include_fingerprint=True), on_output=outputs.append
+        )
+        assert not source.exists()
+        assert result.image is None
+        assert isinstance(result.geometry_outcome, GeometryRefused)
+        assert result.geometry_outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert result.geometry["triangle_count"] is None
+        assert result.fingerprint_result is not None
+        assert result.fingerprint_result.state is FingerprintResultState.FAILED
+        assert (
+            result.fingerprint_result.failure_code
+            is FingerprintFailureCode.SOURCE_UNAVAILABLE
+        )
+        assert len(outputs) == 2
+        assert result.coverage.source_scan is SourceScanState.NOT_SCANNED
+
+    @pytest.mark.parametrize(
+        "embedded", [False, True], ids=["without-preview", "with-preview"]
+    )
+    def test_allocator_refusal_preserves_document_preview(
+        self, tmp_path, monkeypatch, embedded
+    ):
+        source = tmp_path / "allocation.3mf"
+        source_bytes = three_mf(
+            extras={"Metadata/thumbnail.png": content.png()} if embedded else {}
+        )
+        source.write_bytes(source_bytes)
+
+        def unavailable(*args, **kwargs):
+            raise MemoryError("external NumPy allocator unavailable")
+
+        monkeypatch.setattr(np, "array", unavailable)
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(source, include_fingerprint=True)
+        )
+        assert isinstance(result.geometry_outcome, GeometryRefused)
+        assert result.geometry_outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert result.geometry["triangle_count"] is None
+        assert result.fingerprint_result.state is FingerprintResultState.FAILED
+        assert (
+            result.fingerprint_result.failure_code
+            is FingerprintFailureCode.RESOURCE_LIMIT
+        )
+        assert source.read_bytes() == source_bytes
+        if embedded:
+            assert result.image == content.png()
+            assert result.strategy is ThumbnailStrategy.EMBEDDED
+            assert result.coverage.preview is PreviewCoverage.DOCUMENT_SUPPLIED
+            assert result.failure_reason is None
+        else:
+            assert result.image is None
+            assert result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT
+
+    @pytest.mark.parametrize(
+        "error", [OSError, ValueError], ids=["oserror", "valueerror"]
+    )
+    def test_unavailable_rss_does_not_discard_real_outputs(
+        self, cube, monkeypatch, error
+    ):
+        outputs = []
+        original = cube.read_bytes()
+
+        def unavailable(*args, **kwargs):
+            raise error("external resource counter unavailable")
+
+        monkeypatch.setattr(thumbnail_engine.resource, "getrusage", unavailable)
+        result = ThumbnailEngine().generate(
+            ThumbnailRequest(cube, width=64, height=64), on_output=outputs.append
+        )
+        assert isinstance(result.geometry_outcome, GeometryReady)
+        assert result.geometry["triangle_count"] == 12
+        assert result.image is not None
+        assert result.failure_reason is None
+        assert result.peak_rss_bytes is None
+        assert len(outputs) == 2
+        assert all(output.peak_rss_bytes is None for output in outputs)
+        assert cube.read_bytes() == original
+
+    @pytest.mark.parametrize(
+        "error", [RuntimeError, MemoryError], ids=["runtimeerror", "memoryerror"]
+    )
+    def test_propagates_publication_failure_after_allocator_refusal(
+        self, tmp_path, monkeypatch, error
+    ):
+        source = tmp_path / "allocation.3mf"
+        source_bytes = three_mf()
+        source.write_bytes(source_bytes)
+        fault = error("output publication refused")
+        outputs = []
+
+        def unavailable(*args, **kwargs):
+            raise MemoryError("external NumPy allocator unavailable")
+
+        def refuse(output):
+            outputs.append(output)
+            raise fault
+
+        monkeypatch.setattr(np, "array", unavailable)
+        with pytest.raises(error) as raised:
+            ThumbnailEngine().generate(ThumbnailRequest(source), on_output=refuse)
+        assert raised.value is fault
+        assert len(outputs) == 1
+        assert isinstance(outputs[0].outcome, GeometryRefused)
+        assert outputs[0].outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert source.read_bytes() == source_bytes

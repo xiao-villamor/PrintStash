@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add thumbnail engine contracts for unavailable allocation, source files and RSS telemetry, preserving publication errors.
+
 - Add real database contracts for mesh continuation recovery, cache lease deferral and current Job withdrawal authority.
 
 - Add authenticated HTTP contracts for outliner printer-filter authority and contradictory query scopes.
