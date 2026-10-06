@@ -50,7 +50,11 @@ export function stlPreviewMessage(reason: StlPreviewFailure): string {
   }
 }
 
-export function useStlPreview(url: string | null, modelId?: number): StlPreview {
+export function useStlPreview(
+  url: string | null,
+  modelId?: number,
+  previewFetcher: typeof getDerivedBlob = getDerivedBlob,
+): StlPreview {
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     if (modelId === undefined) return;
@@ -66,9 +70,11 @@ export function useStlPreview(url: string | null, modelId?: number): StlPreview 
   const [result, setResult] = useState<{
     source: string | null;
     revision: number;
+    fetcher: typeof getDerivedBlob;
     preview: StlPreview;
   }>({
     source: url,
+    fetcher: previewFetcher,
     revision,
     preview: { state: "pending" },
   });
@@ -80,20 +86,31 @@ export function useStlPreview(url: string | null, modelId?: number): StlPreview 
     let blobUrl: string | undefined;
     async function load() {
       try {
-        const response = await getDerivedBlob(source, controller.signal);
+        const response = await previewFetcher(source, controller.signal);
         if (controller.signal.aborted) return;
         if (!response.ready) {
-          setResult({ source: url, revision, preview: { state: "pending" } });
+          setResult({
+            source: url,
+            fetcher: previewFetcher,
+            revision,
+            preview: { state: "pending" },
+          });
           timer = setTimeout(() => void load(), 1000);
           return;
         }
         if (controller.signal.aborted) return;
         blobUrl = URL.createObjectURL(response.blob);
-        setResult({ source: url, revision, preview: { state: "ready", url: blobUrl } });
+        setResult({
+          source: url,
+          fetcher: previewFetcher,
+          revision,
+          preview: { state: "ready", url: blobUrl },
+        });
       } catch (error) {
         if (!controller.signal.aborted)
           setResult({
             source: url,
+            fetcher: previewFetcher,
             revision,
             preview: { state: "failed", reason: failureCode(parseApiError(error).code) },
           });
@@ -105,8 +122,8 @@ export function useStlPreview(url: string | null, modelId?: number): StlPreview 
       clearTimeout(timer);
       if (blobUrl !== undefined) URL.revokeObjectURL(blobUrl);
     };
-  }, [url, revision]);
-  return result.source === url && result.revision === revision
+  }, [url, revision, previewFetcher]);
+  return result.source === url && result.revision === revision && result.fetcher === previewFetcher
     ? result.preview
     : { state: "pending" };
 }

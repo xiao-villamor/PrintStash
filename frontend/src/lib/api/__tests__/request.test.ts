@@ -27,6 +27,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   downloadAuthenticatedFile,
   getJson,
+  getPublicJson,
+  getPublicDerivedBlob,
+  getPublicDerivedText,
+  requestPublicApi,
   getAuthenticatedBlob,
   getAuthenticatedText,
   getDerivedText,
@@ -40,9 +44,10 @@ import {
   sendForm,
   sendJson,
 } from "@/lib/api/request";
+import { getSessionVersion } from "@/lib/session-transport";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
-import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
+import { clearLogin, getUser, storeLogin, retirePrivateSessionScope } from "@/lib/auth-store";
 
 /** Any payload the API can serialise as a JSON response body. */
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -650,5 +655,159 @@ describe("upload session retirement", () => {
     transfer.emitProgress(8, 8);
     expect(await outcome).toMatchObject({ name: "AbortError" });
     expect(progress.mock.calls).toEqual([[1, 8]]);
+  });
+});
+
+describe("public transport", () => {
+  const reads = [
+    {
+      label: "JSON",
+      read: (signal?: AbortSignal) => getPublicJson("/api/v1/public/token", { signal }),
+    },
+    {
+      label: "binary",
+      read: (signal?: AbortSignal) => getPublicDerivedBlob("/api/v1/public/token/stl", signal),
+    },
+    {
+      label: "text",
+      read: (signal?: AbortSignal) => getPublicDerivedText("/api/v1/public/token/toolpath", signal),
+    },
+  ];
+  function login() {
+    storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
+  }
+  it.each(reads)("omits private credentials from public reads ($label)", async ({ read }) => {
+    login();
+    respondWith({ value: "public" });
+    await read();
+    expect(initOf(0).credentials).toBe("omit");
+    expect(new Headers(initOf(0).headers).has("authorization")).toBe(false);
+  });
+  it.each(reads)(
+    "preserves private identity after public unauthorized responses ($label)",
+    async ({ read }) => {
+      login();
+      const version = getSessionVersion();
+      respondWith({ detail: "share_denied" }, 401);
+      await expect(read()).rejects.toMatchObject({ status: 401, code: "share_denied" });
+      expect(getUser()?.username).toBe("owner");
+      expect(getSessionVersion()).toBe(version);
+    },
+  );
+  it.each(reads)(
+    "completes public reads across private scope retirement ($label)",
+    async ({ read }) => {
+      login();
+      const pending = Promise.withResolvers<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      const outcome = read();
+      const signal = initOf(0).signal;
+      retirePrivateSessionScope();
+      expect(signal?.aborted).toBe(false);
+      pending.resolve(jsonResponse({ value: "public" }));
+      await expect(outcome).resolves.toBeDefined();
+    },
+  );
+  it.each([
+    {
+      label: "JSON",
+      read: (signal: AbortSignal) => getPublicJson("/public", { signal }),
+      body: "json" as const,
+      value: { value: "late" },
+    },
+    {
+      label: "binary",
+      read: (signal: AbortSignal) => getPublicDerivedBlob("/public", signal),
+      body: "blob" as const,
+      value: new Blob(["late"]),
+    },
+    {
+      label: "text",
+      read: (signal: AbortSignal) => getPublicDerivedText("/public", signal),
+      body: "text" as const,
+      value: "late",
+    },
+  ])(
+    "preserves caller cancellation through public body parsing ($label)",
+    async ({ read, body, value }) => {
+      const response = jsonResponse({ value: "body" });
+      const pending = Promise.withResolvers<typeof value>();
+      const consume = vi.spyOn(response, body).mockImplementation(() => pending.promise);
+      fetchMock.mockResolvedValueOnce(response);
+      const caller = new AbortController();
+      const outcome = read(caller.signal).catch((error: Error) => error);
+      await vi.waitFor(() => expect(consume).toHaveBeenCalledOnce());
+      const reason = new DOMException("token changed", "AbortError");
+      caller.abort(reason);
+      pending.resolve(value);
+      expect(await outcome).toBe(reason);
+    },
+  );
+  it("skips a public request with an already aborted caller", async () => {
+    const caller = new AbortController();
+    const reason = new DOMException("token changed", "AbortError");
+    caller.abort(reason);
+    await expect(getPublicJson("/public", { signal: caller.signal })).rejects.toBe(reason);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("preserves public derivative preparation responses", async () => {
+    respondWith({ state: "running" }, 202);
+    expect(await getPublicDerivedBlob("/public/stl")).toEqual({ ready: false });
+    expect(await getPublicDerivedText("/public/toolpath")).toEqual({
+      ready: false,
+      state: "running",
+    });
+  });
+  it("rejects malformed public derivative state", async () => {
+    respondWith({ state: "made-up" }, 202);
+    await expect(getPublicDerivedText("/public/toolpath")).rejects.toThrow(
+      "derivative_state_invalid",
+    );
+  });
+  it.each(["network", "redirect"])(
+    "retries public artifact delivery through the proxy without credentials (%s)",
+    async (mode) => {
+      if (mode === "network") fetchMock.mockRejectedValueOnce(new TypeError("provider egress"));
+      else {
+        const response = jsonResponse({ detail: "expired" }, 403);
+        vi.spyOn(response, "redirected", "get").mockReturnValue(true);
+        fetchMock.mockResolvedValueOnce(response);
+      }
+      fetchMock.mockResolvedValueOnce(new Response("public bytes"));
+      expect(await getPublicDerivedText("/public/toolpath")).toEqual({
+        ready: true,
+        text: "public bytes",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      for (const call of fetchMock.mock.calls) {
+        expect(call[1]?.credentials).toBe("omit");
+        expect(new Headers(call[1]?.headers).has("authorization")).toBe(false);
+      }
+      expect(new Headers(initOf(1).headers).get("X-PrintStash-Delivery")).toBe("proxy");
+    },
+  );
+  it("preserves public bodyless acknowledgements", async () => {
+    respondWith(null, 204);
+    expect(await getPublicJson("/public")).toBeUndefined();
+  });
+  it("preserves public retryable failures", async () => {
+    login();
+    const version = getSessionVersion();
+    respondWith({ detail: "unavailable" }, 503);
+    await expect(getPublicJson("/public")).rejects.toMatchObject({
+      status: 503,
+      code: "unavailable",
+    });
+    expect(getSessionVersion()).toBe(version);
+  });
+  it("removes an accidental Authorization header from public transport", async () => {
+    respondWith({ value: "public" });
+    await requestPublicApi("/public", {
+      headers: { Authorization: "Bearer private", Accept: "application/json" },
+      credentials: "include",
+    });
+    expect(new Headers(initOf(0).headers).has("authorization")).toBe(false);
+    expect(new Headers(initOf(0).headers).get("accept")).toBe("application/json");
+    expect(initOf(0).credentials).toBe("omit");
   });
 });

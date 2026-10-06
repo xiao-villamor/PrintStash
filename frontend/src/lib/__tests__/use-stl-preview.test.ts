@@ -1,6 +1,7 @@
 /** STL preparation is polled as status; terminal failures never become STL bytes. */
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { getDerivedBlob } from "@/lib/api/request";
 import { stlPreviewMessage, useStlPreview } from "../use-stl-preview";
 
 describe("useStlPreview", () => {
@@ -15,6 +16,33 @@ describe("useStlPreview", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("delegates STL preparation to an explicit fetcher", async () => {
+    const fetcher = vi.fn<typeof getDerivedBlob>().mockResolvedValue({ ready: false });
+    const { unmount } = renderHook(() => useStlPreview("/public/stl", undefined, fetcher));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    expect(fetcher).toHaveBeenCalledWith("/public/stl", expect.any(AbortSignal));
+    expect(request).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("hides STL bytes when the preparation fetcher changes", async () => {
+    const first = vi
+      .fn<typeof getDerivedBlob>()
+      .mockResolvedValue({ ready: true, blob: new Blob(["first"]) });
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof getDerivedBlob>>>();
+    const second = vi.fn<typeof getDerivedBlob>().mockReturnValue(pending.promise);
+    const { result, rerender, unmount } = renderHook(
+      ({ fetcher }) => useStlPreview("/public/stl", undefined, fetcher),
+      { initialProps: { fetcher: first } },
+    );
+    await waitFor(() => expect(result.current.state).toBe("ready"));
+    rerender({ fetcher: second });
+    expect(result.current).toEqual({ state: "pending" });
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview");
+    unmount();
+    await act(async () => pending.resolve({ ready: false }));
   });
 
   it("waits for prepared bytes", async () => {

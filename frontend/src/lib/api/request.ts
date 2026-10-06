@@ -39,10 +39,24 @@ export function getAssetUrl(path: string): string {
   return getUrl(path);
 }
 
-/** Revalidate protected bytes; a failed cross-origin delivery retries via the API. */
-async function fetchArtifact(path: string, session: SessionRequest): Promise<Response> {
-  const options: RequestInit = {
+interface ResponseContext {
+  /** Fence response bodies against the lifetime that requested them. */
+  assertCurrent(): void;
+}
+interface RequestContext extends ResponseContext {
+  readonly signal: AbortSignal;
+}
+
+/** Revalidate artifact bytes; failed cross-origin delivery retries with the same credentials. */
+async function fetchArtifact(
+  path: string,
+  session: RequestContext,
+  delivery: { headers: Record<string, string>; credentials?: RequestCredentials } = {
     headers: authHeaders(),
+  },
+): Promise<Response> {
+  const options: RequestInit = {
+    ...delivery,
     cache: "no-cache",
     signal: session.signal,
   };
@@ -50,7 +64,7 @@ async function fetchArtifact(path: string, session: SessionRequest): Promise<Res
     session.assertCurrent();
     const response = await fetch(getUrl(path), {
       ...options,
-      headers: { ...authHeaders(), "X-PrintStash-Delivery": "proxy" },
+      headers: { ...delivery.headers, "X-PrintStash-Delivery": "proxy" },
     });
     session.assertCurrent();
     return response;
@@ -96,13 +110,20 @@ export async function getAuthenticatedBlob(path: string, signal?: AbortSignal): 
 /** A published binary derivative, or its pending preparation state. */
 export type DerivedBlob = { ready: true; blob: Blob } | { ready: false };
 
+async function consumeDerivedBlob(
+  response: Response,
+  context: ResponseContext,
+): Promise<DerivedBlob> {
+  await expectOk(response, context);
+  if (response.status === 202) return { ready: false };
+  return { ready: true, blob: await response.blob() };
+}
+
 export async function getDerivedBlob(path: string, signal?: AbortSignal): Promise<DerivedBlob> {
-  return withApiSession(async (session) => {
-    const response = await fetchArtifact(path, session);
-    await expectOk(response, session);
-    if (response.status === 202) return { ready: false };
-    return { ready: true, blob: await response.blob() };
-  }, signal);
+  return withApiSession(
+    async (session) => consumeDerivedBlob(await fetchArtifact(path, session), session),
+    signal,
+  );
 }
 
 /** Read a protected text resource while preserving the shared 401 handling. */
@@ -131,19 +152,94 @@ const DERIVATIVE_STATES: readonly DerivativeState[] = [
   "cancelled",
 ];
 
+async function consumeDerivedText(
+  response: Response,
+  context: ResponseContext,
+): Promise<DerivedText> {
+  await expectOk(response, context);
+  if (response.status === 202) {
+    const body: { state?: unknown } | null = await response.json();
+    context.assertCurrent();
+    const state = DERIVATIVE_STATES.find((known) => known === body?.state);
+    if (state === undefined) throw new Error("derivative_state_invalid");
+    return { ready: false, state };
+  }
+  return { ready: true, text: await response.text() };
+}
+
 export async function getDerivedText(path: string, signal?: AbortSignal): Promise<DerivedText> {
-  return withApiSession(async (session) => {
-    const res = await fetchArtifact(path, session);
-    await expectOk(res, session);
-    if (res.status === 202) {
-      const body: { state?: unknown } = await res.json();
-      session.assertCurrent();
-      const state = DERIVATIVE_STATES.find((known) => known === body.state);
-      if (state === undefined) throw new Error("derivative_state_invalid");
-      return { ready: false, state };
-    }
-    return { ready: true, text: await res.text() };
-  }, signal);
+  return withApiSession(
+    async (session) => consumeDerivedText(await fetchArtifact(path, session), session),
+    signal,
+  );
+}
+
+/** Public token reads follow their caller only; private scope changes never cancel them. */
+async function withCallerRequest<T>(
+  operation: (request: RequestContext) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const caller = signal ?? new AbortController().signal;
+  const context: RequestContext = {
+    signal: caller,
+    assertCurrent() {
+      if (caller.aborted) throw caller.reason;
+    },
+  };
+  try {
+    context.assertCurrent();
+    const value = await operation(context);
+    context.assertCurrent();
+    return value;
+  } catch (error) {
+    context.assertCurrent();
+    throw error;
+  }
+}
+
+/** Explicit public transport: no cookies, bearer credentials, private cancellation or auth events. */
+export function requestPublicApi<T>(
+  path: string,
+  options: RequestInit = {},
+  consume: (response: Response, context: RequestContext) => Promise<T> = handleResponse<T>,
+): Promise<T> {
+  return withCallerRequest(async (context) => {
+    const headers = new Headers(options.headers);
+    headers.delete("Authorization");
+    const response = await fetch(getUrl(path), {
+      ...options,
+      headers,
+      credentials: "omit",
+      signal: context.signal,
+    });
+    context.assertCurrent();
+    return consume(response, context);
+  }, options.signal ?? undefined);
+}
+
+export function getPublicJson<T>(path: string, options?: { signal?: AbortSignal }): Promise<T> {
+  return requestPublicApi<T>(path, { signal: options?.signal, cache: "no-store" });
+}
+
+export function getPublicDerivedBlob(path: string, signal?: AbortSignal): Promise<DerivedBlob> {
+  return withCallerRequest(
+    async (context) =>
+      consumeDerivedBlob(
+        await fetchArtifact(path, context, { headers: {}, credentials: "omit" }),
+        context,
+      ),
+    signal,
+  );
+}
+export function getPublicDerivedText(path: string, signal?: AbortSignal): Promise<DerivedText> {
+  return withCallerRequest(
+    async (context) =>
+      consumeDerivedText(
+        await fetchArtifact(path, context, { headers: {}, credentials: "omit" }),
+        context,
+      ),
+    signal,
+  );
 }
 
 const SAFE_DOWNLOAD_FALLBACK = "download";
@@ -261,33 +357,33 @@ function errorCode(status: number, body: string): string {
   return parseDetailCode(body) ?? String(status);
 }
 
-async function parseError(res: Response, session?: SessionRequest): Promise<ApiError> {
-  session?.assertCurrent();
+async function parseError(res: Response, context?: ResponseContext): Promise<ApiError> {
+  context?.assertCurrent();
   const text = await res.text().catch((error) => {
-    session?.assertCurrent();
+    context?.assertCurrent();
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     return "Unknown error";
   });
-  session?.assertCurrent();
-  if (!session && res.status === 401) emitUnauthorized();
+  context?.assertCurrent();
+  if (!context && res.status === 401) emitUnauthorized();
   return new ApiError(res.status, errorCode(res.status, text), text);
 }
 
-export async function handleResponse<T>(res: Response, session?: SessionRequest): Promise<T> {
-  session?.assertCurrent();
-  if (!res.ok) throw await parseError(res, session);
+export async function handleResponse<T>(res: Response, context?: ResponseContext): Promise<T> {
+  context?.assertCurrent();
+  if (!res.ok) throw await parseError(res, context);
   if (res.status === 204) {
     // SAFETY: a 204 has no body; void endpoints declare T as void/undefined.
     return undefined as T;
   }
   const value: T = await res.json();
-  session?.assertCurrent();
+  context?.assertCurrent();
   return value;
 }
 
-export async function expectOk(res: Response, session?: SessionRequest): Promise<void> {
-  session?.assertCurrent();
-  if (!res.ok) throw await parseError(res, session);
+export async function expectOk(res: Response, context?: ResponseContext): Promise<void> {
+  context?.assertCurrent();
+  if (!res.ok) throw await parseError(res, context);
 }
 
 /** Scope the entire response consumer, including binary bodies and mutation effects. */

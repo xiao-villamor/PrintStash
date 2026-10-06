@@ -18,7 +18,9 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setEventSocketFactory, type EventSocket } from "@/lib/events";
+import { setEventSocketFactory, type EventSocket, type EventSocketFactory } from "@/lib/events";
+import { storeLogin } from "@/lib/auth-store";
+import type { getDerivedText } from "@/lib/api/request";
 import { ApiError } from "@/lib/errors";
 import { parseGcode } from "@/lib/gcode";
 
@@ -52,6 +54,63 @@ beforeEach(() => {
 });
 
 describe("GcodeViewer", () => {
+  it("keeps a public Gcode viewer outside private events", async () => {
+    storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
+    const factory = vi.fn<EventSocketFactory>(async () => ({
+      onopen: null,
+      onclose: null,
+      onmessage: null,
+      send() {},
+      close() {},
+    }));
+    setEventSocketFactory(factory);
+    const fetcher = vi
+      .fn<typeof getDerivedText>()
+      .mockResolvedValue({ ready: true, text: TOOLPATH });
+    render(
+      <GcodeViewer
+        url="/public/toolpath"
+        toolpathFetcher={fetcher}
+        privateEventsEnabled={false}
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    expect(await screen.findByRole("slider", { name: "Current layer" })).toBeInTheDocument();
+    expect(factory).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("hides a toolpath when its fetcher changes", async () => {
+    const first = vi.fn<typeof getDerivedText>().mockResolvedValue({ ready: true, text: TOOLPATH });
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof getDerivedText>>>();
+    const second = vi.fn<typeof getDerivedText>().mockReturnValue(pending.promise);
+    const parser = async (text: string) => parseGcode(text);
+    const { rerender, unmount } = render(
+      <GcodeViewer
+        url="/public/toolpath"
+        toolpathFetcher={first}
+        privateEventsEnabled={false}
+        canvasRenderer={TestCanvas}
+        toolpathParser={parser}
+      />,
+    );
+    expect(await screen.findByRole("slider", { name: "Current layer" })).toBeInTheDocument();
+    rerender(
+      <GcodeViewer
+        url="/public/toolpath"
+        toolpathFetcher={second}
+        privateEventsEnabled={false}
+        canvasRenderer={TestCanvas}
+        toolpathParser={parser}
+      />,
+    );
+    expect(screen.queryByRole("slider", { name: "Current layer" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading");
+    unmount();
+    await act(async () => pending.resolve({ ready: false, state: "running" }));
+  });
+
   it("exposes an accessible layer slider and pressed states for travel/bed toggles", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));
@@ -211,6 +270,7 @@ describe("GcodeViewer", () => {
 
 describe("disabled toolpaths", () => {
   it("resumes a disabled viewer on a policy notice or resync", async () => {
+    storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const socket: EventSocket = {
       onopen: null,

@@ -411,3 +411,54 @@ M7 printer detail evidence: the corrected initial ownership test lane was red6fa
 Printer file actions have a single production owner, PrinterDetail. Their HTTP wrappers now report acknowledgements without cache invalidation. The feature owner cancels obsolete files before publishing acknowledged lists and refreshes the printer read; start refreshes only the printer and jobs. A denied write preserves cached presentation. Page switch or private scope retirement aborts the caller workflow and suppresses old UI delivery. Settings/control wrappers still use the temporary compatibility bridge because they have other owners, but their page acknowledgements are lifetime-fenced.
 
 Final M7 printer detail gates: full app/UI/domain typecheck, full frontend lint (zero diagnostics), full format check681files and git diff --check passed after the final resync/auth variants.
+
+
+## M9 public transport and viewer seam plan (before tests)
+
+Public token reads have caller cancellation only, omit cookies and Authorization, preserve response/error DTO semantics, and never emit private auth events. The body consumer remains within the caller scope. Public STL uses an explicit previewFetcher; public G-code uses its existing toolpathFetcher plus privateEventsEnabled=false. Private defaults retain authenticated delivery and event subscriptions. SharePage's independent route QueryClient and token owner are assigned to the feature worker.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 136 | omits private credentials from public reads | Happy | signed-in identity; publicJSON/blob/text | credentials omit; Authorization absent | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::omits private credentials from public reads ($label)` |
+| 137 | preserves private identity after public unauthorized responses | Error | publicJSON/blob/text401 | ApiError401 retained; private identity/scope unchanged | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::preserves private identity after public unauthorized responses ($label)` |
+| 138 | completes public reads across private scope retirement | Edge | publicJSON/blob/text pending; scope retired | public signal active; current public bytes delivered | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::completes public reads across private scope retirement ($label)` |
+| 139 | preserves caller cancellation through public body parsing | Edge | JSON/blob/text body pending; callerabort | first abort reason retained; late body rejected | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::preserves caller cancellation through public body parsing ($label)` |
+| 140 | skips a public request with an already aborted caller | Edge | aborted caller | no fetch; same reason | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::skips a public request with an already aborted caller` |
+| 141 | preserves public derivative preparation responses | Happy | binary/text202 | pending discriminant; state decoded | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::preserves public derivative preparation responses` |
+| 142 | rejects malformed public derivative state | Error | text202 stateinvalid | error instead of invented state | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::rejects malformed public derivative state` |
+| 143 | retries public artifact delivery through the proxy without credentials | Edge | TypeError or redirected failure | one proxy retry; caller signal/omit retained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::retries public artifact delivery through the proxy without credentials (%s)` |
+| 144 | preserves public bodyless acknowledgements | Edge | public204 | undefined result | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::preserves public bodyless acknowledgements` |
+| 145 | preserves public retryable failures | Error | public503 | exactApiError status/code; private scope unchanged | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::preserves public retryable failures` |
+| 146 | delegates STL preparation to an explicit fetcher | Happy | hook custombinaryfetcher | customfetcher called; globalfetch unused | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts::delegates STL preparation to an explicit fetcher` |
+| 147 | passes an explicit preview fetcher into STL preparation | Happy | STLViewer customfetcher rejectsresource_limit | refusalrendered; privateHTTPunused | Frontend unit | ✅ `frontend/src/components/__tests__/stl-viewer.test.tsx::passes an explicit preview fetcher into STL preparation` |
+| 148 | keeps a public Gcode viewer outside private events | Edge | signedin; explicitpublicfetcher; eventdisabled | renderedtoolpath; no privateSocketfactory | Frontend unit | ✅ `frontend/src/components/__tests__/gcode-viewer.test.tsx::keeps a public Gcode viewer outside private events` |
+| 149 | removes an accidental Authorization header from public transport | Edge | explicitAuthorization/credentialsinclude | bearerremoved;credentialsomit;otherheaderretained | Frontend unit | ✅ `frontend/src/lib/api/__tests__/request.test.ts::removes an accidental Authorization header from public transport` |
+| 150 | hides STL bytes when the preparation fetcher changes | Edge | sameURL; replacementfetchpending | oldpreviewhidden;oldURLrevoked | Frontend unit | ✅ `frontend/src/lib/__tests__/use-stl-preview.test.ts::hides STL bytes when the preparation fetcher changes` |
+| 151 | hides a toolpath when its fetcher changes | Edge | sameURL;replacementfetchpending | oldsliderhidden;loadingdisplayed | Frontend unit | ✅ `frontend/src/components/__tests__/gcode-viewer.test.tsx::hides a toolpath when its fetcher changes` |
+
+
+M9 seam evidence: a typed public alias to the private transport demonstrated12failed/8passed/44skipped. The eight existing passes retain body cancellation, pending state decoding and error semantics; isolation and credential omission are new. The three explicit viewer seams were red3failed/28skipped. Two later same-URL fetcher identity tests were red2failed/29skipped before adding fetcher identity to completed viewer results. Final combined qualification passed106cases6files, including private session/response contracts. One old private policy event test lacked a signed-in arrange; it now explicitly calls storeLogin before testing a private event (the M7 events contract correctly rejects anonymous socket creation). STL internal Mesh props exclude the transport-only previewFetcher. No browser/CI or coverage result is inferred.
+
+### M9 public seam manually inspected source, test and configuration ledger
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/lib/api/request.ts` | complete transport source inspected: active URL derivation, artifact proxy retry, private scope wrapper, derived consumers, response/error parsing, compatibility invalidation adapter, multipart/XHR body lifetime. New ResponseContext/RequestContext distinguish response lifetime from private identity; caller-only scope installs no listeners; public headers delete Authorization and always omit credentials. |
+| `frontend/src/lib/api/__tests__/request.test.ts` | public transport describe: JSON/binary/text credentials, scope changes and body parsing; preabort, public401/503/204, pending/invalid derivative state, redirected/network proxy retry and accidental header removal. Private cases retained. |
+| `frontend/src/lib/use-stl-preview.ts` | full hook state/source/fetcher identity, polling, caller controller, public/no-model event behavior and Blob URL disposal. |
+| `frontend/src/lib/__tests__/use-stl-preview.test.ts` | explicit preparation fetcher; same-URL adapter replacement hides old output/revokes lease; existing cancellation/failure/polling cases retained. |
+| `frontend/src/components/stl-viewer.tsx` | STLViewerProps, internal Mesh Required/Omit boundary, STLViewer primary/overlay preparation and refusal/readiness paths; rendering internals unchanged. |
+| `frontend/src/components/__tests__/stl-viewer.test.tsx` | custom public-style fetcher renders persisted failure without private HTTP or native Canvas; existing failure case retained. |
+| `frontend/src/components/gcode-viewer.tsx` | GcodeViewerProps, LoadedToolpath identity, private event effect, fetch/parser lifecycle, preparation/retry paths and readiness projection. Public callers explicitly disable private events; private defaults preserved. |
+| `frontend/src/components/__tests__/gcode-viewer.test.tsx` | public no-private-Socket factory, delivery identity replacement, existing toolpath rendering/error/pending/private-policy cases. |
+| `frontend/src/lib/api/share.ts` | getSharedModel private-getJson bug inspected; private share management has separate owner; no edits, feature worker migrates only public lookup. |
+| `frontend/src/pages/share.tsx` | token effect/read/error/viewer delivery inspected; feature worker owns independent token Query/cache/page migration; no edits. |
+| `frontend/src/router.tsx` | public share route is outside AuthProvider/private composition; no edits. |
+| `frontend/src/lib/session-transport.ts` | first caller abort reason and listener cleanup compatibility; no edits. |
+| `frontend/src/lib/__tests__/session-transport.test.ts` | existing private races/caller abort/cleanup included in final lane; no edits. |
+| `frontend/tests/repo/suite-hygiene.test.ts` | unchanged headers/mirror/naming checks included; no edits. |
+| `frontend/package.json` | app/UI/domain typecheck, oxlint/oxfmt commands and supported browser floor checked; no new framework/runtime APIs. |
+
+Integration API: request.ts exports getPublicJson<T>(path,{signal?}), getPublicDerivedBlob/Text(path,signal?), and requestPublicApi<T>(path,RequestInit,optional scoped consumer). STLViewer accepts previewFetcher; GcodeViewer keeps toolpathFetcher and adds privateEventsEnabled (defaulttrue). SharePage passes public helpers and privateEventsEnabled=false, with no modelId subscription for public STL. The feature worker owns an independent route QueryClient and complete token key so private global cache disposal cannot retire public reads. Setup/auth bootstrap uses cookies/CSRF and must retain private/session-auth transport.
+
+Final M9 seam gates: full app/UI/domain typecheck, full frontend lint (zero diagnostics), full format check681files and git diff --check passed. The final tests retain one pre-existing asynchronous act warning in the unchanged derivative-ready timer case; no runtime exception or unhandled rejection was reported.

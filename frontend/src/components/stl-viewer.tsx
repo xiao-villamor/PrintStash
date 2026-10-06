@@ -45,6 +45,7 @@ export interface STLViewerControls {
 export interface STLViewerProps {
   url: string;
   modelId?: number;
+  previewFetcher?: NonNullable<Parameters<typeof useStlPreview>[2]>;
   onControlsReady?: (api: STLViewerControls) => void;
   onReadyChange?: (ready: boolean) => void;
   /** Largest loaded dimension, before viewer normalization, in source units. */
@@ -162,6 +163,7 @@ function Scene({
   Omit<
     STLViewerProps,
     | "modelId"
+    | "previewFetcher"
     | "onControlsReady"
     | "onReadyChange"
     | "onGeometrySize"
@@ -422,6 +424,7 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
 export function STLViewer({
   url,
   modelId,
+  previewFetcher,
   onControlsReady,
   onReadyChange,
   onGeometrySize,
@@ -436,11 +439,11 @@ export function STLViewer({
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
   // swap reset the overlay during render instead of through a reset effect.
   const previewPreferences = usePreviewPreferences();
-  const preview = useStlPreview(url, modelId);
+  const preview = useStlPreview(url, modelId, previewFetcher);
   const { loaded: meshLoaded, setLoaded: setMeshLoaded } = useViewerReadiness(
     preview.state === "ready" ? preview.url : url,
   );
-  const overlayPreview = useStlPreview(overlay?.url ?? null);
+  const overlayPreview = useStlPreview(overlay?.url ?? null, undefined, previewFetcher);
 
   useEffect(() => {
     onReadyChange?.(meshLoaded && preview.state === "ready");

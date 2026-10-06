@@ -196,6 +196,7 @@ function DefaultCanvasRenderer({ children, className, dpr, gl }: CanvasRendererP
 /** The outcome of one completed toolpath fetch, tagged with the url it was for. */
 interface LoadedToolpath {
   url: string;
+  fetcher: typeof getDerivedText;
   data: ToolpathData | null;
   errorKind: "limit" | "resource" | "busy" | "invalid" | "load" | "disabled" | null;
   /** The toolpath is a derivative still being produced; check again shortly. */
@@ -212,6 +213,7 @@ export interface GcodeViewerProps {
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
   toolpathFetcher?: typeof getDerivedText;
+  privateEventsEnabled?: boolean;
 }
 
 export function GcodeViewer({
@@ -220,6 +222,7 @@ export function GcodeViewer({
   canvasRenderer,
   toolpathParser = parseGcodeInWorker,
   toolpathFetcher = getDerivedText,
+  privateEventsEnabled = true,
 }: GcodeViewerProps) {
   const i18n = useOptionalI18n();
   const previewPreferences = usePreviewPreferences();
@@ -233,18 +236,17 @@ export function GcodeViewer({
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
 
-  useEffect(
-    () =>
-      subscribeEvents((notice) => {
-        if (notice.type === "derivative_policy" || notice.type === "resync") {
-          setLoaded(null);
-          setRetry((value) => value + 1);
-        }
-      }),
-    [],
-  );
+  useEffect(() => {
+    if (!privateEventsEnabled) return;
+    return subscribeEvents((notice) => {
+      if (notice.type === "derivative_policy" || notice.type === "resync") {
+        setLoaded(null);
+        setRetry((value) => value + 1);
+      }
+    });
+  }, [privateEventsEnabled]);
 
-  const current = loaded?.url === url ? loaded : null;
+  const current = loaded?.url === url && loaded.fetcher === toolpathFetcher ? loaded : null;
   const loading = current === null;
   const data = current?.data ?? null;
   const errorKind = current?.errorKind ?? null;
@@ -263,19 +265,26 @@ export function GcodeViewer({
           // A binary toolpath is converted in the background; the old response
           // was the conversion itself, now it is a derivative that may not
           // exist yet.
-          setLoaded({ url, data: null, errorKind: null, preparing: true });
+          setLoaded({
+            url,
+            fetcher: toolpathFetcher,
+            data: null,
+            errorKind: null,
+            preparing: true,
+          });
           recheck = setTimeout(() => setRetry((value) => value + 1), PREPARING_POLL_MS);
           return;
         }
         const parsed = await toolpathParser(derived.text, controller.signal);
         if (!live) return;
-        setLoaded({ url, data: parsed, errorKind: null });
+        setLoaded({ url, fetcher: toolpathFetcher, data: parsed, errorKind: null });
         setCurrentLayer(parsed.totalLayers - 1);
       })
       .catch((cause: unknown) => {
         if (!live) return;
         setLoaded({
           url,
+          fetcher: toolpathFetcher,
           data: null,
           errorKind:
             cause instanceof ApiError &&
