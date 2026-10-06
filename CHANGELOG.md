@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Measure whole-host native fairness in the mandatory serial resource phase,
+  retaining real workers, branch coverage and the existing timing budgets.
+
 - Isolate provider HTTP pools and host capacity between tests so a previous
   test's ended event loop cannot affect transport shutdown.
 

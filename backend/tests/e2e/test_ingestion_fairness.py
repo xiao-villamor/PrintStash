@@ -14,6 +14,11 @@ import pytest
 from tests.e2e._processes import vault_environment
 from tests.paths import BACKEND_DIR
 
+# Each test vault has an independent admission pool. Full-host CPU/RAM
+# measurements must not compete with unrelated xdist workers. Both assertions
+# remain mandatory in the serial coverage and compatibility resource phases.
+pytestmark = pytest.mark.native_host
+
 
 def _stop(process: subprocess.Popen) -> None:
     if process.poll() is None:

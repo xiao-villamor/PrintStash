@@ -226,13 +226,13 @@ class TestDeepSuite:
             pytest.param(
                 "full-ordinary",
                 ["-n", "auto", "--dist", "worksteal"],
-                "not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode",
+                "not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode and not native_host",
                 id="ordinary",
             ),
             pytest.param(
                 "full-resources",
                 [],
-                "(postgres or s3 or remote_storage or bgcode) and not coverage_gate and not scale",
+                "(postgres or s3 or remote_storage or bgcode or native_host) and not coverage_gate and not scale",
                 id="resources",
             ),
         ],
@@ -262,6 +262,68 @@ class TestDeepSuite:
             "tests",
             "-q",
         ]
+
+    def test_measures_host_native_fairness_in_the_serial_coverage_phase(self, tmp_path):
+        fake_uv = tmp_path / "uv"
+        record = tmp_path / "commands.jsonl"
+        fake_uv.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os, sys\n"
+            "with open(os.environ['UV_RECORD'], 'a') as f:\n"
+            "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        )
+        fake_uv.chmod(0o755)
+        subprocess.run(
+            ["bash", "scripts/test.sh", "coverage", "-q"],
+            cwd=REPO_ROOT / "backend",
+            env={
+                **os.environ,
+                "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+                "UV_RECORD": str(record),
+            },
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        commands = [json.loads(line) for line in record.read_text().splitlines()]
+        assert len(commands) == 3
+        ordinary, resources, gate = commands
+        assert "not native_host" in ordinary[ordinary.index("-m") + 1]
+        assert "native_host" in resources[resources.index("-m") + 1]
+        assert "-n" not in resources
+        assert "--cov" in resources
+        assert "--cov-append" in resources
+        assert "tests/repo/test_coverage_floors.py" in gate
+
+    def test_selects_host_native_fairness_by_its_resource_marker(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "-p",
+                "no:randomly",
+                "-m",
+                "native_host",
+                "tests/e2e/test_ingestion_fairness.py",
+            ],
+            cwd=REPO_ROOT / "backend",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (
+            "TestIngestionFairness::test_backfill_progresses_during_sustained_interactive_arrivals"
+            in result.stdout
+        )
+        assert (
+            "TestIngestionFairness::test_full_capacity_backfill_eventually_completes"
+            in result.stdout
+        )
+        assert "2 tests collected" in result.stdout
 
     @pytest.mark.parametrize(
         ("job_name", "suite_name"),

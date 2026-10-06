@@ -86,12 +86,14 @@ done
 # module-level state rely on the scheduling CI has historically exercised. The
 # default full/coverage lanes run container-backed contracts in a second, serial
 # pass so every service starts once rather than once per xdist worker.
+# Full-host native budget measurements also run serially: independent test
+# vaults do not share admission credits with the other xdist workers.
 parallel=(-n auto --dist worksteal)
 # A scale job runs one benchmark at a time. Four Deep CI matrix jobs provide
 # parallelism across runners; sharing one runner across seeded 100k-Model
 # databases exhausted the 30-minute job cap without a test result.
-resource_expression="postgres or s3 or remote_storage or bgcode"
-non_resource_expression="not postgres and not s3 and not remote_storage and not bgcode"
+resource_expression="postgres or s3 or remote_storage or bgcode or native_host"
+non_resource_expression="not postgres and not s3 and not remote_storage and not bgcode and not native_host"
 # Timed at the supported library size; only its own lane selects it.
 not_scale="not scale"
 

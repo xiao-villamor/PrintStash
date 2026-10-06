@@ -3,7 +3,7 @@
 `CI` runs on every pull request, merge queue commit and push to `main`, and can
 be dispatched on an integration branch. Its
 backend shards cover each test file once, excluding `slow` and tests needing
-container-backed services. Core, frontend, extension and two real-backend
+container-backed services or exclusive host-native measurements. Core, frontend, extension and two real-backend
 browser flows run in parallel. Configure branch protection to require **PR
 gate** only: it fails if any of those jobs fails or is skipped. Do not add path
 filters to this required workflow.
@@ -23,7 +23,12 @@ require a green `CI` run for the same SHA on `main`.
 
 Python compatibility runs the `full-ordinary` and `full-resources` lanes in
 independent jobs. The ordinary phase includes slow tests and retains work-stealing;
-the resource phase runs serially so each real service starts once. Their marker
+the resource phase runs serially so each real service starts once. Tests marked
+`native_host` also run in that mandatory phase: independent test vaults have
+independent admission pools, so an xdist companion would consume CPU/RAM outside
+the pool whose wall-clock bounds are being measured. Fairness still runs real
+DBOS/native workers with the same budgets, six arrivals and 110/130-second limits.
+Coverage appends that serial phase before evaluating its unchanged floors. Their marker
 sets are disjoint and together cover the full lane, excluding the separately
 measured scale and coverage gates. Both phases must succeed; fail-fast is disabled
 so one failure preserves the other result. Each retains the 60-minute limit.
