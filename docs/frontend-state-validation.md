@@ -1084,3 +1084,5 @@ Exact manual review for this increment:
 | `frontend/tsconfig.json` full file, read-only | Includes src/tests/vite.config; excludes dist/node_modules; playwright.config checked separately. |
 
 Execution log is `/tmp/printstash-state-pwa-production.log`; process exited 0 and its web server/mock API were disposed. The owned ports 3338/4338 listeners were released; unrelated ports 3327/4327 listeners were preserved. This is the final assigned worker checkpoint; no next production or open-ended audit slice was started.
+
+Coordinator integration at `71416a21`: the production PWA suite was rerun against the integrated frontend on ports 3338/4338 with `PLAYWRIGHT_PRODUCTION_PWA=1 pnpm exec playwright test --workers=1`. All six cases passed (26.7s), exit 0. This checks the actual integrated bundle and service worker, not only the state worker branch. No application source changed during the run. Bundle-size and classic-script build warnings remain visible; this is correctness evidence, not a performance comparison.
