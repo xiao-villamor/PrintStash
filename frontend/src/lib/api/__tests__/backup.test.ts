@@ -27,6 +27,8 @@ import {
   deleteBackup,
   listBackupSources,
   listBackups,
+  listBackupRuns,
+  retryBackupDestination,
   listUnownedLocalBackups,
   listUnownedRemoteBackups,
   listUnownedS3Backups,
@@ -36,7 +38,7 @@ import {
 import { invalidateApiCache } from "@/lib/api/request";
 import { aJob } from "@/test-support/factories";
 
-import { expectRequest, fetchMock, respondWith } from "./_wire";
+import { expectRequest, fetchMock, lastCall, respondWith } from "./_wire";
 
 /** Replace the object-URL machinery, recording what the client created and released. */
 function stubDownload() {
@@ -314,5 +316,64 @@ describe("downloadBackup", () => {
     await downloadBackup("b1");
 
     expect(document.querySelectorAll("a[download]")).toHaveLength(0);
+  });
+});
+
+describe("listBackupRuns", () => {
+  it("reads fresh execution history", async () => {
+    respondWith([]);
+    await expect(listBackupRuns()).resolves.toEqual([]);
+    expectRequest("/api/v1/backups/runs");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+  it("cancels native execution reads at the caller boundary", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const reading = listBackupRuns({ signal: controller.signal });
+    controller.abort();
+    await expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+});
+describe("retryBackupDestination", () => {
+  it("queues only the encoded failed destination", async () => {
+    respondWith({ job_id: "retry-result", state: "queued", message: "queued" }, 202);
+    await expect(retryBackupDestination("result / 1")).resolves.toMatchObject({
+      job_id: "retry-result",
+    });
+    expectRequest("/api/v1/backups/runs/destinations/result%20%2F%201/retry", "POST");
+    expect(lastCall().init.body).toBeUndefined();
+  });
+  it("preserves a refused exact retry without repeating the command", async () => {
+    respondWith({ detail: "backup_retry_in_progress" }, 409);
+    await expect(retryBackupDestination("busy")).rejects.toMatchObject({
+      status: 409,
+      code: "backup_retry_in_progress",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it("cancels pending retry HTTP at the caller boundary", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const retry = retryBackupDestination("pending", { signal: controller.signal });
+    controller.abort();
+    await expect(retry).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,13 @@
-import { expectOk, getJson, requestApi, sendAction, sendForm, sendJson } from "@/lib/api/request";
+import {
+  expectOk,
+  getJson,
+  jsonHeaders,
+  requestApi,
+  sendAction,
+  sendForm,
+  sendJson,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import type { JobAccepted, JobStatus, StorageOperations } from "@/types";
 
 export type BackupRunOutcome = "running" | "completed" | "partial" | "failed";
@@ -23,16 +32,18 @@ export interface BackupRun {
   destinations: BackupDestinationResult[];
 }
 
-export function listBackupRuns(): Promise<BackupRun[]> {
-  return getJson<BackupRun[]>("/api/v1/backups/runs", { fresh: true });
+export function listBackupRuns(options: GetJsonOptions = {}): Promise<BackupRun[]> {
+  return getJson<BackupRun[]>("/api/v1/backups/runs", { ...options, fresh: true });
 }
 
 /** Queues a retry Job for one failed destination; follow it by `job_id`. */
-export function retryBackupDestination(id: string): Promise<JobAccepted> {
-  return sendJson<JobAccepted>(
+export function retryBackupDestination(
+  id: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<JobAccepted> {
+  return requestApi<JobAccepted>(
     `/api/v1/backups/runs/destinations/${encodeURIComponent(id)}/retry`,
-    "POST",
-    undefined,
+    { method: "POST", headers: jsonHeaders(), signal: options.signal },
   );
 }
 

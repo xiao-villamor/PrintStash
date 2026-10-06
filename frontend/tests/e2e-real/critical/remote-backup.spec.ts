@@ -115,6 +115,14 @@ test.describe("remote-only backup recovery", () => {
 
 test.describe("partial backup recovery", () => {
   test("@critical retries the exact failed copy from partial backup success", async ({ page }) => {
+    let historyReads = 0;
+    const retriedDestinations: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "GET" && path === "/api/v1/backups/runs") historyReads += 1;
+      if (request.method() === "POST" && path.startsWith("/api/v1/backups/runs/destinations/"))
+        retriedDestinations.push(path);
+    });
     const { mkdir, writeFile, rm } = await import("node:fs/promises");
     const { dirname, resolve } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
@@ -166,6 +174,7 @@ test.describe("partial backup recovery", () => {
       await expect(article.getByText("Local backup · Published")).toBeVisible();
 
       await rm(obstruction);
+      const settledHistoryReads = historyReads;
       const retried = page.waitForResponse(
         (candidate) =>
           candidate.url().endsWith(`/runs/destinations/${failed.id}/retry`) &&
@@ -178,6 +187,10 @@ test.describe("partial backup recovery", () => {
       const completed = page.getByRole("article", { name: `${meta.backup_id}: Completed` });
       await expect(completed.getByText(`${root} · Published`)).toBeVisible();
       await expect(completed.getByText(/Last verified:/)).toBeVisible();
+      expect(historyReads).toBe(settledHistoryReads + 1);
+      expect(retriedDestinations).toEqual([
+        `/api/v1/backups/runs/destinations/${encodeURIComponent(failed.id)}/retry`,
+      ]);
       const remote = await page.request.get(
         `http://127.0.0.1:${webdavPort}/${(failed.key ?? "").replace(/^webdav\//, "")}`,
       );

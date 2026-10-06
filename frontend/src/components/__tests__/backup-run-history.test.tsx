@@ -1,12 +1,22 @@
 /* Backup history preserves successful copies and retries only the exact failed result. */
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackupRunHistory } from "@/components/backup-run-history";
 import type { BackupRun } from "@/lib/api/backup";
+import * as backupApi from "@/lib/api/backup";
+import * as taskCenter from "@/lib/task-center";
+import { AuthContext } from "@/lib/auth-context";
+import { clearLogin } from "@/lib/auth-store";
 import { aJob } from "@/test-support/factories";
-import { json, renderApp, type RouteTable } from "@/test-support/render";
+import {
+  adminSession,
+  memberSession,
+  json,
+  renderApp,
+  type RouteTable,
+} from "@/test-support/render";
 import type { JobStatus } from "@/types";
 
 /**
@@ -98,7 +108,7 @@ describe("Backup run history", () => {
   it("refreshes verified status after retrying the exact failed destination", async () => {
     let run = partialRun();
     const published = vi.fn<() => void>();
-    renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
       routes: {
         "GET /api/v1/backups/runs": () => json([run]),
         "POST /api/v1/backups/runs/destinations/remote-result/retry": () => {
@@ -123,6 +133,16 @@ describe("Backup run history", () => {
     expect(screen.getByText(/Last verified:/)).toBeVisible();
     expect(published).toHaveBeenCalledOnce();
     expect(
+      app
+        .requestsWithMethod("POST")
+        .filter((request) =>
+          request.url.endsWith("/backups/runs/destinations/remote-result/retry"),
+        ),
+    ).toHaveLength(1);
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/backups/runs")),
+    ).toHaveLength(2);
+    expect(
       screen.queryByRole("button", { name: "Retry this destination" }),
     ).not.toBeInTheDocument();
   });
@@ -130,7 +150,7 @@ describe("Backup run history", () => {
   it("explains why a new archive is required after a failed retry", async () => {
     let run = partialRun();
     const published = vi.fn<() => void>();
-    renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
       routes: {
         "GET /api/v1/backups/runs": () => json([run]),
         "POST /api/v1/backups/runs/destinations/remote-result/retry": () => {
@@ -161,10 +181,20 @@ describe("Backup run history", () => {
       expect(screen.getByRole("button", { name: "Retry this destination" })).toBeEnabled(),
     );
     expect(published).not.toHaveBeenCalled();
+    expect(
+      app
+        .requestsWithMethod("POST")
+        .filter((request) =>
+          request.url.endsWith("/backups/runs/destinations/remote-result/retry"),
+        ),
+    ).toHaveLength(1);
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/backups/runs")),
+    ).toHaveLength(2);
   });
 
   it("reports a retry another request already started", async () => {
-    renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
       routes: {
         "GET /api/v1/backups/runs": () => json([partialRun()]),
         "POST /api/v1/backups/runs/destinations/remote-result/retry": () =>
@@ -175,6 +205,13 @@ describe("Backup run history", () => {
     expect(
       await screen.findByText("A retry is already in progress for this destination."),
     ).toBeVisible();
+    expect(
+      app
+        .requestsWithMethod("POST")
+        .filter((request) =>
+          request.url.endsWith("/backups/runs/destinations/remote-result/retry"),
+        ),
+    ).toHaveLength(1);
   });
 
   it("keeps historical archives available when no runs exist", async () => {
@@ -189,5 +226,214 @@ describe("Backup run history", () => {
       routes: { "GET /api/v1/backups/runs": json({ detail: "unavailable" }, 503) },
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Backup runs could not be loaded.");
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  taskCenter.resetTasksForNewSetup();
+});
+
+describe("Backup history ownership", () => {
+  it("keeps one canonical snapshot when refresh notification changes", async () => {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: { "GET /api/v1/backups/runs": json([partialRun()]) },
+    });
+    await screen.findByRole("article", { name: "archive-1: Partially completed" });
+    const completed = { ...partialRun(), outcome: "completed" as const };
+    app.route({ "GET /api/v1/backups/runs": json([completed]) });
+    app.rerender(<BackupRunHistory refreshKey={1} onPublished={vi.fn<() => void>()} />);
+    await screen.findByRole("article", { name: "archive-1: Completed" });
+    expect(
+      app.client
+        .getQueryCache()
+        .findAll({ queryKey: ["backup-runs"] })
+        .map((query) => query.queryKey),
+    ).toEqual([["backup-runs"]]);
+    expect(app.requestsWithMethod("GET")).toHaveLength(2);
+  });
+  it("cancels a disposed history read", async () => {
+    let signal: AbortSignal | null | undefined;
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: {
+        "GET /api/v1/backups/runs": (_url, init) => {
+          signal = init?.signal;
+          return new Promise(() => {});
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+  });
+  it("recovers an unavailable history without an empty-state claim", async () => {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: { "GET /api/v1/backups/runs": json({ detail: "unavailable" }, 503) },
+    });
+    await screen.findByRole("alert");
+    expect(screen.queryByText(/Older archives remain available below/)).not.toBeInTheDocument();
+    app.route({ "GET /api/v1/backups/runs": json([partialRun()]) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh backup runs" }));
+    expect(
+      await screen.findByRole("article", { name: "archive-1: Partially completed" }),
+    ).toBeVisible();
+  });
+  it("hides denied cached history", async () => {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: { "GET /api/v1/backups/runs": json([partialRun()]) },
+    });
+    await screen.findByRole("article", { name: "archive-1: Partially completed" });
+    app.route({ "GET /api/v1/backups/runs": json({ detail: "forbidden" }, 403) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh backup runs" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry this destination" }),
+    ).not.toBeInTheDocument();
+  });
+  it("hides private history immediately after role loss", async () => {
+    const app = renderApp(
+      <AuthContext.Provider value={adminSession()}>
+        <BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />
+      </AuthContext.Provider>,
+      {
+        routes: { "GET /api/v1/backups/runs": json([partialRun()]) },
+      },
+    );
+    await screen.findByRole("article", { name: "archive-1: Partially completed" });
+    app.rerender(
+      <AuthContext.Provider value={memberSession()}>
+        <BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />
+      </AuthContext.Provider>,
+    );
+    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    const refresh = screen.getByRole("button", { name: "Refresh backup runs" });
+    expect(refresh).toBeDisabled();
+    await userEvent.click(refresh);
+    expect(app.requestsWithMethod("GET")).toHaveLength(1);
+  });
+  it("preserves transient-failure history read-only until recovery", async () => {
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />, {
+      routes: { "GET /api/v1/backups/runs": json([partialRun()]) },
+    });
+    await screen.findByRole("article", { name: "archive-1: Partially completed" });
+    app.route({ "GET /api/v1/backups/runs": json({ detail: "unavailable" }, 503) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh backup runs" }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("Local backup · Published")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry this destination" })).toBeDisabled();
+    app.route({ "GET /api/v1/backups/runs": json([partialRun()]) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh backup runs" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry this destination" })).toBeEnabled(),
+    );
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("does not register a retired acceptance in the new account", async () => {
+    const received = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const native = backupApi.retryBackupDestination;
+    vi.spyOn(backupApi, "retryBackupDestination").mockImplementation(async (...args) => {
+      const accepted = await native(...args);
+      received.resolve();
+      await release.promise;
+      return accepted;
+    });
+    const published = vi.fn<() => void>();
+    renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
+      routes: {
+        "GET /api/v1/backups/runs": json([partialRun()]),
+        "POST /api/v1/backups/runs/destinations/remote-result/retry": json(
+          retryAccepted("retired-acceptance"),
+          202,
+        ),
+        ...retryJob({ job_id: "retired-acceptance" }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Retry this destination" }));
+    await received.promise;
+    await act(async () => {
+      clearLogin();
+      taskCenter.resetTasksForNewSetup();
+    });
+    await act(async () => release.resolve());
+    expect(taskCenter.listTasks().some((task) => task.jobId === "retired-acceptance")).toBe(false);
+    expect(published).not.toHaveBeenCalled();
+    expect(screen.queryByText("Backup copy published.")).not.toBeInTheDocument();
+  });
+  it("preserves accepted durable tracking after local disposal", async () => {
+    const received = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const native = backupApi.retryBackupDestination;
+    vi.spyOn(backupApi, "retryBackupDestination").mockImplementation(async (...args) => {
+      const accepted = await native(...args);
+      received.resolve();
+      await release.promise;
+      return accepted;
+    });
+    const published = vi.fn<() => void>();
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
+      routes: {
+        "GET /api/v1/backups/runs": json([partialRun()]),
+        "POST /api/v1/backups/runs/destinations/remote-result/retry": json(
+          retryAccepted("disposed-accepted"),
+          202,
+        ),
+        ...retryJob({ job_id: "disposed-accepted" }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Retry this destination" }));
+    await received.promise;
+    app.unmount();
+    await act(async () => release.resolve());
+    await waitFor(() =>
+      expect(taskCenter.listTasks().some((task) => task.jobId === "disposed-accepted")).toBe(true),
+    );
+    expect(published).not.toHaveBeenCalled();
+  });
+  it("does not publish a disposed terminal retry into a new view", async () => {
+    const terminal = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const native = taskCenter.waitForImportJob;
+    vi.spyOn(taskCenter, "waitForImportJob").mockImplementation(async (...args) => {
+      const job = await native(...args);
+      terminal.resolve();
+      await release.promise;
+      return job;
+    });
+    const published = vi.fn<() => void>();
+    const app = renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
+      routes: {
+        "GET /api/v1/backups/runs": json([partialRun()]),
+        "POST /api/v1/backups/runs/destinations/remote-result/retry": json(
+          retryAccepted("disposed-terminal"),
+          202,
+        ),
+        ...retryJob({ job_id: "disposed-terminal" }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Retry this destination" }));
+    await terminal.promise;
+    app.unmount();
+    let signal: AbortSignal | null | undefined;
+    const fresh = Promise.withResolvers<Response>();
+    const current = renderApp(
+      <BackupRunHistory refreshKey={0} onPublished={vi.fn<() => void>()} />,
+      {
+        routes: {
+          "GET /api/v1/backups/runs": (_url, init) => {
+            signal = init?.signal;
+            return fresh.promise;
+          },
+        },
+      },
+    );
+    await waitFor(() => expect(signal).toBeDefined());
+    await act(async () => release.resolve());
+    expect(published).not.toHaveBeenCalled();
+    expect(signal?.aborted).toBe(false);
+    expect(current.requestsWithMethod("GET")).toHaveLength(1);
+    expect(screen.queryByText("Backup copy published.")).not.toBeInTheDocument();
+    await act(async () => fresh.resolve(json([partialRun()])));
   });
 });
