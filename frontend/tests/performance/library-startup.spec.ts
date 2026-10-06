@@ -1,5 +1,13 @@
 /** Production assets + real API + exact SQLite corpus. Timings are local observations. */
-import { test, expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Request,
+  type Response,
+} from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -73,71 +81,210 @@ async function prepared(browser: Browser, locale: "en" | "es", token: string, us
   return { context, page };
 }
 
-async function sample(page: Page) {
-  await page.mouse.move(0, 0);
-  await page.goto(`${base}${destination}`, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => performance.getEntriesByName("observed:ready").length > 0);
-  await expect(
-    page.locator("aside").getByRole("button", { name: "Collection 01", exact: true }),
-  ).toBeVisible();
-  if (!baseline) {
-    await page.waitForFunction(
-      () => performance.getEntriesByName("printstash:library-ready").length > 0,
-    );
-    const painted = await page.evaluate(() => ({
-      ready: performance.getEntriesByName("printstash:library-ready")[0].startTime,
-      cards: performance.getEntriesByName("observed:cards")[0].startTime,
-      tree: performance.getEntriesByName("observed:tree")[0].startTime,
-    }));
-    // Scheduling can delay our two post-paint marks by different frame counts.
-    // Readiness must never precede visible cards/tree; its drift is recorded.
-    expect(painted.ready).toBeGreaterThanOrEqual(Math.max(painted.cards, painted.tree));
-  }
-  await page.waitForFunction(() => {
-    const containers = [...document.querySelectorAll('main article a[href^="/models/"]')].filter(
-      (card) => {
-        const bounds = card.getBoundingClientRect();
-        return bounds.width > 0 && bounds.top < innerHeight && bounds.bottom > 0;
-      },
-    );
-    return containers.every((card) => {
-      const image = card.querySelector("img");
-      return image?.complete && image.naturalWidth > 0;
+let sampleSequence = 0;
+
+async function sample(page: Page, label: string) {
+  const directory = resolve(process.env.STARTUP_REPORT_DIR ?? ".startup-results/metrics");
+  await mkdir(directory, { recursive: true });
+  const identity = `${distribution}-${label}-${process.pid}-${++sampleSequence}`;
+  const started = performance.now();
+  const pending = new Map<Request, number>();
+  const events: {
+    event: string;
+    id: number;
+    at: number;
+    path?: string;
+    method?: string;
+    type?: string;
+    status?: number;
+  }[] = [];
+  const checkpoints: { name: string; at: number; pending: number }[] = [];
+  let nextId = 0;
+  let maxPending = 0;
+  let outcome = "incomplete";
+  let observation: {
+    ready: number;
+    thumbnailsObserved: number;
+    decoded: {
+      applicable: boolean;
+      cards: number;
+      images: number;
+      completed: number;
+      observed: number;
+    };
+  } | null = null;
+  const checkpoint = (name: string) =>
+    checkpoints.push({ name, at: performance.now() - started, pending: pending.size });
+  const onRequest = (request: Request) => {
+    const id = ++nextId;
+    pending.set(request, id);
+    maxPending = Math.max(maxPending, pending.size);
+    events.push({
+      event: "start",
+      id,
+      at: performance.now() - started,
+      path: new URL(request.url()).pathname,
+      method: request.method(),
+      type: request.resourceType(),
     });
-  });
-  const record = await page.evaluate(() => ({
-    ready: performance.getEntriesByName("observed:ready")[0].startTime,
-    marks: Object.fromEntries(
-      performance.getEntriesByType("mark").map((entry) => [entry.name, entry.startTime]),
-    ),
-    thumbnailsObserved: performance.now(),
-    visibleImages: [...document.querySelectorAll("main img")].filter(
-      (image) => image.getBoundingClientRect().top < innerHeight,
-    ).length,
-    serviceWorker: Boolean(navigator.serviceWorker.controller),
-    resources: performance.getEntriesByType("resource").map((entry) => {
-      // SAFETY: resource entries are returned by the browser with PerformanceResourceTiming fields.
-      const resource = entry as PerformanceResourceTiming;
-      return {
-        path: new URL(resource.name).pathname,
-        start: resource.startTime,
-        duration: resource.duration,
-        decoded: resource.decodedBodySize,
-        transfer: resource.transferSize,
-        server: resource.serverTiming.map((timing) => ({
-          name: timing.name,
-          duration: timing.duration,
-          description: timing.description,
-        })),
+  };
+  const settle = (request: Request, event: string) => {
+    const id = pending.get(request);
+    if (id === undefined) return;
+    events.push({ event, id, at: performance.now() - started });
+    pending.delete(request);
+  };
+  const onResponse = (response: Response) => {
+    const id = pending.get(response.request());
+    if (id !== undefined)
+      events.push({
+        event: "response",
+        id,
+        at: performance.now() - started,
+        status: response.status(),
+      });
+  };
+  const onFinished = (request: Request) => settle(request, "finished");
+  const onFailed = (request: Request) => settle(request, "failed");
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  page.on("requestfinished", onFinished);
+  page.on("requestfailed", onFailed);
+  try {
+    await page.mouse.move(0, 0);
+    await page.goto(`${base}${destination}`, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => performance.getEntriesByName("observed:ready").length > 0);
+    await expect(
+      page.locator("aside").getByRole("button", { name: "Collection 01", exact: true }),
+    ).toBeVisible();
+    if (!baseline) {
+      await page.waitForFunction(
+        () => performance.getEntriesByName("printstash:library-ready").length > 0,
+      );
+      const painted = await page.evaluate(() => ({
+        ready: performance.getEntriesByName("printstash:library-ready")[0].startTime,
+        cards: performance.getEntriesByName("observed:cards")[0].startTime,
+        tree: performance.getEntriesByName("observed:tree")[0].startTime,
+      }));
+      // Scheduling can delay our two post-paint marks by different frame counts.
+      // Readiness must never precede visible cards/tree; its drift is recorded.
+      expect(painted.ready).toBeGreaterThanOrEqual(Math.max(painted.cards, painted.tree));
+    }
+    checkpoint("ready-observed");
+    await page.waitForFunction((dense) => {
+      const visible = (element: Element) => {
+        const r = element.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.left < innerWidth &&
+          r.right > 0 &&
+          r.top < innerHeight &&
+          r.bottom > 0
+        );
       };
-    }),
-  }));
-  expect(record.serviceWorker).toBe(true);
-  // A real navigation proves the rendered tree handles input, beyond marks/skeletons.
-  await page.locator("aside").getByRole("button", { name: "Collection 02", exact: true }).click();
-  await expect(page).toHaveURL(/c=collection-02/);
-  await page.waitForLoadState("networkidle");
-  return record;
+      const cards = [...document.querySelectorAll('main article a[href^="/models/"]')].filter(
+        visible,
+      );
+      return (
+        (!dense || cards.length > 0) &&
+        cards.every((card) => {
+          const image = card.querySelector("img");
+          return image && visible(image) && image.complete && image.naturalWidth > 0;
+        })
+      );
+    }, distribution === "dense");
+    const decoded = await page.evaluate(async (dense) => {
+      const visible = (element: Element) => {
+        const r = element.getBoundingClientRect();
+        return (
+          r.width > 0 &&
+          r.height > 0 &&
+          r.left < innerWidth &&
+          r.right > 0 &&
+          r.top < innerHeight &&
+          r.bottom > 0
+        );
+      };
+      const cards = [...document.querySelectorAll('main article a[href^="/models/"]')].filter(
+        visible,
+      );
+      if (dense && cards.length === 0) throw new Error("Dense corpus has no visible Model cards");
+      const images = cards.map((card) => {
+        const image = card.querySelector("img");
+        if (!image || !visible(image)) throw new Error("Visible Model thumbnail is absent");
+        return { image, source: image.currentSrc };
+      });
+      await Promise.all(images.map(({ image }) => image.decode()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      for (const { image, source } of images) {
+        if (
+          !image.isConnected ||
+          image.currentSrc !== source ||
+          !image.complete ||
+          image.naturalWidth === 0
+        ) {
+          throw new Error("Decoded thumbnail changed before observation");
+        }
+      }
+      return {
+        applicable: dense,
+        cards: cards.length,
+        images: images.length,
+        completed: images.length,
+        observed: performance.now(),
+      };
+    }, distribution === "dense");
+    checkpoint("decoded-observed");
+    const record = await page.evaluate(() => ({
+      ready: performance.getEntriesByName("observed:ready")[0].startTime,
+      marks: Object.fromEntries(
+        performance.getEntriesByType("mark").map((entry) => [entry.name, entry.startTime]),
+      ),
+      thumbnailsObserved: performance.now(),
+      visibleImages: [...document.querySelectorAll("main img")].filter(
+        (image) => image.getBoundingClientRect().top < innerHeight,
+      ).length,
+      serviceWorker: Boolean(navigator.serviceWorker.controller),
+      resources: performance.getEntriesByType("resource").map((entry) => {
+        // SAFETY: resource entries are returned by the browser with PerformanceResourceTiming fields.
+        const resource = entry as PerformanceResourceTiming;
+        return {
+          path: new URL(resource.name).pathname,
+          start: resource.startTime,
+          duration: resource.duration,
+          decoded: resource.decodedBodySize,
+          transfer: resource.transferSize,
+          server: resource.serverTiming.map((timing) => ({
+            name: timing.name,
+            duration: timing.duration,
+            description: timing.description,
+          })),
+        };
+      }),
+    }));
+    observation = { ready: record.ready, thumbnailsObserved: record.thumbnailsObserved, decoded };
+    expect(record.serviceWorker).toBe(true);
+    // A real navigation proves the rendered tree handles input, beyond marks/skeletons.
+    await page.locator("aside").getByRole("button", { name: "Collection 02", exact: true }).click();
+    await expect(page).toHaveURL(/c=collection-02/);
+    await page.waitForLoadState("networkidle");
+    outcome = "passed";
+    return { ...record, decoded, network: { identity, checkpoints, maxPending } };
+  } finally {
+    page.off("request", onRequest);
+    page.off("response", onResponse);
+    page.off("requestfinished", onFinished);
+    page.off("requestfailed", onFailed);
+    await writeFile(
+      resolve(directory, `sample-${identity}.json`),
+      JSON.stringify(
+        { identity, outcome, observation, checkpoints, maxPending, pending: pending.size, events },
+        null,
+        2,
+      ),
+    );
+  }
 }
 
 function statistics(values: number[]) {
@@ -171,9 +318,9 @@ test.describe("library startup budget", () => {
       try {
         const initial = await prepared(browser, locale, token, user);
         context = initial.context;
-        await sample(initial.page);
+        await sample(initial.page, `${locale}-warmup`);
         for (let index = 0; index < warmCount; index++) {
-          warm.push(await sample(initial.page));
+          warm.push(await sample(initial.page, `${locale}-warm-${index}`));
         }
       } finally {
         await context?.close();
@@ -181,7 +328,7 @@ test.describe("library startup budget", () => {
       for (let index = 0; index < coldCount; index++) {
         const fresh = await prepared(browser, locale, token, user);
         try {
-          cold.push(await sample(fresh.page));
+          cold.push(await sample(fresh.page, `${locale}-fresh-${index}`));
         } finally {
           await fresh.context.close();
         }

@@ -174,7 +174,10 @@ acceptance, prerequisite readiness and final delivery are distinct states.
 
 Follow the dependency graph in the table below. The closure sequence is
 M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10 → M11.
-M0 is the active closure target. Parallel work may divide that goal's bounded
+M0 is qualified by the [exact-base checkpoint](baseline-measurement.md#m0-acceptance):
+501 original unit/package tests, 17 production functional cases, 200 startup
+observations and bounded reproductions of the six failure families. M1 is the
+next closure target. Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own
 acceptance and removal criteria are satisfied.
@@ -182,9 +185,9 @@ acceptance and removal criteria are satisfied.
 Work implemented ahead of this order is preserved with its actual qualification
 results. It is not discarded, counted as a closed goal, or rerun without a
 specific need. The qualified M5 refresh checkpoint and pending navigation work
-remain recorded in their feature validation documents. Complete only already
-running verification before returning to M0. Final delivery and remote CI remain
-M11 work; no full-suite or performance improvement is claimed here.
+remain recorded in their feature validation documents. With M0 qualified, only
+M1 is active; later work waits for its stated prerequisites. Final delivery and
+remote CI remain M11 work; no full-suite or performance improvement is claimed here.
 
 ## Ordered increments
 

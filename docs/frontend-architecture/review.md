@@ -4,6 +4,11 @@
 frontend file or behaviour has been manually audited. Production implementation
 and comprehensive qualification remain pending.
 
+For implementation-base accounting and fresh bounded evidence, see
+[inventory reconciliation](inventory.md), [baseline failure evidence](baseline-evidence.md)
+and [measurement qualification](baseline-measurement.md). The counts and measurements
+below remain the historical planning snapshot.
+
 ## Provenance
 
 Two different source states must not be conflated:
