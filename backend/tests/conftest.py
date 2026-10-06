@@ -395,6 +395,14 @@ def _patch_engine(
 
     _http_client_mod.reset_for_tests()
 
+    # Provider clients and host semaphores are process-wide too. A test owns
+    # fresh caches; it must not close a previous test's client after that
+    # client's event loop has ended. Production shutdown stays unchanged.
+    from app.modules.ingestion import capture_provider_transport
+
+    monkeypatch.setattr(capture_provider_transport, "_pooled_clients", {})
+    monkeypatch.setattr(capture_provider_transport, "_host_limiters", {})
+
     from app.runtime import maintenance
 
     maintenance.reset_for_tests()

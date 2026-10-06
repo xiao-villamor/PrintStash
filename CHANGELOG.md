@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Isolate provider HTTP pools and host capacity between tests so a previous
+  test's ended event loop cannot affect transport shutdown.
+
 - Keep fairness qualification reads bounded to pending foreground uploads while
   preserving exact progress totals, native budgets and its existing deadline.
 
