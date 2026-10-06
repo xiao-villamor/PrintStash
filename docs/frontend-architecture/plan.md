@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M2 is locally qualified; the overall migration remains open.**
+2026-10-07. **Implementation in progress. M2 acceptance is locally qualified; no milestone is formally closed while its prerequisites remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -167,18 +167,24 @@ JobEngine seams without adding deployment infrastructure here.
 
 ## Execution status
 
-M2 (URL state and the two library modes) is closed for local implementation and
-acceptance. Its [closure record](../frontend-m2-closure-validation.md) consolidates
-the reviewed source and actual unit/browser evidence; the parent coverage matrix
-now resolves M2 rows 1–5. This does not claim a completed migration, full-suite
-qualification, performance improvement, or green remote CI.
+M2 has locally qualified implementation and acceptance, consolidated in its
+[validation record](../frontend-m2-closure-validation.md) and parent matrix rows
+1–5. Its prerequisite M1 is still open, so M2 is not formally closed. Local
+acceptance, prerequisite readiness and final delivery are distinct states.
 
-M5 (coherent navigation and history) is the next and only active closure target.
-Other unfinished goals retain their partial work and remain queued. Existing
-backend qualification results are retained without starting additional broad gates
-until the active closure needs them. Finish one goal's explicit acceptance and
-removal criteria before opening another implementation front; record a concrete
-blocker if a goal cannot close. Final delivery and remote CI remain M11 work.
+Follow the dependency graph in the table below. The closure sequence is
+M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10 → M11.
+M0 is the active closure target. Parallel work may divide that goal's bounded
+review and verification tasks; it must not substitute a later goal for an
+unfinished prerequisite. A goal closes only when its prerequisites and its own
+acceptance and removal criteria are satisfied.
+
+Work implemented ahead of this order is preserved with its actual qualification
+results. It is not discarded, counted as a closed goal, or rerun without a
+specific need. The qualified M5 refresh checkpoint and pending navigation work
+remain recorded in their feature validation documents. Complete only already
+running verification before returning to M0. Final delivery and remote CI remain
+M11 work; no full-suite or performance improvement is claimed here.
 
 ## Ordered increments
 

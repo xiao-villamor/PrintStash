@@ -40,3 +40,10 @@ pnpm exec playwright test --config=playwright.real.config.ts tests/e2e-real/mult
 Local evidence: `/tmp/frontend-m2-split-result.json` (complete, exit 0), `/tmp/frontend-m2-split.log`, `/tmp/frontend-m2-split-artifacts`. Failed expanded-run evidence remains in `/tmp/frontend-m2-browser.log`; the cancelled run has an explicit coordinator-cancelled manifest. Final test source SHA256: `2d9c75890041a9daad50a33c6a39a0d0523c1f5de7695691532033cdd6f7f0f8`.
 
 M2 acceptance is qualified by this final browser result plus the linked migration, filter, saved-view, and navigation evidence. The failed oversized attempt is retained as resolved test-organization evidence, not hidden or counted as green. Broad M1/M5 completion and remote PR CI are not claimed by this checkpoint.
+
+## Prerequisite status
+
+The local acceptance above is qualified. Formal M2 closure still requires M1,
+which depends on M0. The earlier closure announcement did not respect those
+prerequisites and is corrected in the execution plan. Keep the passing evidence;
+it does not qualify unrelated remaining transport work or the whole migration.
