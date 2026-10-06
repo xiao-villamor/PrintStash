@@ -26,6 +26,8 @@ import {
   refreshVaultAfterIngest,
 } from "@/lib/query-client";
 
+import { clearLogin, retirePrivateSessionScope } from "@/lib/auth-store";
+
 import type { QueryKey } from "@tanstack/react-query";
 import type { MockInstance } from "vitest";
 
@@ -194,6 +196,53 @@ describe("invalidateQueriesForPath", () => {
 });
 
 describe("refreshVaultAfterIngest", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    queryClient.clear();
+  });
+
+  it.each([
+    { name: "session", retire: clearLogin },
+    { name: "permission", retire: retirePrivateSessionScope },
+  ])(
+    "preserves replacement-$name projections after delayed ingest cancellation",
+    async ({ retire }) => {
+      const cancellation = Promise.withResolvers<void>();
+      const cancelQueries = queryClient.cancelQueries.bind(queryClient);
+      vi.spyOn(queryClient, "cancelQueries").mockImplementation(async (...args) => {
+        await cancelQueries(...args);
+        await cancellation.promise;
+      });
+      const refresh = refreshVaultAfterIngest();
+      retire();
+      const outlinerKey = [...queryKeys.outliner, "collections"];
+      const pages = { pages: [{ items: [] }], pageParams: [null] };
+      queryClient.setQueryData(outlinerKey, pages);
+      queryClient.setQueryData(queryKeys.models, []);
+      cancellation.resolve();
+      await refresh;
+      expect(queryClient.getQueryData(outlinerKey)).toEqual(pages);
+      expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(false);
+    },
+  );
+
+  it("refreshes current-session projections after delayed ingest cancellation", async () => {
+    const cancellation = Promise.withResolvers<void>();
+    const cancelQueries = queryClient.cancelQueries.bind(queryClient);
+    vi.spyOn(queryClient, "cancelQueries").mockImplementation(async (...args) => {
+      await cancelQueries(...args);
+      await cancellation.promise;
+    });
+    const outlinerKey = [...queryKeys.outliner, "collections"];
+    queryClient.setQueryData(outlinerKey, { pages: [{ items: [] }], pageParams: [null] });
+    queryClient.setQueryData(queryKeys.models, []);
+    const refresh = refreshVaultAfterIngest();
+    cancellation.resolve();
+    await refresh;
+    expect(queryClient.getQueryData(outlinerKey)).toBeUndefined();
+    expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(true);
+  });
+
   it("cancels stale upload-time reads, then refreshes grid, tree, and totals", async () => {
     const cancel = vi.spyOn(queryClient, "cancelQueries").mockResolvedValue();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();

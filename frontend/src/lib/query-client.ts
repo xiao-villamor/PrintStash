@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
 
 import type { CollectionRole } from "@/types";
 
@@ -84,6 +85,7 @@ export const queryKeys = {
  * race with this completion refresh.
  */
 export async function refreshVaultAfterIngest(): Promise<void> {
+  const session = getSessionVersion();
   const keys = [
     queryKeys.models,
     queryKeys.collections,
@@ -91,6 +93,8 @@ export async function refreshVaultAfterIngest(): Promise<void> {
     queryKeys.multipartModels,
   ];
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+  // Cancellation can yield across logout or an access-scope replacement.
+  if (session !== getSessionVersion()) return;
   await Promise.all([
     queryClient.resetQueries({ queryKey: queryKeys.outliner }),
     ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
