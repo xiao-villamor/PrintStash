@@ -33,6 +33,22 @@ afterEach(() => {
 });
 
 describe("listSavedViews", () => {
+  it("forwards list cancellation to the transport", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation((_url, init) => {
+      signal = init?.signal;
+      return pending.promise;
+    });
+    const request = listSavedViews({ signal: controller.signal });
+
+    controller.abort(new DOMException("cancelled", "AbortError"));
+    pending.resolve(new Response("[]", { headers: { "Content-Type": "application/json" } }));
+
+    await expect(request).rejects.toThrow("cancelled");
+    expect(signal?.aborted).toBe(true);
+  });
   it("reads them fresh", async () => {
     respondWith([]);
 

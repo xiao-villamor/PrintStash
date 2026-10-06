@@ -1,4 +1,7 @@
 {
+  "savedView.loading": "Loading saved views…",
+  "savedView.loadError": "Could not load saved views",
+  "savedView.retry": "Retry saved views",
   "settings.accountUsersFailed": "Users could not be loaded.",
   "settings.accountKeysFailed": "API keys could not be loaded.",
   "settings.accountDismissSecret": "Dismiss this secret",

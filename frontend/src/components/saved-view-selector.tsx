@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Bookmark,
   BookmarkPlus,
@@ -51,6 +51,7 @@ export function SavedViewSelector({
   views,
   activeId,
   modified = false,
+  readState = { status: "ready" },
   onSelect,
   onCreate,
   onUpdate,
@@ -65,6 +66,7 @@ export function SavedViewSelector({
   views: SavedViewRead[];
   activeId: number | null;
   modified?: boolean;
+  readState?: { status: "ready" | "loading" } | { status: "error"; retry: () => void };
   onSelect: (view: SavedViewRead) => void;
   onCreate: () => void;
   onUpdate: (view: SavedViewRead) => Promise<void>;
@@ -85,6 +87,8 @@ export function SavedViewSelector({
   const [deleting, setDeleting] = useState<SavedViewRead | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const draftRevision = useRef(0);
+  const confirmationRevision = useRef(0);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     const matches = needle
@@ -118,6 +122,8 @@ export function SavedViewSelector({
     setBusy(true);
     try {
       await action();
+    } catch {
+      // The command owner reports the error; retain the current form for retry.
     } finally {
       setBusy(false);
     }
@@ -168,6 +174,19 @@ export function SavedViewSelector({
             </div>
           </div>
           <div className="max-h-64 overflow-y-auto p-1">
+            {readState.status === "loading" && (
+              <p role="status" className="px-3 py-6 text-center text-sm text-muted-foreground">
+                {uiText("savedView.loading")}
+              </p>
+            )}
+            {readState.status === "error" && (
+              <div role="alert" className="space-y-2 px-3 py-3 text-sm">
+                <p>{uiText("savedView.loadError")}</p>
+                <Button size="sm" variant="outline" onClick={readState.retry}>
+                  {uiText("savedView.retry")}
+                </Button>
+              </div>
+            )}
             {filtered.length ? (
               filtered.map((view, index) => (
                 <div
@@ -202,6 +221,7 @@ export function SavedViewSelector({
                       title={uiText("Rename")}
                       aria-label={uiText("Rename {value1}", { value1: String(view.name) })}
                       onClick={() => {
+                        draftRevision.current += 1;
                         setEditing(view);
                         setName(view.name);
                         setMenuOpen(false);
@@ -224,6 +244,7 @@ export function SavedViewSelector({
                       title={uiText("Delete")}
                       aria-label={uiText("Delete {value1}", { value1: String(view.name) })}
                       onClick={() => {
+                        confirmationRevision.current += 1;
                         setDeleting(view);
                         setMenuOpen(false);
                       }}
@@ -234,15 +255,16 @@ export function SavedViewSelector({
                   </div>
                 </div>
               ))
-            ) : (
+            ) : readState.status === "ready" ? (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">
                 {views.length ? uiText("No matching views") : uiText("No saved views yet")}
               </p>
-            )}
+            ) : null}
           </div>
           <div className="border-t border-border p-1">
             <button
               type="button"
+              disabled={readState.status !== "ready"}
               onClick={() => {
                 setMenuOpen(false);
                 onCreate();
@@ -256,7 +278,10 @@ export function SavedViewSelector({
         </DropdownMenu>
         <Modal
           open={!!editing}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            draftRevision.current += 1;
+            setEditing(null);
+          }}
           title={uiText("Rename saved view")}
           className="max-w-sm"
         >
@@ -265,8 +290,9 @@ export function SavedViewSelector({
               event.preventDefault();
               if (editing && name.trim())
                 void run(async () => {
+                  const revision = draftRevision.current;
                   await onRename(editing, name.trim());
-                  setEditing(null);
+                  if (revision === draftRevision.current) setEditing(null);
                 });
             }}
             className="space-y-4"
@@ -274,11 +300,21 @@ export function SavedViewSelector({
             <Input
               autoFocus
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                draftRevision.current += 1;
+                setName(event.target.value);
+              }}
               maxLength={128}
             />
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setEditing(null)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  draftRevision.current += 1;
+                  setEditing(null);
+                }}
+              >
                 {uiText("Cancel")}
               </Button>
               <Button type="submit" loading={busy} disabled={!name.trim()}>
@@ -289,12 +325,16 @@ export function SavedViewSelector({
         </Modal>
         <ConfirmModal
           open={!!deleting}
-          onClose={() => setDeleting(null)}
+          onClose={() => {
+            confirmationRevision.current += 1;
+            setDeleting(null);
+          }}
           onConfirm={() =>
             deleting &&
             void run(async () => {
+              const revision = confirmationRevision.current;
               await onDelete(deleting);
-              setDeleting(null);
+              if (revision === confirmationRevision.current) setDeleting(null);
             })
           }
           title={uiText("Delete saved view?")}

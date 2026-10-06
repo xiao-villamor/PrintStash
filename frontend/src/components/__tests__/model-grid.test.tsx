@@ -20,7 +20,7 @@
 import { outlinerRoutes } from "@/test-support/outliner";
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +29,7 @@ import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { ModelBrowser } from "@/components/model-grid";
 import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { queryKeys } from "@/lib/query-client";
+import { clearLogin } from "@/lib/auth-store";
 import type {
   CollectionRead,
   ModelListItem,
@@ -1961,6 +1962,91 @@ describe("ModelBrowser", () => {
   });
 
   describe("saved views", () => {
+    it("retires the rename draft after a denied list refresh", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: "Rename PETG only" }));
+      expect(screen.getByDisplayValue("PETG only")).toBeVisible();
+      app.route({ "GET /api/v1/saved-views": json({ detail: "not_authenticated" }, 401) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: ["saved-views"] });
+      });
+
+      expect(screen.queryByDisplayValue("PETG only")).toBeNull();
+      expect(screen.queryByRole("button", { name: "PETG only" })).toBeNull();
+      expect(
+        app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/saved-views"),
+      ).toHaveLength(2);
+    });
+
+    it("immediately retires the private create draft with its session", async () => {
+      const user = userEvent.setup();
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByRole("textbox"), "Private draft");
+
+      act(() => clearLogin());
+
+      expect(screen.queryByDisplayValue("Private draft")).toBeNull();
+    });
+
+    it("recovers the list after retry", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: { "GET /api/v1/saved-views": json({ detail: "temporary_failure" }, 503) },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await screen.findByText("Could not load saved views");
+      expect(screen.queryByText("No saved views yet")).toBeNull();
+      app.route({ "GET /api/v1/saved-views": json([aSavedView()]) });
+
+      await user.click(screen.getByRole("button", { name: "Retry saved views" }));
+
+      expect(await screen.findByRole("button", { name: "PETG only" })).toBeVisible();
+    });
+
+    it("preserves a newer create name after acknowledgement", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Benchy" })],
+        routes: { "POST /api/v1/saved-views": () => pending.promise },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
+      const dialog = await screen.findByRole("dialog");
+      await user.type(within(dialog).getByRole("textbox"), "First name");
+      await user.click(within(dialog).getByRole("button", { name: "Save view" }));
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("POST").filter((request) => request.url === "/api/v1/saved-views"),
+        ).toHaveLength(1),
+      );
+      await user.clear(within(dialog).getByRole("textbox"));
+      await user.type(within(dialog).getByRole("textbox"), "Next draft");
+
+      await act(async () => pending.resolve(json(aSavedView({ name: "First name" }))));
+
+      expect(screen.getByRole("dialog", { name: "Save current view" })).toBeVisible();
+      expect(within(dialog).getByRole("textbox")).toHaveValue("Next draft");
+    });
+
     it("saves the library mode", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderVault({
@@ -2013,7 +2099,7 @@ describe("ModelBrowser", () => {
       const { requestsWithMethod } = renderVault({
         at: "/?tag=functional",
         models: [aModelListItem({ name: "Benchy" })],
-        routes: { "POST /api/v1/saved-views": json({ id: 1, name: "PETG", filters: {} }) },
+        routes: { "POST /api/v1/saved-views": json(aSavedView({ name: "PETG" })) },
       });
       await screen.findByText("Benchy");
 

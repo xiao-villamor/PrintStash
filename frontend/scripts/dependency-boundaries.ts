@@ -67,6 +67,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "mutations",
     "navigation-state",
     "reading-position",
+    "saved-views",
     "thumbnails",
     "url",
   ].map((name) => `src/features/library/${name}.ts`),

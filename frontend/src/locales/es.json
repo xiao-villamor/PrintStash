@@ -1,4 +1,7 @@
 {
+  "savedView.loading": "Cargando vistas guardadas…",
+  "savedView.loadError": "No se pudieron cargar las vistas guardadas",
+  "savedView.retry": "Reintentar vistas guardadas",
   "settings.accountUsersFailed": "No se pudieron cargar los usuarios.",
   "settings.accountKeysFailed": "No se pudieron cargar las claves API.",
   "settings.accountDismissSecret": "Ocultar este secreto",

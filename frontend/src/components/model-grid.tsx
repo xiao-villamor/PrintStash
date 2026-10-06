@@ -8,6 +8,7 @@ import {
   tagLibraryModels,
   type LibraryEditReceipt,
 } from "@/features/library/batch-edits";
+import { useSavedViews, type SavedViewCommand } from "@/features/library/saved-views";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 
 import {
@@ -101,10 +102,6 @@ import {
   renameCollection,
   deleteCollection,
   batchDeleteModels,
-  createSavedView,
-  updateSavedView,
-  deleteSavedView,
-  listSavedViews,
   restoreModel,
   replaceCollectionTags,
 } from "@/lib/api";
@@ -434,9 +431,6 @@ const RECENT_FOLDERS_KEY = "ps-recent-folders";
 const RECENT_FOLDERS_LABELLED_KEY = "ps-recent-folders-labelled";
 const RECENT_FOLDERS_LIMIT = 6;
 const LIBRARY_VIEW_KEY = "ps-vault-library-view";
-// A signed-out session has no saved views; a shared constant keeps the derived
-// list referentially stable across renders.
-const NO_SAVED_VIEWS: SavedViewRead[] = [];
 
 // The values each enum-valued filter accepts. The URL is user-editable, so a
 // `?file_type=nonsense` has to be dropped before it reaches a query.
@@ -608,13 +602,37 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     else params.delete("printer_presence");
     router.replace(params.size ? `/?${params}` : "/", { scroll: false });
   }
-  const [loadedSavedViews, setLoadedSavedViews] = useState<SavedViewRead[]>([]);
-  // Saved views belong to an account, so a signed-out session simply has none.
-  const savedViews = auth.isAuthenticated ? loadedSavedViews : NO_SAVED_VIEWS;
-  const [activeSavedViewId, setActiveSavedViewId] = useState<number | null>(null);
+  const savedViewsOwner = useSavedViews(savedViewsEnabled);
+  const savedViews = savedViewsOwner.views;
+  const [savedViewSelection, setSavedViewSelection] = useState<{
+    session: number;
+    id: number;
+  } | null>(null);
+  const activeSavedViewId =
+    savedViewSelection?.session === savedViewsOwner.session ? savedViewSelection.id : null;
+  function setActiveSavedViewId(id: number | null) {
+    setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
+  }
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
   const [saveViewBusy, setSaveViewBusy] = useState(false);
+  const [saveViewSession, setSaveViewSession] = useState(savedViewsOwner.session);
+  const saveViewRevision = useRef(0);
+  function openSaveView() {
+    saveViewRevision.current += 1;
+    setSaveViewSession(savedViewsOwner.session);
+    setSaveViewName("");
+    setSaveViewBusy(false);
+    setSaveViewOpen(true);
+  }
+  const savedViewReadState = savedViewsOwner.query.isError
+    ? {
+        status: "error" as const,
+        retry: () => {
+          void savedViewsOwner.query.refetch();
+        },
+      }
+    : { status: savedViewsOwner.query.isPending ? ("loading" as const) : ("ready" as const) };
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     readVaultPreference("ps-vault-view") === "list" ? "list" : "grid",
   );
@@ -759,21 +777,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
-
-  useEffect(() => {
-    if (!auth.isAuthenticated || !savedViewsEnabled) return;
-    let active = true;
-    listSavedViews()
-      .then((views) => {
-        if (active) setLoadedSavedViews(views);
-      })
-      .catch(() => {
-        if (active) setLoadedSavedViews([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [auth.isAuthenticated, savedViewsEnabled]);
 
   // Collection selection lives in the URL (`?c=<path>`) so it resets when the
   // user navigates away (e.g. to Settings) and clicks "Vault" again — that link
@@ -954,20 +957,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function saveCurrentView() {
     const name = saveViewName.trim();
-    if (!name) return;
+    if (!name || saveViewBusy) return;
+    const session = getSessionVersion();
+    const revision = saveViewRevision.current;
     setSaveViewBusy(true);
     try {
-      const created = await createSavedView(name, currentViewFilters());
-      setLoadedSavedViews((current) =>
-        [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
-      );
-      setSaveViewOpen(false);
-      setSaveViewName("");
+      await savedViewsOwner.mutation.mutateAsync({
+        kind: "create",
+        name,
+        filters: currentViewFilters(),
+      });
+      requireSessionVersion(session);
+      if (revision === saveViewRevision.current) {
+        setSaveViewOpen(false);
+        setSaveViewName("");
+      }
       toast.success(uiText("View saved"));
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setSaveViewBusy(false);
+      if (session === getSessionVersion()) setSaveViewBusy(false);
     }
   }
 
@@ -1016,13 +1025,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         tag: [...selectedTags].sort(),
       });
 
-  async function manageSavedView(action: () => Promise<SavedViewRead | void>, success: MessageKey) {
+  async function manageSavedView(command: SavedViewCommand, success: MessageKey) {
+    const session = getSessionVersion();
     try {
-      await action();
-      setLoadedSavedViews(await listSavedViews());
+      await savedViewsOwner.mutation.mutateAsync(command);
+      requireSessionVersion(session);
+      if (command.kind === "delete") {
+        setSavedViewSelection((current) => (current?.id === command.id ? null : current));
+      }
       toast.success(uiText(success));
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
       throw error;
     }
   }
@@ -1858,7 +1871,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     <Localized>
       <>
         <Modal
-          open={saveViewOpen}
+          open={saveViewOpen && saveViewSession === savedViewsOwner.session}
           onClose={() => {
             if (!saveViewBusy) {
               setSaveViewOpen(false);
@@ -1880,7 +1893,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               <Input
                 autoFocus
                 value={saveViewName}
-                onChange={(event) => setSaveViewName(event.target.value)}
+                onChange={(event) => {
+                  saveViewRevision.current += 1;
+                  setSaveViewName(event.target.value);
+                }}
                 maxLength={128}
                 placeholder={uiText("Ready to print")}
               />
@@ -2251,6 +2267,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           {favoritesOnly && <Check className="h-3.5 w-3.5" />}
                         </button>
                         <SavedViewSelector
+                          key={savedViewsOwner.session}
+                          readState={savedViewReadState}
                           views={savedViews}
                           activeId={activeSavedViewId}
                           modified={savedViewModified}
@@ -2260,31 +2278,39 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           }}
                           onCreate={() => {
                             setMoreOpen(false);
-                            setSaveViewOpen(true);
+                            openSaveView();
                           }}
                           onUpdate={(view) =>
                             manageSavedView(
-                              () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                              {
+                                kind: "update",
+                                id: view.id,
+                                payload: { filters: currentViewFilters() },
+                              },
                               "savedView.updateSuccess",
                             )
                           }
                           onRename={(view, name) =>
                             manageSavedView(
-                              () => updateSavedView(view.id, { name }),
+                              { kind: "update", id: view.id, payload: { name } },
                               "savedView.renameSuccess",
                             )
                           }
                           onDuplicate={(view) =>
                             manageSavedView(
-                              () => createSavedView(duplicateViewName(view.name), view.filters),
+                              {
+                                kind: "create",
+                                name: duplicateViewName(view.name),
+                                filters: view.filters,
+                              },
                               "savedView.duplicateSuccess",
                             )
                           }
                           onDelete={(view) =>
-                            manageSavedView(async () => {
-                              await deleteSavedView(view.id);
-                              if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                            }, "savedView.deleteSuccess")
+                            manageSavedView(
+                              { kind: "delete", id: view.id },
+                              "savedView.deleteSuccess",
+                            )
                           }
                           triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
                           triggerRole="menuitem"
@@ -2590,34 +2616,41 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       {uiText("Favorites")}
                     </Button>
                     <SavedViewSelector
+                      key={savedViewsOwner.session}
+                      readState={savedViewReadState}
                       views={savedViews}
                       activeId={activeSavedViewId}
                       modified={savedViewModified}
                       onSelect={applySavedView}
-                      onCreate={() => setSaveViewOpen(true)}
+                      onCreate={openSaveView}
                       onUpdate={(view) =>
                         manageSavedView(
-                          () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                          {
+                            kind: "update",
+                            id: view.id,
+                            payload: { filters: currentViewFilters() },
+                          },
                           "savedView.updateSuccess",
                         )
                       }
                       onRename={(view, name) =>
                         manageSavedView(
-                          () => updateSavedView(view.id, { name }),
+                          { kind: "update", id: view.id, payload: { name } },
                           "savedView.renameSuccess",
                         )
                       }
                       onDuplicate={(view) =>
                         manageSavedView(
-                          () => createSavedView(duplicateViewName(view.name), view.filters),
+                          {
+                            kind: "create",
+                            name: duplicateViewName(view.name),
+                            filters: view.filters,
+                          },
                           "savedView.duplicateSuccess",
                         )
                       }
                       onDelete={(view) =>
-                        manageSavedView(async () => {
-                          await deleteSavedView(view.id);
-                          if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                        }, "savedView.deleteSuccess")
+                        manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
                       }
                       triggerClassName="h-10 sm:h-8"
                     />
