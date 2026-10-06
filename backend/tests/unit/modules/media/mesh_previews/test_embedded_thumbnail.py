@@ -217,3 +217,154 @@ class TestPngMagic:
     def test_rejects_data_without_png_magic(self, tmp_path: Path) -> None:
         p = _make_3mf(tmp_path, {"Metadata/thumbnail.png": b"not actually a png"})
         assert extract_embedded_3mf_thumbnail(p) is None
+
+
+class TestEmbeddedPreviewBoundaries:
+    def test_archive_entry_ceiling(self, tmp_path):
+        path = tmp_path / "too-many.3mf"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("Metadata/thumbnail.png", _PNG_SMALL)
+            for index in range(4096):
+                archive.writestr(f"3D/part-{index}.model", b"")
+        original = path.read_bytes()
+        assert extract_embedded_3mf_thumbnail(path) is None
+        assert path.read_bytes() == original
+
+    @pytest.mark.parametrize(
+        "name",
+        ["/Metadata/thumbnail.png", "Metadata/" + "é" * 513 + ".png"],
+        ids=["absolute", "utf8-over-1024-bytes"],
+    )
+    def test_unsafe_member_name(self, tmp_path, name):
+        path = _make_3mf(
+            tmp_path, {name: _PNG_BIG, "Metadata/thumbnail.png": _PNG_SMALL}
+        )
+        original = path.read_bytes()
+        assert extract_embedded_3mf_thumbnail(path) is None
+        assert path.read_bytes() == original
+
+    def test_thumbnail_candidate_ceiling(self, tmp_path):
+        entries = {f"Metadata/plate_{index}.png": _PNG_SMALL for index in range(64)}
+        entries["Metadata/thumbnail.png"] = _PNG_BIG
+        path = _make_3mf(tmp_path, entries)
+        assert extract_embedded_3mf_thumbnail(path) is None
+
+    def test_actual_compression_ratio_refusal(self, tmp_path):
+        path = tmp_path / "ratio.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("Metadata/thumbnail.png", _PNG_MAGIC + b"x" * 100_000)
+        with zipfile.ZipFile(path) as archive:
+            info = archive.getinfo("Metadata/thumbnail.png")
+            assert info.file_size / info.compress_size > 200
+        assert extract_embedded_3mf_thumbnail(path) is None
+
+    def test_actual_single_image_ceiling(self, tmp_path):
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (4, 4), "blue").save(image, format="PNG")
+        valid = image.getvalue()
+        oversized = valid + b"x" * (32 * 1024 * 1024 + 1 - len(valid))
+        with Image.open(io.BytesIO(oversized)) as preview:
+            preview.load()
+            assert (preview.format, preview.size) == ("PNG", (4, 4))
+        path = _make_3mf(
+            tmp_path,
+            {"Metadata/thumbnail.png": oversized, "Metadata/plate_1.png": valid},
+        )
+        with zipfile.ZipFile(path) as archive:
+            assert (
+                archive.getinfo("Metadata/thumbnail.png").file_size
+                == 32 * 1024 * 1024 + 1
+            )
+        assert extract_embedded_3mf_thumbnail(path, validate_image=True) == valid
+        with zipfile.ZipFile(path) as archive:
+            assert archive.read("Metadata/plate_1.png") == valid
+
+    def test_actual_aggregate_ceiling(self, tmp_path):
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (4, 4), "blue").save(image, format="PNG")
+        valid = image.getvalue()
+        invalid = _PNG_MAGIC + b"x" * (32 * 1024 * 1024 - len(_PNG_MAGIC))
+        path = _make_3mf(
+            tmp_path,
+            {
+                "Metadata/thumbnail.png": invalid,
+                "Thumbnails/thumbnail.png": invalid,
+                "Metadata/plate_1.png": valid,
+            },
+        )
+        with zipfile.ZipFile(path) as archive:
+            assert (
+                archive.getinfo("Metadata/thumbnail.png").file_size == 32 * 1024 * 1024
+            )
+            assert (
+                archive.getinfo("Thumbnails/thumbnail.png").file_size
+                == 32 * 1024 * 1024
+            )
+            assert archive.read("Metadata/plate_1.png") == valid
+        assert extract_embedded_3mf_thumbnail(path, validate_image=True) is None
+
+    def test_corrupt_candidate_fallback(self, tmp_path):
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (4, 4), "green").save(image, format="PNG")
+        valid = image.getvalue()
+        path = _make_3mf(
+            tmp_path, {"Metadata/thumbnail.png": valid, "Metadata/plate_1.png": valid}
+        )
+        with zipfile.ZipFile(path) as archive:
+            info = archive.getinfo("Metadata/thumbnail.png")
+            offset = (
+                info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+            )
+        with path.open("r+b") as stream:
+            stream.seek(offset)
+            stream.write(b"X")
+        with zipfile.ZipFile(path) as archive:
+            with pytest.raises(zipfile.BadZipFile, match="CRC"):
+                archive.read("Metadata/thumbnail.png")
+        assert extract_embedded_3mf_thumbnail(path, validate_image=True) == valid
+
+    def test_oversized_pixel_header(self, tmp_path):
+        import struct
+
+        payload = (
+            _PNG_MAGIC
+            + struct.pack(">I", 13)
+            + b"IHDR"
+            + struct.pack(">II", 5001, 5000)
+        )
+        path = _make_3mf(tmp_path, {"Metadata/thumbnail.png": payload})
+        assert extract_embedded_3mf_thumbnail(path) is None
+
+    @pytest.mark.parametrize(
+        "shape",
+        ["short-header", "undecodable-ihdr"],
+        ids=["short-header", "undecodable-ihdr"],
+    )
+    def test_strict_png_validation(self, tmp_path, shape):
+        import struct
+
+        payload = (
+            _PNG_SMALL
+            if shape == "short-header"
+            else _PNG_MAGIC + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 4, 4)
+        )
+        path = _make_3mf(tmp_path, {"Metadata/thumbnail.png": payload})
+        assert extract_embedded_3mf_thumbnail(path, validate_image=True) is None
+        assert extract_embedded_3mf_thumbnail(path) == payload
+
+    @pytest.mark.parametrize(
+        "preferred",
+        ["Thumbnails/thumbnail.png", "Metadata/plate_01.png"],
+        ids=["nested-thumbnail", "first-plate"],
+    )
+    def test_semantic_fallback_rank(self, tmp_path, preferred):
+        path = _make_3mf(
+            tmp_path, {preferred: _PNG_SMALL, "Metadata/generic.png": _PNG_BIG}
+        )
+        assert extract_embedded_3mf_thumbnail(path) == _PNG_SMALL
