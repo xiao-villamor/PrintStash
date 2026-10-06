@@ -3,20 +3,16 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
-import { getModel } from "@/lib/api";
-import { ApiError, parseApiError } from "@/lib/errors";
+import { useModelDetail } from "@/features/library/model-detail";
+import { Button } from "@/components/ui/button";
+import { parseApiError } from "@/lib/errors";
 import { ModelRead } from "@/types";
 
 import { ModelDetail } from "./index";
 
-/**
- * Renders the model detail. When the server could not fetch the model (SSR has
- * no auth token — reads now require a logged-in user), `initialModel` is null
- * and we fetch client-side with the browser's stored token.
- */
+/** Route composition for the authorized Model read and its recovery states. */
 export function ModelDetailClientView({
   id,
   initialModel,
@@ -25,29 +21,16 @@ export function ModelDetailClientView({
   initialModel: ModelRead | null;
 }) {
   useUiLocale();
-  const [model, setModel] = useState<ModelRead | null>(initialModel);
-  const [error, setError] = useState<ApiError | null>(null);
+  const query = useModelDetail(id, initialModel ?? undefined);
+  const model = query.data;
+  const error = query.error ? parseApiError(query.error) : null;
+  const denied = error && [401, 403, 404].includes(error.status);
 
-  useEffect(() => {
-    if (model) return;
-    let alive = true;
-    getModel(id)
-      .then((m) => {
-        if (alive) setModel(m);
-      })
-      .catch((e) => {
-        if (alive) setError(parseApiError(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [id, model]);
+  if (model && !denied) return <ModelDetail model={model} />;
 
-  if (model) return <ModelDetail model={model} />;
-
-  if (error) {
-    const notFound = error.status === 404;
-    const needsAuth = error.status === 401 || error.status === 403;
+  if (error || !query.active) {
+    const notFound = error?.status === 404;
+    const needsAuth = !query.active || error?.status === 401 || error?.status === 403;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
         <p className="text-lg font-semibold text-on-surface">
@@ -64,6 +47,11 @@ export function ModelDetailClientView({
               ? uiText("This model lives in a collection you need access to.")
               : uiText("A server error occurred. Reload to try again.")}
         </p>
+        {!notFound && !needsAuth && (
+          <Button variant="outline" onClick={() => void query.refetch()} loading={query.isFetching}>
+            {uiText("Retry")}
+          </Button>
+        )}
       </div>
     );
   }

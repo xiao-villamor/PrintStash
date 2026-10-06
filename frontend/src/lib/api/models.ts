@@ -180,8 +180,11 @@ export function importLibraryArchive(file: File): Promise<JobAccepted> {
   return sendForm("/api/v1/models/library-import", form);
 }
 
-export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]> {
-  return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`);
+export function getModelPrinterFiles(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<ModelPrinterFileRead[]> {
+  return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`, options);
 }
 
 export function getModelPrintJobs(

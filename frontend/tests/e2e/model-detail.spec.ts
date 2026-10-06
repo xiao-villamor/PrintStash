@@ -24,6 +24,24 @@ import type { ModelRead } from "../../src/types/models";
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("recovers a failed Model read without reloading the route", async ({ page }) => {
+    let available = false;
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (!available)
+        await route.fulfill({ status: 503, json: { detail: "temporarily_unavailable" } });
+      else await route.continue();
+    });
+    await page.goto("/models/1");
+    await expect(page.getByText("Couldn’t load this model")).toBeVisible();
+    available = true;
+
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+
+    await expect(page.getByRole("button", { name: "Model actions" })).toBeVisible();
+    await expect(page.getByText("Couldn’t load this model")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/models\/1$/);
+  });
+
   test("reviews a conflicting Model before intentional retry", async ({ page }) => {
     let conflicted = false;
     let saved = false;
@@ -207,13 +225,15 @@ test.describe("model detail route", () => {
     const loadingPreview = page.getByRole("status", { name: "Loading 3D preview" });
 
     await page.goto("/");
+    await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
+    const libraryUrl = page.url();
     await modelLink.click();
     await expect(page).toHaveURL(/\/models\/1$/);
     await expect(preview).toBeVisible();
     await expect(loadingPreview).toHaveCount(0);
 
     await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(libraryUrl);
     await modelLink.click();
     await expect(page).toHaveURL(/\/models\/1$/);
     await expect(preview).toBeVisible();

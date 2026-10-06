@@ -1,5 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
+import {
+  useModelDetail,
+  modelPrinterFilesOptions,
+  useModelPrintJobs,
+  type PublishModel,
+} from "@/features/library/model-detail";
+import { useLibraryStar } from "@/features/library/mutations";
 import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
@@ -34,18 +42,7 @@ import {
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
-import {
-  createTag,
-  deleteModel,
-  deleteTag,
-  getAssetUrl,
-  getModel,
-  getModelPrinterFiles,
-  getModelPrintJobs,
-  starModel,
-  unstarModel,
-  updateModel,
-} from "@/lib/api";
+import { createTag, deleteModel, deleteTag, getAssetUrl, getModel, updateModel } from "@/lib/api";
 import { useTags } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
@@ -53,7 +50,7 @@ import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { ModelPrinterFileRead, ModelPrintJobRead, ModelRead, TagRead } from "@/types";
+import { ModelPrinterFileRead, ModelRead, TagRead } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Button } from "@/components/ui/button";
@@ -147,14 +144,39 @@ function getBedSize(printerModel: string | null | undefined): BedSize {
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
+  const resource = useModelDetail(initialModel.id, initialModel);
+  const denied =
+    resource.error instanceof ApiError && [401, 403, 404].includes(resource.error.status);
+  if (!resource.data || denied) return null;
+  return (
+    <ModelDetailPresentation
+      key={resource.data.id}
+      model={resource.data}
+      setModel={resource.publish}
+      readError={resource.isError}
+      retryRead={() => void resource.refetch()}
+    />
+  );
+}
+
+function ModelDetailPresentation({
+  model,
+  setModel,
+  readError,
+  retryRead,
+}: {
+  model: ModelRead;
+  setModel: PublishModel;
+  readError: boolean;
+  retryRead: () => void;
+}) {
   useUiLocale();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
-  const [model, setModel] = useState(initialModel);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editBaseVersion, setEditBaseVersion] = useState(initialModel.edit_version);
+  const [editBaseVersion, setEditBaseVersion] = useState(model.edit_version);
   const [editConflict, setEditConflict] = useState(false);
   const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -162,7 +184,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [starBusy, setStarBusy] = useState(false);
+  const star = useLibraryStar();
+  const starBusy = star.isPending;
   const [editName, setEditName] = useState(model.name);
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
@@ -176,8 +199,6 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   // there is nothing to re-sync while this view is open.
   const [metadataPreferences] = useState(readMetadataPreferences);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
-  const [fetchedPrinterFiles, setFetchedPrinterFiles] = useState<ModelPrinterFileRead[]>([]);
-  const [fetchedPrintJobs, setFetchedPrintJobs] = useState<ModelPrintJobRead[]>([]);
   const [requestedTab, setRequestedTab] = useState<TabKey>("overview");
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
   const [detailSidebarWidth, setDetailSidebarWidth] = useState(() => {
@@ -203,17 +224,16 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const viewerControls = useRef<STLViewerControls | null>(null);
   const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
   const canViewPrinters = !!user?.is_superuser;
-  // Printer files, print jobs and the history tab are superuser-only. Gating
-  // them here — rather than clearing state from an effect when the permission
-  // disappears — keeps the fetch effect a pure fetch.
+  const printerFileQuery = useQuery({
+    ...modelPrinterFilesOptions(model.id),
+    enabled: canViewPrinters,
+  });
+  const printJobQuery = useModelPrintJobs(model.id, canViewPrinters);
   const printerFiles = useMemo(
-    () => (canViewPrinters ? fetchedPrinterFiles : []),
-    [canViewPrinters, fetchedPrinterFiles],
+    () => (canViewPrinters ? (printerFileQuery.data ?? []) : []),
+    [canViewPrinters, printerFileQuery.data],
   );
-  const printJobs = useMemo(
-    () => (canViewPrinters ? fetchedPrintJobs : []),
-    [canViewPrinters, fetchedPrintJobs],
-  );
+  const printJobs = canViewPrinters ? (printJobQuery.data ?? []) : [];
   const activeTab =
     (!canViewPrinters && requestedTab === "history") ||
     (!canEditModel && requestedTab === "similar")
@@ -231,35 +251,20 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   // Quick actions on the Overview card (mark failed / recommend).
   const revisionUpdater = useRevisionUpdater(model.id, setModel);
   // Thumbnails and metadata arrive after upload, derived in the background.
-  useDerivativeRefresh(model.id, setModel);
+  useDerivativeRefresh(model.id);
 
   async function toggleFavorite() {
     if (!auth.isAuthenticated || starBusy) {
       auth.showAuthRequiredToast();
       return;
     }
-    const starred = !model.starred;
-    setModel((current) => ({ ...current, starred }));
-    setStarBusy(true);
+    const session = getSessionVersion();
     try {
-      await (starred ? starModel(model.id) : unstarModel(model.id));
+      await star.mutateAsync({ kind: "model", id: model.id, starred: !model.starred });
     } catch (error) {
-      setModel((current) => ({ ...current, starred: !starred }));
-      toast.error(error);
-    } finally {
-      setStarBusy(false);
+      if (session === getSessionVersion()) toast.error(error);
     }
   }
-
-  useEffect(() => {
-    if (!canViewPrinters) return;
-    getModelPrinterFiles(model.id)
-      .then(setFetchedPrinterFiles)
-      .catch(() => {});
-    getModelPrintJobs(model.id)
-      .then(setFetchedPrintJobs)
-      .catch(() => {});
-  }, [model.id, canViewPrinters]);
 
   useEffect(() => {
     try {
@@ -356,7 +361,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         version,
       );
       requireSessionVersion(session);
-      setModel(updated);
+      if (!(await setModel(updated))) return;
       setEditConflict(false);
       setReviewedModel(null);
       setEditing(false);
@@ -386,9 +391,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     }
   }
 
-  function useReviewedVersion() {
-    if (!reviewedModel) return;
-    setModel(reviewedModel);
+  async function useReviewedVersion() {
+    if (!reviewedModel || !(await setModel(reviewedModel))) return;
     setEditBaseVersion(reviewedModel.edit_version);
     setEditName(reviewedModel.name);
     setEditDescription(reviewedModel.description ?? "");
@@ -526,6 +530,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   return (
     <Localized>
       <div className="flex flex-col h-full">
+        {readError && (
+          <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
+            <p>{uiText("Couldn’t load this model")}</p>
+            <Button variant="outline" size="sm" onClick={retryRead}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
         <ConfirmModal
           open={confirmDeleteOpen}
           onClose={() => setConfirmDeleteOpen(false)}
@@ -557,8 +569,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           <AddGcodeRevisionModal
             modelId={model.id}
             onClose={() => setAddRevisionOpen(false)}
-            onUploaded={(updated) => {
-              setModel(updated);
+            onUploaded={async (updated) => {
+              if (!(await setModel(updated))) return;
               setAddRevisionOpen(false);
               toast.success(uiText("G-code revision added"));
             }}
@@ -576,9 +588,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           suggestions={tags}
           open={tagDialogOpen}
           onClose={() => setTagDialogOpen(false)}
-          onSaved={(nextTags, editVersion) =>
-            setModel((current) => ({ ...current, tags: nextTags, edit_version: editVersion }))
-          }
+          onSaved={(nextTags, editVersion) => {
+            void setModel((current) => ({ ...current, tags: nextTags, edit_version: editVersion }));
+          }}
         />
         {editing && editConflict && (
           <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
@@ -1083,6 +1095,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
               {activeTab === "source" && <SourceTab modelId={model.id} canEdit={canEditModel} />}
 
+              {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
+                <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
+                  {uiText("Retry")}
+                </Button>
+              )}
               {activeTab === "revisions" && (
                 <RevisionsTab
                   modelId={model.id}
@@ -1105,14 +1122,25 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 />
               )}
 
-              {activeTab === "history" && canViewPrinters && (
-                <PrintHistorySection
-                  jobs={printJobs}
-                  modelId={model.id}
-                  gcodeFiles={gcodeFiles}
-                  onJobCreated={(job) => setFetchedPrintJobs((jobs) => [job, ...jobs])}
-                />
+              {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
+                <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
+                  {uiText("Retry")}
+                </Button>
               )}
+              {activeTab === "history" && canViewPrinters && printJobQuery.isPending && (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              )}
+              {activeTab === "history" &&
+                canViewPrinters &&
+                printJobQuery.data &&
+                !printJobQuery.isError && (
+                  <PrintHistorySection
+                    jobs={printJobs}
+                    modelId={model.id}
+                    gcodeFiles={gcodeFiles}
+                    onJobCreated={(job) => void printJobQuery.publish(job)}
+                  />
+                )}
             </div>
 
             {/* Klipper Sync Panel */}

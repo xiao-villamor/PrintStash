@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getSessionVersion } from "@/lib/session-transport";
 
 import { deleteFileRevision, updateFileRevision } from "@/lib/api";
 import { uiText } from "@/lib/locale";
@@ -12,7 +13,10 @@ import { FileRead, FileRevisionUpdate, ModelRead } from "@/types";
  * Shared revision mutation: auth gating, per-file saving indicator, toasts.
  * Used by the Overview card quick actions and the Revisions tab editor.
  */
-export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) => void) {
+export function useRevisionUpdater(
+  modelId: number,
+  onModel: (model: ModelRead) => void | Promise<boolean>,
+) {
   const auth = useRequireAuth();
   const [saving, setSaving] = useState<number | null>(null);
 
@@ -21,16 +25,20 @@ export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) 
       auth.showAuthRequiredToast();
       return false;
     }
+    const session = getSessionVersion();
     setSaving(file.id);
     try {
-      onModel(await updateFileRevision(modelId, file.id, patch));
+      const result = await updateFileRevision(modelId, file.id, patch);
+      if (session !== getSessionVersion()) return false;
+      const accepted = await onModel(result);
+      if (session !== getSessionVersion() || accepted === false) return false;
       toast.success(uiText("revision.updateSuccess"));
       return true;
     } catch (e) {
-      toast.error(e);
+      if (session === getSessionVersion()) toast.error(e);
       return false;
     } finally {
-      setSaving(null);
+      if (session === getSessionVersion()) setSaving(null);
     }
   }
 
@@ -39,16 +47,20 @@ export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) 
       auth.showAuthRequiredToast();
       return false;
     }
+    const session = getSessionVersion();
     setSaving(file.id);
     try {
-      onModel(await deleteFileRevision(modelId, file.id));
+      const result = await deleteFileRevision(modelId, file.id);
+      if (session !== getSessionVersion()) return false;
+      const accepted = await onModel(result);
+      if (session !== getSessionVersion() || accepted === false) return false;
       toast.success(uiText("revision.deleteSuccess"));
       return true;
     } catch (e) {
-      toast.error(e);
+      if (session === getSessionVersion()) toast.error(e);
       return false;
     } finally {
-      setSaving(null);
+      if (session === getSessionVersion()) setSaving(null);
     }
   }
 

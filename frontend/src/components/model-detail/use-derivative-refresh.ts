@@ -1,49 +1,26 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-
-import { getModel } from "@/lib/api";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { followModel } from "@/lib/events";
-import type { DerivativeState, ModelRead } from "@/types";
+import { getSessionVersion } from "@/lib/session-transport";
+import { modelDetailOptions } from "@/features/library/model-detail";
+import type { DerivativeState } from "@/types";
 
-/** States after which a Model's shown values (thumbnail, metadata) change. */
 const SETTLED: ReadonlySet<DerivativeState> = new Set(["ready", "skipped", "failed"]);
 
-/**
- * Keep an open Model current while its derivatives are produced in the
- * background: a freshly uploaded Artifact shows a placeholder, and the
- * thumbnail and metadata appear once a worker derives them, without a reload.
- *
- * Refetches through the authorized Model read on a settled derivative or a
- * `resync`; a notice never carries the data itself.
- */
-export function useDerivativeRefresh(
-  modelId: number,
-  onModel: (model: ModelRead) => void,
-  load: (id: number) => Promise<ModelRead> = getModel,
-): void {
-  // The latest callbacks, so a re-render does not resubscribe the channel.
-  const latest = useRef({ onModel, load });
+/** Notices invalidate the one authorized read, coalescing while it is pending. */
+export function useDerivativeRefresh(modelId: number): void {
+  const client = useQueryClient();
   useEffect(() => {
-    latest.current = { onModel, load };
-  });
-
-  useEffect(() => {
-    let alive = true;
-    const stop = followModel(modelId, (notice) => {
+    const session = getSessionVersion();
+    return followModel(modelId, (notice) => {
+      if (session !== getSessionVersion()) return;
       if (notice.type === "derivative" && !SETTLED.has(notice.state)) return;
-      latest.current
-        .load(modelId)
-        .then((model) => {
-          if (alive) latest.current.onModel(model);
-        })
-        .catch(() => {
-          // The next notice (or the user's next action) refetches.
-        });
+      void client.invalidateQueries(
+        { queryKey: modelDetailOptions(modelId).queryKey, exact: true },
+        { cancelRefetch: false },
+      );
     });
-    return () => {
-      alive = false;
-      stop();
-    };
-  }, [modelId]);
+  }, [client, modelId]);
 }

@@ -1,22 +1,11 @@
-/*
- * The model page's fallback path: fetching the model the server could not.
- *
- * Reads require a session, and the server render has no token — so on a cold
- * load the page arrives with no model and has to fetch one with the browser's
- * stored credentials. The three ways that can fail are three different
- * instructions, and collapsing them wastes the user's time: a 404 means stop
- * looking, a 401/403 means ask for access, and anything else means try again.
- * "Couldn't load this model" for a deleted model sends somebody hunting for a
- * model that no longer exists.
- *
- * Nothing is rendered while the fetch is in flight, because an empty detail page
- * is indistinguishable from a model with nothing in it.
- */
+/** The SPA route shares one authorized Model read and distinguishes recovery from lost access. */
 
 import "@testing-library/jest-dom/vitest";
-import { screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import userEvent from "@testing-library/user-event";
+import { queryKeys } from "@/lib/query-client";
 import { ModelDetailClientView } from "@/components/model-detail/client-view";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ModelRead } from "@/types";
@@ -70,10 +59,69 @@ afterEach(() => {
 });
 
 describe("ModelDetailClientView", () => {
-  describe("when the server already had the model", () => {
+  it("retries a failed initial read without navigation", async () => {
+    const user = userEvent.setup();
+    const view = renderView({ routes: { "GET /api/v1/models/1": json({ detail: "boom" }, 500) } });
+    await screen.findByText("Couldn’t load this model");
+    view.route({ "GET /api/v1/models/1": json(aModel()) });
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Benchy")).toBeVisible();
+  });
+
+  it("hides a cached Model after access is denied", async () => {
+    const { client } = renderView({
+      initialModel: aModel(),
+      routes: { "GET /api/v1/models/1": json({ detail: "forbidden" }, 403) },
+    });
+    await screen.findByText("Benchy");
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.model(1), exact: true });
+    });
+
+    expect(
+      await screen.findByText("This model lives in a collection you need access to."),
+    ).toBeVisible();
+    expect(screen.queryByText("Benchy")).toBeNull();
+  });
+
+  it("retains displayed Model during a transient read failure", async () => {
+    const { client } = renderView({
+      initialModel: aModel(),
+      routes: { "GET /api/v1/models/1": json({ detail: "boom" }, 500) },
+    });
+    await screen.findByText("Benchy");
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.model(1), exact: true });
+    });
+
+    expect(screen.getByText("Benchy")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
+  it("retires a pending read when the route closes", async () => {
+    let requestSignal: AbortSignal | null | undefined;
+    const view = renderView({
+      routes: {
+        "GET /api/v1/models/1": (_url, init) => {
+          requestSignal = init?.signal;
+          return new Promise<Response>(() => {});
+        },
+      },
+    });
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    view.unmount();
+
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  describe("when navigation already provided the Model", () => {
     it("renders it without asking again", async () => {
-      // The server fetched it; fetching a second time is a wasted round trip on
-      // the slowest part of the page.
+      // A fresh authorized snapshot does not need another round trip.
       const { requests } = renderView({ initialModel: aModel() });
 
       expect(await screen.findByText("Benchy")).toBeInTheDocument();
@@ -98,7 +146,7 @@ describe("ModelDetailClientView", () => {
     });
   });
 
-  describe("when the server could not", () => {
+  describe("when navigation needs the Model", () => {
     it("shows nothing while it fetches", () => {
       // An empty detail page is indistinguishable from a model with nothing in
       // it.

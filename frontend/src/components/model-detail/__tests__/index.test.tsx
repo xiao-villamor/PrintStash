@@ -13,13 +13,12 @@
  * a part that looks like it fits when it does not — which is a wrong answer
  * presented with the same confidence as a right one.
  *
- * Favouriting writes immediately and optimistically, so the star has to survive
- * the request failing: leaving it lit after a 403 tells the user something is
- * saved that is not.
+ * Favouriting publishes the confirmed server state. A failed write must leave
+ * the earlier star visible rather than claim something was saved.
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -115,6 +114,77 @@ afterEach(() => {
 });
 
 describe("ModelDetail", () => {
+  describe("remote Model ownership", () => {
+    it("shows a refreshed authorized Model", async () => {
+      const { client } = renderDetail();
+      await screen.findByText("Benchy");
+
+      act(() =>
+        client.setQueryData(queryKeys.model(1), aModel({ name: "Updated Model", edit_version: 4 })),
+      );
+
+      expect(await screen.findByText("Updated Model")).toBeVisible();
+      expect(screen.queryByText("Benchy")).toBeNull();
+    });
+
+    it("preserves the editing base across a background refresh", async () => {
+      const user = userEvent.setup();
+      const headers: string[] = [];
+      const { client } = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": (_url, init) => {
+            headers.push(new Headers(init?.headers).get("If-Match") ?? "missing");
+            return json({ detail: "edit_conflict" }, 412);
+          },
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+
+      act(() =>
+        client.setQueryData(queryKeys.model(1), aModel({ name: "Remote edit", edit_version: 4 })),
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(headers).toEqual(['"model-1-v1"']);
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
+    });
+
+    it("keeps a confirmed edit after an older read finishes", async () => {
+      const user = userEvent.setup();
+      let release!: (response: Response) => void;
+      const oldRead = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const { client, requests } = renderDetail({
+        routes: {
+          "GET /api/v1/models/1": () => oldRead,
+          "PATCH /api/v1/models/1": json(aModel({ name: "Confirmed edit", edit_version: 4 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "Confirmed edit");
+      void client.invalidateQueries({ queryKey: queryKeys.model(1), exact: true });
+      await waitFor(() =>
+        expect(requests().some((r) => r.url === "/api/v1/models/1" && r.method === "GET")).toBe(
+          true,
+        ),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(await screen.findByText("Confirmed edit")).toBeVisible();
+      await act(async () => {
+        release(json(aModel()));
+        await oldRead;
+      });
+
+      expect(screen.getByText("Confirmed edit")).toBeVisible();
+      expect(client.getQueryData<ModelRead>(queryKeys.model(1))?.name).toBe("Confirmed edit");
+    });
+  });
+
   describe("collection navigation", () => {
     it("shows the detail label without loading the whole collection tree", async () => {
       const { requests } = renderDetail({
