@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify preparation resource lifecycle rejects malformed recovery identities,
+  preserves failed cleanup ownership and enforces source-before-native ordering.
+
 - Verify durable volume evidence reads preserve closed variants and refuse
   incompatible scalar, method, cause or state combinations.
 

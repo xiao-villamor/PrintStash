@@ -9,8 +9,19 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import native_resources
+from app.runtime import native_runtime, preparation_runtime
 from app.runtime.native_admission import LocalResourcePool, Resources
 from app.runtime.preparation_runtime import make_pools
+
+
+@pytest.fixture
+def preparation_pools(tmp_path):
+    pools = make_pools(tmp_path / "prepared", tmp_path / "io")
+    previous = preparation_runtime.bind_pools(pools)
+    try:
+        yield pools
+    finally:
+        preparation_runtime.bind_pools(previous)
 
 
 class TestPreparationRecovery:
@@ -168,3 +179,152 @@ class TestPreparationPriority:
                         )
         finally:
             preparation_runtime.bind_pools(previous)
+
+
+class TestPreparationLifecycle:
+    @pytest.mark.parametrize("identity", ["short", "g" * 32], ids=["short", "nonhex"])
+    def test_refuses_malformed_recovery_identities(
+        self, preparation_pools, tmp_path, identity
+    ):
+        prepared = preparation_pools.prepared
+        prepared.directory.mkdir()
+        receipt = prepared.directory / (identity + ".ticket")
+        receipt.write_bytes(b"abandoned")
+        sentinel = tmp_path / "untouched.stl"
+        sentinel.write_bytes(b"source")
+
+        with pytest.raises(ValueError, match="invalid preparation workspace identity"):
+            with prepared.reserve(
+                Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+            ):
+                pytest.fail("invalid recovery admitted work")
+
+        assert receipt.read_bytes() == b"abandoned"
+        assert sentinel.read_bytes() == b"source"
+
+    def test_retains_recovery_ownership_after_partial_unlink_failure(
+        self, preparation_pools, monkeypatch
+    ):
+        amount = Resources(1, 100)
+        with preparation_runtime.reserve(
+            amount, amount, checkpoint=lambda: None
+        ) as old:
+            workspace = preparation_runtime.workspace(old)
+            source = workspace / "source.stl"
+            source.write_bytes(b"retained")
+
+        def missing_descendant(path):
+            assert path == workspace
+            raise FileNotFoundError("missing descendant during cleanup")
+
+        monkeypatch.setattr(preparation_runtime.shutil, "rmtree", missing_descendant)
+
+        with pytest.raises(
+            FileNotFoundError, match="missing descendant during cleanup"
+        ):
+            with preparation_runtime.reserve(amount, amount, checkpoint=lambda: None):
+                pytest.fail("unreclaimed workspace admitted work")
+
+        assert old.path.exists()
+        assert source.read_bytes() == b"retained"
+        assert preparation_runtime.current_permit() is None
+
+    def test_refuses_workspace_access_outside_permit_lifetime(self, preparation_pools):
+        amount = Resources(1, 100)
+        with preparation_runtime.reserve(
+            amount, amount, checkpoint=lambda: None
+        ) as permit:
+            active_workspace = preparation_runtime.workspace(permit)
+
+        with pytest.raises(RuntimeError, match="requires its active permit"):
+            preparation_runtime.workspace(permit)
+
+        assert active_workspace.exists()
+
+    def test_refuses_preparation_before_pool_binding(self):
+        previous = preparation_runtime.bind_pools(None)
+        try:
+            with pytest.raises(
+                RuntimeError, match="pools are not bound by process bootstrap"
+            ):
+                with preparation_runtime.reserve(
+                    Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+                ):
+                    pytest.fail("unbound preparation admitted work")
+        finally:
+            preparation_runtime.bind_pools(previous)
+
+        assert preparation_runtime.current_permit() is None
+
+    def test_refuses_nested_preparation(self, preparation_pools):
+        amount = Resources(1, 100)
+        with preparation_runtime.reserve(
+            amount, amount, checkpoint=lambda: None
+        ) as permit:
+            with pytest.raises(
+                RuntimeError,
+                match="prepare all sources before acquiring native resources",
+            ):
+                with preparation_runtime.reserve(
+                    amount, amount, checkpoint=lambda: None
+                ):
+                    pytest.fail("nested preparation admitted work")
+
+            assert preparation_runtime.current_permit() is permit
+            assert preparation_runtime.workspace(permit).exists()
+
+    def test_refuses_preparation_after_native_admission(
+        self, preparation_pools, tmp_path
+    ):
+        amount = Resources(1, 100)
+        native_pool = LocalResourcePool(tmp_path / "native")
+        with native_pool.reserve(amount, amount, checkpoint=lambda: None) as native:
+            with native_runtime.inherit(native.fileno, native.path):
+                with pytest.raises(
+                    RuntimeError,
+                    match="prepare all sources before acquiring native resources",
+                ):
+                    with preparation_runtime.reserve(
+                        amount, amount, checkpoint=lambda: None
+                    ):
+                        pytest.fail("native-first preparation admitted work")
+
+        assert not (preparation_pools.prepared.directory / "sources").exists()
+
+    def test_refuses_io_without_preparation(self, preparation_pools):
+        with pytest.raises(
+            RuntimeError,
+            match="source I/O requires preparation before native admission",
+        ):
+            with preparation_runtime.io_slot(1, checkpoint=lambda: None):
+                pytest.fail("unprepared source I/O admitted work")
+
+        assert not preparation_pools.io.directory.exists()
+
+    def test_refuses_source_io_after_native_admission(
+        self, preparation_pools, tmp_path
+    ):
+        amount = Resources(1, 100)
+        native_pool = LocalResourcePool(tmp_path / "native")
+        with preparation_runtime.reserve(amount, amount, checkpoint=lambda: None):
+            with native_pool.reserve(amount, amount, checkpoint=lambda: None) as native:
+                with native_runtime.inherit(native.fileno, native.path):
+                    with pytest.raises(
+                        RuntimeError,
+                        match="source I/O requires preparation before native admission",
+                    ):
+                        with preparation_runtime.io_slot(1, checkpoint=lambda: None):
+                            pytest.fail("native-held source I/O admitted work")
+
+        assert not preparation_pools.io.directory.exists()
+
+    def test_clears_preparation_scope_after_consumer_failure(self, preparation_pools):
+        amount = Resources(1, 100)
+        with pytest.raises(ValueError, match="consumer failure"):
+            with preparation_runtime.reserve(
+                amount, amount, checkpoint=lambda: None
+            ) as permit:
+                assert preparation_runtime.current_permit() is permit
+                raise ValueError("consumer failure")
+
+        assert preparation_runtime.current_permit() is None
