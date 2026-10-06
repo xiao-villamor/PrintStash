@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify prepared mesh resource identity and immutable detached buffers refuse
+  incoherent evidence before native analysis.
+
 - Verify import resolver selection identities reject malformed provider responses
   while preserving stable errors and redacting private transport data.
 
