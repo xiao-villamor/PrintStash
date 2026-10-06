@@ -168,7 +168,7 @@ The sole printer socket connection owner is PrinterDetailPage. Other event subsc
 | 56 | keeps a mounted image URL under count pressure | Edge | leased image plus 405 inactive assets | leased URL usable and not revoked | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::keeps a mounted image URL under count pressure` |
 | 57 | bounds inactive image bytes | Edge | inactive blobs exceed 32MiB | oldest inactive URL revoked; newest retained | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::bounds inactive image bytes` |
 | 58 | observes caller cancellation independently | Error | two shared consumers; caller aborts one | cancelled caller rejected; other completes | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::observes caller cancellation independently` |
-| 59 | disposes active and queued assets on scope retirement | Error | four active; queued leases; auth event | old signals aborted, URLs discarded, queued HTTP never starts | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::disposes active and queued assets on scope retirement` |
+| 59 | disposes private assets on scope retirement | Error | four active; queued leases; auth event | old signals aborted, URLs discarded, queued HTTP never starts | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::disposes private assets on scope retirement` |
 | 60 | acquires a lease for an already cached image | Happy | remount cached path then cache pressure | immediate URL remains leased until unmount | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::acquires a lease for an already cached image` |
 | 61 | clears a resolved image after private scope retirement | Error | mounted hook with resolved private URL | old image removed immediately | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::clears a resolved image after private scope retirement` |
 | 62 | admits an image only near the viewport | Happy | offscreen element then intersecting observer frame | no fetch before admission; fetch afterward | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::admits an image only near the viewport` |
@@ -180,11 +180,11 @@ Provisional asset settings: four simultaneous protected blob downloads; inactive
 
 | 66 | refetches a mounted image after explicit invalidation | Edge | mounted cached path replaced | old URL hidden; fresh bytes displayed | Frontend unit | ✅ `frontend/src/lib/__tests__/use-authenticated-asset-url.test.tsx::refetches a mounted image after explicit invalidation` |
 | 67 | starts current scope work before an old aborted response settles | Error | four retired requests ignore abort temporarily | current scope request starts immediately | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::starts current scope work before an old aborted response settles` |
-| 68 | reports leased and inactive encoded bytes separately | Happy | resolved lease then release | live/inactive counters move exact bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::reports leased and inactive encoded bytes separately` |
+| 68 | reports encoded byte ownership separately | Happy | resolved lease then release | live/inactive counters move exact bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::reports encoded byte ownership separately` |
 
 | 69 | admits images when intersection observation is unavailable | Edge | supported API absent in fallback environment | image fetched and displayed | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::admits images when intersection observation is unavailable` |
 | 70 | unobserves a removed thumbnail | Edge | queued viewport target unmounts | observer releases target; zero fetch | Frontend unit | ✅ `frontend/src/lib/__tests__/use-viewport-admission.test.tsx::unobserves a removed thumbnail` |
-| 71 | keeps missing image and alternative text semantics | Edge | no thumbnail path | existing placeholder; no empty src image | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps missing image and alternative text semantics` |
+| 71 | keeps missing image semantics | Edge | no thumbnail path | existing placeholder; no empty src image | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps missing image semantics` |
 | 72 | keeps external covers outside authenticated transport | Happy | external HTTPS cover | native image URL; no protected blob fetch | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps external covers outside authenticated transport` |
 | 73 | leases Multipart covers through viewport admission | Happy | shared Cover in Multipart lists/cards | leased protected image with original alt | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::leases Multipart covers through viewport admission` |
 | 74 | leases Search previews through viewport admission | Happy | Document preview in search list | protected preview image displayed | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::leases Search previews through viewport admission` |
@@ -210,7 +210,7 @@ M6 manual review additions:
 | `frontend/src/components/search-evidence.tsx` | SearchSubjectPreview icon/frame and image admission |
 | `frontend/src/components/similarity-queue.tsx` | ModelLabel thumbnail admission; linked model semantics; remaining queue untouched |
 | `frontend/src/components/multipart-model-browser.tsx` | four Cover call sites for cards, candidates, live member and unavailable-member presentations; no edits |
-| `frontend/src/components/model-grid.tsx` | baseline MultipartModelListRow and ModelListRow thumbnail hook/frame; no edits; integrated Document owner assigned to root |
+| `frontend/src/components/model-grid.tsx` | baseline MultipartModelListRow and ModelListRow thumbnail hook/frame; no edits; Document cards inspected separately: icon-only, no thumbnail owner |
 | `frontend/src/components/model-detail/index.tsx` | thumbUrl detail hero; base lease hook retained for detail visibility |
 | `frontend/src/components/model-detail/source-tab.tsx` | SourceCover content path, upload/delete explicit invalidation; base lease hook retained |
 | `frontend/src/components/markdown-view.tsx` | AuthImage local versus external content URL; base lease hook retained for document/content images |
@@ -233,9 +233,79 @@ M6 manual review additions:
 | `frontend/tests/performance/scripts/start-frontend.sh` | production nginx caching/delivery and cleanup; no edits |
 | `backend/tests/factories/library_startup.py` | distribution/cardinality, derivative rows and completed160pxWebP fixture; no edits |
 
-All base protected-asset hook consumers now acquire leases and share max4 admission. List thumbnail viewport adapters in root-owned integrated ModelGrid (Model, Multipart, Document rows/cards) remain a coordinator cutover dependency; this checkpoint does not claim that final grid migration or final measurements are complete.
+All base protected-asset hook consumers now acquire leases and share max4 admission. List thumbnail viewport adapters in root-owned integrated ModelGrid (Model and Multipart rows/cards) remain a coordinator cutover dependency; this checkpoint does not claim that final grid migration or final measurements are complete.
 
 | 76 | keeps a failed decode out of the readiness milestone | Error | loaded image decoder fails | pending marker; no false decoded-ready claim | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::keeps a failed decode out of the readiness milestone` |
 | 77 | ignores a previous URL decode after image reassignment | Error | decoder A pending; URL B displayed | A cannot mark B ready; B decode establishes readiness | Frontend unit | ✅ `frontend/src/components/__tests__/protected-thumbnail.test.tsx::ignores a previous URL decode after image reassignment` |
 
 Final M6 combined qualification: **281 passed (14 files)** across assets, thumbnails, existing card/Multipart/similarity/startup, M7 sockets, and integrated AuthProvider/store retirement contracts; final focused decoder lane **7 passed**, including two additional error/reassignment cases. Scope/presentation prerequisite is coordinator commit2facc0c3 (content cherry-picked locally as16613e66).
+
+## M3/M5 authority revalidation plan and assessment
+
+One Query scheduler owns mount/focus/reconnect/resync/foreground30s authority reads. Opaque tokens are compared only for equality. Client-local request-start sequencing fences mount, displayed page replacement, and every browse-prefix success receipt, including structural sharing, hover prefetch and mutation publication. Authority successes never advance browse receipts. Conservative redundant probes from non-displayed browse successes are coalesced.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 78 | checks authority after mounting a cached page | Happy | cached page r1/a1 | one revision HTTP read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::checks authority after mounting a cached page` |
+| 79 | preserves a list when its browse revision changes | Happy | r2/a1 authority for r1/a1 page | retained output; explicit Refresh | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::preserves a list when its browse revision changes` |
+| 80 | retires private scope when authorization changes | Happy | r1/a2 authority | hidden private output; cache clear; verified identity retained | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::retires private scope when authorization changes` |
+| 81 | ignores cached authority from a previous mount | Edge | old cached mismatch; fresh probe pending | no notice or retirement | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::ignores cached authority from a previous mount` |
+| 82 | rejects a probe started before a newer page | Edge | old probe resolves after page replacement | old response cannot retire newer page | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::rejects a probe started before a newer page` |
+| 83 | rechecks an identical page receipt | Edge | structurally shared browse success during probe | old signal aborted; current probe accepted | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::rechecks an identical page receipt` |
+| 84 | keeps authority successes outside browse receipts | Edge | successful probe | exactly one read; no refetch loop | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::keeps authority successes outside browse receipts` |
+| 85 | coalesces resync while a probe is pending | Edge | repeated socket resync | one active revision read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::coalesces resync while a probe is pending` |
+| 86 | checks authority after focus returns | Happy | focused tab after settled initial probe | new revision read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::checks authority after focus returns` |
+| 87 | checks authority after reconnect | Happy | offline then online | new revision read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::checks authority after reconnect` |
+| 88 | polls only while foregrounded | Happy | 30s foreground; hidden tab | foreground revision read; no background read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::polls only while foregrounded` |
+| 89 | cancels a probe when its last view unmounts | Edge | pending probe; unmount | request signal aborted | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::cancels a probe when its last view unmounts` |
+| 90 | rejects a late retired session response | Edge | logout during pending probe | no retirement callback or stale notice | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::rejects a late retired session response` |
+| 91 | retains private output when revision lookup fails | Error | 503 response | error exposed; list retained | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::retains private output when revision lookup fails` |
+| 92 | delegates explicit refresh to the browse owner | Happy | ordinary revision mismatch; Refresh click | owner refresh executes; no hidden automatic list read | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::delegates explicit refresh to the browse owner` |
+| 93 | skips checks without an active presentation | Edge | null page or disabled hook | no revision HTTP request | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::skips checks without an active presentation ($label)` |
+| 94 | rechecks the same cached page on remount | Edge | same page object remounted; old authority mismatch cached | fresh probe; no cached notice | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::rechecks the same cached page on remount` |
+| 95 | checks authority after a settled resync | Happy | socket resync after initial probe | new revision request | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::checks authority after a settled resync` |
+| 96 | preserves pending list reads on ordinary revision change | Happy | list request pending; newer browse token | list request signal stays active | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::preserves pending list reads on ordinary revision change` |
+| 97 | retires pending private reads on authorization change | Edge | private request pending; changed authorization token | private signal abort; late value rejected | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::retires pending private reads on authorization change` |
+| 98 | revokes mounted asset leases on authorization change | Edge | mounted ready protected image; changed authorization token | URL revoked; cache entry removed | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::revokes mounted asset leases on authorization change` |
+| 99 | retains private output for malformed authority responses | Error | absent, null, non-string or empty required token | lookup error; no false retirement | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::retains private output for malformed authority responses ($label)` |
+| 100 | shares authority requests between mounted views | Edge | two authority consumers mounted together | one network request; both settle | Frontend unit | ✅ `frontend/src/features/library/__tests__/authority.test.tsx::shares authority requests between mounted views` |
+
+
+M3/M5 evidence: initial boundary stub produced13 observable behavior failures,2 arrangement errors (the session-version import), and2 passing inactive variants. After correcting the arrange import, the two affected auth/cached-authority cases were rerun against the stub and were red2failed/15skipped. The initial implemented17-case lane passed; the additional malformed-response cases were red4failed/1passed with the expected null-payload render error, then the response guard moved those failures into ordinary lookup errors. The final authority file covers27 cases. No production timing, coverage percentage, browser headline or CI result is inferred from these unit results.
+
+The integrated authorization retirement test asserts private DOM is absent before the post-retirement callback, verified identity remains stored, private Query entries disappear, an outstanding private read is aborted and rejects late bytes, and a mounted Blob URL is revoked. Ordinary browse changes preserve their pending read. Lookup failures (503 and malformed tokens) retain authorized presentation and expose an error.
+
+M6 suite-hygiene checkpoint f390c397 changes only test headers, describe grouping and three names. Existing assertions are retained; the conjunction cap remains123. The combined asset/hygiene/authority qualification was70passed6files before the final malformed-response cases were added. No browser behavior is attributed to this syntactic followup.
+
+### M3/M5 manually inspected source, test and configuration ledger
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/features/library/authority.ts` | BrowseReceipts exact models/browse success prefix; weak client provenance owner; mount/page/request sequencing; Query scheduler; synchronous render suppression; once-only post-retirement callback |
+| `frontend/src/features/library/__tests__/authority.test.tsx` | real endpoint transport, real Query client/cache, deferred HTTP signals, shared Socket fake, structural sharing, focus/online manager and foreground interval, private read and Blob lease retirement |
+| `frontend/src/features/library/browse.ts` | libraryBrowseKeys; libraryBrowseOptions infinite pages; explicit loadMore; no page focus/reconnect reordering; no edits |
+| `frontend/src/lib/api/library-browse.ts` | getLibraryRevision GetJsonOptions signal; ordered list API; typed authority DTO; no edits |
+| `frontend/src/types/library-browse.ts` | required opaque revisions; mixed page/card discriminants; no edits |
+| `frontend/src/lib/session-transport.ts` | getSessionVersion, withSessionRequest caller/scope fences; no edits |
+| `frontend/src/lib/auth-store.ts` | retirePrivateSessionScope preserves verified identity and emits same scope event; onAuthChange; no edits |
+| `frontend/src/lib/auth-provider.tsx` | keyed private subtree; refresh captures current session incarnation when called; coordinator wires handled getMe refresh callback; no edits |
+| `frontend/src/lib/query-client.ts` | onAuthChange clears private Query cache; no edits |
+| `frontend/src/lib/events.ts` | subscribeEvents lifecycle/resync; signal-fenced ticket/socket; no edits |
+| `frontend/src/lib/asset-cache.ts` | scope event disposal, acquireAssetUrl reference ownership and revocation; no edits |
+| `frontend/src/test-support/render.tsx` | real singleton QueryClient; cached seed; deferred route responses; stored verified identity; no edits |
+| `frontend/src/test-support/factories.ts` | aModelListItem defaults include integrated required edit_version; no edits |
+| `frontend/src/features/library/__tests__/browse.test.tsx` | ordered append, pending continuation and refresh-required 409 regressions; no edits |
+| `frontend/src/features/library/__tests__/mutations.test.tsx` | confirmed mutation publication cancels obsolete browse reads; these success receipts conservatively request authority checks; no edits |
+| `frontend/tests/repo/suite-hygiene.test.ts` | contract header, describe ownership, mirror paths, conjunction cap123; no edits |
+| `frontend/node_modules/.pnpm/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/src/queryCache.ts` | updated success events include structurally shared data; subscribing only while view listeners remain |
+| `frontend/node_modules/.pnpm/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/src/query.ts` | initial pending refetch shares request even cancelRefetch:true with no data; explicit cancelQueries required for pre-page request |
+| `frontend/node_modules/.pnpm/@tanstack+query-core@5.101.0/node_modules/@tanstack/query-core/src/queryObserver.ts` | observer scheduling owns polling/focus/reconnect; disabled/background guard; no separate hook interval |
+| `frontend/src/components/document-browser.tsx` | full card/KindIcon rendering manually reviewed: icon-only cards, no image or protected-asset hook; no viewport cutover needed |
+| `frontend/src/pages/document-detail.tsx` | image is detail/content output; not a list thumbnail admission owner |
+| `frontend/package.json` | app/UI/domain typecheck scripts; oxlint/oxfmt; Safari16.4 supported floor; no new runtime APIs/frameworks |
+
+Integration contract: supply the first displayed server page (null for placeholder/no-page), suppress private content whenever authorizationChanged is true, and provide onAuthorityRetired that invokes verified AuthProvider.refresh with a handled rejection. The callback executes after scope retirement, so refresh captures the new incarnation. The browse owner supplies an awaited explicit refresh callback. The authority Query stores a LibraryAuthorityObservation wrapper with client provenance, using the unchanged library-authority key. Route headline Playwright and final before/after startup measurements remain coordinator integration dependencies and are not claimed by this standalone hook checkpoint.
+
+The HTTP decoder has one documented no-runtime-typeof exception: foreign revision JSON must establish both required nonempty opaque string tokens without coercion before any observation enters Query. Runtime guards never participate in already-decoded authority decisions. Manual review also included frontend/.oxlintrc.json and frontend/tools/oxlint/anti-slop/rules/no-runtime-typeof.ts to verify this is a boundary-specific exception, not a change to repository lint policy.
+
+Final M3/M5 local qualification:137passed9files (authority, browse, confirmed mutations, auth store/provider, session transport, assets, events and suite hygiene); after extracting the dedicated boundary decoder,27authority cases passed again. Full app/UI/domain typecheck, full frontend lint (zero diagnostics), full format check and git diff --check passed. No integrated browser or CI qualification is claimed.
