@@ -1,4 +1,10 @@
-import { authHeaders, getJson, requestApi, sendAction, sendJson } from "@/lib/api/request";
+import {
+  authHeaders,
+  getJson,
+  jsonHeaders,
+  requestApi,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import { ApiError } from "@/lib/errors";
 import type { SavedViewFilters, ModelSort } from "@/types";
 import type {
@@ -70,8 +76,8 @@ export async function searchLibrary(
   query.types?.forEach((type) => params.append("types[]", type));
   return searchRequest<SearchResponse>(`/api/v1/search?${params}`, { signal });
 }
-export function getSearchStatus() {
-  return getJson<SearchStatus>("/api/v1/search/status", { fresh: true });
+export function getSearchStatus(options: GetJsonOptions = {}) {
+  return getJson<SearchStatus>("/api/v1/search/status", { fresh: true, ...options });
 }
 export async function searchUsingModel(
   modelId: number,
@@ -99,76 +105,103 @@ export async function searchImage(
     signal,
   });
 }
+type SearchCommandBody =
+  | SearchSettings
+  | EndpointProposal
+  | GenerationProposal
+  | { version_token: SearchGeneration["version_token"] }
+  | Partial<Pick<SearchPreferences, "nl_filters_enabled" | "timezone">>;
+/** First-party Search commands reconcile in the feature owner, without compatibility invalidations. */
+function writeSearch<T>(
+  path: string,
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  payload?: SearchCommandBody,
+) {
+  const options: RequestInit = { method, headers: jsonHeaders() };
+  if (payload !== undefined) options.body = JSON.stringify(payload);
+  return requestApi<T>(path, options);
+}
 const configuration = "/api/v1/config/ai-search";
-export function getSearchSettings() {
-  return getJson<SearchSettingsRead>(configuration, { fresh: true });
+export function getSearchSettings(options: GetJsonOptions = {}) {
+  return getJson<SearchSettingsRead>(configuration, { fresh: true, ...options });
 }
 export function saveSearchSettings(settings: SearchSettings) {
-  return sendJson<SearchSettingsRead>(configuration, "PUT", settings);
+  return writeSearch<SearchSettingsRead>(configuration, "PUT", settings);
 }
 export function createInferenceEndpoint(proposal: EndpointProposal) {
-  return sendJson<InferenceEndpoint>(`${configuration}/endpoints`, "POST", proposal);
+  return writeSearch<InferenceEndpoint>(`${configuration}/endpoints`, "POST", proposal);
 }
 export function importEnvironmentEndpoint(kind: "embedding" | "chat") {
-  return sendJson<InferenceEndpoint>(
+  return writeSearch<InferenceEndpoint>(
     `${configuration}/endpoints/from-environment/${kind}`,
     "POST",
     {},
   );
 }
-export function listSearchGenerations() {
-  return getJson<SearchGeneration[]>(`${configuration}/generations`, { fresh: true });
+export function listSearchGenerations(options: GetJsonOptions = {}) {
+  return getJson<SearchGeneration[]>(`${configuration}/generations`, { fresh: true, ...options });
 }
 export function prepareSearchGeneration(proposal: GenerationProposal) {
-  return sendJson<SearchGeneration>(`${configuration}/generations`, "POST", proposal);
+  return writeSearch<SearchGeneration>(`${configuration}/generations`, "POST", proposal);
 }
-export function estimateSearchGeneration(proposal: GenerationProposal) {
-  return sendJson<GenerationEstimate>(`${configuration}/generations/estimate`, "POST", proposal);
+export function estimateSearchGeneration(
+  proposal: GenerationProposal,
+  options: Pick<GetJsonOptions, "signal"> = {},
+) {
+  return requestApi<GenerationEstimate>(`${configuration}/generations/estimate`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(proposal),
+    ...options,
+  });
 }
 export function actOnSearchGeneration(
   generation: SearchGeneration,
   action: "activate" | "cancel" | "retry",
 ) {
-  return sendJson<SearchGeneration>(
+  return writeSearch<SearchGeneration>(
     `${configuration}/generations/${generation.id}/${action}`,
     "POST",
     { version_token: generation.version_token },
   );
 }
-export function listInferenceModels() {
-  return getJson<InferenceModel[]>("/api/v1/inference/models", { fresh: true });
+export function listInferenceModels(options: GetJsonOptions = {}) {
+  return getJson<InferenceModel[]>("/api/v1/inference/models", { fresh: true, ...options });
 }
 /** The Job kind of a model download; follow it through the Jobs API. */
 export const MODEL_DOWNLOAD_KIND = "inference.model_download";
 
 export function downloadInferenceModel(key: string) {
-  return sendJson<{ job_id: string }>(
+  return writeSearch<{ job_id: string }>(
     `/api/v1/inference/models/${encodeURIComponent(key)}/download`,
     "POST",
     {},
   );
 }
 export function cancelInferenceDownload(id: string) {
-  return sendAction(`/api/v1/inference/models/downloads/${encodeURIComponent(id)}/cancel`, "POST");
+  return writeSearch<void>(
+    `/api/v1/inference/models/downloads/${encodeURIComponent(id)}/cancel`,
+    "POST",
+  );
 }
 export function validateInferenceModel(id: string) {
-  return sendJson<{ id: string; ready: boolean }>(
+  return writeSearch<{ id: string; ready: boolean }>(
     `/api/v1/inference/models/${id}/validate`,
     "POST",
     {},
   );
 }
 export function deleteInferenceModel(id: string) {
-  return sendAction(`/api/v1/inference/models/${id}`, "DELETE");
+  return writeSearch<void>(`/api/v1/inference/models/${id}`, "DELETE");
 }
 
-export function getSearchPreferences() {
-  return searchRequest<SearchPreferences>("/api/v1/search/preferences");
+export function getSearchPreferences(options: Pick<GetJsonOptions, "signal"> = {}) {
+  return searchRequest<SearchPreferences>("/api/v1/search/preferences", options);
 }
 export function saveSearchPreferences(
   value: Partial<Pick<SearchPreferences, "nl_filters_enabled" | "timezone">>,
 ) {
-  return sendJson<SearchPreferences>("/api/v1/search/preferences", "PATCH", value);
+  return writeSearch<SearchPreferences>("/api/v1/search/preferences", "PATCH", value);
 }
 export async function parseSearch(query: string, signal?: AbortSignal): Promise<ParsedSearch> {
   return searchRequest<ParsedSearch>("/api/v1/search/parse", {

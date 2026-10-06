@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 
-import { getSearchStatus } from "@/lib/api/search";
+import { searchStatusOptions } from "@/lib/queries/search";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/lib/i18n";
 import { useRouter } from "@/lib/navigation";
@@ -16,12 +16,8 @@ export function ModelSearchAction({
   const { user } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
-  const status = useQuery({
-    queryKey: ["ai-search", "status", user?.id],
-    queryFn: getSearchStatus,
-    enabled: !!user,
-  });
-  if (!user || !status.data?.semantic_ready) return null;
+  const status = useQuery(searchStatusOptions(user?.id));
+  if (!user || status.isError || !status.data?.semantic_ready) return null;
   return (
     <button
       type="button"

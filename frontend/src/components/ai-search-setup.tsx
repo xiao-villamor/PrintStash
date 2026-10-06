@@ -1,37 +1,43 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
-import { listJobs } from "@/lib/api/jobs";
-import {
-  MODEL_DOWNLOAD_KIND,
-  actOnSearchGeneration,
-  cancelInferenceDownload,
-  downloadInferenceModel,
-  estimateSearchGeneration,
-  getSearchStatus,
-  listInferenceModels,
-  listSearchGenerations,
-  prepareSearchGeneration,
-  saveSearchSettings,
-} from "@/lib/api/search";
+import { estimateSearchGeneration } from "@/lib/api/search";
+import { searchStatusOptions, useSearchCommands, type AiSearchCatalog } from "@/lib/queries/search";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { useAuth } from "@/lib/auth-context";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { isMessageKey } from "@/lib/locale";
-import type { GenerationProposal, SearchSettingsRead } from "@/types/search";
+import type { GenerationProposal, SearchGeneration, SearchSettingsRead } from "@/types/search";
 
 /** The first-run path prepares text search; specialist search types stay in advanced controls. */
 export function AiSearchSetup({
   settings,
-  onSaved,
+  catalog,
 }: {
   settings: SearchSettingsRead;
-  onSaved: () => void;
+  catalog: AiSearchCatalog;
 }) {
   const { t } = useI18n();
-  const client = useQueryClient();
+  const { user } = useAuth();
+  const commands = useSearchCommands();
+  const { models, generations, downloads } = catalog;
+  const live = useRef(true);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+      controller.current?.abort();
+    };
+  }, []);
+  const requireActive = (session: number) => {
+    requireSessionVersion(session);
+    if (!live.current) throw new Error("AI setup is no longer active");
+  };
   const [path, setPath] = useState<"local" | "server" | null>(
     settings.settings.enabled
       ? settings.settings.local_models_enabled
@@ -39,65 +45,29 @@ export function AiSearchSetup({
         : "server"
       : null,
   );
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
   const [endpointId, setEndpointId] = useState<number | null>(null);
   const [changing, setChanging] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const models = useQuery({ queryKey: ["ai-search", "models"], queryFn: listInferenceModels });
-  const generations = useQuery({
-    queryKey: ["ai-search", "generations"],
-    queryFn: listSearchGenerations,
-    refetchInterval: (query) =>
-      query.state.data?.some(
-        (g) => g.state === "building" && g.phase !== "ready" && g.phase !== "verify_failed",
-      )
-        ? 3000
-        : false,
-  });
-  const downloads = useQuery({
-    queryKey: ["ai-search", "downloads"],
-    queryFn: async () => (await listJobs()).filter((job) => job.kind === MODEL_DOWNLOAD_KIND),
-    refetchInterval: (query) =>
-      query.state.data?.some((job) => job.state === "running" || job.state === "queued")
-        ? 1500
-        : false,
-  });
-  const completed =
-    downloads.data
-      ?.filter((job) => job.state === "completed")
-      .map((job) => job.job_id)
-      .join(",") ?? "";
-  const refreshModels = models.refetch;
-  useEffect(() => {
-    if (completed) void refreshModels();
-  }, [completed, refreshModels]);
   const choices = (models.data ?? [])
     .filter(
       (model) =>
         model.modality === "text" && model.runtime_available && (model.curated || model.installed),
     )
     .sort((a, b) => Number(b.installed) - Number(a.installed) || a.size_bytes - b.size_bytes);
-  const local = choices.find((model) => model.id === selected) ?? choices[0];
+  const local = selected === null ? choices[0] : choices.find((model) => model.id === selected);
   const servers = settings.endpoints.filter((endpoint) => endpoint.kind === "embedding");
-  const remote = servers.find((endpoint) => endpoint.id === endpointId) ?? servers[0];
+  const remote =
+    endpointId === null ? servers[0] : servers.find((endpoint) => endpoint.id === endpointId);
   const building = generations.data?.find(
     (g) => g.profile === "semantic_text" && g.state === "building",
   );
   const active = generations.data?.find(
     (g) => g.profile === "semantic_text" && g.state === "active",
   );
-  const availability = useQuery({
-    queryKey: [
-      "ai-search",
-      "setup-availability",
-      active?.id,
-      settings.settings.enabled,
-      settings.settings.local_models_enabled,
-    ],
-    queryFn: getSearchStatus,
-    enabled: settings.settings.enabled && !!active,
-  });
+  const requiresAvailability = settings.settings.enabled && !!active;
+  const availability = useQuery(searchStatusOptions(user?.id, requiresAvailability));
   const failedPreparation = generations.data?.find(
     (generation) => generation.profile === "semantic_text" && generation.state === "failed",
   );
@@ -107,62 +77,115 @@ export function AiSearchSetup({
   const failedDownload = downloads.data?.find((job) => job.state === "failed");
   const enabled =
     settings.settings.enabled && (path !== "local" || settings.settings.local_models_enabled);
+  type GuidedCommand =
+    | { kind: "enable"; payload: SearchSettingsRead["settings"]; session: number }
+    | {
+        kind: "download";
+        consent: SearchSettingsRead["settings"] | null;
+        key: string;
+        session: number;
+      }
+    | { kind: "prepare"; proposal: GenerationProposal; session: number }
+    | {
+        kind: "generation";
+        generation: SearchGeneration;
+        action: "cancel" | "activate" | "retry";
+        session: number;
+      }
+    | { kind: "cancel-download"; id: string; session: number };
   const change = useMutation({
-    mutationFn: async (
-      action: "enable" | "download" | "prepare" | "cancel" | "activate" | "retry",
-    ) => {
-      setMessage(null);
-      if (action === "enable") {
-        const result = await saveSearchSettings({
+    retry: false,
+    mutationFn: async (command: GuidedCommand) => {
+      requireActive(command.session);
+      if (command.kind === "enable")
+        await commands.settings.mutateAsync({ payload: command.payload, session: command.session });
+      else if (command.kind === "download") {
+        if (command.consent)
+          await commands.settings.mutateAsync({
+            payload: command.consent,
+            session: command.session,
+          });
+        requireActive(command.session);
+        await commands.download.mutateAsync({ key: command.key, session: command.session });
+      } else if (command.kind === "prepare") {
+        controller.current?.abort();
+        const request = new AbortController();
+        controller.current = request;
+        const estimate = await estimateSearchGeneration(command.proposal, {
+          signal: request.signal,
+        });
+        requireActive(command.session);
+        if (!estimate.fits_budget) return { kind: "over-budget" } as const;
+        await commands.generation.mutateAsync({
+          proposal: command.proposal,
+          session: command.session,
+        });
+        requireActive(command.session);
+        return { kind: "prepared" } as const;
+      } else if (command.kind === "generation")
+        await commands.generationAction.mutateAsync({
+          generation: command.generation,
+          action: command.action,
+          session: command.session,
+        });
+      else await commands.cancelDownload.mutateAsync({ id: command.id, session: command.session });
+      requireActive(command.session);
+      return { kind: "completed" } as const;
+    },
+    onSuccess: (result, command) => {
+      if (!live.current || command.session !== getSessionVersion()) return;
+      if (result.kind === "over-budget")
+        setMessage(
+          t(
+            "There is not enough space in the AI search budget. Increase it in Advanced AI controls, then try again.",
+          ),
+        );
+      if (result.kind === "prepared") setChanging(false);
+    },
+    onError: (_error, command) => {
+      if (live.current && command.session === getSessionVersion())
+        setMessage(t("This step could not be completed. Your library is safe. Try again."));
+    },
+  });
+  function dispatch(action: "enable" | "download" | "prepare" | "cancel" | "activate" | "retry") {
+    const session = getSessionVersion();
+    setMessage(null);
+    if (action === "enable")
+      change.mutate({
+        kind: "enable",
+        payload: {
           ...settings.settings,
           enabled: true,
           local_models_enabled: path === "local" ? true : settings.settings.local_models_enabled,
-        });
-        client.setQueryData(["ai-search", "settings"], result);
-        onSaved();
-      } else if (action === "download" && local) {
-        if (!settings.settings.download_enabled) {
-          const result = await saveSearchSettings({ ...settings.settings, download_enabled: true });
-          client.setQueryData(["ai-search", "settings"], result);
-          onSaved();
-        }
-        await downloadInferenceModel(local.key);
-        await downloads.refetch();
-      } else if (action === "prepare") {
-        const proposal: GenerationProposal = {
+        },
+        session,
+      });
+    else if (action === "download" && local)
+      change.mutate({
+        kind: "download",
+        key: local.key,
+        consent: settings.settings.download_enabled
+          ? null
+          : { ...settings.settings, download_enabled: true },
+        session,
+      });
+    else if (action === "prepare" && (path === "local" ? local : remote))
+      change.mutate({
+        kind: "prepare",
+        proposal: {
           ...(path === "local" ? { local_model_id: local?.id } : { endpoint_id: remote?.id }),
           profile: "semantic_text",
           index_backend: "auto",
           quantization: "float32",
           auto_activate: true,
-        };
-        const estimate = await estimateSearchGeneration(proposal);
-        if (!estimate.fits_budget) {
-          setMessage(
-            t(
-              "There is not enough space in the AI search budget. Increase it in Advanced AI controls, then try again.",
-            ),
-          );
-          return;
-        }
-        await prepareSearchGeneration(proposal);
-        await generations.refetch();
-        setChanging(false);
-      } else if (action === "cancel") {
-        if (building) await actOnSearchGeneration(building, "cancel");
-        else if (downloading) await cancelInferenceDownload(downloading.job_id);
-        await Promise.all([generations.refetch(), downloads.refetch()]);
-      } else if (action === "activate" && building) {
-        await actOnSearchGeneration(building, "activate");
-        await generations.refetch();
-      } else if (action === "retry" && building) {
-        await actOnSearchGeneration(building, "retry");
-        await generations.refetch();
-      }
-    },
-    onError: () =>
-      setMessage(t("This step could not be completed. Your library is safe. Try again.")),
-  });
+        },
+        session,
+      });
+    else if (building && (action === "cancel" || action === "activate" || action === "retry"))
+      change.mutate({ kind: "generation", generation: { ...building }, action, session });
+    else if (downloading && action === "cancel")
+      change.mutate({ kind: "cancel-download", id: downloading.job_id, session });
+  }
   const busy = change.isPending;
   if (models.isPending || generations.isPending || downloads.isPending || availability.isLoading)
     return (
@@ -170,7 +193,12 @@ export function AiSearchSetup({
         {t("Checking AI Search…")}
       </p>
     );
-  if (models.isError || generations.isError || downloads.isError || availability.isError)
+  if (
+    models.isError ||
+    generations.isError ||
+    downloads.isError ||
+    (requiresAvailability && availability.isError)
+  )
     return (
       <div className="space-y-3 p-5">
         <p role="alert">{t("AI setup could not be loaded.")}</p>
@@ -319,16 +347,16 @@ export function AiSearchSetup({
             {building.version_token && (
               <div className="flex flex-wrap gap-2">
                 {building.phase === "verify_failed" && (
-                  <Button loading={busy} onClick={() => change.mutate("retry")}>
+                  <Button loading={busy} onClick={() => dispatch("retry")}>
                     {t("Retry preparation")}
                   </Button>
                 )}
                 {building.phase === "ready" && (
-                  <Button loading={busy} onClick={() => change.mutate("activate")}>
+                  <Button loading={busy} onClick={() => dispatch("activate")}>
                     {t("Use prepared search")}
                   </Button>
                 )}
-                <Button variant="outline" disabled={busy} onClick={() => change.mutate("cancel")}>
+                <Button variant="outline" disabled={busy} onClick={() => dispatch("cancel")}>
                   {t("Cancel preparation")}
                 </Button>
               </div>
@@ -433,7 +461,6 @@ export function AiSearchSetup({
                       compact
                       onSaved={() => {
                         setConnecting(false);
-                        onSaved();
                       }}
                     />
                   </>
@@ -530,7 +557,7 @@ export function AiSearchSetup({
                         <Button
                           loading={busy}
                           className="min-h-11"
-                          onClick={() => change.mutate("enable")}
+                          onClick={() => dispatch("enable")}
                         >
                           {t(
                             path === "local" ? "Enable local AI Search" : "Enable server AI Search",
@@ -552,7 +579,7 @@ export function AiSearchSetup({
                         <Button
                           variant="outline"
                           disabled={busy}
-                          onClick={() => change.mutate("cancel")}
+                          onClick={() => dispatch("cancel")}
                         >
                           {t("Cancel download")}
                         </Button>
@@ -572,7 +599,7 @@ export function AiSearchSetup({
                         <Button
                           loading={busy}
                           className="min-h-11"
-                          onClick={() => change.mutate("download")}
+                          onClick={() => dispatch("download")}
                         >
                           {t("Allow download and continue")}
                         </Button>
@@ -587,7 +614,7 @@ export function AiSearchSetup({
                         <Button
                           loading={busy}
                           className="min-h-11"
-                          onClick={() => change.mutate("prepare")}
+                          onClick={() => dispatch("prepare")}
                         >
                           {t("Prepare my library")}
                         </Button>

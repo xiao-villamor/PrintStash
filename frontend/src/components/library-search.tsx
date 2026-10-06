@@ -4,7 +4,7 @@ import { Camera, Search, Sparkles, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
-import { getSearchStatus, searchLibrary } from "@/lib/api/search";
+import { searchStatusOptions, searchSuggestionsOptions } from "@/lib/queries/search";
 import { useAuth } from "@/lib/auth-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useI18n } from "@/lib/i18n";
@@ -35,21 +35,14 @@ export function LibrarySearch() {
     // Only navigation from outside this input replaces the current draft.
     if (q !== published) setValue(q);
   }
-  const status = useQuery({
-    queryKey: ["ai-search", "status", user?.id],
-    queryFn: getSearchStatus,
-    enabled: visible && !!user && statusEnabled,
-    refetchInterval: 15000,
-    retry: false,
-  });
-  const suggestions = useQuery({
-    queryKey: ["search-suggestions", user?.id, debounced],
-    queryFn: ({ signal }) =>
-      searchLibrary({ q: debounced, mode: "lexical", instant: true, limit: 5 }, signal),
-    enabled: !!user && visible && open && !!debounced && debounced === value.trim(),
-    gcTime: 0,
-    retry: false,
-  });
+  const status = useQuery(searchStatusOptions(user?.id, visible && statusEnabled));
+  const suggestions = useQuery(
+    searchSuggestionsOptions(
+      user?.id,
+      debounced,
+      visible && open && !!debounced && debounced === value.trim(),
+    ),
+  );
   useEffect(() => {
     if (!visible) return;
     function focus(event: KeyboardEvent) {
@@ -139,11 +132,12 @@ export function LibrarySearch() {
   }
   if (!visible) return <span className="flex-1" />;
   const current = debounced === value.trim();
-  const visualReady = status.data?.legs.some(
+  const capability = status.isError ? undefined : status.data;
+  const visualReady = capability?.legs.some(
     (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
   );
-  const aiEnabled = status.data?.enabled === true;
-  const aiReady = aiEnabled && status.data?.semantic_ready === true;
+  const aiEnabled = capability?.enabled === true;
+  const aiReady = aiEnabled && capability?.semantic_ready === true;
   const aiActive =
     aiReady &&
     pathname === "/search" &&
@@ -309,7 +303,7 @@ export function LibrarySearch() {
           <Button variant="ghost" className="mt-1 w-full justify-start" onClick={submit}>
             {t("aiSearch.allResults")}
           </Button>
-          {status.data?.backlog && (
+          {capability?.backlog && (
             <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
               {t("aiSearch.backlog")}
             </p>

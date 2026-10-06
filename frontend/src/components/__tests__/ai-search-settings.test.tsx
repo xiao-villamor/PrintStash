@@ -1,5 +1,5 @@
 /** Administrator settings disclose inference capabilities and require independent consent. */
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiSearchSettings } from "@/components/ai-search-settings";
@@ -11,6 +11,7 @@ import {
   aSearchGeneration,
   searchConfiguration,
   searchSettings,
+  searchStatus,
 } from "@/test-support/search";
 
 async function settingsPanel(options: RenderAppOptions = {}) {
@@ -30,6 +31,7 @@ async function settingsPanel(options: RenderAppOptions = {}) {
       "GET /api/v1/config/ai-search/generations": json([aSearchGeneration()]),
       "GET /api/v1/inference/models": json([anInferenceModel()]),
       "GET /api/v1/jobs": json([]),
+      "GET /api/v1/search/status": json(searchStatus({ semantic_ready: true })),
       "PUT /api/v1/config/ai-search": json(searchConfiguration()),
       ...options.routes,
     },
@@ -490,6 +492,51 @@ describe("AI Search settings", () => {
       });
     },
   );
+  it("keeps a generation action bound to the version selected before refresh", async () => {
+    const generation = aSearchGeneration({
+      state: "building",
+      phase: "backfill",
+      version_token: "captured-version",
+    });
+    const app = await settingsPanel({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([generation]),
+        "POST /api/v1/config/ai-search/generations/1/cancel": json(
+          { detail: "search_generation_stale" },
+          409,
+        ),
+      },
+    });
+    let resume!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const cancellation = vi
+      .spyOn(app.client, "cancelQueries")
+      .mockImplementationOnce(() => pending);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(cancellation).toHaveBeenCalled());
+    app.route({
+      "GET /api/v1/config/ai-search/generations": json([
+        { ...generation, model: "Refreshed encoder", version_token: "new-version" },
+      ]),
+    });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["ai-search", "generations"] });
+    });
+    expect(await screen.findByText(/Refreshed encoder/)).toBeVisible();
+    await act(async () => {
+      resume();
+      await pending;
+    });
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toEqual({
+      version_token: "captured-version",
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled());
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+    cancellation.mockRestore();
+  });
   it("keeps saved credentials out of an unrelated endpoint edit", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel({
@@ -552,9 +599,60 @@ describe("AI Search settings", () => {
       ),
     });
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(
-      await screen.findByRole("heading", { name: "Where should AI Search run?" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Enable local AI Search" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Prepare search by meaning" })).toBeVisible();
+  });
+  it("keeps a technical draft through background settings replacement", async () => {
+    const user = userEvent.setup();
+    const app = await settingsPanel();
+    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
+    await user.clear(weight);
+    await user.type(weight, "2");
+    app.route({
+      "GET /api/v1/config/ai-search": json(
+        searchConfiguration({
+          settings: searchSettings({ enabled: false, lexical_weight: 3 }),
+          endpoints: [
+            anInferenceEndpoint({
+              id: 7,
+              kind: "chat",
+              model: "refreshed-chat",
+              native_dimension: null,
+            }),
+          ],
+        }),
+      ),
+    });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["ai-search", "settings"] });
+    });
+    expect(await screen.findByRole("option", { name: /refreshed-chat/ })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Keyword ranking weight" })).toHaveValue(2);
+    expect(screen.getByRole("checkbox", { name: "Enable AI Search" })).toBeChecked();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+  it("keeps a failed-refresh technical draft read-only until retry", async () => {
+    const user = userEvent.setup();
+    const app = await settingsPanel();
+    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
+    await user.clear(weight);
+    await user.type(weight, "2");
+    app.route({ "GET /api/v1/config/ai-search": json({}, 503) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["ai-search", "settings"] });
+    });
+    expect(await screen.findByText("AI Search settings could not load")).toBeVisible();
+    expect(screen.getByRole("spinbutton", { name: "Keyword ranking weight" })).toHaveValue(2);
+    expect(screen.getByRole("button", { name: "Save search settings" })).toBeDisabled();
+    app.route({ "GET /api/v1/config/ai-search": json(searchConfiguration()) });
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save search settings" })).toBeEnabled(),
+    );
+    expect(screen.getByRole("spinbutton", { name: "Keyword ranking weight" })).toHaveValue(2);
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
   });
   it("reports a settings load failure with retry", async () => {
     await settingsPanel({ routes: { "GET /api/v1/config/ai-search": json({}, 503) } });

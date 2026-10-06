@@ -6,6 +6,11 @@ import {
   deleteInferenceModel,
   downloadInferenceModel,
   getSearchPreferences,
+  getSearchSettings,
+  getSearchStatus,
+  listInferenceModels,
+  listSearchGenerations,
+  estimateSearchGeneration,
   importEnvironmentEndpoint,
   parseSearch,
   searchImage,
@@ -65,6 +70,34 @@ describe("Interactive search requests", () => {
       }),
       Promise.resolve().then(() => controller.abort()),
     ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([
+    { label: "status", run: (signal: AbortSignal) => getSearchStatus({ signal }) },
+    { label: "settings", run: (signal: AbortSignal) => getSearchSettings({ signal }) },
+    { label: "models", run: (signal: AbortSignal) => listInferenceModels({ signal }) },
+    { label: "generations", run: (signal: AbortSignal) => listSearchGenerations({ signal }) },
+    { label: "preferences", run: (signal: AbortSignal) => getSearchPreferences({ signal }) },
+    {
+      label: "estimate",
+      run: (signal: AbortSignal) =>
+        estimateSearchGeneration(
+          {
+            local_model_id: "small",
+            index_backend: "auto",
+            quantization: "float32",
+            auto_activate: true,
+          },
+          { signal },
+        ),
+    },
+  ])("cancels an active $label read", async ({ run }) => {
+    stall();
+    const controller = new AbortController();
+    const pending = run(controller.signal);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(vi.getTimerCount()).toBe(0);
   });
   it("rejects an already cancelled search", async () => {

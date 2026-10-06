@@ -1,5 +1,5 @@
 /** Guided AI setup keeps consent explicit and advances only after successful server operations. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { AiSearchSettings } from "@/components/ai-search-settings";
@@ -113,6 +113,67 @@ describe("AiSearchSetup", () => {
       quantization: "float32",
       auto_activate: true,
     });
+  });
+  it("stops preparation after the setup route leaves during an estimate", async () => {
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "POST /api/v1/config/ai-search/generations/estimate": (_url, init) => {
+          signal = init?.signal;
+          return pending;
+        },
+        "POST /api/v1/config/ai-search/generations": json(aSearchGeneration({ state: "building" })),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Prepare my library" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      finish(
+        json({
+          passages: 10,
+          estimated_bytes: 1000,
+          existing_bytes: 0,
+          budget_bytes: 2000,
+          fits_budget: true,
+          estimated_seconds: 10,
+        }),
+      );
+      await pending;
+    });
+    expect(app.requestsWithMethod("POST").map((request) => request.url)).toEqual([
+      "/api/v1/config/ai-search/generations/estimate",
+    ]);
+  });
+  it("stops a download after the setup route leaves during consent", async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([anInferenceModel({ installed: false })]),
+        "PUT /api/v1/config/ai-search": () => pending,
+        "POST /api/v1/inference/models/": json({ job_id: "download-1" }),
+      },
+    });
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Allow download and continue" }),
+    );
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    app.unmount();
+    await act(async () => {
+      finish(json(searchConfiguration({ settings: { ...enabled, download_enabled: true } })));
+      await pending;
+    });
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
   });
   it("blocks preparation over budget", async () => {
     const app = setup({

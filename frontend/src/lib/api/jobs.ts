@@ -1,4 +1,4 @@
-import { getJson, sendJson } from "@/lib/api/request";
+import { getJson, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import type { JobStatus } from "@/types";
 
 /** One Job, uncached: a cached status never sees its Job finish. */
@@ -11,11 +11,14 @@ export function getJobStatus(jobId: string): Promise<JobStatus> {
  * are always included whatever their age, so a browser that tracked a Job can
  * still observe how it ended after a reload.
  */
-export function listJobs(trackedJobIds: string[] = []): Promise<JobStatus[]> {
+export function listJobs(
+  trackedJobIds: string[] = [],
+  options: GetJsonOptions = {},
+): Promise<JobStatus[]> {
   const params = new URLSearchParams();
   trackedJobIds.forEach((jobId) => params.append("tracked_job_id", jobId));
   const query = params.size ? `?${params.toString()}` : "";
-  return getJson<JobStatus[]>(`/api/v1/jobs${query}`, { fresh: true });
+  return getJson<JobStatus[]>(`/api/v1/jobs${query}`, { fresh: true, ...options });
 }
 
 /** Administrator's live queue, including system-owned preview and maintenance Jobs. */

@@ -4189,5 +4189,9 @@
   "library.updatesAvailable": "The library has changed. Refresh before loading more results.",
   "library.refresh": "Refresh library",
   "library.authorityCheckFailed": "Could not check whether the library is up to date.",
-  "library.checkAgain": "Check again"
+  "library.checkAgain": "Check again",
+  "aiSearch.statusError": "Search capabilities could not be loaded.",
+  "aiSearch.preferencesLoadError": "Your search preferences could not be loaded.",
+  "aiSearch.downloadsLoadError": "Model downloads could not be loaded.",
+  "aiSearch.estimateError": "The resource estimate could not be loaded."
 }

@@ -1,9 +1,10 @@
 /** Search pages preserve authorization evidence, bounded pagination and query privacy. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aModelListItem } from "@/test-support/factories";
 import SearchPage from "@/pages/search";
+import { useRouter } from "@/lib/navigation";
 import { AuthContext } from "@/lib/auth-context";
 import {
   adminSession,
@@ -12,7 +13,12 @@ import {
   renderApp,
   type RenderAppOptions,
 } from "@/test-support/render";
-import { aSearchResult, searchResponse, searchStatus } from "@/test-support/search";
+import {
+  aSearchResult,
+  searchPreferences,
+  searchResponse,
+  searchStatus,
+} from "@/test-support/search";
 
 function results(options: RenderAppOptions = {}) {
   return renderApp(<SearchPage />, {
@@ -20,6 +26,7 @@ function results(options: RenderAppOptions = {}) {
     ...options,
     routes: {
       "GET /api/v1/search/status": json(searchStatus()),
+      "GET /api/v1/search/preferences": json(searchPreferences({ available: false })),
       "GET /api/v1/search?": json(searchResponse({ items: [aSearchResult()], outcome: "results" })),
       ...options.routes,
     },
@@ -412,6 +419,129 @@ describe("Search results", () => {
         true,
       ),
     );
+  });
+  it("retries unavailable capabilities while keyword results remain usable", async () => {
+    const app = results({ routes: { "GET /api/v1/search/status": json({}, 503) } });
+    expect(await screen.findByRole("link", { name: "Desk bracket" })).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Search capabilities could not be loaded.",
+    );
+    app.route({ "GET /api/v1/search/status": json(searchStatus({ legs: ["thumbnail"] })) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Search by image" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Desk bracket" })).toBeVisible();
+  });
+  it("retries unavailable personal preferences without claiming parser consent", async () => {
+    const app = results({ routes: { "GET /api/v1/search/preferences": json({}, 503) } });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your search preferences could not be loaded.",
+    );
+    expect(screen.queryByRole("button", { name: "Natural-language search" })).toBeNull();
+    app.route({ "GET /api/v1/search/preferences": json(searchPreferences({ available: true })) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Natural-language search" })).toBeVisible();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("cancels an obsolete submitted route before presenting its result", async () => {
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    const held = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    function Next() {
+      const router = useRouter();
+      return <button onClick={() => router.push("/search?q=clamp")}>Next search</button>;
+    }
+    const app = renderApp(
+      <>
+        <Next />
+        <SearchPage />
+      </>,
+      {
+        at: "/search?q=bracket",
+        routes: {
+          "GET /api/v1/search/status": json(searchStatus()),
+          "GET /api/v1/search/preferences": json(searchPreferences({ available: false })),
+          "GET /api/v1/search?": (url, init) => {
+            if (url.includes("q=bracket")) {
+              signal = init?.signal;
+              return held;
+            }
+            return json(searchResponse({ items: [aSearchResult({ name: "Current clamp" })] }));
+          },
+        },
+      },
+    );
+    await waitFor(() =>
+      expect(app.requests().some((request) => request.url.includes("q=bracket"))).toBe(true),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Next search" }));
+    expect(await screen.findByRole("link", { name: "Current clamp" })).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      finish(json(searchResponse({ items: [aSearchResult({ name: "Obsolete bracket" })] })));
+      await held;
+    });
+    expect(screen.queryByRole("link", { name: "Obsolete bracket" })).toBeNull();
+  });
+  it("retries a failed continuation without hiding accepted results", async () => {
+    const app = results({
+      routes: {
+        "GET /api/v1/search?": (url) =>
+          url.includes("cursor=")
+            ? json({}, 503)
+            : json(searchResponse({ items: [aSearchResult()], next_cursor: "next-page" })),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Load more results" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Search could not finish");
+    expect(screen.getByRole("link", { name: "Desk bracket" })).toBeVisible();
+    app.route({
+      "GET /api/v1/search?": json(
+        searchResponse({
+          items: [aSearchResult({ name: "Next clamp", subject_id: 18, href: "/models/18" })],
+        }),
+      ),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("link", { name: "Next clamp" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Desk bracket" })).toBeVisible();
+  });
+  it("suppresses cached results after access is denied", async () => {
+    const app = results();
+    await screen.findByRole("link", { name: "Desk bracket" });
+    app.route({ "GET /api/v1/search?": json({}, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["search-results"] });
+    });
+    expect(await screen.findByText("Search could not finish. Try again.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Desk bracket" })).toBeNull();
+    expect(screen.queryByText("No results")).toBeNull();
+  });
+  it("suppresses denied cached Search metadata", async () => {
+    const app = results({
+      routes: {
+        "GET /api/v1/search/status": json(
+          searchStatus({ remote_hosts: ["private.example"], backlog: true }),
+        ),
+        "GET /api/v1/search/preferences": json(searchPreferences({ available: true })),
+      },
+    });
+    expect(await screen.findByText(/private.example/)).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Natural-language search" })).toBeVisible();
+    app.route({
+      "GET /api/v1/search/status": json({}, 403),
+      "GET /api/v1/search/preferences": json({}, 403),
+    });
+    await act(async () => {
+      await Promise.all([
+        app.client.refetchQueries({ queryKey: ["ai-search", "status"] }),
+        app.client.refetchQueries({ queryKey: ["search-preferences"] }),
+      ]);
+    });
+    await waitFor(() => expect(screen.queryByText(/private.example/)).toBeNull());
+    expect(screen.queryByRole("button", { name: "Natural-language search" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Desk bracket" })).toBeVisible();
   });
   it("offers recovery after a failed search", async () => {
     const user = userEvent.setup();

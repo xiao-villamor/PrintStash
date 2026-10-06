@@ -52,6 +52,23 @@ describe("listJobs", () => {
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
 
+  it("cancels a catalog read while preserving tracked identities", async () => {
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = listJobs(["tracked/job"], { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expectRequest("/api/v1/jobs?tracked_job_id=tracked%2Fjob");
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("names the Jobs a reconnecting Task Center still tracks", async () => {
     respondWith([]);
 

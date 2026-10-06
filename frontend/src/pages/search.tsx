@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, LayoutGrid, List, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { SearchFilterControls } from "@/components/search-filter-controls";
 import { SearchPreferences } from "@/components/search-preferences";
@@ -17,15 +17,14 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import {
-  getSearchStatus,
-  getSearchPreferences,
-  parseSearch,
-  searchImage,
-  searchLibrary,
-  searchUsingModel,
-} from "@/lib/api/search";
+  parsedSearchOptions,
+  searchPreferencesOptions,
+  searchResultsOptions,
+  searchStatusOptions,
+  type SearchIntent,
+} from "@/lib/queries/search";
 import { useAuth } from "@/lib/auth-context";
-import { ApiError } from "@/lib/errors";
+import { ApiError, parseApiError } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { useRouter, useSearchParams } from "@/lib/navigation";
@@ -58,34 +57,16 @@ function SearchContent() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const mode = params.get("mode") === "lexical" ? "lexical" : "hybrid";
   const types = subjectTypes.filter((type) => params.getAll("type").includes(type));
-  const status = useQuery({
-    queryKey: ["ai-search", "status", user?.id],
-    queryFn: getSearchStatus,
-    enabled: !!user,
-    refetchInterval: 15000,
-  });
+  const status = useQuery(searchStatusOptions(user?.id));
   const filters = readSearchFilters(params);
   const filtered = hasSearchFilters(filters);
   const sort = searchSorts.find((value) => value === params.get("sort")) ?? "relevance";
   const wantsParse = params.get("parse") === "1" && !!q.trim() && !imageMode && !modelId;
   const parseFailed = params.get("parse_error") === "1";
-  const preference = useQuery({
-    queryKey: ["search-preferences", user?.id],
-    queryFn: getSearchPreferences,
-    enabled: !!user && !imageMode && !modelId,
-    retry: false,
-  });
-  const canParse = !!preference.data?.available && preference.data.nl_filters_enabled;
-  const parsed = useQuery({
-    queryKey: ["search-parse", user?.id, q],
-    queryFn: ({ signal }) => parseSearch(q, signal),
-    enabled: wantsParse && canParse,
-    retry: false,
-    gcTime: 0,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
+  const preference = useQuery(searchPreferencesOptions(user?.id, !imageMode && !modelId));
+  const canParse =
+    !preference.isError && !!preference.data?.available && preference.data.nl_filters_enabled;
+  const parsed = useQuery(parsedSearchOptions(user?.id, q, wantsParse && canParse));
   useEffect(() => {
     if (!wantsParse || preference.isPending || (canParse && parsed.isPending)) return;
     const result = canParse ? parsed.data : undefined;
@@ -106,42 +87,30 @@ function SearchContent() {
     params,
     router,
   ]);
-  const queryKey = [
-    "search-results",
+  const imageIdentity = useId();
+  const intent: SearchIntent = modelId
+    ? { kind: "model", modelId }
+    : imageMode
+      ? image
+        ? { kind: "image", image, identity: `${imageIdentity}:${imageVersion}` }
+        : { kind: "idle" }
+      : {
+          kind: "text",
+          query: {
+            q,
+            mode,
+            types: types.length ? types : undefined,
+            filters: filtered ? filters : undefined,
+            sort,
+          },
+        };
+  const options = searchResultsOptions(
     user?.id,
-    q,
-    mode,
-    types,
-    imageMode,
-    imageVersion,
-    modelId,
-    filters,
-    sort,
-  ];
-  const results = useInfiniteQuery({
-    queryKey,
-    queryFn: ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-      modelId
-        ? searchUsingModel(modelId, pageParam, signal)
-        : imageMode && image
-          ? searchImage(image, { cursor: pageParam }, signal)
-          : searchLibrary(
-              {
-                q,
-                mode,
-                cursor: pageParam,
-                types: types.length ? types : undefined,
-                filters: filtered ? filters : undefined,
-                sort,
-              },
-              signal,
-            ),
-    initialPageParam: undefined,
-    getNextPageParam: (page) => page.next_cursor ?? undefined,
-    enabled: !!user && !wantsParse && (!!modelId || (imageMode ? !!image : !!q.trim() || filtered)),
-    retry: false,
-    gcTime: 0,
-  });
+    intent,
+    !wantsParse && (!!modelId || (imageMode ? !!image : !!q.trim() || filtered)),
+  );
+  const queryKey = options.queryKey;
+  const results = useInfiniteQuery(options);
   function changeType(type: SearchSubjectType) {
     const next = types.includes(type) ? types.filter((item) => item !== type) : [...types, type];
     const query = new URLSearchParams(params);
@@ -149,9 +118,17 @@ function SearchContent() {
     next.forEach((item) => query.append("type", item));
     router.push(`/search?${query}`);
   }
-  const pages = results.data?.pages ?? [];
+  const inaccessible =
+    results.isError && [401, 403, 404].includes(parseApiError(results.error).status);
+  const pages = inaccessible ? [] : (results.data?.pages ?? []);
   const first = pages[0];
   const items = pages.flatMap((page) => page.items);
+  const capability =
+    status.isError && [401, 403, 404].includes(parseApiError(status.error).status)
+      ? undefined
+      : status.data;
+  const preferencesInaccessible =
+    preference.isError && [401, 403, 404].includes(parseApiError(preference.error).status);
   const cursorExpired =
     results.error instanceof ApiError &&
     ["search_cursor_expired", "search_cursor_invalid"].includes(results.error.code);
@@ -159,9 +136,11 @@ function SearchContent() {
     !!modelId &&
     pages.some((page) => Object.values(page.leg_errors).includes("search_model_index_pending"));
   const visualReady =
-    status.data?.legs.some(
+    !status.isError &&
+    (status.data?.legs.some(
       (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
-    ) ?? false;
+    ) ??
+      false);
   return (
     <div className="h-full overflow-y-auto bg-background pb-24 md:pb-0">
       <div className="border-b border-border px-4 py-5 sm:px-6">
@@ -231,7 +210,9 @@ function SearchContent() {
                   filters={{ ...filters, q, sort }}
                   onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
                 />
-                {preference.data && <SearchPreferences userId={user.id} value={preference.data} />}
+                {preference.data && !preferencesInaccessible && (
+                  <SearchPreferences userId={user.id} value={preference.data} />
+                )}
               </div>
             )}
           </div>
@@ -273,12 +254,28 @@ function SearchContent() {
             {t("aiSearch.parseFailed")}
           </p>
         )}
-        {status.data?.remote_hosts.length ? (
+        {status.isError && (
+          <div className="mb-3 flex items-center gap-3" role="alert">
+            <p>{t("aiSearch.statusError")}</p>
+            <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
+              {t("aiSearch.retry")}
+            </Button>
+          </div>
+        )}
+        {preference.isError && !imageMode && !modelId && (
+          <div className="mb-3 flex items-center gap-3" role="alert">
+            <p>{t("aiSearch.preferencesLoadError")}</p>
+            <Button variant="outline" size="sm" onClick={() => void preference.refetch()}>
+              {t("aiSearch.retry")}
+            </Button>
+          </div>
+        )}
+        {capability?.remote_hosts.length ? (
           <p className="mb-3 text-sm text-muted-foreground">
-            {t("aiSearch.remoteDisclosure", { hosts: status.data.remote_hosts.join(", ") })}
+            {t("aiSearch.remoteDisclosure", { hosts: capability.remote_hosts.join(", ") })}
           </p>
         ) : null}
-        {status.data?.backlog && (
+        {capability?.backlog && (
           <p role="status" className="mb-3 text-sm text-muted-foreground">
             {t("aiSearch.backlog")}
           </p>
@@ -409,10 +406,21 @@ function SearchContent() {
               }
             />
           ))}
-        {results.isFetchNextPageError && (
+        {results.isError && !!items.length && (
           <p role="alert" className="mt-4 text-sm text-destructive">
             {t(cursorExpired ? "aiSearch.cursorExpired" : "aiSearch.loadError")}
           </p>
+        )}
+        {results.isError && !!items.length && !cursorExpired && (
+          <Button
+            className="mt-4"
+            variant="outline"
+            onClick={() =>
+              void (results.isFetchNextPageError ? results.fetchNextPage() : results.refetch())
+            }
+          >
+            {t("aiSearch.retry")}
+          </Button>
         )}
         {cursorExpired ? (
           <Button
@@ -423,6 +431,7 @@ function SearchContent() {
             {t("aiSearch.restartSearch")}
           </Button>
         ) : (
+          !results.isError &&
           results.hasNextPage && (
             <Button
               className="mt-4"
