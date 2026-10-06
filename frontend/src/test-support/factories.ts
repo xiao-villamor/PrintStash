@@ -836,3 +836,62 @@ export function aMigrationProvider(
     ...override,
   };
 }
+
+/** A scheduled service window for printer 1. */
+export function aMaintenanceWindow(
+  override?: Partial<import("@/types").MaintenanceWindow>,
+): import("@/types").MaintenanceWindow {
+  return {
+    id: 1,
+    printer_id: 1,
+    starts_at: "2026-08-01T09:00:00Z",
+    ends_at: "2026-08-01T11:00:00Z",
+    reason: "Nozzle swap",
+    created_at: FROZEN_NOW,
+    updated_at: FROZEN_NOW,
+    ...override,
+  };
+}
+
+/** One completed printer service record. */
+export function aMaintenanceLog(
+  override?: Partial<import("@/types").MaintenanceLog>,
+): import("@/types").MaintenanceLog {
+  return {
+    id: 1,
+    printer_id: 1,
+    performed_at: FROZEN_NOW,
+    category: "belt",
+    note: "Tensioned X belt",
+    counter_value: null,
+    counter_unit: null,
+    created_at: FROZEN_NOW,
+    updated_at: FROZEN_NOW,
+    ...override,
+  };
+}
+
+/** A known remote file linked to a vault Artifact. */
+export function aPrinterFile(
+  override?: Partial<import("@/types").PrinterFileRead>,
+): import("@/types").PrinterFileRead {
+  return {
+    id: 50,
+    printer_id: 4,
+    printer_name: "Voron",
+    file_id: 20,
+    model_id: 1,
+    model_name: "Bracket",
+    original_filename: "bracket.gcode",
+    remote_filename: "bracket.gcode",
+    size_bytes: 4096,
+    sha256: "b".repeat(64),
+    matched_by: "sha256",
+    modified_at: FROZEN_NOW,
+    last_seen_at: FROZEN_NOW,
+    missing_since: null,
+    created_at: FROZEN_NOW,
+    updated_at: FROZEN_NOW,
+    ...override,
+  };
+}

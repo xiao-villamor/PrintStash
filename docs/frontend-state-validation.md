@@ -309,3 +309,59 @@ Integration contract: supply the first displayed server page (null for placehold
 The HTTP decoder has one documented no-runtime-typeof exception: foreign revision JSON must establish both required nonempty opaque string tokens without coercion before any observation enters Query. Runtime guards never participate in already-decoded authority decisions. Manual review also included frontend/.oxlintrc.json and frontend/tools/oxlint/anti-slop/rules/no-runtime-typeof.ts to verify this is a boundary-specific exception, not a change to repository lint policy.
 
 Final M3/M5 local qualification:137passed9files (authority, browse, confirmed mutations, auth store/provider, session transport, assets, events and suite hygiene); after extracting the dedicated boundary decoder,27authority cases passed again. Full app/UI/domain typecheck, full frontend lint (zero diagnostics), full format check and git diff --check passed. No integrated browser or CI qualification is claimed.
+
+## M7 remote printer and fleet ownership plan (before tests)
+
+Initial maintenance reads remain2*N because the server exposes per-printer windows and log endpoints. Keyed Query ownership removes repeated2*N reads on object/array identity changes; no aggregate endpoint or benchmark improvement is claimed. Printer detail socket snapshots remain generation-owned; Query owns HTTP state. Drafts remain local. Maintenance mutations reconcile only the confirmed resource after cancelling obsolete reads.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| 101 | reuses maintenance reads for unchanged printer IDs | Happy | new printer array with unchanged IDs | exact initial two reads; no rerender reads | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::reuses maintenance reads for unchanged printer IDs` |
+| 102 | fetches maintenance only for an added printer | Edge | fleet expands one→two | only new printer resources fetched | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::fetches maintenance only for an added printer` |
+| 103 | aborts removed printer maintenance reads | Edge | pending resource; printer removed | signal abort; late response excluded | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::aborts removed printer maintenance reads` |
+| 104 | shares maintenance reads between mounted panels | Edge | same printer in two views | two resource reads total | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::shares maintenance reads between mounted panels` |
+| 105 | retains successful maintenance beside a failed resource | Error | log503; windows200 | window visible; lookup error/retry exposed | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::retains successful maintenance beside a failed resource` |
+| 106 | preserves maintenance drafts during revalidation | Happy | open Log draft; refresh arrives | entered note retained | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::preserves maintenance drafts during revalidation` |
+| 107 | refreshes only confirmed maintenance windows | Happy | deletewindow ack | affected windows re-read; log not re-read | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::refreshes only confirmed maintenance windows` |
+| 108 | refreshes only confirmed maintenance logs | Happy | deletelog ack | affected log re-read; windows not re-read | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::refreshes only confirmed maintenance logs` |
+| 109 | retains maintenance data after a denied mutation | Error | maintenance delete403 | visible row retained; no invalidation | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::retains maintenance data after a denied mutation` |
+| 110 | rejects maintenance mutation effects after scope retirement | Edge | createpending; private scope retired | late result cannot dismiss current draft or publish | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::rejects maintenance mutation effects after scope retirement` |
+| 111 | refreshes active maintenance after event resync | Happy | settled data; resync | coalesced maintenance resources re-read | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::refreshes active maintenance after event resync` |
+| 112 | skips maintenance reads for an empty fleet | Edge | zero printer IDs | noHTTP reads | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::skips maintenance reads for an empty fleet` |
+| 113 | passes cancellation to printer HTTP reads | Edge | caller signal abort | read request signals aborted | Frontend unit | ✅ `frontend/src/lib/api/__tests__/printers.test.ts::passes cancellation to printer HTTP reads ($label)` |
+| 114 | passes cancellation to maintenance HTTP reads | Edge | caller signal abort | two resource signals aborted | Frontend unit | ✅ `frontend/src/lib/api/__tests__/fleet.test.ts::passes cancellation to maintenance HTTP reads ($label)` |
+| 115 | leaves private caches untouched after maintenance transport writes | Happy | successful maintenance/routing writes | no HTTP-triggered Query invalidation | Frontend unit | ✅ `frontend/src/lib/api/__tests__/fleet.test.ts::leaves private caches untouched after maintenance transport writes ($label)` |
+| 116 | retains genuine maintenance auth failures | Error | 401 from current scope | ApiError401 retained; identity expires | Frontend unit | ✅ `frontend/src/lib/api/__tests__/fleet.test.ts::retains genuine maintenance auth failures` |
+| 117 | cancels obsolete maintenance before confirmed revalidation | Edge | pending log read; createack; freshread completes first | oldsignal aborted; late old row cannot replace fresh row | Frontend unit | ✅ `frontend/src/features/printers/__tests__/queries.test.tsx::cancels obsolete maintenance before confirmed revalidation` |
+| 118 | limits routing reconciliation to routing read models | Happy | routingack with unrelated maintenance cached | printer/list updated; unrelated maintenance stays fresh | Frontend unit | ✅ `frontend/src/features/printers/__tests__/queries.test.tsx::limits routing reconciliation to routing read models` |
+| 119 | retries only failed maintenance resources | Error | window200; log503then200 | successful window untouched; log Retry recovers | Frontend unit | ✅ `frontend/src/features/printers/__tests__/queries.test.tsx::retries only failed maintenance resources` |
+| 120 | retains genuine auth failures through the maintenance owner | Error | current create request401 | owner preserves ApiError401; identity expires | Frontend unit | ✅ `frontend/src/features/printers/__tests__/queries.test.tsx::retains genuine auth failures through the maintenance owner` |
+| 121 | scheduling a maintenance window calls createMaintenanceWindow with the entered fields | Happy | entered date/reason; createwindow ack | payload retained; modal closes; only windows re-read | Frontend unit | ✅ `frontend/src/components/__tests__/fleet-panels.test.tsx::scheduling a maintenance window calls createMaintenanceWindow with the entered fields` |
+
+
+M7 maintenance evidence: after correcting a text arrangement mismatch in the new tests, the unchanged implementation was red7failed/3passed/16skipped for keyed ownership and cancellation. The seven typed read cancellation variants were separately red7failed/53skipped. Existing draft and session fences passed against the prior implementation and are recorded as retained behavior, not newly introduced protection. Final focused qualification was102passed5files (fleet panel, printer owner, fleet/printer clients and suite hygiene); two files were rerun after adding exact read-count assertions and passed32cases. Full app/UI/domain typecheck passed. Full lint and format passed before the last fixture/extra assertions, with final checks recorded below. No timing, coverage, browser or CI result is claimed.
+
+### M7 maintenance manually inspected source, test and configuration ledger
+
+| Path | Symbols / notes |
+|---|---|
+| `frontend/src/components/fleet-panels.tsx` | FleetMaintenancePanel full section: duplicated2*N identity-triggered effect removed; keyed resource projection; local form/mode/note retained; exact-resource mutation and scope-fenced UI acknowledgements. FleetQueuePanel read only for import compatibility. |
+| `frontend/src/components/__tests__/fleet-panels.test.tsx` | Existing maintenance payload/draft tests and twelve new HTTP-count, partial failure, cancellation, resync, permission and scope cases; Queue tests unchanged except shared event factory setup. |
+| `frontend/src/features/printers/queries.ts` | printerKeys, maintenance query options, stable ID useQueries, resync subscription, retry only errors, typed mutation variants; cancel exact obsolete reads before confirmed invalidation. |
+| `frontend/src/features/printers/__tests__/queries.test.tsx` | deferred obsolete HTTP response, exact routing cache scope, partial retry, genuine401 through outer owner workflow. |
+| `frontend/src/lib/api/printers.ts` | getPrinter, getDiagnostics, getMoonrakerConfig, listPrinterFiles, listPrinterJobs caller signal options; other writes inventoried for next detail slice. |
+| `frontend/src/lib/api/__tests__/printers.test.ts` | five typed read cancellation variants plus existing provider/printer client contracts. |
+| `frontend/src/lib/api/fleet.ts` | windows/log signal options; maintenance/routing POST/PATCH/DELETE requestApi transport without Query invalidation; fleet queue mutations unchanged. |
+| `frontend/src/lib/api/__tests__/fleet.test.ts` | two read cancellation variants; five raw write cache isolation cases; current401 identity/error contract. |
+| `frontend/src/test-support/factories.ts` | appended aMaintenanceWindow, aMaintenanceLog and aPrinterFile canonical fixtures; existing factories preserved. |
+| `frontend/src/components/printer-detail.tsx` | loadPrinter/jobs/files/diagnostics/config effects and mutation paths inspected for upcoming migration; socket generation/auth cleanup retained, no edits in this checkpoint. |
+| `frontend/src/lib/events.ts` | resync delivery and subscriber disposal reviewed; no edits. |
+| `frontend/src/lib/api/request.ts` | raw requestApi writes avoid temporary requestMutation→Query bridge; scoped derived response fencing preserved; no edits. |
+| `frontend/src/lib/session-transport.ts` | outer workflow assertion and genuine expired-scope401 marker behavior reviewed; no edits. |
+| `frontend/src/test-support/render.tsx` | real Query provider/client and auth-store reset, deferred response helpers; no edits. |
+| `frontend/tests/repo/suite-hygiene.test.ts` | mirror headers/describe scope and test conjunction cap verified; no edits. |
+| `frontend/package.json` | focused Vitest/type/lint/format command owners; no edits. |
+
+The initial per-printer API cost is still two HTTP requests per printer. This checkpoint reduces redundant work and prevents obsolete reads from replacing confirmed maintenance, without claiming a lower initial fleet cost or aggregate backend behavior.
+
+Final M7 maintenance gates: full frontend lint reported zero diagnostics; full format check passed681files; git diff --check passed. The final typecheck included app, UI and domain packages.

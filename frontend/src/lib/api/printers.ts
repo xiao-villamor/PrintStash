@@ -36,21 +36,23 @@ export function getDashboard(options?: GetJsonOptions): Promise<Dashboard> {
   return getJson<Dashboard>("/api/v1/printers/dashboard", options);
 }
 
-export function getPrinter(id: number): Promise<PrinterRead> {
-  return getJson<PrinterRead>(`/api/v1/printers/${id}`);
+export function getPrinter(id: number, options?: GetJsonOptions): Promise<PrinterRead> {
+  return getJson<PrinterRead>(`/api/v1/printers/${id}`, options);
 }
 
-export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
+export function getPrinterDiagnostics(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<PrinterDiagnostics> {
   // Live connectivity check — caching it would defeat the "re-run checks" button.
-  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, {
-    fresh: true,
-  });
+  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, options);
 }
 
-export function getMoonrakerConfig(id: number): Promise<MoonrakerConfigRead> {
-  return getJson<MoonrakerConfigRead>(`/api/v1/printers/${id}/config`, {
-    fresh: true,
-  });
+export function getMoonrakerConfig(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<MoonrakerConfigRead> {
+  return getJson<MoonrakerConfigRead>(`/api/v1/printers/${id}/config`, options);
 }
 
 export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
@@ -152,8 +154,8 @@ export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
   });
 }
 
-export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {
-  return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`);
+export function listPrinterFiles(id: number, options?: GetJsonOptions): Promise<PrinterFileRead[]> {
+  return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`, options);
 }
 
 export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
@@ -169,8 +171,12 @@ export async function deletePrinterFile(
   });
 }
 
-export function listPrinterJobs(id: number, limit = 50): Promise<PrintJobRead[]> {
-  return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`);
+export function listPrinterJobs(
+  id: number,
+  limit = 50,
+  options?: GetJsonOptions,
+): Promise<PrintJobRead[]> {
+  return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`, options);
 }
 
 export async function openPrinterWS(id: number, signal?: AbortSignal): Promise<WebSocket> {

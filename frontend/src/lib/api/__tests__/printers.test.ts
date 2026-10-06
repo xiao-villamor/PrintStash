@@ -356,3 +356,24 @@ describe("printer ticket lifetimes", () => {
     expect(sockets).toEqual([]);
   });
 });
+
+describe("printer HTTP read cancellation", () => {
+  it.each([
+    { label: "detail", read: (signal: AbortSignal) => getPrinter(4, { signal }) },
+    { label: "jobs", read: (signal: AbortSignal) => listPrinterJobs(4, 50, { signal }) },
+    { label: "files", read: (signal: AbortSignal) => listPrinterFiles(4, { signal }) },
+    { label: "diagnostics", read: (signal: AbortSignal) => getPrinterDiagnostics(4, { signal }) },
+    { label: "config", read: (signal: AbortSignal) => getMoonrakerConfig(4, { signal }) },
+  ])("passes cancellation to printer HTTP reads ($label)", async ({ read }) => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
+    const caller = new AbortController();
+    const outcome = read(caller.signal).catch((error: Error) => error);
+    const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+    const reason = new DOMException("View left", "AbortError");
+    caller.abort(reason);
+    expect(signal?.aborted).toBe(true);
+    pending.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+    expect(await outcome).toBe(reason);
+  });
+});

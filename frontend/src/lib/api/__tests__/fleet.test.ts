@@ -33,6 +33,9 @@ import {
   updateFleetJob,
   updatePrinterRouting,
 } from "@/lib/api/fleet";
+import { isLoggedIn, storeLogin } from "@/lib/auth-store";
+import { queryClient } from "@/lib/query-client";
+import { aMaintenanceWindow, aMaintenanceLog } from "@/test-support/factories";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -257,5 +260,67 @@ describe("maintenance log", () => {
     await deleteMaintenanceLog(3, 9);
 
     expectRequest("/api/v1/fleet/printers/3/maintenance-log/9", "DELETE");
+  });
+});
+
+describe("maintenance HTTP read cancellation", () => {
+  it.each([
+    { label: "windows", read: (signal: AbortSignal) => listMaintenanceWindows(3, { signal }) },
+    { label: "logs", read: (signal: AbortSignal) => listMaintenanceLog(3, { signal }) },
+  ])("passes cancellation to maintenance HTTP reads ($label)", async ({ read }) => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
+    const caller = new AbortController();
+    const outcome = read(caller.signal).catch((error: Error) => error);
+    const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+    const reason = new DOMException("View left", "AbortError");
+    caller.abort(reason);
+    expect(signal?.aborted).toBe(true);
+    pending.resolve(new Response("[]", { headers: { "content-type": "application/json" } }));
+    expect(await outcome).toBe(reason);
+  });
+});
+
+describe("maintenance transport isolation", () => {
+  it.each([
+    {
+      label: "create window",
+      write: () =>
+        createMaintenanceWindow(3, {
+          starts_at: "2026-08-01T09:00:00Z",
+          ends_at: "2026-08-01T11:00:00Z",
+        }),
+    },
+    {
+      label: "create log",
+      write: () => createMaintenanceLog(3, { category: "service", note: "Done" }),
+    },
+    { label: "delete window", write: () => deleteMaintenanceWindow(3, 1) },
+    { label: "delete log", write: () => deleteMaintenanceLog(3, 1) },
+    { label: "routing", write: () => updatePrinterRouting(3, { drain_mode: true }) },
+  ])(
+    "leaves private caches untouched after maintenance transport writes ($label)",
+    async ({ write }) => {
+      queryClient.setQueryData(["printers", 99, "maintenance", "log"], [aMaintenanceLog()]);
+      respondWith({ ...aMaintenanceWindow() });
+      await write();
+      expect(queryClient.getQueryState(["printers", 99, "maintenance", "log"])?.isInvalidated).toBe(
+        false,
+      );
+    },
+  );
+
+  it("retains genuine maintenance auth failures", async () => {
+    storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
+    fetchMock.mockResolvedValueOnce(
+      new Response('{"detail":"session_expired"}', {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      createMaintenanceLog(3, { category: "service", note: "Done" }),
+    ).rejects.toMatchObject({ status: 401, code: "session_expired" });
+    expect(isLoggedIn()).toBe(false);
   });
 });
