@@ -10,6 +10,7 @@ import {
   normalizeVault,
   parseBrowserExtensionSetup,
   verifyVaultConnection,
+  verifyVaultReachability,
 } from "../core.ts";
 import { buildBrowserCaptureMessage } from "../capture-adapter.ts";
 
@@ -589,4 +590,39 @@ describe("capture authentication boundary", () => {
       message: "This PrintStash user does not have import permission.",
     });
   });
+});
+
+test("checks vault reachability without authenticating a device", async () => {
+  const requests: Array<{ url: string; options: RequestInit }> = [];
+  const result = await verifyVaultReachability({
+    vault: "https://prints.example.com/",
+    fetchImpl: async (input, options = {}) => {
+      requests.push({ url: requestUrl(input), options });
+      return Response.json({ status: "ok", name: "PrintStash" });
+    },
+  });
+
+  assert.deepEqual(result, { base: "https://prints.example.com" });
+  assert.equal(requests.length, 1);
+  const request = itemAt(requests, 0);
+  assert.equal(request.url, "https://prints.example.com/api/v1/health");
+  assert.equal(request.options.method ?? "GET", "GET");
+  assert.equal(headerValue(request.options, "Authorization"), undefined);
+  assert.equal(request.options.credentials, "omit");
+  assert.equal(request.options.cache, "no-store");
+});
+
+it.each([
+  { label: "HTTP failure", body: { status: "ok", name: "PrintStash" }, status: 503 },
+  { label: "wrong server", body: { status: "ok", name: "Other" }, status: 200 },
+  { label: "unhealthy server", body: { status: "unavailable", name: "PrintStash" }, status: 200 },
+  { label: "unreadable body", body: undefined, status: 200 },
+])("rejects an unusable vault reachability response: $label", async ({ body, status }) => {
+  await expect(
+    verifyVaultReachability({
+      vault: "https://prints.example.com",
+      fetchImpl: async () =>
+        body === undefined ? new Response("unreadable") : Response.json(body, { status }),
+    }),
+  ).rejects.toThrow("That URL is not a PrintStash server.");
 });

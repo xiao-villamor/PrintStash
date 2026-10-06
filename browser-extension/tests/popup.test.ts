@@ -122,6 +122,73 @@ describe("popup browser adapters", () => {
     },
   );
 
+  it.each(["stored", "new pairing"])(
+    "displays paired browser readiness without inventing a user role: %s",
+    async (mode) => {
+      if (mode === "stored") {
+        await fakeBrowser.storage.local.set({
+          vault: "https://prints.example.com",
+          deviceCredential: "device-secret",
+        });
+      }
+      const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+        if (String(input).endsWith("/health"))
+          return response({ status: "ok", name: "PrintStash" });
+        if (String(input).endsWith("/browser-pairings/claim"))
+          return response({ credential: "device-secret", device: { id: 3, name: "Browser" } });
+        throw new Error("Unexpected readiness request");
+      });
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await settle();
+      if (mode === "new pairing") {
+        requiredElement("#vault", HTMLInputElement).value = "https://prints.example.com";
+        requiredElement("#pairing-code", HTMLInputElement).value = "pairing-code";
+        button("#connect").click();
+        await settle();
+      }
+
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(element("#connection-detail").textContent).toBe("Paired browser · prints.example.com");
+      expect(element("#import-panel").hidden).toBe(false);
+      expect(button("#capture").disabled).toBe(false);
+      expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+        "https://prints.example.com/api/v1/health",
+        ...(mode === "new pairing"
+          ? ["https://prints.example.com/api/v1/browser-pairings/claim"]
+          : []),
+      ]);
+    },
+  );
+
+  it.each([
+    { isSuperuser: true, role: "Admin" },
+    { isSuperuser: false, role: "Member" },
+  ])("preserves the verified legacy account role: $role", async ({ isSuperuser, role }) => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "legacy-key",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input).endsWith("/health"))
+          return response({ status: "ok", name: "PrintStash" });
+        if (String(input).endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (String(input).endsWith("/me"))
+          return response({ username: "owner", is_superuser: isSuperuser });
+        throw new Error("Unexpected account request");
+      }),
+    );
+    await import("../popup.ts");
+    await settle();
+
+    expect(element("#connection-title").textContent).toBe("Connected");
+    expect(element("#connection-detail").textContent).toBe(`owner · prints.example.com · ${role}`);
+    expect(button("#capture").disabled).toBe(false);
+  });
+
   it("keeps an empty Vault address required", () => {
     const input = requiredElement("#vault", HTMLInputElement);
 

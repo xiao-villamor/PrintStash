@@ -13,7 +13,7 @@ import {
   isLocalVault,
   normalizeVault,
   parseBrowserExtensionSetup,
-  verifyBrowserDevice,
+  verifyVaultReachability,
   verifyVaultConnection,
 } from "./core.ts";
 import {
@@ -570,9 +570,11 @@ function renderConnection(
 
   if (state === "connected") {
     if (!config) throw new Error("Connected state requires a configuration.");
-    const role = profile?.is_superuser ? "Admin" : "Member";
     connectionTitle.textContent = "Connected";
-    connectionDetail.textContent = `${profile?.username || (config.deviceCredential ? "Paired browser" : config.username)} · ${connectionHost(config)} · ${role}`;
+    const identity =
+      profile?.username || (config.deviceCredential ? "Paired browser" : config.username);
+    const role = profile ? ` · ${profile.is_superuser ? "Admin" : "Member"}` : "";
+    connectionDetail.textContent = `${identity} · ${connectionHost(config)}${role}`;
   } else if (state === "checking") {
     connectionTitle.textContent = "Checking connection…";
     connectionDetail.textContent =
@@ -663,7 +665,7 @@ async function establishConnection(
       });
       normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
     } else if (config.deviceCredential) {
-      verified = await verifyBrowserDevice({ ...config, fetchImpl });
+      verified = await verifyVaultReachability({ vault: config.vault, fetchImpl });
       normalized = { vault: verified.base, deviceCredential: config.deviceCredential };
     } else {
       verified = await verifyVaultConnection({

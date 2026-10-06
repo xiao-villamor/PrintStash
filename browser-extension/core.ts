@@ -393,7 +393,8 @@ export async function claimBrowserPairing({
   return { base, deviceCredential: payload.credential, device: payload.device || null };
 }
 
-export async function verifyBrowserDevice({
+/** Check public server reachability; paired credentials are authenticated when used for capture. */
+export async function verifyVaultReachability({
   fetchImpl = fetch,
   vault,
 }: {
