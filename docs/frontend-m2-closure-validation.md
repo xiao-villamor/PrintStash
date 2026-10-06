@@ -25,7 +25,7 @@ This matrix was recorded with pending rows before the test correction and assess
 - Back/Forward: navigation browser qualification already covers collection and document history; this correction adds real detail navigation. Mode changes themselves intentionally replace the current entry: `tests/e2e/vault.spec.ts::vault route / restores library mode after collection history` enters a folder, changes mode, then one Back restores the root multipart mode and sort (navigation matrix row 18, qualified in its 21-case browser run).
 - Independent Model access: final real headline passed; one Model referenced by two sets appears once in Everything, opens its exact heading and recommended Revision, and remains after both sets are deleted.
 - Removal: only Everything / Multipart sets only controls remain; client membership downloads are removed. Existing Model API/detail routes remain compatible; no data migration is needed to roll back the UI cutover.
-- Dependency: necessary transport/session/Query foundations are qualified. Broad M1 completion and M5 reading-position completion are separate goals, not additional M2 acceptance criteria.
+- Dependency: M0 and M1 are now closed. M5 reading-position completion remains a separate downstream goal.
 
 ## Execution
 
@@ -41,9 +41,26 @@ Local evidence: `/tmp/frontend-m2-split-result.json` (complete, exit 0), `/tmp/f
 
 M2 acceptance is qualified by this final browser result plus the linked migration, filter, saved-view, and navigation evidence. The failed oversized attempt is retained as resolved test-organization evidence, not hidden or counted as green. Broad M1/M5 completion and remote PR CI are not claimed by this checkpoint.
 
-## Prerequisite status
+## Ordered acceptance (2026-10-07)
 
-The local acceptance above is qualified. Formal M2 closure still requires M1,
-which depends on M0. The earlier closure announcement did not respect those
-prerequisites and is corrected in the execution plan. Keep the passing evidence;
-it does not qualify unrelated remaining transport work or the whole migration.
+M0 closed at `9f1d6bd7`; M1 closed at `9ebdb7d8`. The prerequisite block is now
+resolved. The earlier premature closure announcement remains documented in the
+execution history; the existing passing evidence was retained.
+
+After the collection cancellation change in M1, the complete ModelBrowser,
+Library URL and filter tests passed **215/215 in three files** (60.51 s).
+This renewed the affected consumer qualification; it did not rerun unrelated
+browser lifecycles. URL/filter/saved-view owners, sidebar mode controls, locale
+notices and the real multipart acceptance spec are unchanged from `371fee63`.
+The real spec still has SHA256
+`2d9c75890041a9daad50a33c6a39a0d0523c1f5de7695691532033cdd6f7f0f8`, matching the
+successful two-lifecycle result manifest. Subsequent grid refresh changes also
+have their own [qualified checkpoint](library-refresh-validation.md); the
+current full grid regression above includes them.
+
+M2 is now formally closed as a local milestone. M3 is the next active goal.
+The six-row matrix above and the linked URL/filter/saved-view/navigation matrices
+remain the acceptance contract. M5 scroll/snapshot work, the known pending M5
+suite-hygiene failure and final PR CI are still open. No performance claim follows
+from this closure. Evidence is retained locally in
+`reports/frontend-implementation/m2-closure-2026-10-07`.

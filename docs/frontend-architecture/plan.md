@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0 and M1 are closed locally. M2 acceptance is locally qualified and is next for prerequisite review. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M2 are closed locally in dependency order. M3 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -167,17 +167,18 @@ JobEngine seams without adding deployment infrastructure here.
 
 ## Execution status
 
-M2 has locally qualified implementation and acceptance, consolidated in its
+M2 is locally closed after M0 and M1, with acceptance consolidated in its
 [validation record](../frontend-m2-closure-validation.md) and parent matrix rows
-1–5. Its prerequisite M1 is now closed; M2 awaits the ordered acceptance review before formal closure. Local
-acceptance, prerequisite readiness and final delivery are distinct states.
+1–5. Its current 215-test regression passes and its retained browser result has
+matching source provenance. Local acceptance and final delivery are distinct states.
 
 Follow the dependency graph in the table below. The closure sequence is
 M0 → M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9 → M10 → M11.
 M0 is qualified by the [exact-base checkpoint](baseline-measurement.md#m0-acceptance):
 501 original unit/package tests, 17 production functional cases, 200 startup
 observations and bounded reproductions of the six failure families. M1 is qualified
-by the [transport closure record](../frontend-m1-closure-validation.md); M2 is next.
+by the [transport closure record](../frontend-m1-closure-validation.md). M2
+prerequisites and acceptance are satisfied; M3 is the next closure target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own
