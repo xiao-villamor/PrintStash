@@ -1,0 +1,17 @@
+# Import download boundary contracts
+
+Downloads must normalize source filenames, retain exact staging ownership and enforce the existing HTTP/window limits. Review must refuse actual CRC corruption. HTTPX MockTransport and public DNS answers stand in only for outbound I/O; real response streaming, file writes, scratch windows, capacity rows and ZIP verification execute. This does not qualify real DNS resolution or public-network security.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | `preserves_safe_download_names` | Happy | Real body; quoted/encoded/empty/URL names | Safe filename, exact bytes, suffix; cleanup | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_preserves_safe_download_names` |
+| 2 | `refuses_invalid_window_limit_before_fetch` | Error | Bool/zero/negative/float/string limit | Explicit ValueError; no HTTP or scratch files | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_refuses_invalid_window_limit_before_fetch` |
+| 3 | `refuses_redirect_without_location` | Error | HTTP302 no location | Stable error; one request; no scratch | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_refuses_redirect_without_location` |
+| 4 | `stops_at_configured_redirect_ceiling` | Security | Actual HTTPX relative redirect chain | Exact configured number of hops, stable refusal | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_stops_at_configured_redirect_ceiling` |
+| 5 | `stream_failure_releases_owned_window` | Partial failure | Stream emits1MiB then OS/PermissionError | Same fault; stream closed; window/credits restored | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_stream_failure_releases_owned_window` |
+| 6 | `respects_caller_window_capacity` | Boundary | Caller window8bytes/body9bytes | Typed too-large refusal; caller retains then closes window | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestDownloadBoundaries::test_respects_caller_window_capacity` |
+| 7 | `crc_failure_preserves_archive_source` | Error | Actual corrupted ZIP member | Review refuses CRC; source unchanged; no completed entry | Integration | ✅ `integration/modules/ingestion/importer/test_download_boundaries.py::TestArchiveReviewBoundaries::test_crc_failure_preserves_archive_source` |
+
+Eighteen new cases cover seven behaviors. No application, schema, security policy, dependency, floor or budget changes. No local full/coverage/Deep runs. Final measured module floors await GitHub Deep CI.
+
+Validation:31 passed,1 deprecation warning,9.77s (bounded17.62s), including18 new cases plus existing archive-window and cancellation contracts. Ruff check/format/whitespace pass. Initial17 passed1 failed7.53s was a new-test assumption: window manifest metadata is not payload and exceeds an8-byte payload bound. Corrected assertion names the actual temporary payload, empty before over-limit chunk publication, and verifies no final STL. No productive RED. HTTP DNS/transport stand-ins do not claim external provider closure/security qualification.
