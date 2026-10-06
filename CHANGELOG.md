@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add authenticated HTTP contracts for outliner printer-filter authority and contradictory query scopes.
+
 - Add real ZIP preview contracts for embedded 3MF budgets, unsafe member names, CRC recovery and strict PNG validation.
 
 - Add real database contracts for similarity ingestion continuation authority, durable analysis eligibility and caller write rollback.

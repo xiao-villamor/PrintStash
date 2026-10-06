@@ -563,3 +563,80 @@ class TestOutliner:
         last = _read(client, auth_headers, COLLECTIONS, cursor=first["next_cursor"])
         assert [r["id"] for r in first["items"] + last["items"]] == expected
         assert last["next_cursor"] is None
+
+
+class TestOutlinerQueryAuthority:
+    @pytest.mark.parametrize(
+        "path", [ENTRIES, COLLECTIONS, SEARCH], ids=["entries", "collections", "search"]
+    )
+    def test_denies_printer_id_to_nonadministrator(
+        self, client, make_user, headers_for, make_printer, path
+    ):
+        printer = make_printer()
+        params = {"printer_id": printer.id}
+        if path == SEARCH:
+            params["q"] = "Needle"
+        response = client.get(path, headers=headers_for(make_user()), params=params)
+        assert response.status_code == 403
+        assert response.json() == {"detail": "admin_required"}
+
+    @pytest.mark.parametrize(
+        "path", [ENTRIES, COLLECTIONS, SEARCH], ids=["entries", "collections", "search"]
+    )
+    @pytest.mark.parametrize(
+        "selector", ["collection", "direct"], ids=["legacy-path", "legacy-direct"]
+    )
+    def test_rejects_legacy_collection_selectors(
+        self, client, auth_headers, make_collection, path, selector
+    ):
+        folder = make_collection("Actual folder")
+        params = {selector: folder.path if selector == "collection" else "true"}
+        if path == SEARCH:
+            params["q"] = "Needle"
+        response = client.get(path, headers=auth_headers, params=params)
+        assert response.status_code == 422
+        assert response.json() == {"detail": "outliner_use_collection_id"}
+
+    @pytest.mark.parametrize(
+        "path", [ENTRIES, COLLECTIONS], ids=["entries", "collections"]
+    )
+    def test_rejects_search_text_on_listing_endpoints(self, client, auth_headers, path):
+        response = client.get(path, headers=auth_headers, params={"q": "Needle"})
+        assert response.status_code == 422
+        assert response.json() == {"detail": "outliner_use_search"}
+
+    @pytest.mark.parametrize(
+        "selector", ["parent_id", "reveal_id"], ids=["parent", "reveal"]
+    )
+    def test_rejects_scoped_global_search(
+        self, client, auth_headers, make_collection, selector
+    ):
+        folder = make_collection("Needle")
+        response = client.get(
+            SEARCH, headers=auth_headers, params={"q": "Needle", selector: folder.id}
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "outliner_search_is_global"}
+
+    def test_requires_parent_selector_for_collection_listing(
+        self, client, auth_headers, make_collection
+    ):
+        folder = make_collection("Actual folder")
+        response = client.get(
+            COLLECTIONS, headers=auth_headers, params={"collection_id": folder.id}
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "outliner_use_parent_id"}
+
+    @pytest.mark.parametrize(
+        "selector", ["parent_id", "reveal_id"], ids=["parent", "reveal"]
+    )
+    def test_requires_collection_selector_for_entry_listing(
+        self, client, auth_headers, make_collection, selector
+    ):
+        folder = make_collection("Actual folder")
+        response = client.get(
+            ENTRIES, headers=auth_headers, params={selector: folder.id}
+        )
+        assert response.status_code == 422
+        assert response.json() == {"detail": "outliner_use_collection_id"}
