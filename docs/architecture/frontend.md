@@ -100,12 +100,15 @@ sibling internals: shared screens compose public interfaces, and shared DTOs liv
 at their actual common owner. Session and event infrastructure exposes lifecycle
 signals without importing feature code; bootstrap wires cleanup and adapters.
 
-Enforce migrated boundaries with repository import tests using the existing parser
-and resolver, including aliases, workspace exports and type-only imports. Check
-strongly connected components and literal dynamic imports. Name unresolved computed
-imports for manual review. Maintain a small explicit legacy allowlist that can only
-shrink; no global ban with hundreds of silently ignored exceptions. Do not introduce
-ESLint or a new build framework to enforce a boundary oxlint/repo tests can express.
+Migrated boundaries are enforced by `frontend/tests/repo/dependency-boundaries.test.ts`
+using the existing Oxc parser and a resolver for TypeScript aliases and workspace
+exports. The [boundary contract](../frontend-architecture/dependency-boundaries.md)
+names the public feature modules and the single legacy transport-invalidation
+exception. The gate checks type-only, static, re-export, literal dynamic and worker
+imports, reports runtime and type-involving strongly connected components separately,
+and fails on unresolved computed imports for explicit review. Unused exceptions
+fail too. This is dependency-direction enforcement, not a claim that every legacy
+owner has migrated; no ESLint or new build framework is required.
 
 ## State ownership
 
