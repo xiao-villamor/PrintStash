@@ -23,7 +23,10 @@ beforeEach(() => {
   });
   vi.stubGlobal("window", { location: { reload } });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("lazy chunk recovery", () => {
   it("reloads once when a deferred chunk is unavailable", async () => {
@@ -49,4 +52,57 @@ describe("lazy chunk recovery", () => {
     expect(render(Component)).toContain("usable form");
     expect(reload).not.toHaveBeenCalled();
   });
+
+  it.each(["getter", "removeItem"])(
+    "renders a successful chunk when retry storage %s is blocked",
+    async (failure) => {
+      const denied = () => {
+        throw new DOMException("storage denied", "SecurityError");
+      };
+      flags.set("chunk-reload", "1");
+      if (failure === "getter") {
+        Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get: denied });
+      } else {
+        vi.spyOn(sessionStorage, "removeItem").mockImplementation(denied);
+      }
+      const Component = lazyImport(async () => ({ default: () => <span>usable form</span> }));
+
+      render(Component);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(render(Component)).toContain("usable form");
+      expect(render(Component)).not.toContain("storage denied");
+      expect(reload).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { failure: "getter", errorName: "SecurityError" },
+    { failure: "getItem", errorName: "SecurityError" },
+    { failure: "setItem", errorName: "SecurityError" },
+    { failure: "setItem", errorName: "QuotaExceededError" },
+  ])(
+    "preserves a failed chunk when retry storage $failure throws $errorName",
+    async ({ failure, errorName }) => {
+      const denied = () => {
+        throw new DOMException("storage denied", errorName);
+      };
+      if (failure === "getter") {
+        Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get: denied });
+      } else if (failure === "getItem") {
+        vi.spyOn(sessionStorage, "getItem").mockImplementation(denied);
+      } else {
+        vi.spyOn(sessionStorage, "setItem").mockImplementation(denied);
+      }
+      const Component = lazyImport(() => Promise.reject(new Error("original chunk failure")));
+
+      render(Component);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(render(Component)).toContain("original chunk failure");
+      expect(render(Component)).not.toContain("storage denied");
+      expect(reload).not.toHaveBeenCalled();
+      expect(flags.has("chunk-reload")).toBe(false);
+    },
+  );
 });

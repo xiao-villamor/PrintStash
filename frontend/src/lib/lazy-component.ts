@@ -7,12 +7,24 @@ export function lazyImport<T extends Awaited<ReturnType<Parameters<typeof lazy>[
   return lazy<T>(() =>
     factory()
       .then((mod) => {
-        sessionStorage.removeItem(key);
+        try {
+          sessionStorage.removeItem(key);
+        } catch {
+          // A successful chunk remains usable without optional retry storage.
+        }
         return mod;
       })
       .catch((err) => {
-        if (!sessionStorage.getItem(key)) {
-          sessionStorage.setItem(key, "1");
+        let canReload = false;
+        try {
+          if (!sessionStorage.getItem(key)) {
+            sessionStorage.setItem(key, "1");
+            canReload = true;
+          }
+        } catch {
+          // Without a persisted latch, a reload could repeat indefinitely.
+        }
+        if (canReload) {
           window.location.reload();
           return new Promise<{ default: T }>(() => {});
         }
