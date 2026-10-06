@@ -33,18 +33,19 @@ import {
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
 import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
 
 import { useUiLocale } from "@/lib/i18n";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
   CollectionNodeRead,
   CollectionRead,
+  CollectionPage,
   ModelBatchResult,
   ModelListItem,
   ModelSort,
@@ -102,6 +103,8 @@ import {
 } from "lucide-react";
 import {
   createCollection,
+  listCollectionChildren,
+  searchCollections,
   updateModel,
   moveCollection,
   renameCollection,
@@ -484,6 +487,11 @@ function writeRecentFolders(folders: RecentFolder[]): void {
 function canWriteCollection(collection: CollectionRead | null | undefined): boolean {
   return collection?.effective_role === "edit" || collection?.effective_role === "admin";
 }
+
+type LibraryRefreshState = { entry: LibraryEntry } & (
+  | { status: "pending" }
+  | { status: "failed" | "denied"; error: string }
+);
 
 export interface BrowserInitialData {
   models: ModelListItem[];
@@ -912,14 +920,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
-  const browseReady =
+  const projectionReady =
     (selectedCollection === null || selectedCollectionRow !== null) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
     !modelQuery.isPlaceholderData;
 
-  const entry = useLibraryEntry(canonicalLibraryHref, browseReady);
+  const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
+  const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
+  const refreshScope = useRef({ entry, sequence: 0 });
+  useLayoutEffect(() => {
+    const scope = refreshScope.current;
+    scope.entry = entry;
+    return () => {
+      scope.sequence++;
+    };
+  }, [entry]);
+  const currentRefresh = refreshState?.entry === entry ? refreshState : null;
+  const browseReady = projectionReady && currentRefresh === null;
   const orderedItems = useMemo<LibraryItem[]>(
     () =>
       modelQuery.data?.pages.flatMap((page) =>
@@ -963,7 +982,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   ]);
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
-  const snapshot = nextSnapshot ?? settledSnapshot;
+  const snapshot = currentRefresh?.status === "denied" ? null : (nextSnapshot ?? settledSnapshot);
+  const displayedCollection = snapshot?.collection ?? null;
   const onAuthorityRetired = useCallback(() => {
     const session = getSessionVersion();
     void refreshAuth().catch((error) => {
@@ -974,7 +994,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     onRefresh: () => reading.refresh(refresh),
     onAuthorityRetired,
   });
-  const refreshRequired = authority.refreshRequired || modelQuery.refreshRequired;
+  const refreshRequired =
+    authority.refreshRequired || modelQuery.refreshRequired || currentRefresh !== null;
   const libraryItems = snapshot?.items ?? [];
   const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
   const visibleMultipartModels = libraryItems.flatMap((item) =>
@@ -984,15 +1005,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const breadcrumbs = snapshot?.breadcrumbs ?? [];
   const selectedName = snapshot?.collection?.name ?? null;
   const error =
+    (currentRefresh && currentRefresh.status !== "pending" ? currentRefresh.error : null) ??
     (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
     null;
   const loading = snapshot === null && !browseReady && error === null;
   const refreshing =
-    !loading &&
-    !error &&
-    (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage));
+    currentRefresh?.status === "pending" ||
+    (!loading &&
+      !error &&
+      (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
   const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
   const hasMore = snapshot?.hasMore ?? false;
 
@@ -1040,18 +1063,88 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
   async function refresh() {
     const session = getSessionVersion();
+    if (
+      entry.session !== session ||
+      authority.authorizationChanged ||
+      currentRefresh?.status === "pending"
+    )
+      return;
+    const scope = refreshScope.current;
+    const sequence = ++scope.sequence;
+    const isCurrent = () =>
+      getSessionVersion() === session && scope.entry === entry && scope.sequence === sequence;
+    setRefreshState({ entry, status: "pending" });
+    let lookupPending = selectedCollection !== null;
     try {
-      await queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all });
-      requireSessionVersion(session);
-      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
-      requireSessionVersion(session);
+      const previousFolders =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(selectedCollectionRow?.id ?? null)
+          : queryKeys.collectionSearch(searchQuery, "view");
       await Promise.all([
-        queryClient.resetQueries({ queryKey: libraryBrowseKeys.pages(browseParams), exact: true }),
+        queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all }),
+        queryClient.cancelQueries({ queryKey: previousFolders, exact: true }),
+        queryClient.cancelQueries({
+          queryKey: queryKeys.collectionLookup(selectedCollection),
+          exact: true,
+        }),
+      ]);
+      if (!isCurrent()) return;
+      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
+      if (!isCurrent()) return;
+      // Resolve the path first: a replacement folder may have a different id.
+      let parentId: number | null = null;
+      if (selectedCollection !== null) {
+        const lookup = await selectedLookup.refetch({ throwOnError: true });
+        if (!isCurrent()) return;
+        if (!lookup.data) throw new Error("Collection refresh returned no lookup");
+        parentId = lookup.data.collection.id;
+      }
+      lookupPending = false;
+      const folderKey =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(parentId)
+          : queryKeys.collectionSearch(searchQuery, "view");
+      await queryClient.cancelQueries({ queryKey: folderKey, exact: true });
+      if (!isCurrent()) return;
+      await Promise.all([
+        queryClient.resetQueries(
+          { queryKey: libraryBrowseKeys.pages(browseParams), exact: true },
+          { throwOnError: true },
+        ),
+        (async () => {
+          await queryClient.resetQueries(
+            { queryKey: folderKey, exact: true },
+            { throwOnError: true },
+          );
+          if (!isCurrent()) return;
+          // A new parent key may not have an observer yet. Fetch its same Query
+          // entry explicitly; Infinity reuses the page resetQueries just read.
+          await queryClient.fetchInfiniteQuery<
+            CollectionPage,
+            Error,
+            CollectionPage,
+            typeof folderKey,
+            string | null
+          >({
+            queryKey: folderKey,
+            queryFn: ({ pageParam }: { pageParam: string | null }) =>
+              searchQuery === undefined
+                ? listCollectionChildren(parentId, pageParam)
+                : searchCollections(searchQuery, "view", pageParam),
+            initialPageParam: null,
+            getNextPageParam: (page: CollectionPage) => page.next_cursor,
+            staleTime: Infinity,
+          });
+        })(),
         queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
         queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
       ]);
+      if (isCurrent()) setRefreshState(null);
     } catch (error) {
-      if (session === getSessionVersion()) toast.error(error);
+      if (!isCurrent()) return;
+      const denied = lookupPending && parseApiError(error).status === 404;
+      if (denied) setSettledSnapshot(null);
+      setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
     }
   }
 
@@ -1437,11 +1530,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // folder explorer (immediate children of the selected collection).
   // The folder being viewed and the way to it, from one lookup by path.
   // A folder view shows one bounded page of child folders at a time.
-  const {
-    hasNextPage: moreFolders,
-    isFetchingNextPage: fetchingFolders,
-    fetchNextPage: fetchMoreFolders,
-  } = folderPages;
+  const { isFetchingNextPage: fetchingFolders, fetchNextPage: fetchMoreFolders } = folderPages;
   // The open folder's names replace its provisional label once they load.
   if (
     selectedCollectionRow &&
@@ -2302,23 +2391,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </div>
 
-          {selectedCollectionRow && (
+          {displayedCollection && (
             <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
               <EntityTagsDialog
-                entityLabel={selectedCollectionRow.name}
-                tags={selectedCollectionRow.tags}
+                entityLabel={displayedCollection.name}
+                tags={displayedCollection.tags}
                 availableTags={tags}
-                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+                canEdit={
+                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                }
                 help={uiText(
                   "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
                 )}
-                onSave={(nextTags) => saveCollectionTags(selectedCollectionRow, nextTags)}
+                onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
               />
               <CollectionReadme
-                key={selectedCollectionRow.id}
-                collectionId={selectedCollectionRow.id}
-                hasReadme={selectedCollectionRow.has_readme}
-                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+                key={displayedCollection.id}
+                collectionId={displayedCollection.id}
+                hasReadme={displayedCollection.has_readme}
+                canEdit={
+                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                }
               />
             </div>
           )}
@@ -2579,7 +2672,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     variant="outline"
                     size="sm"
                     loading={refreshing}
-                    onClick={() => void authority.refresh()}
+                    onClick={() =>
+                      void (currentRefresh
+                        ? snapshot
+                          ? reading.refresh(refresh)
+                          : refresh()
+                        : authority.refresh())
+                    }
                   >
                     {uiText("library.refresh")}
                   </Button>
@@ -2604,6 +2703,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               {error && (
                 <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {error}
+                  {currentRefresh && currentRefresh.status !== "pending" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void (snapshot ? reading.refresh(refresh) : refresh())}
+                    >
+                      {uiText("Retry")}
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -2715,9 +2823,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     )}
                   </div>
                   <LoadMore
-                    hasMore={moreFolders}
-                    loading={fetchingFolders}
-                    onClick={() => void fetchMoreFolders()}
+                    hasMore={snapshot?.moreFolders ?? false}
+                    loading={fetchingFolders || currentRefresh !== null}
+                    onClick={() => {
+                      if (currentRefresh === null) void fetchMoreFolders();
+                    }}
                     folders
                   />
                   <LoadMore
@@ -2752,9 +2862,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       />
                     ))}
                     <LoadMore
-                      hasMore={moreFolders}
-                      loading={fetchingFolders}
-                      onClick={() => void fetchMoreFolders()}
+                      hasMore={snapshot?.moreFolders ?? false}
+                      loading={fetchingFolders || currentRefresh !== null}
+                      onClick={() => {
+                        if (currentRefresh === null) void fetchMoreFolders();
+                      }}
                       folders
                     />
                     {libraryItems.map((item) =>

@@ -323,6 +323,15 @@ for (const recovery of ["available", "removed", "stale"] as const) {
     // Activate the actual control without locator auto-scroll changing the reading bookmark.
     await refresh.evaluate((button: HTMLButtonElement) => button.click());
     if (recovery === "available") {
+      // The coherent old snapshot keeps this anchor in place while refresh is
+      // pending. Prove fresh pages published before checking its new position.
+      await expect.poll(() => refreshed).toEqual([null, "second-new"]);
+      await expect(
+        page
+          .getByRole("main")
+          .getByRole("link", { name: /Inserted/ })
+          .first(),
+      ).toBeAttached();
       const anchor = page.locator(`[data-library-entry="${bookmark.key}"]`).first();
       await expect
         .poll(async () => anchor.evaluate((node) => node.getBoundingClientRect().top))
