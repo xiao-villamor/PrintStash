@@ -1090,6 +1090,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     return {
       entry,
       items: orderedItems,
+      modelPages: modelQuery.data?.pages.length ?? 0,
+      folderPages: folderPages.data?.pages.length ?? 0,
       collections: folderPages.data?.pages.flatMap((page) => page.items) ?? [],
       collection: selectedCollectionRow,
       breadcrumbs:
@@ -1108,6 +1110,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedCollectionRow,
     selectedLookup.data,
     modelQuery.hasNextPage,
+    modelQuery.data?.pages.length,
   ]);
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
@@ -1150,12 +1153,29 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [browseReady, error, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
-  useLibraryReadingPosition(
+  const readingStatus = useLibraryReadingPosition(
     snapshot?.entry,
     viewMode,
     startupContent,
     listContent,
     snapshot !== null && docView === "models" && !authority.authorizationChanged,
+    {
+      ready: browseReady,
+      models: {
+        count: snapshot?.modelPages ?? 0,
+        more: modelQuery.hasNextPage ?? false,
+        pending: modelQuery.isFetching,
+        failed: modelQuery.isError,
+        next: () => void modelQuery.loadMore(),
+      },
+      folders: {
+        count: snapshot?.folderPages ?? 0,
+        more: folderPages.hasNextPage ?? false,
+        pending: folderPages.isFetching,
+        failed: folderPages.isError,
+        next: () => void folderPages.fetchNextPage({ cancelRefetch: false }),
+      },
+    },
   );
   useStartupThumbnails(startupContent, browseReady);
   const thumbnails = useLibraryThumbnails(
@@ -2005,6 +2025,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
         <main
           ref={startupContent}
+          aria-busy={readingStatus === "restoring"}
           className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
@@ -2671,6 +2692,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             />
           ) : (
             <div className="flex-1 flex flex-col bg-background">
+              {readingStatus === "reset" && (
+                <p
+                  role="status"
+                  className="mx-6 mt-4 rounded-md border border-border bg-muted p-3 text-sm"
+                >
+                  {uiText("library.readingPositionReset")}
+                </p>
+              )}
               {refreshRequired && (
                 <div
                   role="status"
@@ -2771,12 +2800,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       </div>
                     )
                   }
-                  className="flex-1 py-20 animate-panel-in"
+                  className="flex-1 py-20"
                 />
               ) : viewMode === "grid" ? (
-                <div key="grid" className={`${compact ? "p-3" : "p-4 sm:p-6"} animate-panel-in`}>
+                <div key="grid" className={compact ? "p-3" : "p-4 sm:p-6"}>
                   <div
-                    className={`stagger-children grid grid-cols-1 ${compact ? "gap-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,260px))]" : "gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"}`}
+                    className={`grid grid-cols-1 ${compact ? "gap-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,260px))]" : "gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"}`}
                   >
                     {visibleCollections.map((collection) => (
                       <CollectionFolderCard
@@ -2829,11 +2858,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   />
                 </div>
               ) : (
-                <div
-                  key="list"
-                  ref={listContent}
-                  className="flex-1 overflow-y-auto animate-panel-in"
-                >
+                <div key="list" ref={listContent} className="flex-1 overflow-y-auto">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
                       <span className="w-10 flex-shrink-0">{uiText("Thumb")}</span>
@@ -3005,7 +3030,7 @@ function CollectionFolderCard({
           }
         }}
         {...handlers}
-        className={`animate-card-in group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
+        className={`group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
           selected
             ? "border-primary bg-accent"
             : dragOver

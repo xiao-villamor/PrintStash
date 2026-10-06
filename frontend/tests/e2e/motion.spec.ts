@@ -1,12 +1,8 @@
 /*
  * The design rules from DESIGN.md that only exist once a page is assembled.
  *
- * The grid stagger is capped, and the cap is the point: a full 60-card page has
- * to land inside the 300ms UI budget rather than marching in for two seconds. A
- * per-card delay with no ceiling looks correct on a page of six.
- *
- * `prefers-reduced-motion` drops the stagger entirely. That is an accessibility
- * setting a user set for a reason, and honouring it partially is not honouring it.
+ * Library route results remain still in either motion preference. Entrance
+ * transforms used to move semantic scroll anchors after restoration measured them.
  *
  * The layering row is here because z-index bugs are invisible until two surfaces
  * are open at once: the header menu and the recent-folder menu each work alone
@@ -14,33 +10,41 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { gridDelays, useMockApi } from "./_setup";
+import { useMockApi } from "./_setup";
+import { aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("motion and layering", () => {
-  test("grid cards enter on a capped stagger", async ({ page }) => {
-    const delays = await gridDelays(page);
-    expect(delays.length).toBeGreaterThan(1);
-
-    expect(delays[0]).toBe("0s");
-    expect(delays[1]).toBe("0.03s");
-    // The cap is the point: a full 60-card page must still land inside the 300ms
-    // UI budget rather than marching in for two seconds.
-    for (const delay of delays) {
-      expect(Number.parseFloat(delay)).toBeLessThanOrEqual(0.27);
-    }
-  });
-
-  test("reduced motion drops the grid stagger entirely", async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
-
-    // The stagger rules are :nth-child (specificity 0,2,0); a naive
-    // `.stagger-children > *` override loses to them and the grid keeps marching in.
-    for (const delay of await gridDelays(page)) {
-      expect(delay).toBe("0s");
-    }
-  });
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`Library route results stay still with ${reducedMotion}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.route("**/api/v1/models/browse?**", (route) =>
+        route.fulfill({
+          json: {
+            items: [
+              { kind: "model", model: aModelListItem({ id: 1 }) },
+              { kind: "model", model: aModelListItem({ id: 2 }) },
+              { kind: "multipart", multipart: aMultipartModel({ id: 3 }) },
+            ],
+            total: 3,
+            next_cursor: null,
+            browse_revision: "r1",
+            authorization_revision: "a1",
+          },
+        }),
+      );
+      await page.goto("/");
+      const cards = page.getByRole("main").locator("article");
+      await expect(cards.first()).toBeVisible();
+      await expect(cards).toHaveCount(3);
+      expect(
+        await cards.evaluateAll((nodes) =>
+          nodes.map((node) => getComputedStyle(node).animationName),
+        ),
+      ).toEqual(Array(await cards.count()).fill("none"));
+    });
+  }
 
   test("header and recent-folder menus stay above adjacent vault surfaces", async ({ page }) => {
     await page.addInitScript(() =>

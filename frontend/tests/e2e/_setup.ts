@@ -16,7 +16,7 @@
  * their own. It is a subscription rather than a snapshot, so it must be
  * installed before the navigation it is watching.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { test, type Page } from "@playwright/test";
 import type { Server } from "node:http";
 
 import { resetMockApiState, startMockApi } from "./mock-api";
@@ -113,14 +113,4 @@ export async function collectPageProblems(page: Page): Promise<string[]> {
     }
   });
   return problems;
-}
-
-/** Computed animation-delay of every direct child of the staggered model grid. */
-export async function gridDelays(page: Page): Promise<string[]> {
-  await page.goto("/");
-  const grid = page.locator(".stagger-children").first();
-  await expect(grid.locator("> *").first()).toBeAttached();
-  return grid.evaluate((el) =>
-    Array.from(el.children).map((c) => getComputedStyle(c).animationDelay),
-  );
 }

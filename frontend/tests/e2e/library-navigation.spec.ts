@@ -83,7 +83,9 @@ for (const { layout, viewport } of [
       ),
     }));
     expect(Math.max(...before.offsets)).toBeGreaterThan(100);
-    await link.click();
+    const box = await link.boundingBox();
+    if (!box) throw new Error("Reading anchor has no visible box");
+    await page.mouse.click(box.x + 20, box.y + 20);
     await expect(
       page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
     ).toBeVisible();
@@ -104,5 +106,71 @@ for (const { layout, viewport } of [
     await expect
       .poll(async () => link.evaluate((element) => element.getBoundingClientRect().top))
       .toBeCloseTo(before.top, 0);
+  });
+}
+
+for (const recovery of ["available", "removed", "stale"] as const) {
+  test(`bounds history reconstruction when its anchor is ${recovery}`, async ({ page }) => {
+    await page.clock.install();
+    const first = Array.from({ length: 20 }, (_, index) =>
+      aModelListItem({ id: index + 100, name: `First page ${index}` }),
+    );
+    const second = Array.from({ length: 20 }, (_, index) =>
+      aModelListItem({ id: index + 200, name: `Second page ${index}` }),
+    );
+    second[10] = aModelListItem({ id: 1, name: "skadis_kitchen-roll_screw" });
+    let returning = false;
+    const restored: (string | null)[] = [];
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get("cursor");
+      if (returning) restored.push(cursor);
+      if (returning && cursor && recovery === "stale")
+        return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
+      const models = cursor ? second : first;
+      return route.fulfill({
+        json: {
+          items: models
+            .filter((model) => !(returning && recovery === "removed" && model.id === 1))
+            .map((model) => ({ kind: "model", model })),
+          total: 60,
+          next_cursor: cursor ? "unvisited-third-page" : "second",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?c=maraio&type=all&sort=name-asc");
+    await page.getByRole("button", { name: "Load more", exact: true }).click();
+    const link = page
+      .getByRole("main")
+      .getByRole("link", { name: /skadis_kitchen-roll_screw/ })
+      .first();
+    await link.scrollIntoViewIfNeeded();
+    const before = await link.evaluate((node) => node.getBoundingClientRect().top);
+    const box = await link.boundingBox();
+    if (!box) throw new Error("Reading anchor has no visible box");
+    await page.mouse.click(box.x + 20, box.y + 20);
+    await expect(
+      page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
+    // Exercise actual Query GC rather than reaching into the app's cache from a test hook.
+    await page.clock.fastForward(301_000);
+    returning = true;
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+    if (recovery === "available") {
+      await expect(link).toBeVisible();
+      await expect
+        .poll(async () => link.evaluate((node) => node.getBoundingClientRect().top))
+        .toBeCloseTo(before, 0);
+    } else {
+      await expect(
+        page.getByText(
+          "Your previous reading position could not be restored. Showing the start of this view.",
+        ),
+      ).toBeVisible();
+      expect(await page.getByRole("main").evaluate((node) => node.scrollTop)).toBe(0);
+    }
+    expect(restored.filter((cursor) => cursor !== null)).toEqual(["second"]);
+    expect(restored).not.toContain("unvisited-third-page");
   });
 }

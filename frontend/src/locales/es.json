@@ -4193,6 +4193,7 @@
   "library.saveUnconfirmed": "No se ha confirmado el guardado. Revisa la última versión antes de volver a intentarlo.",
   "library.accessChanged": "Tu acceso ha cambiado. El guardado está desactivado; copia el borrador que necesites antes de salir.",
   "library.updatesAvailable": "La biblioteca ha cambiado. Actualiza antes de cargar más resultados.",
+  "library.readingPositionReset": "No se pudo recuperar tu posición de lectura anterior. Se muestra el inicio de esta vista.",
   "library.refresh": "Actualizar biblioteca",
   "library.authorityCheckFailed": "No se pudo comprobar si la biblioteca está al día.",
   "library.checkAgain": "Comprobar de nuevo",

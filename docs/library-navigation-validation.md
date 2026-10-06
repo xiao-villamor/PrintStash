@@ -65,8 +65,8 @@ Implementation order: first qualify exact source links and snapshot identity, th
 | 4 | retains a displayed snapshot's return target during navigation | Edge | A displayed while B remains pending | A card returns to A; labels/cards remain coherent | Component | ✅ |
 | 5 | restores the grid's nested reading position | Happy | Cached grid, scroll, detail, Back/Forward on desktop/mobile | Same visible entity and container offsets | Browser | ✅ |
 | 6 | restores list layout independently | Happy | Cached list, scroll, detail, Back/Forward on desktop/mobile | List reading position restored | Browser | ✅ |
-| 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ❌ |
-| 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Feature/browser | ❌ |
+| 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ✅ |
+| 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Browser | ✅ |
 | 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ❌ |
 | 10 | retires private history metadata on session/access change | Edge | Session retired while detail open | No old restoration/cache/DOM reused | Feature/browser | ❌ |
 | 11 | chooses a safe fallback for direct detail links | Edge | No known history origin or unsafe return URL | Same-origin Library URL; no external redirect | Component | ✅ |
@@ -89,3 +89,23 @@ The desktop grid/list regressions both failed before implementation: returning p
 This increment depends on Query retaining the rendered pages. Cache-eviction reconstruction, semantic anchors for deleted/reordered results, confirmed favourite removal and rapid route races remain separate open matrix rows. Pixel offsets alone do not close those contracts, and no production performance improvement is claimed.
 
 The final affected navigation/entry/reading/grid/caption/hygiene gate passed 184 cases across six files in 98.95s. App/UI/domain typecheck, lint, format:check (715 files), and whitespace checks passed. The reading mirror also asserts that a retired view cannot rewrite offsets for the next session; full private-DOM/browser retirement remains open in row 10.
+
+## Bounded reconstruction and stable geometry
+
+A reading bookmark now records model/folder page counts plus an optional semantic entry key and its offset within the actual container. After Query garbage collection, restoration requests only missing pages up to those recorded counts. It never follows an unvisited third page to search for an absent anchor. A removed anchor, failed continuation or an unavailable offset resets the affected view to its start with an explicit localized notice. The browser cases advance the real Query GC clock; they do not inject a replacement server-state cache.
+
+All three new browser scenarios failed before this increment. The first implementation exposed two further integration defects: an unchanged, queued scroll erased a click's semantic anchor, and entrance transforms shifted measurements by 7–8px after restoration. The queued-event probe confirmed the first. A controlled animation-disabled run passed; restoring animations reproduced the offset mismatch. The final fix preserves the anchor when coordinates have not changed and removes entrance animation from Library route results, following DESIGN.md's navigation rule. Press feedback remains. The old grid-delay helper/assertions were removed, and the mixed-order browser assertion now selects semantic article surfaces.
+
+The full nine navigation cases passed, including desktop/mobile cached Back/Forward and all three GC scenarios. The accompanying motion file first exposed an incorrect fixture assumption (root has one Model plus folders, not multiple articles); its fixture now explicitly supplies two Models and one Multipart set. Both motion preferences and the affected mixed-order pagination case passed together (3 cases, 25.7s). All temporary diagnostic instrumentation and animation overrides were removed. These are correctness results, not production performance measurements.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 13 | bounds history reconstruction when its anchor is available | Edge | Actual five-minute Query GC after two model pages | Original anchor position restored; only visited continuation requested | Browser | ✅ |
+| 14 | bounds history reconstruction when its anchor is removed | Error | GC plus removal of the clicked entity | Explicit reset to top; no unvisited continuation | Browser | ✅ |
+| 15 | bounds history reconstruction when its anchor is stale | Error | Restoring continuation returns 409 | Explicit reset; no automatic continuation loop | Browser | ✅ |
+| 16 | Library route results stay still with each motion preference | Edge | Models and Multipart cards in Library | No entrance transforms move restored layout | Browser | ✅ |
+| 17 | bounds folder reconstruction after eviction | Edge/error | Evict two loaded folder pages; return with success or 409 | At most the saved page count; recovery or reset | Component + real query/HTTP adapters | ✅ |
+
+The nine navigation cases plus the unchanged layering case passed in the initial combined run; that run also contained the two incorrect-fixture failures described above. The targeted corrected motion/pagination run closes those failures without claiming that initial run was wholly green. Favorite-removal anchors, explicit refresh reconstruction, rapid destination races and full browser session retirement still keep M5 open.
+
+Final affected gate: 290 tests across 11 files passed in 69.07s, including both folder reconstruction outcomes and the integrated Documents/Inbox/Profiles session corrections. Full app/UI/domain typecheck passed. Lint initially found the obsolete helper's unused expect import; it was removed. The full browser contract remains M5-partial as described above.

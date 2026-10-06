@@ -179,7 +179,10 @@ test.describe("vault route", () => {
 
     await page.getByRole("button", { name: "Load more" }).click();
 
-    const cards = page.locator(".stagger-children > *").filter({ hasText: /Zeta|Älpha/ });
+    const cards = page
+      .getByRole("main")
+      .locator("article")
+      .filter({ hasText: /Zeta|Älpha/ });
     await expect(cards).toHaveCount(2);
     await expect(cards.nth(0)).toContainText("Zeta");
     await expect(cards.nth(1)).toContainText("Älpha");

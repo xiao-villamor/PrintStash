@@ -13,6 +13,8 @@ export type LibraryLayout = "grid" | "list";
 export interface LibraryReadingPosition {
   main: number;
   list: number | null;
+  anchor: { key: string; offset: number; container: "main" | "list" } | null;
+  pages: { models: number; folders: number };
 }
 interface RegisteredEntry {
   entry: LibraryEntry;
