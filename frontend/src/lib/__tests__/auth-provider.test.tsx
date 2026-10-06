@@ -195,7 +195,7 @@ describe("AuthProvider", () => {
     expect(screen.getByText("signed out")).toBeVisible();
   });
 
-  it("ignores bootstrap identity after logout and another session", async () => {
+  it("ignores bootstrap identity from a previous session", async () => {
     withStoredSession();
     let deliver: (user: UserRead) => void = () => {};
     renderProvider({

@@ -350,12 +350,12 @@ the complete reference distributions, separately from deterministic regressions.
 |---|---|---|---|---|---|---|
 | 1 | `startup with active service worker: warm budget` | Happy | 30 cached reloads per scenario/language | median ≤500 ms; p95 ≤800 ms | Playwright real | ✅ `frontend/tests/performance/library-startup.spec.ts::startup with active service worker: warm budget` |
 | 2 | `startup with active service worker: fresh budget` | Happy | 20 new authenticated profiles per scenario/language | median ≤1 s | Playwright real | ✅ `frontend/tests/performance/library-startup.spec.ts::startup with active service worker: fresh budget` |
-| 3 | `delivers %s without waiting for Cache Storage` | Edge | bootstrap or hashed asset; cache read never resolves | network body delivered | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::delivers %s without waiting for Cache Storage` |
-| 4 | `keeps valid network bytes when a cache write fails` | Error | cache.put rejects | valid response received; write failure handled | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::keeps valid network bytes when a cache write fails` |
-| 5 | `uses only the named shell cache for an offline bootstrap` | Error | network fails; shell cached | cached bootstrap returned | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::uses only the named shell cache for an offline bootstrap` |
-| 6 | `does not rewrite an already cached hashed build asset` | Happy | existing immutable cached asset | network response delivered; no redundant cache write | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::does not rewrite an already cached hashed build asset` |
-| 7 | `precaches both bootstrap scripts on first installation` | Happy | new worker installation | both scripts cached; installation completes | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::precaches both bootstrap scripts on first installation` |
-| 8 | `updates the shell without deleting unrelated caches` | Edge | old PrintStash and unrelated cache | only old shell removed; clients claimed | Frontend unit | ✅ `frontend/src/lib/__tests__/service-worker.test.ts::updates the shell without deleting unrelated caches` |
+| 3 | `delivers %s without waiting for Cache Storage` | Edge | bootstrap or hashed asset; cache read never resolves | network body delivered | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::delivers %s without waiting for Cache Storage` |
+| 4 | `keeps valid network bytes when a cache write fails` | Error | cache.put rejects | valid response received; write failure handled | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::keeps valid network bytes when a cache write fails` |
+| 5 | `uses only the named shell cache for an offline bootstrap` | Error | network fails; shell cached | cached bootstrap returned | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::uses only the named shell cache for an offline bootstrap` |
+| 6 | `does not rewrite an already cached hashed build asset` | Happy | existing immutable cached asset | network response delivered; no redundant cache write | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::does not rewrite an already cached hashed build asset` |
+| 7 | `precaches both bootstrap scripts on first installation` | Happy | new worker installation | both scripts cached; installation completes | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::precaches both bootstrap scripts on first installation` |
+| 8 | `updates the shell without deleting unrelated caches` | Edge | old PrintStash and unrelated cache | only old shell removed; clients claimed | Frontend unit | ✅ `frontend/tests/repo/service-worker.test.ts::updates the shell without deleting unrelated caches` |
 | 9 | `releases secondary reads after both usable surfaces paint` | Happy | cards and desktop tree settle | controls enabled after paint | Frontend unit | ✅ `frontend/src/lib/__tests__/library-startup-provider.test.tsx::releases secondary reads after both usable surfaces paint` |
 | 10 | `loads an explicitly opened control during startup` | Edge | primary pending; control opened | that control enabled immediately | Frontend unit | ✅ `frontend/src/lib/__tests__/library-startup-provider.test.tsx::loads an explicitly opened control during startup` |
 | 11 | `releases recovery controls when primary content fails` | Error | primary error | controls enabled for recovery | Frontend unit | ✅ `frontend/src/lib/__tests__/library-startup-provider.test.tsx::releases recovery controls when primary content fails` |
@@ -376,7 +376,7 @@ the complete reference distributions, separately from deterministic regressions.
 | 26 | `refetches after the events socket reconnects` | Edge | Job changes while disconnected | reconnected snapshot reports completion | Frontend unit | ✅ `frontend/src/lib/__tests__/task-center.test.ts::refetches after the events socket reconnects` |
 | 27 | `ignores a previous installation job response received after reset` | Edge | reset with old Jobs read pending | old Jobs cannot restore state | Frontend unit | ✅ `frontend/src/lib/__tests__/task-center.test.ts::ignores a previous installation job response received after reset` |
 | 28 | `serves production asset caching headers` | Happy | nginx production build | hashed assets immutable; HTML and SW nonstored | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::serves production asset caching headers` |
-| 29 | `defers secondary reads and honors a filter opened during startup` | Edge | hold primary; open Filters | requested control loads; remaining secondary reads wait | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::defers secondary reads and honors a filter opened during startup` |
+| 29 | `allows early filter interaction without prematurely loading other secondary reads` | Edge | hold primary; open Filters | requested control loads; remaining secondary reads wait | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::allows early filter interaction without prematurely loading other secondary reads` |
 | 30 | `retrieves both precached bootstrap scripts offline` | Error | installed SW; offline reload | navigation and bootstrap bytes succeed | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::retrieves both precached bootstrap scripts offline` |
 | 31 | `opens each deferred form on its first use` | Happy | Upload/tags/multipart/ZIP first opening | no initial form chunks; forms usable | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::opens each deferred form on its first use` |
 | 32 | `preserves URL filters in the first organized/all/multipart/components result` | Edge | collection+tag URL in each mode | first response contains matching content | Playwright real | ✅ `frontend/tests/performance/startup-behaviour.spec.ts::preserves URL filters in the first organized/all/multipart/components result` |
@@ -388,7 +388,7 @@ the complete reference distributions, separately from deterministic regressions.
 | 38 | `waits for authenticated bytes before declaring visible thumbnails` | Edge | pending bytes, missing derivative or unloaded image | completion requires loaded visible image bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/use-startup-thumbnails.test.tsx::waits for authenticated bytes before declaring visible thumbnails` |
 | 39 | `keeps missing derivatives separate from a complete visual library` | Edge | pending bytes, missing derivative or unloaded image | completion requires loaded visible image bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/use-startup-thumbnails.test.tsx::keeps missing derivatives separate from a complete visual library` |
 | 40 | `does not let an unloaded image satisfy completion` | Edge | pending bytes, missing derivative or unloaded image | completion requires loaded visible image bytes | Frontend unit | ✅ `frontend/src/lib/__tests__/use-startup-thumbnails.test.tsx::does not let an unloaded image satisfy completion` |
-| 41 | `ignores bootstrap identity after logout and another session` | Edge | pending bootstrap; owner or storage event changes | identity remains tied to current validated owner | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::ignores bootstrap identity after logout and another session` |
+| 41 | `ignores bootstrap identity from a previous session` | Edge | pending bootstrap; owner or storage event changes | identity remains tied to current validated owner | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::ignores bootstrap identity from a previous session` |
 | 42 | `keeps session validation pending through unrelated storage events` | Edge | pending bootstrap; owner or storage event changes | identity remains tied to current validated owner | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::keeps session validation pending through unrelated storage events` |
 | 43 | `accepts same-user auth changes after session validation` | Edge | pending bootstrap; owner or storage event changes | identity remains tied to current validated owner | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-provider.test.tsx::accepts same-user auth changes after session validation` |
 | 44 | `ignores unrelated storage events while recognizing cross-tab sessions` | Edge | locale/theme vs auth storage change | only actual session changes invalidate reads | Frontend unit | ✅ `frontend/src/lib/__tests__/auth-store.test.ts::ignores unrelated storage events while recognizing cross-tab sessions` |
@@ -440,3 +440,43 @@ budget and is retained as diagnostic evidence, not accepted as a controlled run.
 Local task-only checks: **535 tests in 22 Vitest files pass**, including auth, setup, router, tree, thumbnail updates, startup, caches and deferred dialogs. The initial folder-navigation regression was reproduced and corrected; the final ModelBrowser file passes all 142 tests. Frontend format, lint and typecheck pass; the new backend fixture passes Ruff check/format, both launchers pass `bash -n`, and the patch passes `git diff --check`.
 
 The task-only mock-browser vault, motion and PWA regressions pass **25/25**. The isolated worktree reused installed modules through symlinks; Vite reported font allow-list warnings in that dev-server run. Production-nginx functional cases pass **8/8** for the distributed fixture; their assets are bundled rather than served from those module symlinks.
+
+The final task-only production series ran **200 measured navigations** (30 warm
+and 20 fresh visits per distribution/language) with timing enforcement enabled.
+No local unit suite or typecheck overlapped this series. It measured production
+source at `5b3fd1442ee7017aaf9e3c3c8026a6581b327c17`, version 0.14.0,
+using the same reference machine/runtime described above, an active v5 service
+worker and production nginx. Only test organization/names and documentation
+change after that measured production source; its runtime remains identical.
+
+| Distribution | Language | Warm median / p95 (ms) | Fresh median / p95 (ms) | Full budget |
+|---|---|---|---|---|
+| distributed | en | 265.5 / 645.5 | 528.2 / 700.9 | ✅ |
+| distributed | es | 255.6 / 577.3 | 490.3 / 548.3 | ✅ |
+| dense | en | 447.2 / 595.6 | 667.1 / 806.8 | ✅ |
+| dense | es | 446.4 / 968.6 | 738.1 / 1394.1 | ❌ warm p95 |
+
+Measured entry: `/assets/index-v5Ga0AXT.js`. JSON samples are retained locally under
+`frontend/.startup-results/pr-reference/`; the controlled dense ES failure and
+the earlier diagnostic failure are retained, not dropped from the record.
+The acceptance assertion passes for distributed EN/ES and dense EN, but **fails
+for dense ES warm p95**. All four warm medians and all four fresh medians meet
+their budgets. This PR must not be described as meeting the complete timing
+acceptance. Issue #419 remains open for the dense ES tail-latency gap.
+
+The two slowest dense ES warm observations are 1,455.3 and 968.6 ms; their
+`/models/page` resource intervals are 630 and 748 ms, respectively. Resource
+intervals include transport/scheduling and do not establish backend CPU time or
+prove a frontend-only cause. No threshold, sample count, percentile definition
+or event suppression policy was relaxed to pass the series.
+
+All **17/17 production-browser functional cases** pass across both corpora,
+including the complete 90-Model pagination. CI's first attempt passed 2,864
+frontend assertions but failed three repository test-organization rules: the
+public service-worker test lacked a source-module mirror, a Playwright suite
+lacked `describe`, and two new test names increased conjunction-name debt.
+The worker contract now lives in `tests/repo/`, Playwright cases are grouped,
+and those names describe one behavior. These corrections keep the production
+implementation and existing gate thresholds unchanged.
+
+The targeted CI correction rerun passes **31/31** tests (suite hygiene, shipped worker contracts and auth bootstrap). Format, lint, typecheck and Playwright test collection pass again.

@@ -149,81 +149,86 @@ function statistics(values: number[]) {
   return { median, p95: percentile(0.95), runs: values.length };
 }
 
-for (const locale of ["en", "es"] as const) {
-  test(`${distribution} startup (${locale}) with active service worker`, async ({
-    browser,
-    request,
-  }, testInfo) => {
-    const login = await request.post(`${api}/api/v1/auth/login`, {
-      data: { username: "admin", password: "admin1234" },
-    });
-    expect(login.ok()).toBe(true);
-    const token: string = (await login.json()).access_token;
-    const user = await (
-      await request.get(`${api}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-    ).text();
-    const warm: Awaited<ReturnType<typeof sample>>[] = [];
-    const cold: Awaited<ReturnType<typeof sample>>[] = [];
-    let context: BrowserContext | undefined;
-    try {
-      const initial = await prepared(browser, locale, token, user);
-      context = initial.context;
-      await sample(initial.page);
-      for (let index = 0; index < warmCount; index++) {
-        warm.push(await sample(initial.page));
-      }
-    } finally {
-      await context?.close();
-    }
-    for (let index = 0; index < coldCount; index++) {
-      const fresh = await prepared(browser, locale, token, user);
+test.describe("library startup budget", () => {
+  for (const locale of ["en", "es"] as const) {
+    test(`${distribution} startup (${locale}) with active service worker`, async ({
+      browser,
+      request,
+    }, testInfo) => {
+      const login = await request.post(`${api}/api/v1/auth/login`, {
+        data: { username: "admin", password: "admin1234" },
+      });
+      expect(login.ok()).toBe(true);
+      const token: string = (await login.json()).access_token;
+      const user = await (
+        await request.get(`${api}/api/v1/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).text();
+      const warm: Awaited<ReturnType<typeof sample>>[] = [];
+      const cold: Awaited<ReturnType<typeof sample>>[] = [];
+      let context: BrowserContext | undefined;
       try {
-        cold.push(await sample(fresh.page));
+        const initial = await prepared(browser, locale, token, user);
+        context = initial.context;
+        await sample(initial.page);
+        for (let index = 0; index < warmCount; index++) {
+          warm.push(await sample(initial.page));
+        }
       } finally {
-        await fresh.context.close();
+        await context?.close();
       }
-    }
-    const warmStats = statistics(warm.map((record) => record.ready));
-    const coldStats = statistics(cold.map((record) => record.ready));
-    const result = {
-      distribution,
-      locale,
-      variant: baseline ? "before" : "after",
-      revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-      dirty: execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
-      version: JSON.parse(
-        await readFile(resolve(process.env.STARTUP_FRONTEND_DIR ?? ".", "package.json"), "utf8"),
-      ).version,
-      browser: browser.version(),
-      node: process.version,
-      delivery: "production-nginx",
-      nginxImage: execFileSync(
-        "docker",
-        ["image", "inspect", "--format", "{{.Id}}", "nginxinc/nginx-unprivileged:alpine"],
-        { encoding: "utf8" },
-      ).trim(),
-      warm: warmStats,
-      cold: coldStats,
-      samples: { warm, cold },
-    };
-    const directory = resolve(process.env.STARTUP_REPORT_DIR ?? ".startup-results/metrics");
-    await mkdir(directory, { recursive: true });
-    const path = resolve(directory, `${result.variant}-${distribution}-${locale}.json`);
-    await writeFile(path, JSON.stringify(result, null, 2));
-    await testInfo.attach("startup measurements", { path, contentType: "application/json" });
-    console.log(
-      JSON.stringify({
+      for (let index = 0; index < coldCount; index++) {
+        const fresh = await prepared(browser, locale, token, user);
+        try {
+          cold.push(await sample(fresh.page));
+        } finally {
+          await fresh.context.close();
+        }
+      }
+      const warmStats = statistics(warm.map((record) => record.ready));
+      const coldStats = statistics(cold.map((record) => record.ready));
+      const result = {
         distribution,
         locale,
-        variant: result.variant,
+        variant: baseline ? "before" : "after",
+        revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+        dirty:
+          execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
+        version: JSON.parse(
+          await readFile(resolve(process.env.STARTUP_FRONTEND_DIR ?? ".", "package.json"), "utf8"),
+        ).version,
+        browser: browser.version(),
+        node: process.version,
+        delivery: "production-nginx",
+        nginxImage: execFileSync(
+          "docker",
+          ["image", "inspect", "--format", "{{.Id}}", "nginxinc/nginx-unprivileged:alpine"],
+          { encoding: "utf8" },
+        ).trim(),
         warm: warmStats,
         cold: coldStats,
-      }),
-    );
-    if (process.env.STARTUP_ENFORCE_BUDGET === "1") {
-      expect.soft(warmStats.median).toBeLessThanOrEqual(500);
-      expect.soft(warmStats.p95).toBeLessThanOrEqual(800);
-      expect.soft(coldStats.median).toBeLessThanOrEqual(1_000);
-    }
-  });
-}
+        samples: { warm, cold },
+      };
+      const directory = resolve(process.env.STARTUP_REPORT_DIR ?? ".startup-results/metrics");
+      await mkdir(directory, { recursive: true });
+      const path = resolve(directory, `${result.variant}-${distribution}-${locale}.json`);
+      await writeFile(path, JSON.stringify(result, null, 2));
+      await testInfo.attach("startup measurements", { path, contentType: "application/json" });
+      console.log(
+        JSON.stringify({
+          distribution,
+          locale,
+          variant: result.variant,
+          warm: warmStats,
+          cold: coldStats,
+        }),
+      );
+      if (process.env.STARTUP_ENFORCE_BUDGET === "1") {
+        expect.soft(warmStats.median).toBeLessThanOrEqual(500);
+        expect.soft(warmStats.p95).toBeLessThanOrEqual(800);
+        expect.soft(coldStats.median).toBeLessThanOrEqual(1_000);
+      }
+    });
+  }
+});
