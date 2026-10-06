@@ -76,8 +76,9 @@ The transport fixtures use real Response JSON parsing, one-byte Blob payloads an
 fake timers only for the bounded cleanup deadline.
 
 Final extension formatting, lint and type checks passed. Chrome, Firefox and Edge
-builds passed, followed by 249 tests across 13 files (8.67 seconds). The fresh-backend
-capture contract remains pending. No new native browser case is needed for this JSON transport boundary;
+builds passed, followed by 249 tests across 13 files (8.67 seconds). A fresh-backend
+paired-device capture lifecycle contract also passed (1/1, 1.45 seconds); its runner
+completed with exit 0 and stopped its disposable API. No new native browser case is needed for this JSON transport boundary;
 this checkpoint makes no new native-browser execution claim.
 
 ## Limits
