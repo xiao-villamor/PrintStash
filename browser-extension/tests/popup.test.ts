@@ -1118,6 +1118,94 @@ describe("popup browser adapters", () => {
     });
   });
 
+  describe("disconnect host permissions", () => {
+    async function connectSavedDevice(vault: string) {
+      await fakeBrowser.storage.local.set({ vault, deviceCredential: "device-secret" });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () => response({ status: "ok", name: "PrintStash" })),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      vi.mocked(fakeBrowser.permissions.contains).mockClear();
+      button("#edit-connection").click();
+    }
+
+    it.each([
+      { vault: "http://192.168.1.20:8000", origin: "http://192.168.1.20/*" },
+      { vault: "http://prints.local:8000", origin: "http://prints.local/*" },
+      { vault: "http://printstash:8000", origin: "http://printstash/*" },
+      { vault: "http://vault.localhost:8000", origin: "http://vault.localhost/*" },
+      { vault: "http://[fd00::1]:8000", origin: "http://[fd00::1]/*" },
+      { vault: "http://127.0.0.2:8000", origin: "http://127.0.0.2/*" },
+      { vault: "https://localhost:8443", origin: "https://localhost/*" },
+      { vault: "https://127.0.0.1:8443", origin: "https://127.0.0.1/*" },
+      { vault: "https://[::1]:8443", origin: "https://[::1]/*" },
+    ])("removes optional local vault access on disconnect: $vault", async ({ vault, origin }) => {
+      await connectSavedDevice(vault);
+      vi.mocked(fakeBrowser.permissions.contains).mockResolvedValue(false);
+
+      button("#disconnect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-title").textContent).toBe("Not connected"),
+      );
+
+      expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+      expect(fakeBrowser.permissions.remove).toHaveBeenCalledExactlyOnceWith({ origins: [origin] });
+      expect(fakeBrowser.permissions.contains).toHaveBeenCalledExactlyOnceWith({
+        origins: [origin],
+      });
+      expect(element("#status-message").textContent).toBe(
+        "Disconnected. The stored browser credential and vault permission were removed from this browser.",
+      );
+    });
+
+    it.each(["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"])(
+      "explains retained built-in loopback access: %s",
+      async (vault) => {
+        await connectSavedDevice(vault);
+
+        button("#disconnect").click();
+        await vi.waitFor(() =>
+          expect(element("#connection-title").textContent).toBe("Not connected"),
+        );
+
+        expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+        expect(fakeBrowser.permissions.remove).not.toHaveBeenCalled();
+        expect(fakeBrowser.permissions.contains).not.toHaveBeenCalled();
+        expect(element("#status-message").textContent).toBe(
+          "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials.",
+        );
+      },
+    );
+
+    it.each(["retained", "rejected"])(
+      "explains an optional local permission that the browser retained: %s",
+      async (outcome) => {
+        const vault = "http://192.168.1.20:8000";
+        await connectSavedDevice(vault);
+        if (outcome === "rejected")
+          vi.mocked(fakeBrowser.permissions.remove).mockRejectedValue(
+            new Error("Permission removal failed"),
+          );
+        else vi.mocked(fakeBrowser.permissions.remove).mockResolvedValue(false);
+
+        button("#disconnect").click();
+        await vi.waitFor(() =>
+          expect(element("#connection-title").textContent).toBe("Not connected"),
+        );
+
+        expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+        expect(fakeBrowser.permissions.remove).toHaveBeenCalledExactlyOnceWith({
+          origins: ["http://192.168.1.20/*"],
+        });
+        expect(element("#status-message").textContent).toBe(
+          "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings.",
+        );
+      },
+    );
+  });
+
   describe("capture authentication retirement", () => {
     const stages = ["slot_create", "slot_upload", "slot_finalize"] as const;
     const stored = { vault: "https://vault-a.example.com", deviceCredential: "test-credential-a" };

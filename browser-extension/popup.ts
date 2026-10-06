@@ -536,6 +536,13 @@ function permissionOrigin(config: Config) {
     : `${vault.origin}/*`;
 }
 
+function hasBuiltInVaultPermission(config: Config) {
+  const vault = new URL(config.vault);
+  // These exact HTTP hosts are required by the extension manifest. Other
+  // local addresses still use optional grants that Disconnect must remove.
+  return vault.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(vault.hostname);
+}
+
 function connectionHost(config: Config) {
   try {
     return new URL(config.vault).host;
@@ -1359,7 +1366,7 @@ disconnectButton.addEventListener("click", async () => {
   lockConnection(true);
   const previous = connectedConfig;
   retireCapture();
-  const loopbackPermission = previous ? isLocalVault(previous.vault) : false;
+  const builtInPermission = previous ? hasBuiltInVaultPermission(previous) : false;
   try {
     await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
   } catch (error) {
@@ -1369,7 +1376,7 @@ disconnectButton.addEventListener("click", async () => {
   }
 
   let permissionStillGranted = false;
-  if (previous && !loopbackPermission) {
+  if (previous && !builtInPermission) {
     const origins = [permissionOrigin(previous)];
     try {
       await browser.permissions.remove({ origins });
@@ -1395,7 +1402,7 @@ disconnectButton.addEventListener("click", async () => {
   showStatus(
     permissionStillGranted
       ? "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings."
-      : loopbackPermission
+      : builtInPermission
         ? "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials."
         : "Disconnected. The stored browser credential and vault permission were removed from this browser.",
     permissionStillGranted ? "error" : "success",
