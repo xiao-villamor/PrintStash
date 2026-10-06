@@ -80,6 +80,56 @@ describe("Search command lifetime", () => {
     expect(app.requestsWithMethod("PUT")).toHaveLength(1);
     expect(app.client.getQueriesData({ queryKey: searchKeys.all })).toEqual([]);
   });
+  it("leaves a new same-user read active when a retired acknowledgement resumes", async () => {
+    const app = renderCommand();
+    await screen.findByText("Enabled");
+    const cache = app.client.getMutationCache();
+    const previousSuccess = cache.config.onSuccess;
+    const previousSettled = cache.config.onSettled;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    cache.config.onSuccess = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    cache.config.onSettled = () => {
+      settled.resolve();
+    };
+    const currentRead = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Save search" }));
+      await entered.promise;
+      app.unmount();
+      clearLogin();
+      renderApp(<SettingsCommand />, {
+        routes: {
+          "GET /api/v1/config/ai-search": (_url, init) => {
+            signal = init?.signal;
+            return currentRead.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await act(async () => {
+        resume.resolve();
+        await settled.promise;
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        currentRead.resolve(
+          json(searchConfiguration({ settings: searchSettings({ enabled: true }) })),
+        );
+      });
+      expect(await screen.findByText("Enabled")).toBeVisible();
+    } finally {
+      cache.config.onSuccess = previousSuccess;
+      cache.config.onSettled = previousSettled;
+      resume.resolve();
+      currentRead.resolve(json(searchConfiguration()));
+    }
+  });
   it("publishes acknowledged settings without a second settings GET", async () => {
     const app = renderCommand();
     await screen.findByText("Enabled");
@@ -102,6 +152,7 @@ function PreferencesCommand() {
   return (
     <>
       <p>{preference.data ? "Preferences loaded" : "Loading"}</p>
+      <p>{preference.data?.timezone}</p>
       <button
         onClick={() =>
           preferences.mutate({
@@ -125,6 +176,54 @@ function renderPreferences() {
   });
 }
 describe("Search preference command lifetime", () => {
+  it("leaves a new same-user preference read active when a retired acknowledgement resumes", async () => {
+    const app = renderPreferences();
+    await screen.findByText("Preferences loaded");
+    const cache = app.client.getMutationCache();
+    const previousSuccess = cache.config.onSuccess;
+    const previousSettled = cache.config.onSettled;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    cache.config.onSuccess = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    cache.config.onSettled = () => {
+      settled.resolve();
+    };
+    const currentRead = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Save preference" }));
+      await entered.promise;
+      app.unmount();
+      clearLogin();
+      renderApp(<PreferencesCommand />, {
+        routes: {
+          "GET /api/v1/search/preferences": (_url, init) => {
+            signal = init?.signal;
+            return currentRead.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await act(async () => {
+        resume.resolve();
+        await settled.promise;
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        currentRead.resolve(json(searchPreferences({ timezone: "America/New_York" })));
+      });
+      expect(await screen.findByText("America/New_York")).toBeVisible();
+    } finally {
+      cache.config.onSuccess = previousSuccess;
+      cache.config.onSettled = previousSettled;
+      resume.resolve();
+      currentRead.resolve(json(searchPreferences()));
+    }
+  });
   it("never dispatches a retired preference gesture", async () => {
     const app = renderPreferences();
     await screen.findByText("Preferences loaded");

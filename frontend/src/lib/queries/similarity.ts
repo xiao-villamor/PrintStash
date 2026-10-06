@@ -201,6 +201,7 @@ export function useSimilarityCommands() {
   };
   const reconcile = async (session: number | undefined) => {
     if (session === undefined) throw new Error("Similarity command session is required");
+    requireSessionVersion(session);
     await cancelReads();
     requireSessionVersion(session);
     return session;
@@ -251,6 +252,7 @@ export function useSimilarityCommands() {
       onMutate: ({ session }) => prepare(session),
       onSuccess: async (settings, _, context) => {
         const session = await reconcile(context);
+        requireSessionVersion(session);
         client.setQueryData<SimilarityStatus>(similarityKeys.status, (status) => {
           requireSessionVersion(session);
           return status
@@ -336,6 +338,7 @@ export function useSimilarityCommands() {
       },
       onSuccess: async (result, _, context) => {
         const session = await reconcile(context);
+        requireSessionVersion(session);
         client.setQueryData(similarityKeys.candidate(result.candidate.id), result.candidate);
         refresh(session);
         if (result.resolution_kind === "multipart") {

@@ -202,6 +202,7 @@ export function useSearchCommands() {
   };
   const acknowledge = async (session: number | undefined) => {
     if (session === undefined) throw new Error("Search command session is required");
+    requireSessionVersion(session);
     await cancel();
     requireSessionVersion(session);
     return session;
@@ -214,6 +215,7 @@ export function useSearchCommands() {
   };
   const publishGeneration = async (generation: SearchGeneration, context: number | undefined) => {
     const session = await acknowledge(context);
+    requireSessionVersion(session);
     client.setQueryData<SearchGeneration[]>(searchKeys.generations, (rows) => {
       requireSessionVersion(session);
       return rows?.some((row) => row.id === generation.id)
@@ -243,8 +245,9 @@ export function useSearchCommands() {
         return session;
       },
       onSuccess: async (result, { userId }, context) => {
-        await client.cancelQueries({ queryKey: searchKeys.preferences(userId) });
         if (context === undefined) throw new Error("Search preferences session is required");
+        requireSessionVersion(context);
+        await client.cancelQueries({ queryKey: searchKeys.preferences(userId) });
         requireSessionVersion(context);
         client.setQueryData(searchKeys.preferences(userId), result);
       },
@@ -258,6 +261,7 @@ export function useSearchCommands() {
       onMutate: ({ session }) => prepare(session),
       onSuccess: async (result, _, context) => {
         const session = await acknowledge(context);
+        requireSessionVersion(session);
         client.setQueryData(searchKeys.settings, result);
         refresh(session, [["ai-search", "status"], searchKeys.models, searchKeys.generations]);
       },
@@ -271,6 +275,7 @@ export function useSearchCommands() {
       onMutate: ({ session }) => prepare(session),
       onSuccess: async (endpoint, _, context) => {
         const session = await acknowledge(context);
+        requireSessionVersion(session);
         client.setQueryData<Awaited<ReturnType<typeof getSearchSettings>>>(
           searchKeys.settings,
           (current) => {
@@ -371,6 +376,7 @@ export function useSearchCommands() {
       onMutate: ({ session }) => prepare(session),
       onSuccess: async (_, { id }, context) => {
         const session = await acknowledge(context);
+        requireSessionVersion(session);
         client.setQueryData<Awaited<ReturnType<typeof listInferenceModels>>>(
           searchKeys.models,
           (rows) => {

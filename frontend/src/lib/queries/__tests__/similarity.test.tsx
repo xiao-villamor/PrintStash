@@ -22,6 +22,7 @@ function SettingsCommand() {
   return (
     <>
       <p>{status.data ? "Loaded" : "Loading"}</p>
+      <p>{status.data?.settings?.minimum_confidence}</p>
       <button
         onClick={() =>
           saveSettings.mutate({ payload: { enabled: false }, session: getSessionVersion() })
@@ -42,6 +43,56 @@ function renderCommand() {
 }
 afterEach(() => vi.restoreAllMocks());
 describe("similarity command lifetime", () => {
+  it("leaves a new same-user read active when a retired acknowledgement resumes", async () => {
+    const app = renderCommand();
+    await screen.findByText("Loaded");
+    const cache = app.client.getMutationCache();
+    const previousSuccess = cache.config.onSuccess;
+    const previousSettled = cache.config.onSettled;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    cache.config.onSuccess = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    cache.config.onSettled = () => {
+      settled.resolve();
+    };
+    const currentRead = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Save similarity" }));
+      await entered.promise;
+      app.unmount();
+      clearLogin();
+      renderApp(<SettingsCommand />, {
+        routes: {
+          "GET /api/v1/similarity/status": (_url, init) => {
+            signal = init?.signal;
+            return currentRead.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await act(async () => {
+        resume.resolve();
+        await settled.promise;
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        currentRead.resolve(
+          json(similarityStatus({ settings: similaritySettings({ minimum_confidence: 0.77 }) })),
+        );
+      });
+      expect(await screen.findByText("0.77")).toBeVisible();
+    } finally {
+      cache.config.onSuccess = previousSuccess;
+      cache.config.onSettled = previousSettled;
+      resume.resolve();
+      currentRead.resolve(json(similarityStatus()));
+    }
+  });
   it("never dispatches a retired gesture", async () => {
     const app = renderCommand();
     await screen.findByText("Loaded");
