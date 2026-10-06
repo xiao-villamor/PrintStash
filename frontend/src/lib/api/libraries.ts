@@ -1,4 +1,4 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import { type GetJsonOptions, getJson, sendAction, sendJson } from "@/lib/api/request";
 import {
   ExternalLibrary,
   ExternalLibraryCreate,
@@ -7,8 +7,8 @@ import {
 } from "@/types";
 import { JobAccepted } from "@/types/models";
 
-export function listExternalLibraries(): Promise<ExternalLibrary[]> {
-  return getJson<ExternalLibrary[]>("/api/v1/libraries", { fresh: true });
+export function listExternalLibraries(options?: GetJsonOptions): Promise<ExternalLibrary[]> {
+  return getJson<ExternalLibrary[]>("/api/v1/libraries", { fresh: true, ...options });
 }
 
 export function createExternalLibrary(body: ExternalLibraryCreate): Promise<ExternalLibrary> {

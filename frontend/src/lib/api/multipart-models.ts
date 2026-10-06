@@ -1,4 +1,10 @@
-import { getJson, requestMutation, sendAction, sendJson } from "@/lib/api/request";
+import {
+  type GetJsonOptions,
+  getJson,
+  requestMutation,
+  sendAction,
+  sendJson,
+} from "@/lib/api/request";
 import type {
   MultipartModelCandidate,
   MultipartModelCreate,
@@ -32,9 +38,11 @@ function multipartSearch(params?: ListMultipartModelsParams): string {
 
 export function listMultipartModels(
   params?: ListMultipartModelsParams,
+  options?: GetJsonOptions,
 ): Promise<MultipartModelListItem[]> {
   return getJson<MultipartModelListItem[]>(`/api/v1/multipart-models${multipartSearch(params)}`, {
     fresh: true,
+    ...options,
   });
 }
 

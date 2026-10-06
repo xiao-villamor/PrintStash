@@ -76,9 +76,12 @@ export function modelListSearch(params?: ListModelsParams): URLSearchParams {
   return search;
 }
 
-export async function listModels(params?: ListModelsParams): Promise<ModelListItem[]> {
+export async function listModels(
+  params?: ListModelsParams,
+  options?: GetJsonOptions,
+): Promise<ModelListItem[]> {
   const query = modelListSearch(params).toString();
-  return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`);
+  return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`, options);
 }
 
 export async function listModelPage(params?: ListModelPageParams): Promise<ModelPageRead> {
@@ -120,8 +123,8 @@ export async function unstarModel(id: number): Promise<ModelStarRead> {
   return requestMutation<ModelStarRead>(path, { method: "DELETE" });
 }
 
-export function getModel(id: number): Promise<ModelRead> {
-  return getJson<ModelRead>(`/api/v1/models/${id}`);
+export function getModel(id: number, options?: GetJsonOptions): Promise<ModelRead> {
+  return getJson<ModelRead>(`/api/v1/models/${id}`, options);
 }
 
 export function getVaultStats(options?: GetJsonOptions): Promise<VaultStatsRead> {
@@ -181,8 +184,11 @@ export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]
   return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`);
 }
 
-export function getModelPrintJobs(id: number): Promise<ModelPrintJobRead[]> {
-  return getJson<ModelPrintJobRead[]>(`/api/v1/models/${id}/print-jobs`);
+export function getModelPrintJobs(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<ModelPrintJobRead[]> {
+  return getJson<ModelPrintJobRead[]>(`/api/v1/models/${id}/print-jobs`, options);
 }
 
 export function getArtifactOutcomes(
