@@ -1,0 +1,14 @@
+# Local inference boundary contracts
+
+Local embeddings are opt-in, offline and bounded (`docs/similar-models.md`). Missing native capability or model assets must remain explicit errors. Invalid batches and requests must not consume future admission. A failed native launch must normalize its error without leaking transport details, and a read-only model must still serve a vector. These tests use the original tiny ONNX factory models, real files and actual provider admission; they do not measure pretrained model quality.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 1 | refuses_missing_model_asset | Error | Graph removed after provider construction | asset_unavailable; restored graph serves exact vector | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_refuses_missing_model_asset` |
+| 2 | refuses_empty_local_batch | Edge | Empty batch | batch_budget; next valid batch serves exact vector | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_refuses_empty_local_batch` |
+| 3 | reports_unavailable_native_runtime | Error | Native module discovery absent | runtime_unavailable; model bytes unchanged | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_reports_unavailable_native_runtime` |
+| 4 | refuses_request_over_actual_input_budget | Error | Actual 34 MiB limit plus one byte | input_budget; next valid batch serves exact vector | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_refuses_request_over_actual_input_budget` |
+| 5 | normalizes_native_launch_failure | Error | OS launch OSError or ValueError | inference_failed without private detail; next real launch serves exact vector | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_normalizes_native_launch_failure` |
+| 6 | serves_cached_model_when_recency_touch_is_read_only | Happy | Actual cached model; filesystem touch PermissionError | Exact vector, assets unchanged, directory timestamp unchanged | Integration | ✅ `integration/modules/inference/test_local.py::TestLocalBoundaries::test_serves_cached_model_when_recency_touch_is_read_only` |
+
+Validation: 33 tests passed with one preserved deprecation warning in 13.37 seconds (21.53 seconds including the bounded runner). Seven new cases cover the six behaviours above. Ruff check, format and whitespace passed; format only changed line wrapping after the focal run. No production code, dependency, admission budget or coverage floor changed. No local coverage was executed; final measured floors remain pending the GitHub Deep CI after all owner corrections. The original CC0 ONNX models prove loading and vector wiring, not semantic model quality.

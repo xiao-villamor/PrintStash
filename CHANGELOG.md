@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify local inference rejects missing capabilities, model assets and oversized
+  input while preserving admission recovery and read-only cached model support.
+
 - Verify viewer STL conversion refuses nonfinite facets, excess streamed output
   and changed or missing source identities before reporting success.
 

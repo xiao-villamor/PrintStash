@@ -314,3 +314,105 @@ class TestLocalProvider:
         validated = provider.validate()
         assert validated.space() == provider.space
         assert provider.space.dimension == 3
+
+
+class TestLocalBoundaries:
+    def test_refuses_missing_model_asset(self, db_session, assets):
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+        graph = assets / "image.onnx"
+        original = graph.read_bytes()
+        graph.unlink()
+        try:
+            with pytest.raises(EmbeddingError, match="embedding_asset_unavailable"):
+                provider.embed((EmbeddingInput("text", text="red"),), provider.space)
+        finally:
+            graph.write_bytes(original)
+        assert provider.embed(
+            (EmbeddingInput("text", text="red"),), provider.space
+        ) == ((1, 0, 0),)
+        assert graph.read_bytes() == original
+
+    def test_refuses_empty_local_batch(self, db_session, assets):
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+        with pytest.raises(EmbeddingError, match="embedding_batch_budget"):
+            provider.embed((), provider.space)
+        assert provider.embed(
+            (EmbeddingInput("text", text="red"),), provider.space
+        ) == ((1, 0, 0),)
+
+    def test_reports_unavailable_native_runtime(self, db_session, assets, monkeypatch):
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+        graph = assets / "image.onnx"
+        original = graph.read_bytes()
+        discovery = local.importlib.util.find_spec
+
+        def without_runtime(name, *args, **kwargs):
+            return None if name == "onnxruntime" else discovery(name, *args, **kwargs)
+
+        monkeypatch.setattr(local.importlib.util, "find_spec", without_runtime)
+        with pytest.raises(EmbeddingError, match="embedding_runtime_unavailable"):
+            provider.embed((EmbeddingInput("text", text="red"),), provider.space)
+        assert graph.read_bytes() == original
+
+    def test_refuses_request_over_actual_input_budget(self, db_session, assets):
+        from app.modules.inference.worker_protocol import MAX_INPUT_BYTES
+
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+        with pytest.raises(EmbeddingError, match="embedding_input_budget"):
+            provider._request(b"x" * (MAX_INPUT_BYTES + 1))
+        assert provider.embed(
+            (EmbeddingInput("text", text="red"),), provider.space
+        ) == ((1, 0, 0),)
+
+    @pytest.mark.parametrize("failure", [OSError, ValueError], ids=["os", "value"])
+    def test_normalizes_native_launch_failure(
+        self, db_session, assets, monkeypatch, failure
+    ):
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+
+        def unavailable(*args, **kwargs):
+            raise failure("private-native-launch-detail")
+
+        with monkeypatch.context() as launch:
+            launch.setattr(local.subprocess, "Popen", unavailable)
+            with pytest.raises(
+                EmbeddingError, match="embedding_inference_failed"
+            ) as error:
+                provider.embed((EmbeddingInput("text", text="red"),), provider.space)
+            assert "private-native-launch-detail" not in str(error.value)
+        assert provider.embed(
+            (EmbeddingInput("text", text="red"),), provider.space
+        ) == ((1, 0, 0),)
+
+    def test_serves_cached_model_when_recency_touch_is_read_only(
+        self, db_session, assets, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "embedding_cache_dir", assets.parent)
+        provider = LocalEmbeddingProvider(
+            get_session_factory(), assets, "two-tower-contract", 1
+        )
+        snapshot = {path.name: path.read_bytes() for path in assets.iterdir()}
+        timestamp = assets.stat().st_mtime_ns
+
+        def read_only(path, *args, **kwargs):
+            assert path == assets
+            raise PermissionError("read-only model cache")
+
+        monkeypatch.setattr(local.os, "utime", read_only)
+        assert provider.embed(
+            (EmbeddingInput("text", text="red"),), provider.space
+        ) == ((1, 0, 0),)
+        assert assets.stat().st_mtime_ns == timestamp
+        assert {path.name: path.read_bytes() for path in assets.iterdir()} == snapshot
