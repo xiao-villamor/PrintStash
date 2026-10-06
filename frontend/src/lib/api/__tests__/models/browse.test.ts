@@ -273,3 +273,25 @@ describe("Print-history filter transport", () => {
     },
   );
 });
+
+describe("reader cancellation", () => {
+  it("aborts an active Model choices read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = listModels({ limit: 25 }, { signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
+});

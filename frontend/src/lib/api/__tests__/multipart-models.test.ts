@@ -188,3 +188,25 @@ describe("multipart mutation isolation", () => {
     expect(queryClient.getQueryState(queryKeys.multipartModels)?.isInvalidated).toBe(false);
   });
 });
+
+describe("reader cancellation", () => {
+  it("aborts an active Multipart destinations read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = listMultipartModels({ limit: 30 }, { signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
+});

@@ -4185,5 +4185,9 @@
   "library.useLatest": "Use latest version",
   "library.retryDraft": "Save my draft against this version",
   "library.saveUnconfirmed": "The save was not confirmed. Review the latest version before retrying.",
-  "library.accessChanged": "Your access changed. Saving is disabled; copy any draft you need before leaving."
+  "library.accessChanged": "Your access changed. Saving is disabled; copy any draft you need before leaving.",
+  "library.updatesAvailable": "The library has changed. Refresh before loading more results.",
+  "library.refresh": "Refresh library",
+  "library.authorityCheckFailed": "Could not check whether the library is up to date.",
+  "library.checkAgain": "Check again"
 }

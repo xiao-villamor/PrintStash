@@ -240,3 +240,7 @@ Parent approved optional GetJsonOptions on five existing readers, preserving all
 | R1–R5 | aborts an active reader (five named endpoints) | Edge     | caller aborts while fetch is pending | pending operation rejects AbortError; delivered HTTP signal is aborted | Frontend unit | ✅ reader-cancellation.test.ts |
 
 Reader seam qualification: five endpoint test files,71 passed5.11s; lint zero diagnostics, app/UI/domain typecheck, format:check and diff --check passed. Initial lint required awaiting the asynchronous assertion at its use; corrected without weakening active-cancellation verification.
+
+Parent review caught that reader-cancellation.test.ts lacked a production owner mirror. Moved its exact five active cancellation behaviors into models/model.test.ts, models/browse.test.ts, multipart-models.test.ts and libraries.test.ts; deleted the orphan without adding a hygiene exception. Manual review covers the complete new assertion groups and existing wire fake setup of all four owning files. Parent-requested controlled-library-refresh labels are translated in both registered locales (updatesAvailable, refresh, authorityCheckFailed, checkAgain). Their production UI/assertions remain parent-owned.
+
+Reader mirror/locale follow-up: five endpoint/locale test files,86 passed4.30s; repository hygiene/i18n/locale-authoring checks and lint passed. Required production behavior and HTTP cancellation assertions are unchanged.
