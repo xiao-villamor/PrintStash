@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Qualify backup recovery and exact deletion against versioned S3 generations;
+  verify that missing receipts on unversioned targets are refused without
+  changing the published archive.
+
 - Reset PostgreSQL work-engine state by removing only its DBOS schema, preserving
   application tables in the shared database and rebuilding the reconciler schedule.
 

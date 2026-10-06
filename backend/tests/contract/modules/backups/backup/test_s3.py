@@ -86,11 +86,17 @@ class TestBackupS3:
     @requires_s3
     def test_delete_backup_removes_s3_copy(self, backup_s3_env: BackupEnv) -> None:
         seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
-        meta = backup_creation.create_backup()
-
         s3 = backup_targets._get_backup_s3()
+        s3.put_bucket_versioning(
+            Bucket=backup_targets.settings.backup_s3_bucket,
+            VersioningConfiguration={"Status": "Enabled"},
+        )
+        meta = backup_creation.create_backup()
         key = backup_targets._backup_s3_key(Path(meta.path).name)
-        assert s3.head_object(Bucket=backup_targets.settings.backup_s3_bucket, Key=key)
+        published = s3.head_object(
+            Bucket=backup_targets.settings.backup_s3_bucket, Key=key
+        )
+        assert published.get("VersionId") not in (None, "", "null")
 
         Path(meta.path).unlink()
         remote = backup_catalogue.get_backup(meta.id)
@@ -109,3 +115,32 @@ class TestBackupS3:
 
         with pytest.raises(botocore.exceptions.ClientError):
             s3.head_object(Bucket=backup_targets.settings.backup_s3_bucket, Key=key)
+
+    @requires_s3
+    def test_refuses_deletion_without_a_physical_generation(
+        self, backup_s3_env: BackupEnv
+    ) -> None:
+        import hashlib
+
+        from app.modules.backups.backup.contracts import BackupDeleteUnsupportedError
+
+        seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
+        meta = backup_creation.create_backup()
+        s3 = backup_targets._get_backup_s3()
+        bucket = backup_targets.settings.backup_s3_bucket
+        key = backup_targets._backup_s3_key(Path(meta.path).name)
+        Path(meta.path).unlink()
+        remote = backup_catalogue.get_backup(meta.id)
+        assert remote is not None
+        assert remote.location == "s3"
+
+        with pytest.raises(BackupDeleteUnsupportedError):
+            backup_deletion.delete_backup(meta.id, source_ref=remote.source_ref)
+
+        response = s3.get_object(Bucket=bucket, Key=key)
+        assert response.get("VersionId") in (None, "null")
+        body = response["Body"]
+        try:
+            assert hashlib.sha256(body.read()).hexdigest() == meta.archive_sha256
+        finally:
+            body.close()

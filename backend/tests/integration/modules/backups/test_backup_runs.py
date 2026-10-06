@@ -213,11 +213,14 @@ class TestExactReplicaRetry:
     def test_retry_reconciles_a_write_committed_before_receipt_recording(
         self, backup_env, monkeypatch
     ):
-        from app.db.models import BackupDestinationResult
+        from app.db.models import BackupDestinationResult, OwnedStorageObject
         from app.modules.backups import backup_runs
         from app.modules.storage.remote_io_adapters import OpenDALRemoteIO
 
-        _retry_target(backup_env)
+        client, bucket = _retry_target(backup_env)
+        client.put_bucket_versioning(
+            Bucket=bucket, VersioningConfiguration={"Status": "Enabled"}
+        )
         original = OpenDALRemoteIO.publish_replica
         writes = []
 
@@ -240,9 +243,57 @@ class TestExactReplicaRetry:
         assert retried["outcome"] == "completed"
         assert retried["ownership_id"] is not None
         assert len(writes) == 1
+        with backup_env.new_session() as session:
+            owned = session.get(OwnedStorageObject, retried["ownership_id"])
+            assert owned.version_id not in (None, "", "null")
+            assert owned.sha256 == meta.archive_sha256
         assert retried["retry_attempts"][0]["source_result_id"] == result_id
         assert retried["retry_attempts"][0]["outcome"] == "completed"
         assert backup_runs.run_detail(meta.run_id)["outcome"] == "completed"
+
+    def test_refuses_lost_receipt_without_a_physical_generation(
+        self, backup_env, monkeypatch
+    ):
+        import hashlib
+
+        from app.db.models import BackupDestinationResult
+        from app.modules.backups.backup_replica_retry import RetryRefused
+        from app.modules.storage.remote_io_adapters import OpenDALRemoteIO
+
+        client, bucket = _retry_target(backup_env)
+        original = OpenDALRemoteIO.publish_replica
+
+        def interrupted(backend, source, key):
+            original(backend, source, key)
+            raise OSError("lost publication response")
+
+        monkeypatch.setattr(OpenDALRemoteIO, "publish_replica", interrupted)
+        meta = backup_creation.create_backup()
+        with backup_env.new_session() as session:
+            failed = session.exec(
+                select(BackupDestinationResult).where(
+                    BackupDestinationResult.run_id == meta.run_id,
+                    BackupDestinationResult.kind == "connection",
+                )
+            ).one()
+            result_id, key = failed.id, failed.key
+
+        with pytest.raises(RetryRefused, match="backup_retry_publication_conflict"):
+            _retry_now(result_id)
+
+        with backup_env.new_session() as session:
+            failed = session.get(BackupDestinationResult, result_id)
+            assert failed.outcome == "failed"
+            assert failed.ownership_id is None
+        response = client.get_object(
+            Bucket=bucket, Key=key.removeprefix(f"s3/{bucket}/")
+        )
+        assert response.get("VersionId") in (None, "null")
+        body = response["Body"]
+        try:
+            assert hashlib.sha256(body.read()).hexdigest() == meta.archive_sha256
+        finally:
+            body.close()
 
 
 class TestRunVerification:
