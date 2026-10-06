@@ -279,6 +279,7 @@ describe("MultipartModelDetailPage", () => {
         "GET /api/v1/multipart-models/7": json(aMultipart()),
         "POST /api/v1/documents/upload": json({
           id: 44,
+          edit_version: 1,
           name: "Assembly",
           kind: "pdf",
           collection: null,
@@ -308,6 +309,7 @@ describe("MultipartModelDetailPage", () => {
     const user = userEvent.setup();
     const guide = {
       id: 44,
+      edit_version: 1,
       name: "Assembly",
       kind: "pdf" as const,
       collection: null,

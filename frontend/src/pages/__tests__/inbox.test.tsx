@@ -27,6 +27,8 @@ import type { InboxItem } from "@/types";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { BottomNavBar } from "@/components/bottom-nav-bar";
 import { json, renderApp } from "@/test-support/render";
+import { clearLogin } from "@/lib/auth-store";
+import { inboxKeys } from "@/lib/queries/inbox";
 import { I18nProvider } from "@/lib/i18n";
 import InboxPage, { type InboxPageDeps } from "@/pages/inbox";
 
@@ -382,6 +384,37 @@ describe("InboxPage", () => {
     expect(app.requestsWithMethod("DELETE").map((request) => request.url)).toEqual([
       "/api/v1/inbox/1",
     ]);
+  });
+
+  it("does not publish retired Inbox commands after delayed cancellation", async () => {
+    const user = userEvent.setup();
+    const app = renderApp(<InboxPage />, {
+      routes: {
+        "GET /api/v1/inbox": json([{ ...pendingImport, state: "failed", retryable: true }]),
+        "POST /api/v1/inbox/1/retry": json({ ...pendingImport, state: "review" }),
+      },
+    });
+    await screen.findByRole("button", { name: "Retry" });
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const cancel = app.client.cancelQueries.bind(app.client);
+    const spy = vi
+      .spyOn(app.client, "cancelQueries")
+      .mockImplementationOnce(cancel)
+      .mockImplementationOnce(() => paused);
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      clearLogin();
+      resume();
+      await paused;
+    });
+
+    await waitFor(() => expect(app.client.getQueriesData({ queryKey: inboxKeys.all })).toEqual([]));
+    spy.mockRestore();
   });
 
   it("distinguishes Inbox read failure from empty success", async () => {

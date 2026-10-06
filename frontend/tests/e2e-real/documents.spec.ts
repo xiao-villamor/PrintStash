@@ -7,7 +7,7 @@
  * test can stand in for.
  */
 import { devices } from "@playwright/test";
-import { test, expect, type Page } from "./helpers";
+import { test, expect, authBundleFor, authedContext, type Page } from "./helpers";
 import { createCollectionViaVault } from "./util";
 
 // Collection documents (new in 0.8.0): markdown editor, collection README, and
@@ -163,5 +163,144 @@ test.describe("PDF documents", () => {
     await page.getByTitle("Delete document").click();
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
     await expect(page.getByText("No documents here yet.")).toBeVisible();
+  });
+});
+
+// A competing writer, a missing acknowledgement, and revoked access all leave
+// local edits intact. Only an explicit reviewed save can supersede newer data.
+test.describe("conditional Document edits", () => {
+  test("reviews a competing edit before saving the retained draft", async ({ page, context }) => {
+    const name = `doc-conflict-${Date.now()}`;
+    const created = await page.request.post("/api/v1/documents", {
+      data: { name, collection_id: null, body: "Original notes" },
+    });
+    expect(created.ok()).toBeTruthy();
+    const { id, edit_version: initialVersion } = await created.json();
+    const other = await context.newPage();
+    try {
+      await page.goto(`/documents/${id}`);
+      await other.goto(`/documents/${id}`);
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await other.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByPlaceholder(/Write markdown/).fill("First writer notes");
+      await other.getByPlaceholder(/Write markdown/).fill("Retained local draft");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(page.getByPlaceholder(/Write markdown/)).toHaveCount(0);
+      await expect(page.getByText("First writer notes", { exact: true })).toBeVisible();
+
+      await other.getByRole("button", { name: "Save", exact: true }).click();
+
+      await expect(
+        other
+          .getByRole("region", { name: "Latest saved document" })
+          .getByText("First writer notes", { exact: true }),
+      ).toBeVisible();
+      await expect(other.getByPlaceholder(/Write markdown/)).toHaveValue("Retained local draft");
+      await expect(other.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await other.getByRole("button", { name: "Use latest version as edit base" }).click();
+      await other.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(other.getByPlaceholder(/Write markdown/)).toHaveCount(0);
+      await expect(other.getByText("Retained local draft", { exact: true })).toBeVisible();
+      const current = await page.request.get(`/api/v1/documents/${id}`);
+      const saved = await current.json();
+      expect(saved).toMatchObject({ body: "Retained local draft" });
+      expect(saved.edit_version).toBeGreaterThan(initialVersion);
+    } finally {
+      await other.close();
+      expect((await page.request.delete(`/api/v1/documents/${id}`)).ok()).toBeTruthy();
+    }
+  });
+
+  test("confirms a committed save after its acknowledgement is lost", async ({ page }) => {
+    const name = `doc-ack-${Date.now()}`;
+    const created = await page.request.post("/api/v1/documents", {
+      data: { name, collection_id: null, body: "Original notes" },
+    });
+    expect(created.ok()).toBeTruthy();
+    const { id, edit_version: initialVersion } = await created.json();
+    let writes = 0;
+    try {
+      await page.goto(`/documents/${id}`);
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByPlaceholder(/Write markdown/).fill("Committed without acknowledgement");
+      await page.route(`**/api/v1/documents/${id}`, async (route) => {
+        if (route.request().method() !== "PUT") {
+          await route.continue();
+          return;
+        }
+        writes += 1;
+        const response = await route.fetch();
+        expect(response.ok()).toBeTruthy();
+        await route.abort("failed");
+      });
+
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+
+      await expect(page.getByText("Save confirmed from the current document.")).toBeVisible();
+      await expect(page.getByPlaceholder(/Write markdown/)).toHaveCount(0);
+      const current = await page.request.get(`/api/v1/documents/${id}`);
+      const saved = await current.json();
+      expect(saved).toMatchObject({ body: "Committed without acknowledgement" });
+      expect(saved.edit_version).toBeGreaterThan(initialVersion);
+      expect(writes).toBe(1);
+    } finally {
+      await page.unroute(`**/api/v1/documents/${id}`);
+      expect((await page.request.delete(`/api/v1/documents/${id}`)).ok()).toBeTruthy();
+    }
+  });
+
+  test("keeps a local draft after its collection grant is revoked", async ({ page, browser }) => {
+    const stamp = Date.now();
+    const username = `doc-editor-${stamp}`;
+    const user = await page.request.post("/api/v1/admin/users", {
+      data: { username, password: "userpass123" },
+    });
+    expect(user.ok()).toBeTruthy();
+    const { id: userId } = await user.json();
+    const collection = await page.request.post("/api/v1/collections", {
+      data: { name: `doc-access-${stamp}` },
+    });
+    expect(collection.ok()).toBeTruthy();
+    const { id: collectionId } = await collection.json();
+    expect(
+      (
+        await page.request.put(`/api/v1/collections/${collectionId}/permissions/${userId}`, {
+          data: { role: "edit" },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    const created = await page.request.post("/api/v1/documents", {
+      data: { name: `doc-revoked-${stamp}`, collection_id: collectionId, body: "Original notes" },
+    });
+    expect(created.ok()).toBeTruthy();
+    const { id } = await created.json();
+    const member = await authedContext(browser, await authBundleFor(username, "userpass123"));
+    try {
+      await member.page.goto(`/documents/${id}`);
+      await member.page.getByRole("button", { name: "Edit", exact: true }).click();
+      await member.page.getByPlaceholder(/Write markdown/).fill("My private draft");
+      expect(
+        (
+          await page.request.delete(`/api/v1/collections/${collectionId}/permissions/${userId}`)
+        ).ok(),
+      ).toBeTruthy();
+
+      await member.page.getByRole("button", { name: "Save", exact: true }).click();
+
+      await expect(
+        member.page.getByText("Document access changed. Your draft is kept here for copying."),
+      ).toBeVisible();
+      await expect(member.page.getByPlaceholder(/Write markdown/)).toHaveValue("My private draft");
+      await expect(member.page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      expect(await (await page.request.get(`/api/v1/documents/${id}`)).json()).toMatchObject({
+        body: "Original notes",
+        edit_version: 1,
+      });
+    } finally {
+      await member.context.close();
+      expect((await page.request.delete(`/api/v1/documents/${id}`)).ok()).toBeTruthy();
+      expect((await page.request.delete(`/api/v1/collections/${collectionId}`)).ok()).toBeTruthy();
+      expect((await page.request.delete(`/api/v1/admin/users/${userId}`)).ok()).toBeTruthy();
+    }
   });
 });

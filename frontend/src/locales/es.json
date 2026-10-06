@@ -4170,5 +4170,12 @@
   "Search results": "Resultados de búsqueda",
   "Open location": "Abrir ubicación",
   "Show more results": "Mostrar más resultados",
-  "All items loaded": "Todos los elementos cargados"
+  "All items loaded": "Todos los elementos cargados",
+  "documents.name": "Nombre del documento",
+  "documents.conflict": "Este documento cambió en otro lugar. Tu borrador se conserva. Revisa la última versión antes de volver a guardar.",
+  "documents.saveUncertain": "El guardado no se confirmó. Tu borrador se conserva. Comprueba el documento actual antes de volver a intentarlo.",
+  "documents.latestVersion": "Último documento guardado",
+  "documents.reviewLatest": "Usar la última versión como base de edición",
+  "documents.accessChanged": "El acceso al documento cambió. Tu borrador se conserva aquí para que puedas copiarlo.",
+  "documents.saveConfirmed": "Guardado confirmado al consultar el documento actual."
 }

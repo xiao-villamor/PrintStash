@@ -70,10 +70,25 @@ describe("getDocument", () => {
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
   it("carries cancellation to the document request", async () => {
-    respondWith({ id: 1, name: "Manual" });
+    let respond!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
     const controller = new AbortController();
-    await getDocument(1, controller.signal);
-    expect(lastCall().init.signal).toBe(controller.signal);
+    const pending = getDocument(1, controller.signal);
+
+    controller.abort();
+    respond(
+      new Response(JSON.stringify({ id: 1, name: "Manual" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 
@@ -121,9 +136,13 @@ describe("updateDocument", () => {
   it("PUTs an edit", async () => {
     respondWith({ id: 1, name: "Manual" });
 
-    await updateDocument(1, { body: "# Edited" });
+    await updateDocument(1, { body: "# Edited" }, 3);
 
     expectRequest("/api/v1/documents/1", "PUT");
+    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe('"document-1-v3"');
+    expect(new Headers(lastCall().init.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
   });
 });
 

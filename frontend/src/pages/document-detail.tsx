@@ -5,7 +5,16 @@ import { translate } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { type ComponentType, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentType,
+  Suspense,
+  lazy,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
 
@@ -17,7 +26,8 @@ import { Link } from "@/lib/link";
 import { toast } from "@/lib/toast";
 import { useDocument, useDocumentMutations } from "@/lib/queries/documents";
 import { Button } from "@/components/ui/button";
-import { ApiError, userMessage } from "@/lib/errors";
+import { getSessionVersion } from "@/lib/session-transport";
+import { ApiError, parseApiError, userMessage } from "@/lib/errors";
 import type { DocumentRead } from "@/types";
 import NotFound from "./not-found";
 
@@ -30,6 +40,12 @@ type ViewMode = "preview" | "edit";
 
 /** The name and body the editor is holding, tagged with the document it belongs to. */
 type Draft = { docId: number; base: DocumentRead; name: string; body: string };
+type SaveAttempt =
+  | { kind: "conflict" }
+  | { kind: "uncertain"; submitted: { name: string; body: string } };
+type SaveRecovery =
+  | { docId: number; kind: "access" }
+  | (SaveAttempt & { docId: number; latest: "loading" | "ready" | "failed" });
 type BinaryPreview = {
   documentId: number;
   kind: DocumentRead["kind"];
@@ -72,6 +88,7 @@ export default function DocumentDetailPage({
       filename: null,
       effective_role: "edit",
       updated_at: "",
+      edit_version: 1,
       body: "",
     }),
     [collectionParam, collectionId, locale],
@@ -80,19 +97,28 @@ export default function DocumentDetailPage({
   const documentQuery = useDocument(isNew || invalidId ? null : docId);
   const mutations = useDocumentMutations();
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [modeChoice, setModeChoice] = useState<ViewMode | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [modeChoice, setModeChoice] = useState<{ docId: number; mode: ViewMode } | null>(null);
+  const [recovery, setRecovery] = useState<SaveRecovery | null>(null);
+  const routeRef = useRef(id);
+  useLayoutEffect(() => {
+    routeRef.current = id;
+  }, [id]);
+  const [savingKey, setSavingKey] = useState<number | null>(null);
+  const [uploadingKey, setUploadingKey] = useState<number | null>(null);
   const [binaryPreview, setBinaryPreview] = useState<BinaryPreview | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Tagging the fetch results with their document id makes every derived value
   // below reset itself when the route moves to another document, so nothing from
   // the previous one survives into this render.
-  const doc = isNew ? newDocument : (documentQuery.data ?? null);
+  const doc = isNew
+    ? newDocument
+    : (documentQuery.data ?? (draft?.docId === docId ? draft.base : null));
   const notFound =
     invalidId || (documentQuery.error instanceof ApiError && documentQuery.error.status === 404);
-  const docKey = doc?.id ?? 0;
+  const docKey = isNew ? 0 : docId;
+  const saving = savingKey === docKey;
+  const uploading = uploadingKey === docKey;
   const liveDraft = draft?.docId === docKey ? draft : null;
   const draftName = liveDraft?.name ?? doc?.name ?? "";
   const draftBody = liveDraft?.body ?? doc?.body ?? "";
@@ -102,9 +128,15 @@ export default function DocumentDetailPage({
       : null;
   // A new document opens in the editor; anything else opens in preview until the
   // reader asks for one or the other.
-  const mode: ViewMode = modeChoice ?? (isNew ? "edit" : "preview");
+  const mode: ViewMode =
+    modeChoice?.docId === docKey ? modeChoice.mode : isNew ? "edit" : "preview";
+  const activeRecovery = recovery?.docId === docKey ? recovery : null;
+  const accessDenied =
+    activeRecovery?.kind === "access" ||
+    (documentQuery.error instanceof ApiError &&
+      [401, 403, 404].includes(documentQuery.error.status));
 
-  const canEdit = canEditDoc(doc, !!user?.is_superuser);
+  const canEdit = !accessDenied && canEditDoc(doc, !!user?.is_superuser);
   const backHref = doc?.collection
     ? `/?c=${encodeURIComponent(doc.collection)}&v=docs`
     : "/?v=docs";
@@ -138,14 +170,16 @@ export default function DocumentDetailPage({
   // cannot carry the API authorization header.
   useEffect(() => {
     if (
+      accessDenied ||
       previewDocumentId === undefined ||
       previewDocumentKind === undefined ||
       (previewDocumentKind !== "pdf" && !isImage)
     )
       return;
+    const controller = new AbortController();
     let alive = true;
     let url: string | null = null;
-    getAuthenticatedBlob(`/api/v1/documents/${previewDocumentId}/file`)
+    getAuthenticatedBlob(`/api/v1/documents/${previewDocumentId}/file`, controller.signal)
       .then((blob) => {
         if (!alive) return;
         if (isImage) url = URL.createObjectURL(blob);
@@ -159,9 +193,11 @@ export default function DocumentDetailPage({
       .catch(() => alive && toast.error(uiText("Could not load PDF")));
     return () => {
       alive = false;
+      controller.abort();
       if (url) URL.revokeObjectURL(url);
+      setBinaryPreview((current) => (current?.documentId === previewDocumentId ? null : current));
     };
-  }, [previewDocumentId, previewDocumentKind, isImage]);
+  }, [previewDocumentId, previewDocumentKind, isImage, accessDenied]);
 
   function insertAtCursor(text: string) {
     const el = textareaRef.current;
@@ -175,27 +211,63 @@ export default function DocumentDetailPage({
 
   async function handleImages(files: FileList | File[]) {
     const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (!images.length || !doc) return;
+    if (!images.length || !doc || !canEdit || activeRecovery) return;
     if (isNew) {
       toast.error(uiText("Save the document before adding images."));
       return;
     }
-    setUploading(true);
+    const session = getSessionVersion();
+    const route = id;
+    setUploadingKey(docKey);
     try {
       for (const file of images) {
         const { url } = await uploadDocumentImage(doc.id, file);
+        if (getSessionVersion() !== session || routeRef.current !== route) return;
         insertAtCursor(`\n![${file.name}](${url})\n`);
       }
     } catch (err) {
-      toast.error(err);
+      if (getSessionVersion() === session && routeRef.current === route) toast.error(err);
     } finally {
-      setUploading(false);
+      if (getSessionVersion() === session && routeRef.current === route) setUploadingKey(null);
     }
   }
 
+  async function recoverSave(attempt: SaveAttempt) {
+    const session = getSessionVersion();
+    const route = id;
+    setRecovery({ docId: docKey, ...attempt, latest: "loading" });
+    const result = await documentQuery.refetch();
+    if (getSessionVersion() !== session || routeRef.current !== route) return;
+    if (result.error) {
+      const denied =
+        result.error instanceof ApiError && [401, 403, 404].includes(result.error.status);
+      setRecovery(
+        denied
+          ? { docId: docKey, kind: "access" }
+          : { docId: docKey, ...attempt, latest: "failed" },
+      );
+      return;
+    }
+    if (
+      attempt.kind === "uncertain" &&
+      result.data?.name === attempt.submitted.name &&
+      result.data.body === attempt.submitted.body
+    ) {
+      setDraft(null);
+      setRecovery(null);
+      setModeChoice({ docId: docKey, mode: "preview" });
+      toast.success(uiText("documents.saveConfirmed"));
+      return;
+    }
+    setRecovery({ docId: docKey, ...attempt, latest: "ready" });
+  }
+
   async function save() {
-    if (!doc) return;
-    setSaving(true);
+    if (!doc || !canEdit || activeRecovery || uploading) return;
+    const session = getSessionVersion();
+    const route = id;
+    const submitted = { name: draftName.trim() || (liveDraft?.base ?? doc).name, body: draftBody };
+    setSavingKey(docKey);
     try {
       if (isNew) {
         const created = await mutations.create.mutateAsync({
@@ -203,25 +275,33 @@ export default function DocumentDetailPage({
           collection_id: collectionId,
           body: draftBody,
         });
-        // The route now points at a real row; keep the reader in the editor they
-        // were already in rather than bouncing them into preview.
-        setModeChoice("edit");
+        if (getSessionVersion() !== session || routeRef.current !== route) return;
+        setModeChoice({ docId: created.id, mode: "edit" });
         router.replace(`/documents/${created.id}`);
         return;
       }
       await mutations.update.mutateAsync({
         id: doc.id,
-        payload: {
-          name: draftName.trim() || doc.name,
-          body: draftBody,
-        },
+        editVersion: liveDraft?.base.edit_version ?? doc.edit_version,
+        payload: submitted,
       });
+      if (getSessionVersion() !== session || routeRef.current !== route) return;
       setDraft(null);
-      setModeChoice("preview");
+      setModeChoice({ docId: docKey, mode: "preview" });
     } catch (err) {
-      toast.error(err);
+      if (getSessionVersion() !== session || routeRef.current !== route) return;
+      const error = parseApiError(err);
+      if (!isNew && error.status === 412 && error.code === "edit_conflict") {
+        await recoverSave({ kind: "conflict" });
+      } else if (!isNew && (error.status >= 500 || error.code === "network_unreachable")) {
+        await recoverSave({ kind: "uncertain", submitted });
+      } else if (!isNew && [401, 403, 404].includes(error.status)) {
+        setRecovery({ docId: docKey, kind: "access" });
+      } else {
+        toast.error(err);
+      }
     } finally {
-      setSaving(false);
+      if (getSessionVersion() === session && routeRef.current === route) setSavingKey(null);
     }
   }
 
@@ -240,7 +320,14 @@ export default function DocumentDetailPage({
     }
   }
 
-  if (notFound) return <NotFound />;
+  if (notFound && !liveDraft) return <NotFound />;
+  if (accessDenied && !liveDraft) {
+    return (
+      <div role="alert" className="p-6">
+        {userMessage(documentQuery.error)}
+      </div>
+    );
+  }
   if (documentQuery.isError && !doc && !isNew) {
     return (
       <div role="alert" className="p-6">
@@ -259,12 +346,56 @@ export default function DocumentDetailPage({
 
   return (
     <div className="h-full flex flex-col bg-background">
-      {documentQuery.isError && (
+      {documentQuery.isError && !accessDenied && !activeRecovery && (
         <div role="alert" className="p-4 text-sm text-destructive">
           <p>{userMessage(documentQuery.error)}</p>
           <Button variant="outline" onClick={() => void documentQuery.refetch()}>
             {uiText("Retry")}
           </Button>
+        </div>
+      )}
+      {accessDenied && liveDraft && (
+        <div role="alert" className="p-4 text-sm text-destructive">
+          {uiText("documents.accessChanged")}
+        </div>
+      )}
+      {activeRecovery && activeRecovery.kind !== "access" && (
+        <div role="alert" className="p-4 space-y-3 border-b border-border">
+          <p>
+            {uiText(
+              activeRecovery.kind === "conflict" ? "documents.conflict" : "documents.saveUncertain",
+            )}
+          </p>
+          {activeRecovery.latest === "ready" && documentQuery.data && !accessDenied && (
+            <section aria-label={uiText("documents.latestVersion")}>
+              <h2 className="font-semibold">{uiText("documents.latestVersion")}</h2>
+              <p>{documentQuery.data.name}</p>
+              <pre className="whitespace-pre-wrap text-sm max-h-48 overflow-auto">
+                {documentQuery.data.body}
+              </pre>
+              <Button
+                variant="outline"
+                disabled={!canEdit}
+                onClick={() => {
+                  const latest = documentQuery.data;
+                  if (!latest || !liveDraft) return;
+                  setDraft({ ...liveDraft, base: latest });
+                  setRecovery(null);
+                }}
+              >
+                {uiText("documents.reviewLatest")}
+              </Button>
+            </section>
+          )}
+          {activeRecovery.latest === "loading" && <p aria-busy="true">{uiText("Loading…")}</p>}
+          {activeRecovery.latest === "failed" && (
+            <div>
+              <p>{userMessage(documentQuery.error)}</p>
+              <Button variant="outline" onClick={() => void recoverSave(activeRecovery)}>
+                {uiText("Retry")}
+              </Button>
+            </div>
+          )}
         </div>
       )}
       <div className="mx-auto w-full max-w-4xl flex flex-col flex-1 min-h-0 px-4 sm:px-6 py-6">
@@ -278,6 +409,8 @@ export default function DocumentDetailPage({
           </Link>
           {mode === "edit" ? (
             <input
+              aria-label={uiText("documents.name")}
+              readOnly={accessDenied || !!activeRecovery}
               disabled={saving}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
@@ -290,8 +423,10 @@ export default function DocumentDetailPage({
           {isMarkdown && canEdit && mode === "preview" && (
             <button
               onClick={() => {
-                setDraft({ docId: doc.id, base: doc, name: doc.name, body: doc.body ?? "" });
-                setModeChoice("edit");
+                setDraft(
+                  liveDraft ?? { docId: doc.id, base: doc, name: doc.name, body: doc.body ?? "" },
+                );
+                setModeChoice({ docId: docKey, mode: "edit" });
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
             >
@@ -302,7 +437,7 @@ export default function DocumentDetailPage({
           {isMarkdown && mode === "edit" && (
             <>
               <button
-                onClick={() => setModeChoice("preview")}
+                onClick={() => setModeChoice({ docId: docKey, mode: "preview" })}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
               >
                 <Eye className="w-3.5 h-3.5" />
@@ -310,7 +445,7 @@ export default function DocumentDetailPage({
               </button>
               <button
                 onClick={save}
-                disabled={saving || !canEdit}
+                disabled={saving || uploading || !canEdit || !!activeRecovery}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
               >
                 {saving ? (
@@ -322,7 +457,7 @@ export default function DocumentDetailPage({
               </button>
             </>
           )}
-          {!isMarkdown && (
+          {!isMarkdown && !accessDenied && (
             <button
               onClick={downloadFile}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
@@ -339,6 +474,7 @@ export default function DocumentDetailPage({
             (mode === "edit" ? (
               <div className="flex flex-col h-full">
                 <textarea
+                  readOnly={accessDenied || !!activeRecovery}
                   disabled={saving}
                   ref={textareaRef}
                   value={draftBody}
@@ -378,7 +514,8 @@ export default function DocumentDetailPage({
             ))}
 
           {/* PDF: themed inline viewer (pdf.js) */}
-          {doc.kind === "pdf" &&
+          {!accessDenied &&
+            doc.kind === "pdf" &&
             (activeBinaryPreview ? (
               <Suspense
                 fallback={
@@ -395,7 +532,7 @@ export default function DocumentDetailPage({
               </div>
             ))}
 
-          {doc.kind === "other" && isImage && activeBinaryPreview?.imageUrl && (
+          {!accessDenied && doc.kind === "other" && isImage && activeBinaryPreview?.imageUrl && (
             <img
               src={activeBinaryPreview.imageUrl}
               alt={doc.name}
@@ -404,7 +541,7 @@ export default function DocumentDetailPage({
           )}
 
           {/* Other binary: download only */}
-          {doc.kind === "other" && !isImage && (
+          {!accessDenied && doc.kind === "other" && !isImage && (
             <p className="text-sm text-muted-foreground">
               {doc.filename ?? uiText("File")}
               {uiText(" — use Download to open it.")}

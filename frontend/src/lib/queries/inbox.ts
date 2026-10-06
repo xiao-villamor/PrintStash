@@ -9,6 +9,7 @@ import {
   retryPendingImport,
   updatePendingImport,
 } from "@/lib/api/inbox";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import type { InboxItem } from "@/types";
 
 export const inboxApi = {
@@ -44,8 +45,10 @@ function snapshotOptions(api: Pick<InboxApi, "listPendingImports">, includeCompl
 }
 
 function publishSnapshotRow(client: QueryClient, item: InboxItem) {
+  const version = getSessionVersion();
   for (const [key, rows] of client.getQueriesData<InboxItem[]>({ queryKey: inboxKeys.snapshots })) {
     if (!rows) continue;
+    requireSessionVersion(version);
     const includeCompleted = key[2] === true;
     client.setQueryData(
       key,
@@ -111,41 +114,59 @@ export function useInboxItem(
 export function useInboxCommands(api: InboxApi = inboxApi) {
   const client = useQueryClient();
   const cancel = () => client.cancelQueries({ queryKey: inboxKeys.all });
-  const publish = async (item: InboxItem) => {
+  const prepare = async () => {
+    const version = getSessionVersion();
     await cancel();
+    requireSessionVersion(version);
+    return version;
+  };
+  const assertSession = (version: number | undefined) => {
+    if (version === undefined) throw new Error("Inbox mutation session context is required");
+    requireSessionVersion(version);
+  };
+  const publish = async (item: InboxItem, version: number | undefined) => {
+    await cancel();
+    assertSession(version);
     client.setQueryData(inboxKeys.detail(item.id), item);
+    assertSession(version);
     publishSnapshotRow(client, item);
   };
-  const remove = (ids: number[]) => {
-    client.setQueriesData<InboxItem[]>({ queryKey: inboxKeys.snapshots }, (items) =>
-      items?.filter((item) => !ids.includes(item.id)),
-    );
-    for (const id of ids) client.removeQueries({ queryKey: inboxKeys.detail(id) });
+  const remove = (ids: number[], version: number | undefined) => {
+    assertSession(version);
+    client.setQueriesData<InboxItem[]>({ queryKey: inboxKeys.snapshots }, (items) => {
+      assertSession(version);
+      return items?.filter((item) => !ids.includes(item.id));
+    });
+    for (const id of ids) {
+      assertSession(version);
+      client.removeQueries({ queryKey: inboxKeys.detail(id) });
+    }
   };
   return {
     dismiss: useMutation({
       mutationFn: (id: number) => api.dismissPendingImport(id),
-      onMutate: cancel,
-      onSuccess: async (_, id) => {
+      onMutate: prepare,
+      onSuccess: async (_, id, version) => {
         await cancel();
-        remove([id]);
+        remove([id], version);
       },
     }),
     batch: useMutation({
       mutationFn: (payload: Parameters<InboxApi["batchPendingImports"]>[0]) =>
         api.batchPendingImports(payload),
-      onMutate: cancel,
-      onSuccess: async (items, payload) => {
+      onMutate: prepare,
+      onSuccess: async (items, payload, version) => {
         await cancel();
-        if (payload.action === "dismiss") remove(payload.item_ids);
-        else for (const item of items) await publish(item);
+        if (payload.action === "dismiss") remove(payload.item_ids, version);
+        else for (const item of items) await publish(item, version);
       },
     }),
     retry: useMutation({
       mutationFn: (id: number) => api.retryPendingImport(id),
-      onMutate: cancel,
-      onSuccess: async (item) => {
-        await publish(item);
+      onMutate: prepare,
+      onSuccess: async (item, _, version) => {
+        await publish(item, version);
+        assertSession(version);
         void client.invalidateQueries({ queryKey: inboxKeys.detail(item.id) });
       },
     }),
@@ -157,14 +178,14 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
         id: number;
         payload: Parameters<typeof updatePendingImport>[1];
       }) => api.updatePendingImport(id, payload),
-      onMutate: cancel,
-      onSuccess: publish,
+      onMutate: prepare,
+      onSuccess: (item, _, version) => publish(item, version),
     }),
     import: useMutation({
       mutationFn: ({ id, selectedIds }: { id: number; selectedIds: string[] }) =>
         api.importPendingImport(id, selectedIds),
-      onMutate: cancel,
-      onSuccess: publish,
+      onMutate: prepare,
+      onSuccess: (item, _, version) => publish(item, version),
     }),
   };
 }

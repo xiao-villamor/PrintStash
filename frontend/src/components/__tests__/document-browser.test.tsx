@@ -30,6 +30,7 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 function aDocument(over: Partial<DocumentListItem> = {}): DocumentListItem {
   return {
     id: 3,
+    edit_version: 1,
     name: "Assembly guide",
     kind: "markdown",
     collection: "parts",

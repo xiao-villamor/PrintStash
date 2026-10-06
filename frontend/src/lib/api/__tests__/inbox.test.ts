@@ -187,10 +187,23 @@ describe("getPendingImport", () => {
     await expect(getPendingImport(1)).rejects.toThrow("Invalid inbox manifest response");
   });
   it("carries cancellation to the Inbox detail request", async () => {
-    respondWith(ITEM);
+    let respond!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
     const controller = new AbortController();
-    await getPendingImport(1, controller.signal);
-    expect(lastCall().init.signal).toBe(controller.signal);
+    const pending = getPendingImport(1, controller.signal);
+
+    controller.abort();
+    respond(
+      new Response(JSON.stringify(ITEM), { headers: { "content-type": "application/json" } }),
+    );
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 

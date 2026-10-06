@@ -39,8 +39,12 @@ export function uploadDocument(
 export function updateDocument(
   id: number,
   payload: { name?: string; body?: string },
+  editVersion: number,
 ): Promise<DocumentRead> {
-  return sendJson<DocumentRead>(`/api/v1/documents/${id}`, "PUT", payload);
+  return sendJson<DocumentRead>(`/api/v1/documents/${id}`, "PUT", payload, {
+    "If-Match": `"document-${id}-v${editVersion}"`,
+    "X-PrintStash-Edit-Contract": "conditional-v1",
+  });
 }
 
 export function deleteDocument(id: number): Promise<void> {

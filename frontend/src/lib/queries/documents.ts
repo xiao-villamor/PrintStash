@@ -7,6 +7,7 @@ import {
   updateDocument,
   uploadDocument,
 } from "@/lib/api/documents";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import type { DocumentListItem, DocumentRead } from "@/types";
 
 export const documentKeys = {
@@ -38,60 +39,93 @@ export function useDocument(id: number | null) {
 export function useDocumentMutations() {
   const client = useQueryClient();
   const cancel = () => client.cancelQueries({ queryKey: documentKeys.all });
-  const publish = async (document: DocumentRead) => {
+  const prepare = async () => {
+    const version = getSessionVersion();
     await cancel();
-    client.setQueryData(documentKeys.detail(document.id), document);
-    client.setQueriesData<DocumentListItem[]>({ queryKey: documentKeys.lists }, (items) =>
-      items?.map((item) => (item.id === document.id ? document : item)),
-    );
+    requireSessionVersion(version);
+    return version;
   };
-  const refreshCollections = () => {
+  const assertSession = (version: number | undefined) => {
+    if (version === undefined) throw new Error("Document mutation session context is required");
+    requireSessionVersion(version);
+  };
+  const publish = async (document: DocumentRead, version: number | undefined) => {
+    await cancel();
+    assertSession(version);
+    client.setQueryData(documentKeys.detail(document.id), document);
+    for (const [key, items] of client.getQueriesData<DocumentListItem[]>({
+      queryKey: documentKeys.lists,
+    })) {
+      assertSession(version);
+      if (!items) continue;
+      const collection = key[2];
+      client.setQueryData(
+        key,
+        items.flatMap((item) => {
+          if (item.id !== document.id) return [item];
+          return collection === null || collection === document.collection ? [document] : [];
+        }),
+      );
+    }
+  };
+  const refreshCollections = (version: number | undefined) => {
+    assertSession(version);
     void client.invalidateQueries({ queryKey: ["collections"] });
+    assertSession(version);
     void client.resetQueries({ queryKey: ["outliner"] });
   };
-  const refreshLists = () => {
+  const refreshLists = (version: number | undefined) => {
+    assertSession(version);
     void client.invalidateQueries({ queryKey: documentKeys.lists });
-    refreshCollections();
+    refreshCollections(version);
   };
   return {
     create: useMutation({
       mutationFn: (payload: Parameters<typeof createDocument>[0]) => createDocument(payload),
-      onMutate: cancel,
-      onSuccess: async (document) => {
-        await publish(document);
-        refreshLists();
+      onMutate: prepare,
+      onSuccess: async (document, _, version) => {
+        await publish(document, version);
+        refreshLists(version);
       },
     }),
     upload: useMutation({
       mutationFn: ({ file, collectionId }: { file: File; collectionId: number | null }) =>
         uploadDocument(file, collectionId),
-      onMutate: cancel,
-      onSuccess: async (document) => {
-        await publish(document);
-        refreshLists();
+      onMutate: prepare,
+      onSuccess: async (document, _, version) => {
+        await publish(document, version);
+        refreshLists(version);
       },
     }),
     update: useMutation({
       mutationFn: ({
         id,
         payload,
+        editVersion,
       }: {
         id: number;
+        editVersion: number;
         payload: Parameters<typeof updateDocument>[1];
-      }) => updateDocument(id, payload),
-      onMutate: cancel,
-      onSuccess: publish,
+      }) => updateDocument(id, payload, editVersion),
+      onMutate: prepare,
+      onSuccess: async (document, _, version) => {
+        await publish(document, version);
+        refreshLists(version);
+      },
     }),
     remove: useMutation({
       mutationFn: (id: number) => deleteDocument(id),
-      onMutate: cancel,
-      onSuccess: async (_, id) => {
+      onMutate: prepare,
+      onSuccess: async (_, id, version) => {
         await cancel();
+        assertSession(version);
         client.removeQueries({ queryKey: documentKeys.detail(id) });
-        client.setQueriesData<DocumentListItem[]>({ queryKey: documentKeys.lists }, (items) =>
-          items?.filter((item) => item.id !== id),
-        );
-        refreshCollections();
+        assertSession(version);
+        client.setQueriesData<DocumentListItem[]>({ queryKey: documentKeys.lists }, (items) => {
+          assertSession(version);
+          return items?.filter((item) => item.id !== id);
+        });
+        refreshCollections(version);
       },
     }),
   };
