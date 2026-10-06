@@ -31,6 +31,7 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_version: 1,
     id: 1,
     name: "Benchy",
     slug: "benchy",

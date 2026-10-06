@@ -1,5 +1,6 @@
 "use client";
 
+import { useLibraryStar } from "@/features/library/mutations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -39,8 +40,6 @@ import {
   deleteMultipartModelCover,
   replaceMultipartModelTags,
   saveMultipartModel,
-  starMultipartModel,
-  unstarMultipartModel,
   uploadDocument,
   uploadMultipartModelCover,
 } from "@/lib/api";
@@ -83,28 +82,20 @@ export function MultipartModelCard({
 }) {
   useUiLocale();
   const { t } = useI18n();
-  const [starOverride, setStarOverride] = useState<{
-    base: boolean;
-    value: boolean;
-  } | null>(null);
-  const [starBusy, setStarBusy] = useState(false);
+  const starMutation = useLibraryStar();
+  const starBusy = starMutation.isPending;
   const starred =
-    starOverride !== null && starOverride.base === item.starred ? starOverride.value : item.starred;
+    starMutation.isPending && starMutation.variables
+      ? starMutation.variables.starred
+      : item.starred;
   const canEditTags = item.effective_role === "edit" || item.effective_role === "admin";
 
   async function toggleStar() {
     if (starBusy) return;
-    const next = !starred;
-    setStarOverride({ base: item.starred, value: next });
-    setStarBusy(true);
     try {
-      await (next ? starMultipartModel(item.id) : unstarMultipartModel(item.id));
-      onDataChange?.();
+      await starMutation.mutateAsync({ kind: "multipart", id: item.id, starred: !starred });
     } catch (cause) {
-      setStarOverride({ base: item.starred, value: !next });
       toast.error(multipartError(cause, t, "multipart.favoriteError"));
-    } finally {
-      setStarBusy(false);
     }
   }
 

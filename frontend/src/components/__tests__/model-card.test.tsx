@@ -9,17 +9,16 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { I18nProvider } from "@/lib/i18n";
 import { ModelCard } from "@/components/model-card";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { ModelListItem, PrintSummaryRead } from "@/types";
 
 const model: ModelListItem = {
+  edit_version: 1,
   id: 1,
   name: "Cam Holder v4",
   slug: "cam-holder-v4",
@@ -139,11 +138,7 @@ describe("ModelCard", () => {
     // The card links to the model detail route and prefetches it on hover, so
     // it needs a real router; `thumbnail_url: null` keeps the thumbnail hook
     // from touching the network.
-    render(
-      <MemoryRouter>
-        <ModelCard model={model} />
-      </MemoryRouter>,
-    );
+    renderApp(<ModelCard model={model} />);
 
     expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(
       "Needs Test·a",
@@ -212,16 +207,16 @@ describe("ModelCard", () => {
     });
 
     it("lights the star before the server answers", async () => {
-      // The grid is a fast, repetitive surface; waiting a round trip per click
-      // makes starring ten models feel broken.
       const user = userEvent.setup();
-      renderCard();
+      const pending = Promise.withResolvers<Response>();
+      renderCard({}, { "PUT /api/v1/models/1/star": () => pending.promise });
 
       await user.click(screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }));
 
       expect(
-        await screen.findByRole("button", { name: "Remove Cam Holder v4 from favorites" }),
-      ).toBeInTheDocument();
+        screen.getByRole("button", { name: "Remove Cam Holder v4 from favorites" }),
+      ).toBeDisabled();
+      await act(async () => pending.resolve(json({ model_id: 1, starred: true })));
     });
 
     it("puts the star back when the server refuses", async () => {
@@ -259,13 +254,9 @@ describe("localized model card", () => {
       "printstash.card.metrics",
       JSON.stringify(["layer_height", "material", "file_count"]),
     );
-    render(
-      <MemoryRouter>
-        <I18nProvider>
-          <ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />
-        </I18nProvider>
-      </MemoryRouter>,
-    );
+    renderApp(<ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />, {
+      locale: "es",
+    });
     expect(screen.getByText("Files", { exact: true })).toBeVisible();
     expect(screen.getByText("CAPA", { exact: true })).toBeVisible();
     expect(screen.getByText("ARCH", { exact: true })).toBeVisible();

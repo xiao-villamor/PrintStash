@@ -67,6 +67,7 @@ function aTag(override: Partial<TagRead> = {}): TagRead {
 
 function aMultipartSet(override: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
   return {
+    edit_version: 1,
     id: 40,
     name: "Dragon figure",
     slug: "dragon-figure",
@@ -2299,6 +2300,27 @@ describe("ModelBrowser", () => {
       await user.click(await screen.findByRole("button", { name: /Load more/ }));
 
       expect(await screen.findByText("Match")).toBeVisible();
+    });
+
+    it("removes a confirmed favorite from the displayed grid", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const user = userEvent.setup();
+      renderVault({
+        at: "/?favorites=true",
+        models: [aModelListItem({ name: "Favorite bracket", starred: true })],
+        routes: {
+          "DELETE /api/v1/models/1/star": () => pending.promise,
+        },
+      });
+      await screen.findByText("Favorite bracket");
+
+      await user.click(
+        screen.getByRole("button", { name: "Remove Favorite bracket from favorites" }),
+      );
+      expect(screen.getByText("Favorite bracket")).toBeVisible();
+      pending.resolve(json({ model_id: 1, starred: false }));
+
+      await waitFor(() => expect(screen.queryByText("Favorite bracket")).not.toBeInTheDocument());
     });
 
     it("offers more when the page reports a cursor", async () => {

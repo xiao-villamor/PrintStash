@@ -38,6 +38,7 @@ function outlinerModel(over: Partial<OutlinerModelRead> = {}): OutlinerModelRead
 
 function multipartSet(over: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
   return {
+    edit_version: 1,
     id: 40,
     name: "Dragon figure",
     slug: "dragon-figure",

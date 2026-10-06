@@ -13,6 +13,7 @@ import type { CollectionRead, MultipartModelRead } from "@/types";
 
 function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead {
   return {
+    edit_version: 1,
     id: 7,
     name: "Desk organiser",
     slug: "desk-organiser",

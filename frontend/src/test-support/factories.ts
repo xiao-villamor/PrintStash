@@ -264,6 +264,7 @@ export function vaultStats(override?: Partial<VaultStatsRead>): VaultStatsRead {
 /** One row of the model library listing, with nothing printed yet. */
 export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem {
   return {
+    edit_version: 1,
     id: 1,
     name: "Bracket",
     slug: "bracket",
@@ -290,6 +291,7 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    edit_version: 1,
     id: 1,
     name: "Leg",
     slug: "leg",
@@ -462,6 +464,7 @@ export function aMultipartModel(
   override?: Partial<import("@/types/multipart-models").MultipartModelRead>,
 ): import("@/types/multipart-models").MultipartModelRead {
   return {
+    edit_version: 1,
     id: 7,
     name: "Table",
     slug: "table",

@@ -53,6 +53,7 @@ function aJob(over: Partial<JobStatus> = {}): JobStatus {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_version: 1,
     id: 1,
     name: "Cube",
     slug: "cube",

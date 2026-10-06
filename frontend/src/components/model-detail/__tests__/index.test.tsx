@@ -53,6 +53,7 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_version: 1,
     id: 1,
     name: "Benchy",
     slug: "benchy",

@@ -46,6 +46,7 @@ const candidates: MultipartModelCandidate[] = [
 ];
 
 const populatedMobileDetail: MultipartModelRead = {
+  edit_version: 1,
   id: 90,
   name: "broom_holder_vcd_base_25mm",
   slug: "broom-holder-vcd-base-25mm",
@@ -141,6 +142,7 @@ test.describe("multipart models", () => {
       parts: Array<{ name: string; choices: Array<{ model_id: number; choice_id?: number }> }>;
     } | null = null;
     let detail: MultipartModelRead = {
+      edit_version: 1,
       id: 90,
       name: "Desk organiser",
       slug: "desk-organiser",

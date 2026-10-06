@@ -116,6 +116,7 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
   name: string;
@@ -210,6 +211,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
   name: string;

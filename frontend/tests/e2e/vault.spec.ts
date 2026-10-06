@@ -21,6 +21,37 @@ import { aModelListItem, aMultipartModel } from "../../src/test-support/factorie
 useMockApi();
 
 test.describe("vault route", () => {
+  test("removes a favorite after browser confirmation", async ({ page }) => {
+    const confirmation = Promise.withResolvers<void>();
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({ id: 1, name: "Favorite bracket", starred: true }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/1/star", async (route) => {
+      await confirmation.promise;
+      await route.fulfill({ json: { model_id: 1, starred: false } });
+    });
+    await page.goto("/?favorites=true");
+
+    await page.getByRole("button", { name: "Remove Favorite bracket from favorites" }).click();
+
+    await expect(page.getByText("Favorite bracket", { exact: true })).toBeVisible();
+    confirmation.resolve();
+    await expect(page.getByText("Favorite bracket", { exact: true })).toHaveCount(0);
+  });
+
   test("preserves mixed order through browser pagination", async ({ page }) => {
     await page.route("**/api/v1/models/browse?**", async (route) => {
       const continued = new URL(route.request().url()).searchParams.has("cursor");

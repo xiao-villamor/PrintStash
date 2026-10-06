@@ -70,6 +70,7 @@ const metadata: MetadataRead = {
 };
 
 const model = {
+  edit_version: 1,
   id: 1,
   name: "skadis_kitchen-roll_screw",
   slug: "skadis-kitchen-roll-screw",
@@ -220,6 +221,7 @@ const printerDiagnostics = {
 const modelList = [
   {
     id: model.id,
+    edit_version: model.edit_version,
     name: model.name,
     slug: model.slug,
     collection: model.collection,

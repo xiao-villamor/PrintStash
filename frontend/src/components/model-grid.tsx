@@ -123,7 +123,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
 import { useStartupThumbnails } from "@/lib/use-startup-thumbnails";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
@@ -2998,7 +2998,7 @@ function MultipartModelListRow({
 }) {
   useUiLocale();
   const { t } = useI18n();
-  const thumb = useAuthenticatedAssetUrl(item.cover_thumbnail_url);
+  const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(item.cover_thumbnail_url);
   return (
     <Link
       href={`/multipart-models/${item.id}?${new URLSearchParams({ return: returnTo }).toString()}`}
@@ -3006,6 +3006,7 @@ function MultipartModelListRow({
       className="group flex items-center gap-2 border-b border-border px-4 py-3 transition-colors hover:bg-muted active:bg-muted md:gap-3"
     >
       <span
+        ref={thumbnailRef}
         data-library-thumbnail={
           item.cover_thumbnail_url ? (thumb ? "ready" : "pending") : "missing"
         }
@@ -3053,7 +3054,7 @@ function ModelListRow({
 }) {
   useUiLocale();
   const router = useRouter();
-  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
+  const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
     <Localized>
@@ -3087,6 +3088,7 @@ function ModelListRow({
           />
         )}
         <div
+          ref={thumbnailRef}
           data-library-thumbnail={model.thumbnail_url ? (thumb ? "ready" : "pending") : "missing"}
           className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border"
         >

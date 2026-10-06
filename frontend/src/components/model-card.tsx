@@ -11,7 +11,7 @@ import { ModelListItem, FileRevisionStatus } from "@/types";
 import { FileText, Star, Tags, ScanSearch } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { starModel, unstarModel } from "@/lib/api";
+import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
@@ -24,14 +24,6 @@ import {
   CardMetrics,
   readCardMetrics,
 } from "@/lib/card-metrics";
-
-/** An optimistic star toggle, remembered against the server value it overrode. */
-interface StarOverride {
-  /** The `model.starred` this override was made against. */
-  base: boolean;
-  /** What the card shows for as long as the override stands. */
-  value: boolean;
-}
 
 function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -191,16 +183,12 @@ function ModelCardInner({
   useUiLocale();
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
-  // The card owns an optimistic star only until the server says otherwise: a
-  // fresh `model.starred` (list refetch, or the star toggled on the detail
-  // page) no longer matches `base` and supersedes the override, so nothing has
-  // to copy the prop into state.
-  const [starOverride, setStarOverride] = useState<StarOverride | null>(null);
+  const starMutation = useLibraryStar();
   const starred =
-    starOverride !== null && starOverride.base === model.starred
-      ? starOverride.value
+    starMutation.isPending && starMutation.variables
+      ? starMutation.variables.starred
       : model.starred;
-  const [starBusy, setStarBusy] = useState(false);
+  const starBusy = starMutation.isPending;
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;
@@ -208,17 +196,10 @@ function ModelCardInner({
 
   async function toggleStar() {
     if (starBusy) return;
-    const next = !starred;
-    setStarOverride({ base: model.starred, value: next });
-    setStarBusy(true);
     try {
-      await (next ? starModel(model.id) : unstarModel(model.id));
+      await starMutation.mutateAsync({ kind: "model", id: model.id, starred: !starred });
     } catch (error) {
-      // `!next` is exactly what the card showed before this toggle.
-      setStarOverride({ base: model.starred, value: !next });
       toast.error(error);
-    } finally {
-      setStarBusy(false);
     }
   }
 
