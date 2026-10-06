@@ -2001,7 +2001,7 @@
   "multipart.guides": "guides",
   "multipart.empty": "No multipart models yet",
   "multipart.emptyDescription": "Group existing Models when they print together.",
-  "multipart.linkedNotice": "Adding a part references an existing Model. It remains reusable and can always be found in Everything or Parts only.",
+  "multipart.linkedNotice": "Adding a part references an existing Model. It remains reusable and can always be found in Everything.",
   "multipart.addFirst": "Add a part",
   "multipart.addAnother": "Add another part",
   "multipart.addAlternative": "Add a variant",

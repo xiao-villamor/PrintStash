@@ -2001,7 +2001,7 @@
   "multipart.guides": "guías",
   "multipart.empty": "Aún no hay modelos multiparte",
   "multipart.emptyDescription": "Agrupa modelos existentes cuando se imprimen juntos.",
-  "multipart.linkedNotice": "Añadir una pieza enlaza un modelo existente. Sigue siendo reutilizable y siempre aparece en Todo o Solo piezas.",
+  "multipart.linkedNotice": "Añadir una pieza enlaza un modelo existente. Sigue siendo reutilizable y siempre aparece en Todo.",
   "multipart.addFirst": "Añadir una pieza",
   "multipart.addAnother": "Añadir otra pieza",
   "multipart.addAlternative": "Añadir una variante",

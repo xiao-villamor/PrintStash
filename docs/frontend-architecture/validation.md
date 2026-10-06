@@ -1,11 +1,13 @@
 # Behaviour coverage and validation plan
 
-Status: planning only. Rows below are requirements for future increments, not
-claims that tests have been written or run. `❌ missing` means no accepted test
-reference has yet been attached to this planned contract; I0 must read existing
-assertions before deciding whether to reuse or add one. This is a starter matrix,
-not an assertion-by-assertion audit of the whole suite. Expand it per feature before
-implementation, especially settings, provider forms, extension capture and viewers.
+Status: implementation qualification in progress. M2 rows 1–5 have reviewed
+assertions and qualified executions, consolidated in the
+[M2 closure record](../frontend-m2-closure-validation.md). Other rows remain the
+original requirements pending reconciliation with their feature validation records;
+`❌ missing` means no accepted reference has yet been attached here, not that no
+test exists anywhere. This is not an assertion-by-assertion audit of the whole
+suite. Expand the matrix per feature before implementation, especially settings,
+provider forms, extension capture and viewers.
 
 Use the exact repository columns and one observable behaviour per row. Existing
 coverage becomes `✅ <tier dir>/<file>::<test>` only after reading its assertions.
@@ -15,11 +17,11 @@ each case must have the same assertion shape; otherwise split the row.
 
 | #   | Behaviour (test name)                                    | Category | Precondition / input                             | Observable outcome asserted                                     | Tier            | Status     |
 | --- | -------------------------------------------------------- | -------- | ------------------------------------------------ | --------------------------------------------------------------- | --------------- | ---------- |
-| 1   | migrates a retired library mode                          | Edge     | Organized or Parts only in URL/preference        | Everything selected; unrelated URL inputs retained              | Frontend unit   | ❌ missing |
-| 2   | preserves Multipart Sets selection                       | Happy    | current multipart URL                            | only eligible groupings displayed                               | Playwright      | ❌ missing |
-| 3   | keeps referenced Models independently visible            | Happy    | Model referenced by two sets                     | one Model card remains accessible in Everything                 | Playwright real | ❌ missing |
-| 4   | round trips a saved library view                         | Happy    | folder/filter/sort view saved                    | restored URL has the same normalized inputs                     | Frontend unit   | ❌ missing |
-| 5   | normalizes malformed view parameters                     | Error    | invalid enum or identifier                       | documented canonical URL without new history entry              | Frontend unit   | ❌ missing |
+| 1   | migrates a retired library mode                          | Edge     | Organized or Parts only in URL/preference        | Everything selected; unrelated URL inputs retained              | Frontend unit   | ✅ `src/features/library/__tests__/url.test.ts::normalizes retired URL mode` and `normalizes retired preference` |
+| 2   | preserves Multipart Sets selection                       | Happy    | current multipart URL                            | only eligible groupings displayed                               | Playwright real | ✅ `tests/e2e-real/multipart-models.spec.ts::keeps a shared Model independently accessible` |
+| 3   | keeps referenced Models independently visible            | Happy    | Model referenced by two sets                     | one Model card remains accessible in Everything                 | Playwright real | ✅ `tests/e2e-real/multipart-models.spec.ts::keeps a shared Model independently accessible` |
+| 4   | round trips a saved library view                         | Happy    | folder/filter/sort view saved                    | restored URL has the same normalized inputs                     | Frontend unit   | ✅ `src/features/library/__tests__/filters.test.ts::round trips complete Library filters`; real saved-view lifecycle in closure record |
+| 5   | normalizes malformed view parameters                     | Error    | invalid enum or identifier                       | documented canonical URL without new history entry              | Frontend unit   | ✅ `src/components/__tests__/model-grid.test.tsx::replaces a malformed printer bookmark`; `src/features/library/__tests__/url.test.ts` |
 | 6   | returns globally ordered mixed pages                     | Happy    | both entry kinds span pages                      | concatenated identities match canonical server order            | Integration     | ❌ missing |
 | 7   | breaks equal sort values deterministically               | Edge     | equal values; null values; Unicode names         | stable order across repeated page reads                         | Integration     | ❌ missing |
 | 8   | filters before taking a page                             | Edge     | many nonmatching rows precede valid matches      | eligible later entries remain reachable                         | Integration     | ❌ missing |

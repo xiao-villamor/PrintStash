@@ -1,5 +1,5 @@
 /** Multipart groupings link existing Models without taking ownership of their files. */
-import { openLibraryTools } from "./util";
+import { openFilters, openLibraryTools } from "./util";
 import { test, expect } from "./helpers";
 import { createCollectionViaVault, modelCard, uploadModel } from "./util";
 
@@ -72,7 +72,13 @@ test.describe("multipart models", () => {
     await tagsDialog.getByRole("button", { name: "Create tag" }).click();
     await tagsDialog.getByRole("button", { name: "Save tags" }).click();
     await expect(page.getByText(setTag.toUpperCase())).toBeVisible();
-    await page.locator("aside").getByRole("button", { name: "Organized" }).click();
+    await expect(modelCard(page, base)).toBeVisible();
+    await openFilters(page);
+    await page
+      .locator("aside")
+      .getByRole("button", { name: "Multipart sets only", exact: true })
+      .click();
+    await expect(page).toHaveURL(/type=multipart/);
     await expect(modelCard(page, base)).toHaveCount(0);
     await page.goto("/?favorites=true");
     await expect(page.getByRole("link", { name: group })).toBeVisible();
@@ -98,6 +104,79 @@ test.describe("multipart models", () => {
     await expect(modelCard(page, base)).toBeVisible();
     await expect(modelCard(page, short)).toBeVisible();
     await expect(modelCard(page, long)).toBeVisible();
+  });
+  test("keeps a shared Model independently accessible", async ({ page }) => {
+    const stamp = Date.now();
+    const base = `e2e-shared-model-${stamp}`;
+    const group = `e2e-first-set-${stamp}`;
+    const secondGroup = `e2e-second-set-${stamp}`;
+    await uploadModel(page, base, { mesh: true, gcode: true });
+
+    await openLibraryTools(page);
+    await page.getByRole("button", { name: "New multipart set" }).first().click();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Adding a part references an existing Model. It remains reusable and can always be found in Everything.",
+    );
+    await page.getByLabel("Name", { exact: true }).fill(group);
+    await page.getByRole("button", { name: "Create multipart set" }).click();
+    await page.getByRole("button", { name: "Add a part" }).click();
+    await page.getByRole("button", { name: new RegExp(base) }).click();
+    await page.getByRole("button", { name: "Add parts (1)" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Changes saved")).toBeVisible();
+
+    await page.goto("/?type=all");
+    await openLibraryTools(page);
+    await page.getByRole("button", { name: "New multipart set" }).first().click();
+    await page.getByLabel("Name", { exact: true }).fill(secondGroup);
+    await page.getByRole("button", { name: "Create multipart set" }).click();
+    await page.getByRole("button", { name: "Add a part" }).click();
+    await page.getByRole("button", { name: new RegExp(base) }).click();
+    await page.getByRole("button", { name: "Add parts (1)" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Changes saved")).toBeVisible();
+
+    await page.goto("/?type=all");
+    await expect(modelCard(page, base)).toHaveCount(1);
+    await expect(page.getByRole("link", { name: group, exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: secondGroup, exact: true })).toBeVisible();
+    await modelCard(page, base).click();
+    await expect(page.getByRole("heading", { name: base, exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Revisions" }).click();
+    await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Recommended", { exact: true }).first()).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/type=all/);
+    await expect(modelCard(page, base)).toHaveCount(1);
+
+    await openFilters(page);
+    await page
+      .locator("aside")
+      .getByRole("button", { name: "Multipart sets only", exact: true })
+      .click();
+    await expect(page).toHaveURL(/type=multipart/);
+    await expect(modelCard(page, base)).toHaveCount(0);
+    await expect(page.getByRole("link", { name: secondGroup, exact: true })).toBeVisible();
+    await page.getByRole("link", { name: group, exact: true }).click();
+    const detailUrl = page.url();
+    await expect(page.getByRole("heading", { name: group, exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/type=multipart/);
+    await expect(page.getByRole("link", { name: group, exact: true })).toBeVisible();
+    await expect(modelCard(page, base)).toHaveCount(0);
+    await page.goForward();
+    await expect(page).toHaveURL(detailUrl);
+    await expect(page.getByRole("heading", { name: group, exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
+    await page.getByRole("button", { name: "Delete multipart set" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete set" }).click();
+    await page.getByRole("link", { name: secondGroup, exact: true }).click();
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
+    await page.getByRole("button", { name: "Delete multipart set" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete set" }).click();
+    await page.goto("/?type=all");
+    await expect(modelCard(page, base)).toHaveCount(1);
   });
   test("builds multiple parts while browsing collections", async ({ page }) => {
     const stamp = Date.now();

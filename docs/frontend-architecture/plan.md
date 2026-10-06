@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-06. **Implementation in progress; no increment is qualified as complete yet.**
+2026-10-07. **Implementation in progress. M2 is locally qualified; the overall migration remains open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -164,6 +164,21 @@ Stateless API processes and multi-instance backend readiness are deferred to a
 separate backlog task. They are not a prerequisite, implementation step or success
 criterion for this frontend migration. Preserve the existing storage, session and
 JobEngine seams without adding deployment infrastructure here.
+
+## Execution status
+
+M2 (URL state and the two library modes) is closed for local implementation and
+acceptance. Its [closure record](../frontend-m2-closure-validation.md) consolidates
+the reviewed source and actual unit/browser evidence; the parent coverage matrix
+now resolves M2 rows 1–5. This does not claim a completed migration, full-suite
+qualification, performance improvement, or green remote CI.
+
+M5 (coherent navigation and history) is the next and only active closure target.
+Other unfinished goals retain their partial work and remain queued. Existing
+backend qualification results are retained without starting additional broad gates
+until the active closure needs them. Finish one goal's explicit acceptance and
+removal criteria before opening another implementation front; record a concrete
+blocker if a goal cannot close. Final delivery and remote CI remain M11 work.
 
 ## Ordered increments
 
