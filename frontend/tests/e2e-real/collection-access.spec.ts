@@ -67,6 +67,20 @@ test.describe("collection access", () => {
         await page.request.get(`/api/v1/collections/${childId}/permissions`)
       ).json();
       expect(grants).toContainEqual(expect.objectContaining({ user_id: userId, role: "edit" }));
+      await card
+        .getByRole("combobox")
+        .filter({ has: page.getByRole("option", { name: "Admin", exact: true }) })
+        .selectOption({ label: "Admin" });
+      await card.getByRole("button", { name: "Grant" }).click();
+      await expect(card.getByText("admin", { exact: true })).toBeVisible();
+      await card.getByTitle("Remove collection access", { exact: true }).click();
+      await expect(card.getByTitle("Remove collection access", { exact: true })).toHaveCount(0);
+      const remaining = await (
+        await page.request.get(`/api/v1/collections/${childId}/permissions`)
+      ).json();
+      expect(remaining).not.toContainEqual(expect.objectContaining({ user_id: userId }));
+      expect(permissionsReadIds).toEqual([childId]);
+
       expect(wholeTreeRequests).toEqual([]);
       expect(permissionsReadIds.every((id) => id === childId)).toBe(true);
     } finally {

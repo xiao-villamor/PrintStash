@@ -4205,5 +4205,8 @@
   "aiSearch.preferencesLoadError": "No se pudieron cargar tus preferencias de búsqueda.",
   "aiSearch.downloadsLoadError": "No se pudieron cargar las descargas de modelos.",
   "aiSearch.estimateError": "No se pudo cargar la estimación de recursos.",
-  "settings.accountHandoffFailed": "La clave se creó, pero no se pudo guardar la configuración de la extensión. Copia la clave antes de salir."
+  "settings.accountHandoffFailed": "La clave se creó, pero no se pudo guardar la configuración de la extensión. Copia la clave antes de salir.",
+  "settings.accessPrintersFailed": "No se pudieron cargar las impresoras.",
+  "settings.accessPrinterFailed": "No se pudieron cargar los permisos de {name}.",
+  "settings.accessPrinterLoading": "Cargando permisos de {name}…"
 }

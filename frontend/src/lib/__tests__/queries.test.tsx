@@ -309,11 +309,27 @@ describe("resource hooks", () => {
 });
 
 describe("usePrinters enabled gate", () => {
+  it("cancels the canonical printer choice read on disposal", async () => {
+    const response = Promise.withResolvers<Awaited<ReturnType<QueryApi["listPrinters"]>>>();
+    let signal: AbortSignal | undefined;
+    stubs.listPrinters.mockImplementationOnce((_group, options) => {
+      signal = options?.signal;
+      return response.promise;
+    });
+    const app = renderHook(() => usePrinters(), { wrapper: wrapper() });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+    response.resolve([printer]);
+  });
   it("fetches when enabled (default) with fresh:true", async () => {
     const { result } = renderHook(() => usePrinters(), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([printer]);
-    expect(stubs.listPrinters).toHaveBeenCalledWith(undefined, { fresh: true });
+    expect(stubs.listPrinters).toHaveBeenCalledWith(undefined, {
+      fresh: true,
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("does NOT fetch when enabled is false", async () => {

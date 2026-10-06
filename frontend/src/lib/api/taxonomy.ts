@@ -1,4 +1,12 @@
-import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
+import {
+  getJson,
+  sendAction,
+  sendForm,
+  sendJson,
+  requestApi,
+  jsonHeaders,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import {
   CollectionCreate,
   CollectionLookupRead,
@@ -84,8 +92,12 @@ export function uploadCollectionImage(id: number, file: File): Promise<{ url: st
   return sendForm<{ url: string }>(`/api/v1/collections/${id}/images`, form);
 }
 
-export function listCollectionPermissions(id: number): Promise<CollectionPermissionRead[]> {
+export function listCollectionPermissions(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<CollectionPermissionRead[]> {
   return getJson<CollectionPermissionRead[]>(`/api/v1/collections/${id}/permissions`, {
+    ...options,
     fresh: true,
   });
 }
@@ -95,15 +107,20 @@ export function updateCollectionPermission(
   userId: number,
   payload: CollectionPermissionUpdate,
 ): Promise<CollectionPermissionRead> {
-  return sendJson<CollectionPermissionRead>(
+  return requestApi<CollectionPermissionRead>(
     `/api/v1/collections/${collectionId}/permissions/${userId}`,
-    "PUT",
-    payload,
+    {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
+    },
   );
 }
 
 export function deleteCollectionPermission(collectionId: number, userId: number): Promise<void> {
-  return sendAction(`/api/v1/collections/${collectionId}/permissions/${userId}`, "DELETE");
+  return requestApi<void>(`/api/v1/collections/${collectionId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
 }
 
 export function listTags(options?: GetJsonOptions): Promise<TagRead[]> {

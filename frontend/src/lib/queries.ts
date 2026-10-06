@@ -232,7 +232,7 @@ export function usePrinters(options?: { enabled?: boolean; refetchInterval?: num
   const api = useQueryApi();
   return useQuery<PrinterRead[]>({
     queryKey: queryKeys.printers,
-    queryFn: () => api.listPrinters(undefined, { fresh: true }),
+    queryFn: ({ signal }) => api.listPrinters(undefined, { fresh: true, signal }),
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval,
   });

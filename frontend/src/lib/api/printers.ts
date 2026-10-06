@@ -83,8 +83,14 @@ export function deletePrinter(id: number): Promise<void> {
   return sendAction(`/api/v1/printers/${id}`, "DELETE");
 }
 
-export function listPrinterPermissions(id: number): Promise<PrinterPermissionRead[]> {
-  return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, { fresh: true });
+export function listPrinterPermissions(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<PrinterPermissionRead[]> {
+  return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 export function updatePrinterPermission(
@@ -92,15 +98,17 @@ export function updatePrinterPermission(
   userId: number,
   role: PrinterRole,
 ): Promise<PrinterPermissionRead> {
-  return sendJson<PrinterPermissionRead>(
-    `/api/v1/printers/${printerId}/permissions/${userId}`,
-    "PUT",
-    { role },
-  );
+  return requestApi<PrinterPermissionRead>(`/api/v1/printers/${printerId}/permissions/${userId}`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ role }),
+  });
 }
 
 export function deletePrinterPermission(printerId: number, userId: number): Promise<void> {
-  return sendAction(`/api/v1/printers/${printerId}/permissions/${userId}`, "DELETE");
+  return requestApi<void>(`/api/v1/printers/${printerId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
 }
 
 export function sendToPrinter(id: number, payload: SendToPrinter): Promise<PrintJobRead> {

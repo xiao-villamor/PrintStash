@@ -50,6 +50,7 @@ import {
 import { queryClient } from "@/lib/query-client";
 import { aPrinter } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
+import { aPrinterPermission } from "@/test-support/permissions";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -145,7 +146,7 @@ describe("live reads", () => {
     ["material state", () => getPrinterMaterialState(3), "/api/v1/printers/3/material-state"],
     ["permissions", () => listPrinterPermissions(3), "/api/v1/printers/3/permissions"],
   ])("reads %s without touching the cache", async (_name, call, url) => {
-    respondWith({});
+    respondWith(_name === "permissions" ? [] : {});
 
     await call();
 
@@ -169,9 +170,10 @@ describe("updatePrinterManualMaterialState", () => {
 
 describe("permissions", () => {
   it("PUTs a role for one user on one printer", async () => {
-    respondWith({ id: 1, role: "control" });
+    const permission = aPrinterPermission({ printer_id: 3, user_id: 7, role: "control" });
+    respondWith({ ...permission });
 
-    await updatePrinterPermission(3, 7, "control");
+    expect(await updatePrinterPermission(3, 7, "control")).toEqual(permission);
 
     expectRequest("/api/v1/printers/3/permissions/7", "PUT");
     expect(lastBody()).toEqual({ role: "control" });
@@ -393,5 +395,24 @@ describe("printer file transport isolation", () => {
     respondWith([]);
     await write();
     expect(queryClient.getQueryState(["printers", 99])?.isInvalidated).toBe(false);
+  });
+});
+
+describe("permission caller cancellation", () => {
+  it("cancels an active permission read", async () => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = listPrinterPermissions(3, { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

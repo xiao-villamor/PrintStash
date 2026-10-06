@@ -13,6 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { aCollectionPermission } from "@/test-support/permissions";
 import { invalidateApiCache } from "@/lib/api/request";
 import {
   createCollection,
@@ -219,9 +220,10 @@ describe("collection permissions", () => {
   });
 
   it("PUTs a role for one user", async () => {
-    respondWith({ id: 1, role: "edit" });
+    const permission = aCollectionPermission({ collection_id: 1, user_id: 7 });
+    respondWith({ ...permission });
 
-    await updateCollectionPermission(1, 7, { role: "edit" });
+    expect(await updateCollectionPermission(1, 7, { role: "edit" })).toEqual(permission);
 
     expectRequest("/api/v1/collections/1/permissions/7", "PUT");
     expect(lastBody()).toEqual({ role: "edit" });
@@ -259,5 +261,24 @@ describe("tags", () => {
     await deleteTag(1);
 
     expectRequest("/api/v1/tags/1", "DELETE");
+  });
+});
+
+describe("permission caller cancellation", () => {
+  it("cancels an active permission read", async () => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = listCollectionPermissions(3, { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

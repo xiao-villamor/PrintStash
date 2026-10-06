@@ -17,6 +17,13 @@ import {
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
 import { getSessionVersion } from "@/lib/session-transport";
+import {
+  collectionAccessOptions,
+  useCollectionAccessCommand,
+  usePrinterAccessCommand,
+  usePrinterAccess,
+  accessDenied,
+} from "@/lib/queries/settings-access";
 import { onAuthChange } from "@/lib/auth-store";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -99,8 +106,6 @@ import {
   adoptRemoteBackup,
   adoptS3Backup,
   deleteBackup,
-  deleteCollectionPermission,
-  deletePrinterPermission,
   downloadBackup,
   downloadModelExport,
   downloadLibraryArchive,
@@ -115,17 +120,12 @@ import {
   listUnownedS3Backups,
   listUnownedLocalBackups,
   listUnownedRemoteBackups,
-  listCollectionPermissions,
-  listPrinterPermissions,
-  listPrinters,
   listTrash,
   listStorageConnections,
   purgeModel,
   restoreBackup,
   restoreModel,
   restartPrintStash,
-  updateCollectionPermission,
-  updatePrinterPermission,
   updateVaultConfig,
   updateStorageConnection,
   uploadBackup,
@@ -140,7 +140,7 @@ import type {
 } from "@/lib/api";
 import type { StorageConnection } from "@/types";
 import { useAuth } from "@/lib/auth-context";
-import { useVaultStats } from "@/lib/queries";
+import { usePrinters, useVaultStats } from "@/lib/queries";
 import {
   DEFAULT_METADATA_PREFERENCES,
   METADATA_FIELDS,
@@ -180,8 +180,6 @@ import {
 import type {
   CollectionNodeRead,
   CollectionRole,
-  PrinterPermissionRead,
-  PrinterRead,
   PrinterRole,
   StorageCleanupStatus,
   StorageHealthRead,
@@ -507,26 +505,63 @@ export function SettingsPanel() {
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
   const [accessPickerOpen, setAccessPickerOpen] = useState(false);
-  const [accessUserId, setAccessUserId] = useState<number | "">("");
+  const [chosenAccessUserId, setAccessUserId] = useState<number | "">("");
+  const accessUserId = users.some((row) => row.id === chosenAccessUserId && !row.is_superuser)
+    ? chosenAccessUserId
+    : "";
   const [accessRole, setAccessRole] = useState<CollectionRole>("view");
-  const [accessBusy, setAccessBusy] = useState<"save" | string | null>(null);
-  const accessCollectionId = accessCollection?.id;
+  const collectionCommand = useCollectionAccessCommand();
+  const printerCommand = usePrinterAccessCommand();
+  const accessBusy = collectionCommand.isPending
+    ? collectionCommand.variables.kind === "grant"
+      ? "save"
+      : `${collectionCommand.variables.collectionId}:${collectionCommand.variables.targetUserId}`
+    : null;
+  const accessCollectionId = accessCollection?.id ?? null;
+  const accessActorId = user?.is_superuser ? user.id : null;
   const collectionPermissionsQuery = useQuery({
-    queryKey: ["collection-permissions", accessCollectionId],
-    queryFn: () => {
-      if (accessCollectionId === undefined)
-        throw new Error("Collection access requires a selection");
-      return listCollectionPermissions(accessCollectionId);
-    },
-    enabled: !!user?.is_superuser && accessCollectionId !== undefined,
+    ...collectionAccessOptions(accessActorId, accessCollectionId),
+    enabled: accessActorId !== null && accessCollectionId !== null && activeSection === "access",
   });
-  const collectionPermissions = collectionPermissionsQuery.data ?? [];
-  const [accessPrinters, setAccessPrinters] = useState<PrinterRead[]>([]);
-  const [printerPermissions, setPrinterPermissions] = useState<PrinterPermissionRead[]>([]);
-  const [printerAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
+  const collectionPermissions =
+    collectionPermissionsQuery.isError && accessDenied(collectionPermissionsQuery.error)
+      ? []
+      : (collectionPermissionsQuery.data ?? []);
+  const accessPrintersQuery = usePrinters({
+    enabled: accessActorId !== null && activeSection === "access",
+  });
+  const accessPrinters =
+    accessPrintersQuery.isError && accessDenied(accessPrintersQuery.error)
+      ? []
+      : (accessPrintersQuery.data ?? []);
+  const [chosenPrinterAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
+  const printerAccessUserId = users.some(
+    (row) => row.id === chosenPrinterAccessUserId && !row.is_superuser,
+  )
+    ? chosenPrinterAccessUserId
+    : "";
   const [accessPrinterId, setAccessPrinterId] = useState<number | "">("");
   const [printerAccessRole, setPrinterAccessRole] = useState<PrinterRole>("view");
-  const [printerAccessBusy, setPrinterAccessBusy] = useState<"load" | "save" | string | null>(null);
+  const printerAccess = usePrinterAccess(
+    accessActorId,
+    accessPrinters,
+    activeSection === "access" &&
+      !!printerAccessUserId &&
+      !usersQuery.isError &&
+      !usersQuery.isPending &&
+      !accessPrintersQuery.isError,
+  );
+  const printerPermissions = printerAccess.flatMap(({ query }) =>
+    query.isError && accessDenied(query.error) ? [] : (query.data ?? []),
+  );
+  const selectedPrinterRead = printerAccess.find(
+    ({ printer }) => printer.id === accessPrinterId,
+  )?.query;
+  const printerAccessBusy = printerCommand.isPending
+    ? printerCommand.variables.kind === "grant"
+      ? "save"
+      : `${printerCommand.variables.printerId}:${printerCommand.variables.targetUserId}`
+    : null;
   const [ownedReceipt, setOwnedReceipt] = useState<
     (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null }) | null
   >(null);
@@ -548,7 +583,16 @@ export function SettingsPanel() {
   }, [user?.id]);
   useEffect(() => {
     accountLive.current = true;
-    const release = onAuthChange(() => setOwnedReceipt(null));
+    const release = onAuthChange(() => {
+      setOwnedReceipt(null);
+      setAccessCollection(null);
+      setAccessPickerOpen(false);
+      setAccessUserId("");
+      setAccessRole("view");
+      setPrinterAccessUserId("");
+      setAccessPrinterId("");
+      setPrinterAccessRole("view");
+    });
     return () => {
       accountLive.current = false;
       release();
@@ -638,23 +682,6 @@ export function SettingsPanel() {
     router.replace(query ? `/settings?${query}` : "/settings", { scroll: false });
   }
 
-  const refreshPrinterAccess = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setPrinterAccessBusy("load");
-    try {
-      const printers = await listPrinters(undefined, { fresh: true });
-      const permissionGroups = await Promise.all(
-        printers.map((printer) => listPrinterPermissions(printer.id)),
-      );
-      setAccessPrinters(printers);
-      setPrinterPermissions(permissionGroups.flat());
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
-    }
-  }, [user]);
-
   useEffect(() => {
     if (!user?.is_superuser) return;
     getHealthDetails<HealthResponse>()
@@ -685,15 +712,6 @@ export function SettingsPanel() {
     // oxlint-disable-next-line react/set-state-in-effect -- the release itself arrives asynchronously
     void checkForUpdates(false);
   }, [checkForUpdates]);
-
-  useEffect(() => {
-    if (!user) return;
-    if (user.is_superuser) {
-      // Existing printer-access ownership migrates in its separate approved slice.
-      // oxlint-disable-next-line react/set-state-in-effect -- results are applied after the fetch resolves
-      refreshPrinterAccess().catch(() => {});
-    }
-  }, [user, refreshPrinterAccess]);
 
   const loadTrash = useCallback(async () => {
     if (!user) {
@@ -1246,66 +1264,115 @@ export function SettingsPanel() {
   }
 
   async function saveCollectionAccess() {
-    if (usersQuery.isError || usersQuery.isPending || !accessUserId || !accessCollection) return;
-    setAccessBusy("save");
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      collectionPermissionsQuery.isError ||
+      collectionPermissionsQuery.isPending ||
+      accessBusy !== null ||
+      !accessUserId ||
+      !accessCollection
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updateCollectionPermission(accessCollection.id, Number(accessUserId), {
+      await collectionCommand.mutateAsync({
+        kind: "grant",
+        actorId: user.id,
+        session,
+        collectionId: accessCollection.id,
+        targetUserId: accessUserId,
         role: accessRole,
       });
-      await collectionPermissionsQuery.refetch();
-      toast.success(uiText("Collection access saved."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
+      if (accountCurrent(session)) toast.success(uiText("Collection access saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function removeCollectionAccess(collectionId: number, userId: number) {
-    setAccessBusy(`${collectionId}:${userId}`);
-    try {
-      await deleteCollectionPermission(collectionId, userId);
-      await collectionPermissionsQuery.refetch();
-      toast.success(uiText("Collection access removed."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
-    }
-  }
-
-  async function savePrinterAccess() {
-    if (usersQuery.isError || usersQuery.isPending || !printerAccessUserId || !accessPrinterId)
+  async function removeCollectionAccess(collectionId: number, targetUserId: number) {
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      collectionPermissionsQuery.isError ||
+      collectionPermissionsQuery.isPending ||
+      accessBusy !== null
+    )
       return;
-    setPrinterAccessBusy("save");
+    const session = getSessionVersion();
     try {
-      await updatePrinterPermission(
-        Number(accessPrinterId),
-        Number(printerAccessUserId),
-        printerAccessRole,
-      );
-      await refreshPrinterAccess();
-      toast.success(uiText("Printer access saved."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
+      await collectionCommand.mutateAsync({
+        kind: "revoke",
+        actorId: user.id,
+        session,
+        collectionId,
+        targetUserId,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Collection access removed."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function removePrinterAccess(printerId: number, userId: number) {
-    setPrinterAccessBusy(`${printerId}:${userId}`);
+  async function savePrinterAccess() {
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      accessPrintersQuery.isError ||
+      selectedPrinterRead?.isError ||
+      !selectedPrinterRead?.isSuccess ||
+      printerAccessBusy !== null ||
+      !printerAccessUserId ||
+      !accessPrinterId
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await deletePrinterPermission(printerId, userId);
-      setPrinterPermissions((current) =>
-        current.filter((row) => row.printer_id !== printerId || row.user_id !== userId),
-      );
-      toast.success(uiText("Printer access removed."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
+      await printerCommand.mutateAsync({
+        kind: "grant",
+        actorId: user.id,
+        session,
+        printerId: accessPrinterId,
+        targetUserId: printerAccessUserId,
+        role: printerAccessRole,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Printer access saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
+  }
+  async function removePrinterAccess(printerId: number, targetUserId: number) {
+    const read = printerAccess.find(({ printer }) => printer.id === printerId)?.query;
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      accessPrintersQuery.isError ||
+      read?.isError ||
+      !read?.isSuccess ||
+      printerAccessBusy !== null
+    )
+      return;
+    const session = getSessionVersion();
+    try {
+      await printerCommand.mutateAsync({
+        kind: "revoke",
+        actorId: user.id,
+        session,
+        printerId,
+        targetUserId,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Printer access removed."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
+  async function refreshPrinterAccess() {
+    const session = getSessionVersion();
+    await accessPrintersQuery.refetch();
+    if (!accountCurrent(session)) return;
+    await Promise.all(printerAccess.map(({ query }) => query.refetch()));
   }
 
   async function createUser() {
@@ -2411,7 +2478,9 @@ export function SettingsPanel() {
                             usersQuery.isPending ||
                             !accessUserId ||
                             !accessCollection ||
-                            accessBusy === "save"
+                            accessBusy !== null ||
+                            collectionPermissionsQuery.isPending ||
+                            collectionPermissionsQuery.isError
                           }
                           className={`${BTN_PRIMARY} self-end`}
                         >
@@ -2486,7 +2555,13 @@ export function SettingsPanel() {
                                   onClick={() =>
                                     removeCollectionAccess(row.collection_id, row.user_id)
                                   }
-                                  disabled={accessBusy === busyKey}
+                                  disabled={
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
+                                    accessBusy !== null ||
+                                    collectionPermissionsQuery.isError ||
+                                    collectionPermissionsQuery.isPending
+                                  }
                                   className="rounded p-1 text-red-600 hover:bg-red-500/10 disabled:opacity-50"
                                   title={uiText("Remove collection access")}
                                 >
@@ -2515,13 +2590,16 @@ export function SettingsPanel() {
                     action={
                       <button
                         type="button"
-                        onClick={refreshPrinterAccess}
-                        disabled={printerAccessBusy === "load"}
+                        onClick={() => void refreshPrinterAccess()}
+                        disabled={
+                          accessPrintersQuery.isFetching ||
+                          printerAccess.some(({ query }) => query.isFetching)
+                        }
                         className={BTN_ICON}
                         title={uiText("Refresh printer access")}
                       >
                         <RefreshCw
-                          className={`h-4 w-4 ${printerAccessBusy === "load" ? "animate-spin" : ""}`}
+                          className={`h-4 w-4 ${accessPrintersQuery.isFetching || printerAccess.some(({ query }) => query.isFetching) ? "animate-spin" : ""}`}
                         />
                       </button>
                     }
@@ -2541,11 +2619,7 @@ export function SettingsPanel() {
                               setAccessPrinterId("");
                             }}
                             className={INPUT}
-                            disabled={
-                              printerAccessBusy === "load" ||
-                              usersQuery.isError ||
-                              usersQuery.isPending
-                            }
+                            disabled={usersQuery.isError || usersQuery.isPending}
                           >
                             <option value="">{uiText("Choose printer user")}</option>
                             {nonSuperUsers.map((row) => (
@@ -2578,7 +2652,8 @@ export function SettingsPanel() {
                               usersQuery.isError ||
                               usersQuery.isPending ||
                               !printerAccessUserId ||
-                              printerAccessBusy === "load"
+                              accessPrintersQuery.isPending ||
+                              accessPrintersQuery.isError
                             }
                           >
                             <option value="">{uiText("Select printer")}</option>
@@ -2606,7 +2681,10 @@ export function SettingsPanel() {
                               usersQuery.isPending ||
                               !printerAccessUserId ||
                               !accessPrinterId ||
-                              printerAccessBusy === "load"
+                              !selectedPrinterRead?.isSuccess ||
+                              selectedPrinterRead.isError ||
+                              accessPrintersQuery.isPending ||
+                              accessPrintersQuery.isError
                             }
                           >
                             <option value="view">{uiText("View")}</option>
@@ -2623,7 +2701,10 @@ export function SettingsPanel() {
                             usersQuery.isPending ||
                             !printerAccessUserId ||
                             !accessPrinterId ||
-                            printerAccessBusy === "save"
+                            printerAccessBusy !== null ||
+                            accessPrintersQuery.isError ||
+                            !selectedPrinterRead?.isSuccess ||
+                            selectedPrinterRead.isError
                           }
                           className={`${BTN_PRIMARY} self-end`}
                         >
@@ -2635,6 +2716,43 @@ export function SettingsPanel() {
                           {uiText("Save")}
                         </button>
                       </div>
+
+                      {accessPrintersQuery.isError && (
+                        <div role="alert" className="flex items-center gap-2 text-sm">
+                          <p>{t("settings.accessPrintersFailed")}</p>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => void accessPrintersQuery.refetch()}
+                          >
+                            {t("Retry")}
+                          </Button>
+                        </div>
+                      )}
+                      {accessPrintersQuery.isPending && <p role="status">{t("Loading…")}</p>}
+                      {printerAccessUserId &&
+                        printerAccess.map(({ printer, query }) =>
+                          query.isError ? (
+                            <div
+                              key={printer.id}
+                              role="alert"
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <p>{t("settings.accessPrinterFailed", { name: printer.name })}</p>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => void query.refetch()}
+                              >
+                                {t("Retry")}
+                              </Button>
+                            </div>
+                          ) : query.isPending ? (
+                            <p key={printer.id} role="status">
+                              {t("settings.accessPrinterLoading", { name: printer.name })}
+                            </p>
+                          ) : null,
+                        )}
 
                       <p className="text-xs text-muted-foreground">
                         {uiText(
@@ -2652,7 +2770,11 @@ export function SettingsPanel() {
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review printer grants.")}
                           </p>
-                        ) : selectedPrinterPermissions.length === 0 ? (
+                        ) : accessPrintersQuery.isError ||
+                          accessPrintersQuery.isPending ||
+                          (printerAccess.some(({ query }) => query.isError || query.isPending) &&
+                            selectedPrinterPermissions.length ===
+                              0) ? null : selectedPrinterPermissions.length === 0 ? (
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {activePrinterAccessUser?.username ?? uiText("User")}
                             {uiText(" has no direct printer access.")}
@@ -2683,7 +2805,15 @@ export function SettingsPanel() {
                                 <button
                                   type="button"
                                   onClick={() => removePrinterAccess(row.printer_id, row.user_id)}
-                                  disabled={printerAccessBusy === busyKey}
+                                  disabled={
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
+                                    printerAccessBusy !== null ||
+                                    accessPrintersQuery.isError ||
+                                    printerAccess.find(
+                                      ({ printer }) => printer.id === row.printer_id,
+                                    )?.query.isError
+                                  }
                                   className="rounded p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
                                   title={uiText("Remove printer access")}
                                 >

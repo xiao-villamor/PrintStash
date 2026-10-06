@@ -25,6 +25,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "@/components/settings-panel";
+import { aCollectionPermission, aPrinterPermission } from "@/test-support/permissions";
 import { aUser, aApiKey } from "@/test-support/account";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { queryKeys } from "@/lib/query-client";
@@ -44,7 +45,7 @@ import {
   type RenderAppOptions,
   type RouteTable,
 } from "@/test-support/render";
-import type { CollectionPermissionRead, JobStatus, PrinterPermissionRead } from "@/types";
+import type { JobStatus } from "@/types";
 
 const HEALTH = {
   status: "ok",
@@ -97,32 +98,6 @@ const ISSUED_KEY = aApiKey();
 
 /** The mint response, which carries the secret a listing never returns again. */
 const MINTED_KEY = { ...ISSUED_KEY, api_key: "ps_test_this-is-not-a-real-key" };
-
-function aCollectionPermission(
-  over: Partial<CollectionPermissionRead> = {},
-): CollectionPermissionRead {
-  return {
-    collection_id: 5,
-    user_id: 2,
-    username: "maker",
-    role: "edit",
-    inherited: false,
-    ...over,
-  };
-}
-
-function aPrinterPermission(over: Partial<PrinterPermissionRead> = {}): PrinterPermissionRead {
-  return {
-    id: 11,
-    printer_id: 4,
-    user_id: 2,
-    username: "maker",
-    role: "print",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
 
 function renderSettings(options: RenderAppOptions = {}) {
   const { seed = [], routes = {}, ...rest } = options;
@@ -2467,6 +2442,252 @@ describe("Settings account draft lifetime", () => {
     expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
     expect(selects[0]).toBeDisabled();
     expect(screen.queryByText("maker", { selector: "p" })).toBeNull();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+});
+
+describe("Settings resource access recovery", () => {
+  it("closes a grantee selection after the User loses its selectable role", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+      },
+    });
+    const collection = await screen.findByRole("group", { name: "Collection access" });
+    const printer = screen.getByRole("group", { name: "Printer access" });
+    await within(collection).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(collection).getByLabelText("User"), "2");
+    await userEvent.click(within(collection).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await within(collection).findByTitle("Remove collection access");
+    await userEvent.selectOptions(within(printer).getByLabelText("User"), "2");
+    await within(printer).findByTitle("Remove printer access");
+    app.route({ "GET /api/v1/admin/users": json([aUser({ is_superuser: true })]) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    await waitFor(() => expect(within(collection).getByLabelText("User")).toHaveValue(""));
+    expect(within(printer).getByLabelText("User")).toHaveValue("");
+    expect(within(collection).queryByTitle("Remove collection access")).toBeNull();
+    expect(within(printer).queryByTitle("Remove printer access")).toBeNull();
+    expect(within(collection).getByRole("button", { name: "Grant" })).toBeDisabled();
+  });
+  it("hides denied cached printer grants", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await within(card).findByTitle("Remove printer access");
+    await userEvent.selectOptions(within(card).getByLabelText("Printer"), "4");
+    app.route({ "GET /api/v1/printers/4/permissions": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["printer-permissions"] });
+    });
+    expect(await within(card).findByRole("alert")).toHaveTextContent("Voron");
+    expect(within(card).queryByTitle("Remove printer access")).toBeNull();
+    expect(within(card).queryByText(/has no direct printer access/)).toBeNull();
+    expect(within(card).getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+  it("discards an obsolete collection permission read after selection", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        ...collectionTreeRoutes([
+          aCollection({ id: 5, name: "Parts" }),
+          aCollection({ id: 6, name: "Tools" }),
+        ]),
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": (_url, init) => {
+          signal = init?.signal;
+          return held.promise;
+        },
+        "GET /api/v1/collections/6/permissions": json([
+          aCollectionPermission({ collection_id: 6, role: "admin" }),
+        ]),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await waitFor(() => expect(signal).toBeDefined());
+    await userEvent.click(within(card).getByRole("button", { name: "Parts" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Tools/ }));
+    expect(await within(card).findByTitle("Remove collection access")).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      held.resolve(json([aCollectionPermission()]));
+    });
+    expect(within(card).getByText("admin", { selector: "span" })).toBeVisible();
+    expect(within(card).queryByText("edit", { selector: "span" })).toBeNull();
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/permissions")),
+    ).toHaveLength(2);
+  });
+  it("preserves a newer permission draft after an earlier command completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser(), aUser({ id: 3, username: "next-user" })]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "PUT /api/v1/collections/5/permissions/2": () => pending.promise,
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "edit");
+    await userEvent.click(within(card).getByRole("button", { name: "Grant" }));
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "3");
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "admin");
+    await act(async () => {
+      pending.resolve(json(aCollectionPermission()));
+    });
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Grant" })).toBeEnabled());
+    expect(within(card).getByLabelText("User")).toHaveValue("3");
+    expect(within(card).getByLabelText("Role")).toHaveValue("admin");
+    expect(app.requestsWithMethod("PUT")[0].url).toBe("/api/v1/collections/5/permissions/2");
+    expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toEqual({ role: "edit" });
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/permissions")),
+    ).toHaveLength(1);
+  });
+  it("retains failed permission intent without retrying its command", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "PUT /api/v1/collections/5/permissions/2": json(
+          { detail: "Permission command unavailable" },
+          503,
+        ),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "edit");
+    await userEvent.click(within(card).getByRole("button", { name: "Grant" }));
+    expect(
+      await screen.findByText(
+        "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+      ),
+    ).toBeVisible();
+    expect(within(card).getByLabelText("User")).toHaveValue("2");
+    expect(within(card).getByLabelText("Role")).toHaveValue("edit");
+    expect(within(card).getByRole("button", { name: "Parts" })).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("clears permission selections on private retirement", async () => {
+    renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([]),
+      },
+    });
+    const collection = await screen.findByRole("group", { name: "Collection access" });
+    const printer = screen.getByRole("group", { name: "Printer access" });
+    await within(collection).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(collection).getByLabelText("User"), "2");
+    await userEvent.click(within(collection).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(printer).getByLabelText("User"), "2");
+    await userEvent.selectOptions(within(printer).getByLabelText("Printer"), "4");
+    await act(async () => {
+      clearLogin();
+    });
+    expect(within(collection).getByLabelText("User")).toHaveValue("");
+    expect(within(collection).getByRole("button", { name: "Select collection" })).toBeVisible();
+    expect(within(printer).getByLabelText("User")).toHaveValue("");
+    expect(within(printer).getByLabelText("Printer")).toHaveValue("");
+  });
+  it("distinguishes failed printer choices from an empty fleet", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    const alert = await within(card).findByRole("alert");
+    expect(alert).toHaveTextContent("Printers could not be loaded.");
+    expect(within(card).queryByText(/has no direct printer access/)).toBeNull();
+    app.route({
+      "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+      "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+    });
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+  });
+  it("preserves healthy printer grants when another source fails", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json([
+          aPrinter({ id: 4, name: "Voron" }),
+          aPrinter({ id: 5, name: "Prusa" }),
+        ]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+        "GET /api/v1/printers/5/permissions": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+    const alert = within(card).getByRole("alert");
+    expect(alert).toHaveTextContent("Prusa");
+    app.route({
+      "GET /api/v1/printers/5/permissions": json([aPrinterPermission({ id: 12, printer_id: 5 })]),
+    });
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(within(card).getAllByTitle("Remove printer access")).toHaveLength(2),
+    );
+  });
+  it("blocks collection writes until its permission read succeeds", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await within(card).findByRole("alert");
+    expect(within(card).getByRole("button", { name: "Grant" })).toBeDisabled();
     expect(app.requestsWithMethod("PUT")).toHaveLength(0);
   });
 });

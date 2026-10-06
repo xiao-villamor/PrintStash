@@ -4205,5 +4205,8 @@
   "aiSearch.preferencesLoadError": "Your search preferences could not be loaded.",
   "aiSearch.downloadsLoadError": "Model downloads could not be loaded.",
   "aiSearch.estimateError": "The resource estimate could not be loaded.",
-  "settings.accountHandoffFailed": "The key was created, but extension setup could not be stored. Copy the key before leaving."
+  "settings.accountHandoffFailed": "The key was created, but extension setup could not be stored. Copy the key before leaving.",
+  "settings.accessPrintersFailed": "Printers could not be loaded.",
+  "settings.accessPrinterFailed": "Access for {name} could not be loaded.",
+  "settings.accessPrinterLoading": "Loading access for {name}…"
 }
