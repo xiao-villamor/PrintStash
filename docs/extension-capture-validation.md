@@ -28,7 +28,7 @@ The capture operation freezes normalized vault, configuration and authorization 
 
 ## Known gaps and scope limits
 
-- Connection establishment itself still needs its separate lifetime audit: two overlapping pairing/verification attempts can race independently of capture retirement. This change does not claim that handshake ordering is protected.
+- Connection establishment is qualified separately in [extension connection validation](extension-connection-validation.md), including Cancel, failed updates, credential publication, and permission cleanup.
 - A lost slot-creation acknowledgement provides no owned item id. Cleanup does not guess one; existing Pending Imports dismissal/expiry remains the recovery path.
 - Loaded-browser evidence uses Chrome with native extension APIs and controlled loopback HTTP. Chrome/Firefox/Edge builds and shared boundary tests passed; Firefox/Edge loaded browser runtime and live provider capture were not qualified in this slice.
 - Installed popup-tab qualification does not prove native toolbar popup presentation. The product requires the popup to remain open during transfer; no persistent background capture workflow was introduced.

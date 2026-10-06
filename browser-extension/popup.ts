@@ -147,6 +147,19 @@ let connectedConfig: Config | null = null;
 let connectedProfile: Profile | null = null;
 let accessToken: string | null = null;
 let editingConnection = false;
+// Only one connection transition owns permission cleanup or storage publication.
+// Cancel retires verification; the lock remains until its cleanup finishes.
+type ConnectionAttempt = { controller: AbortController; phase: "verifying" | "publishing" };
+let connectionAttempt: ConnectionAttempt | null = null;
+let connectionLocked = false;
+
+function lockConnection(locked: boolean) {
+  connectionLocked = locked;
+  setConnectionFormBusy(locked);
+  editButton.disabled = locked;
+  disconnectButton.disabled = locked;
+  cancelButton.disabled = locked;
+}
 let importBusy = false;
 const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
@@ -601,36 +614,44 @@ async function establishConnection(
   config: Config,
   { requestPermission, persist }: { requestPermission: boolean; persist: boolean },
 ) {
+  if (connectionLocked) return false;
+  const attempt: ConnectionAttempt = { controller: new AbortController(), phase: "verifying" };
+  connectionAttempt = attempt;
+  const signal = attempt.controller.signal;
+  const fetchImpl: typeof fetch = async (input, options) => {
+    signal.throwIfAborted();
+    const result = await fetch(input, { ...options, signal });
+    signal.throwIfAborted();
+    return result;
+  };
   const previous = connectedConfig
     ? { config: connectedConfig, profile: connectedProfile, token: accessToken }
     : null;
   const preservePrevious = Boolean(previous && editingConnection);
   retireCapture();
   renderConnection("checking", { config });
-  setConnectionFormBusy(true);
+  lockConnection(true);
+  cancelButton.disabled = !preservePrevious;
   showStatus();
   try {
     await ensureVaultPermission(config, requestPermission);
+    signal.throwIfAborted();
     let verified;
     let normalized;
     if (config.pairingCode) {
       verified = await claimBrowserPairing({
+        fetchImpl,
         vault: config.vault,
         code: config.pairingCode,
         name: "Browser extension",
       });
       normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
-      if (persist) {
-        await browser.storage.set(normalized);
-        await browser.storage.remove(["username", "apiKey"]);
-      }
     } else if (config.deviceCredential) {
-      verified = await verifyBrowserDevice(config);
+      verified = await verifyBrowserDevice({ ...config, fetchImpl });
       normalized = { vault: verified.base, deviceCredential: config.deviceCredential };
-      if (persist) await browser.storage.set(normalized);
     } else {
       verified = await verifyVaultConnection({
-        fetchImpl: fetch,
+        fetchImpl,
         vault: config.vault,
         username: config.username || "",
         apiKey: config.apiKey || "",
@@ -640,7 +661,23 @@ async function establishConnection(
         username: config.username || "",
         apiKey: config.apiKey || "",
       };
-      if (persist) await browser.storage.set(normalized);
+    }
+
+    // Parsing the response body is asynchronous too; retirement is checked
+    // again at the publication boundary, after every verification response.
+    signal.throwIfAborted();
+    attempt.phase = "publishing";
+    cancelButton.disabled = true;
+    if (persist) {
+      const credentials: Config = normalized;
+      // One set publishes the vault and its credential kind together. Nulls
+      // erase inactive secrets; initialization only accepts string credentials.
+      await browser.storage.set({
+        vault: credentials.vault,
+        username: credentials.username ?? null,
+        apiKey: credentials.apiKey ?? null,
+        deviceCredential: credentials.deviceCredential ?? null,
+      });
     }
 
     if (previous && permissionOrigin(previous.config) !== permissionOrigin(normalized)) {
@@ -660,6 +697,7 @@ async function establishConnection(
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
+    return true;
   } catch (error) {
     let failedOrigin = null;
     let previousOrigin = null;
@@ -672,6 +710,7 @@ async function establishConnection(
     if (requestPermission && failedOrigin && failedOrigin !== previousOrigin) {
       await browser.permissions.remove({ origins: [failedOrigin] }).catch(() => false);
     }
+    if (signal.aborted) return false;
     if (preservePrevious && previous) {
       connectedConfig = previous.config;
       connectedProfile = previous.profile;
@@ -686,7 +725,8 @@ async function establishConnection(
     connectionPanel.hidden = false;
     throw error;
   } finally {
-    setConnectionFormBusy(false);
+    connectionAttempt = null;
+    lockConnection(false);
     connectButton.textContent = editingConnection ? "Update connection" : "Connect";
   }
 }
@@ -1251,10 +1291,12 @@ async function takePreparedSetup(page: Page) {
 
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (connectionLocked) return;
   try {
     const config = configFromForm();
-    await establishConnection(config, { requestPermission: true, persist: true });
-    showStatus("Connection verified. This browser is ready to import.", "success");
+    if (await establishConnection(config, { requestPermission: true, persist: true })) {
+      showStatus("Connection verified. This browser is ready to import.", "success");
+    }
   } catch (error) {
     if (connectionState === "connected") {
       showStatus(`Connection was not updated. ${messageFrom(error)}`, "error");
@@ -1266,6 +1308,7 @@ connectionForm.addEventListener("submit", async (event) => {
 });
 
 editButton.addEventListener("click", () => {
+  if (connectionLocked) return;
   editingConnection = true;
   connectionPanel.hidden = false;
   editButton.hidden = true;
@@ -1278,6 +1321,8 @@ editButton.addEventListener("click", () => {
 });
 
 cancelButton.addEventListener("click", () => {
+  if (connectionLocked && connectionAttempt?.phase !== "verifying") return;
+  connectionAttempt?.controller.abort();
   editingConnection = false;
   fillConnectionForm(connectedConfig);
   connectionPanel.hidden = Boolean(connectedConfig);
@@ -1292,6 +1337,8 @@ cancelButton.addEventListener("click", () => {
 });
 
 disconnectButton.addEventListener("click", async () => {
+  if (connectionLocked) return;
+  lockConnection(true);
   const previous = connectedConfig;
   retireCapture();
   const loopbackPermission = previous ? isLocalVault(previous.vault) : false;
@@ -1299,6 +1346,7 @@ disconnectButton.addEventListener("click", async () => {
     await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
   } catch (error) {
     showStatus(`Couldn't remove the stored browser credential. ${messageFrom(error)}`, "error");
+    lockConnection(false);
     return;
   }
 
@@ -1325,6 +1373,7 @@ disconnectButton.addEventListener("click", async () => {
   disconnectButton.hidden = true;
   connectButton.textContent = "Connect";
   renderConnection("disconnected");
+  lockConnection(false);
   showStatus(
     permissionStillGranted
       ? "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings."
@@ -1671,6 +1720,7 @@ inboxButton.addEventListener("click", () => {
 });
 
 async function initialize() {
+  lockConnection(true);
   const [stored, tabs] = await Promise.all([
     browser.storage.get(["vault", "username", "apiKey", "deviceCredential"]),
     browser.tabs.query({ active: true, currentWindow: true }),
@@ -1687,6 +1737,7 @@ async function initialize() {
     connectButton.textContent = "Finish setup";
     const origins = [permissionOrigin(prepared)];
     const alreadyAllowed = await browser.permissions.contains({ origins }).catch(() => false);
+    lockConnection(false);
     if (alreadyAllowed) {
       try {
         await establishConnection(prepared, { requestPermission: false, persist: true });
@@ -1708,6 +1759,7 @@ async function initialize() {
       : {}),
   };
   fillConnectionForm(storedConfig);
+  lockConnection(false);
 
   if (
     !storedConfig.vault ||
@@ -1725,6 +1777,7 @@ async function initialize() {
 }
 
 initialize().catch((error) => {
+  lockConnection(false);
   connectionPanel.hidden = false;
   renderConnection("error", { detail: messageFrom(error) });
   showStatus(messageFrom(error), "error");

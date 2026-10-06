@@ -59,7 +59,12 @@ declare const browser: LoadedExtensionBrowser;
 declare const chrome: {
   permissions?: { contains?: unknown };
   scripting?: { executeScript?: unknown };
-  storage: { local: { set(values: Record<string, string>): Promise<void> } };
+  storage: {
+    local: {
+      set(values: Record<string, string>): Promise<void>;
+      get(keys: string[]): Promise<Record<string, string | null>>;
+    };
+  };
   tabs: { create(options: { url: string; active: boolean }): Promise<{ id?: number }> };
 };
 
@@ -123,6 +128,61 @@ describe("loaded extension", () => {
   });
 
   if (process.env.PRINTSTASH_EXTENSION_BROWSER_NAME !== "firefox") {
+    it("cancels native connection verification before publication", async () => {
+      let heldResponse: ServerResponse | undefined;
+      let requestClosed = false;
+      const server = createServer((request, response) => {
+        if (request.url === "/second/api/v1/browser-pairings/claim") {
+          heldResponse = response;
+          response.on("close", () => {
+            requestClosed = true;
+          });
+          request.resume();
+          return;
+        }
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ status: "ok", name: "PrintStash" }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      assert.ok(address && typeof address !== "string");
+      const vault = `http://127.0.0.1:${address.port}`;
+      try {
+        const popupUrl = await browser.execute(async (base) => {
+          await chrome.storage.local.set({ vault: base, deviceCredential: "device-a" });
+          return new URL("popup.html", location.href).href;
+        }, vault);
+        await browser.url(popupUrl);
+        await browser.waitUntil(
+          async () => (await browser.$("#connection-title").getText()) === "Connected",
+        );
+        await browser.$("#edit-connection").click();
+        await browser.$("#vault").setValue(`${vault}/second`);
+        await browser.$("#pairing-code").setValue("test-cancelled-code");
+        await browser.$("#connect").click();
+        await browser.waitUntil(async () => heldResponse !== undefined);
+        await browser.$("#cancel-edit").click();
+        await browser.waitUntil(async () => requestClosed);
+        heldResponse?.end(JSON.stringify({ credential: "device-b" }));
+        const state = await browser.execute(async () => ({
+          stored: await chrome.storage.local.get(["vault", "deviceCredential"]),
+          title: document.querySelector("#connection-title")?.textContent,
+          statusHidden: document.querySelector<HTMLElement>("#status")?.hidden,
+          formHidden: document.querySelector<HTMLElement>("#connection-panel")?.hidden,
+        }));
+        assert.deepEqual(state.stored, { vault, deviceCredential: "device-a" });
+        assert.equal(state.title, "Connected");
+        assert.equal(state.statusHidden, true);
+        assert.equal(state.formHidden, true);
+      } finally {
+        heldResponse?.destroy();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+
     it("retires an active native capture when the connection changes", async () => {
       const writes: { path: string; authorization: string | undefined }[] = [];
       let heldResponse: ServerResponse | undefined;
