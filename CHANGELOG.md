@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verify durable ingestion receipt writer authority, result pagination and canonical
+  File confirmation through real SQLite contracts.
+
 - Verify batch session lifecycle, frozen snapshots and result context against
   real durable receipts, including refusal of incomplete artifact commit results.
 

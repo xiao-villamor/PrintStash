@@ -10,9 +10,9 @@ The batch import requirements in `docs/architecture/background-work.md` require 
 | 4 | refuses_invalid_result_page | Error | Bad limit/cursor | ValueError; receipt intact | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_refuses_invalid_result_page` |
 | 5 | refuses_confirmation_for_unknown_receipt | Error | Absent receipt ID; real File | LookupError; receipt pending | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_refuses_confirmation_for_unknown_receipt` |
 | 6 | refuses_confirmation_for_unpersisted_file | Error | Factory detached File | RuntimeError; receipt pending | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_refuses_confirmation_for_unpersisted_file` |
-| 7 | preserves_reconciled_success | Edge | Actual File/confirmed receipt | Same exact IDs/state after repeated reconciliation | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_preserves_reconciled_success` |
+| 7 | preserves_reconciled_success | Happy | Actual File/confirmed receipt | Same exact IDs/state after repeated reconciliation | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_preserves_reconciled_success` |
 | 8 | excludes_claimed_legacy_commit | Edge | Claimed/unclaimed real legacy Files | Only unclaimed candidate returned | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_excludes_claimed_legacy_commit` |
-| 9 | records_canonical_confirmation | Edge | Imported/deduplicated flag | Committed receipt exact IDs/state | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_records_canonical_confirmation` |
+| 9 | records_canonical_confirmation | Happy | Imported/deduplicated flag | Committed receipt exact IDs/state | Integration | ✅ `integration/modules/ingestion/test_batch_store.py::TestStoreBoundaries::test_records_canonical_confirmation` |
 
 ## Validation and limits
 
