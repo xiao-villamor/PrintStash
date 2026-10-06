@@ -215,21 +215,12 @@ export function invalidateQueriesForPath(path: string, method: ApiMethod = "POST
     bust(queryKeys.fleetSummary);
     bust(queryKeys.printers);
   }
-  if (has("filament-profiles")) {
-    bust(queryKeys.filamentProfiles);
-  }
-  if (has("printer-profiles")) {
-    bust(queryKeys.printerProfiles);
-  }
+  // Profile catalogs are published and revalidated by their feature command owner.
   if (segments.includes("admin") && segments.includes("users")) {
     bust(queryKeys.adminUsers);
   }
   if (has("spoolman")) {
     bust(queryKeys.spoolmanStatus);
     bust(queryKeys.spools);
-    // A filament sync rewrites linked presets.
-    if (segments.includes("sync-filaments")) {
-      bust(queryKeys.filamentProfiles);
-    }
   }
 }

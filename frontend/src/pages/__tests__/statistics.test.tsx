@@ -17,7 +17,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +81,21 @@ afterEach(() => {
 });
 
 describe("StatisticsPage", () => {
+  describe("read recovery", () => {
+    it("retries failed statistics for the selected period", async () => {
+      const user = userEvent.setup();
+      const app = renderStatistics({
+        routes: { "GET /api/v1/models/stats/prints": json({ detail: "offline" }, 500) },
+      });
+      await screen.findByText("Failed to load statistics.");
+      app.route({ "GET /api/v1/models/stats/prints": json(statistics()) });
+
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText("34.50", { exact: false })).toBeInTheDocument();
+    });
+  });
+
   describe("what it reports", () => {
     it("names the page", async () => {
       renderStatistics();
@@ -134,6 +149,38 @@ describe("StatisticsPage", () => {
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("period=7d"))).toBe(true),
       );
+    });
+
+    it("ignores an obsolete period read", async () => {
+      let respond!: (response: Response) => void;
+      let signal: AbortSignal | null | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+      const user = userEvent.setup();
+      const app = renderStatistics({
+        routes: {
+          "GET /api/v1/models/stats/prints?period=30d": (_url, init) => {
+            signal = init?.signal;
+            return pending;
+          },
+          "GET /api/v1/models/stats/prints?period=7d": json(
+            statistics({ period: "7d", total_cost: 77 }),
+          ),
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+
+      await user.click(screen.getByRole("button", { name: "7 days" }));
+      expect(await screen.findByText("77.00", { exact: false })).toBeInTheDocument();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        respond(json(statistics({ total_cost: 1 })));
+        await pending;
+      });
+
+      expect(screen.getByText("77.00", { exact: false })).toBeInTheDocument();
+      expect(app.client.getQueryData(queryKeys.printStats("30d"))).toBeUndefined();
     });
 
     it("asks for everything when the user picks all time", async () => {

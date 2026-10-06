@@ -4177,5 +4177,13 @@
   "documents.latestVersion": "Latest saved document",
   "documents.reviewLatest": "Use latest version as edit base",
   "documents.accessChanged": "Document access changed. Your draft is kept here for copying.",
-  "documents.saveConfirmed": "Save confirmed from the current document."
+  "documents.saveConfirmed": "Save confirmed from the current document.",
+  "library.editConflict": "This item changed elsewhere. Your draft has been kept. Review the latest version before saving again.",
+  "library.reviewLatest": "Review latest version",
+  "library.latestVersion": "Latest saved version",
+  "library.keepDraft": "Keep my draft",
+  "library.useLatest": "Use latest version",
+  "library.retryDraft": "Save my draft against this version",
+  "library.saveUnconfirmed": "The save was not confirmed. Review the latest version before retrying.",
+  "library.accessChanged": "Your access changed. Saving is disabled; copy any draft you need before leaving."
 }

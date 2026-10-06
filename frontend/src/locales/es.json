@@ -4177,5 +4177,13 @@
   "documents.latestVersion": "Último documento guardado",
   "documents.reviewLatest": "Usar la última versión como base de edición",
   "documents.accessChanged": "El acceso al documento cambió. Tu borrador se conserva aquí para que puedas copiarlo.",
-  "documents.saveConfirmed": "Guardado confirmado al consultar el documento actual."
+  "documents.saveConfirmed": "Guardado confirmado al consultar el documento actual.",
+  "library.editConflict": "Este elemento se ha modificado en otro lugar. Se ha conservado tu borrador. Revisa la última versión antes de volver a guardar.",
+  "library.reviewLatest": "Revisar la última versión",
+  "library.latestVersion": "Última versión guardada",
+  "library.keepDraft": "Conservar mi borrador",
+  "library.useLatest": "Usar la última versión",
+  "library.retryDraft": "Guardar mi borrador sobre esta versión",
+  "library.saveUnconfirmed": "No se ha confirmado el guardado. Revisa la última versión antes de volver a intentarlo.",
+  "library.accessChanged": "Tu acceso ha cambiado. El guardado está desactivado; copia el borrador que necesites antes de salir."
 }

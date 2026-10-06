@@ -3,19 +3,17 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
-import { FilamentProfileRead, PrinterProfileRead } from "@/types";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  createFilamentProfile,
-  createPrinterProfile,
-  deleteFilamentProfile,
-  deletePrinterProfile,
-  listFilamentProfiles,
-  listPrinterProfiles,
-  syncSpoolmanFilaments,
-  updateFilamentProfile,
-  updatePrinterProfile,
-} from "@/lib/api";
+  filamentProfilesOptions,
+  printerProfilesOptions,
+  useProfileCommands,
+} from "@/lib/queries/profiles";
+import { getSessionVersion } from "@/lib/session-transport";
+import { userMessage } from "@/lib/errors";
+import { FilamentProfileRead, PrinterProfileRead } from "@/types";
+
 import { useSpoolmanStatus } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -50,12 +48,16 @@ type FilamentEdit = {
   notes: string;
 };
 
+type FilamentDraft = FilamentEdit & { base: FilamentProfileRead };
+
 type PrinterEdit = {
   name: string;
   model: string;
   nozzle: string;
   notes: string;
 };
+
+type PrinterDraft = PrinterEdit & { base: PrinterProfileRead };
 
 type DeletePresetTarget = {
   kind: "filament" | "printer";
@@ -171,11 +173,15 @@ export function FilamentProfilesCard() {
   const auth = useRequireAuth();
   const { locale } = useI18n();
   const [activeTab, setActiveTab] = useState<"filaments" | "printers">("filaments");
-  const [filaments, setFilaments] = useState<FilamentProfileRead[]>([]);
-  const [printers, setPrinters] = useState<PrinterProfileRead[]>([]);
-  const [filamentEdits, setFilamentEdits] = useState<Record<number, FilamentEdit>>({});
-  const [printerEdits, setPrinterEdits] = useState<Record<number, PrinterEdit>>({});
-  const [loading, setLoading] = useState(true);
+  const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
+  const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
+  const commands = useProfileCommands();
+  const filaments = filamentQuery.data ?? [];
+  const printers = printerQuery.data ?? [];
+  const activeQuery = activeTab === "filaments" ? filamentQuery : printerQuery;
+  const loading = activeQuery.isPending;
+  const [filamentEdits, setFilamentEdits] = useState<Record<number, FilamentDraft>>({});
+  const [printerEdits, setPrinterEdits] = useState<Record<number, PrinterDraft>>({});
   const [error, setError] = useState<string | null>(null);
   // Per-row auto-save indicator, keyed "f{id}" / "p{id}".
   const [rowStatus, setRowStatus] = useState<Record<string, "saving" | "saved">>({});
@@ -205,30 +211,13 @@ export function FilamentProfilesCard() {
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("");
   const [newPrinterNotes, setNewPrinterNotes] = useState("");
 
-  // Promise chain rather than async/await: the state updates then land in the
-  // resolution callback, so the mount effect below only starts the request.
-  function refresh(): Promise<void> {
-    return Promise.all([listFilamentProfiles(), listPrinterProfiles()])
-      .then(([nextFilaments, nextPrinters]) => {
-        setFilaments(nextFilaments);
-        setPrinters(nextPrinters);
-        setFilamentEdits(Object.fromEntries(nextFilaments.map((p) => [p.id, filamentEdit(p)])));
-        setPrinterEdits(Object.fromEntries(nextPrinters.map((p) => [p.id, printerEdit(p)])));
-        setError(null);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
   function updateFilamentEdit(id: number, patch: Partial<FilamentEdit>) {
+    const profile = filaments.find((row) => row.id === id);
+    if (!profile) throw new Error("Filament draft requires a loaded profile");
     setFilamentEdits((cur) => ({
       ...cur,
       [id]: {
-        ...(cur[id] ?? { name: "", materialType: "", materialBrand: "", cost: "", notes: "" }),
+        ...(cur[id] ?? { ...filamentEdit(profile), base: profile }),
         ...patch,
       },
     }));
@@ -241,9 +230,11 @@ export function FilamentProfilesCard() {
   }
 
   function updatePrinterEdit(id: number, patch: Partial<PrinterEdit>) {
+    const profile = printers.find((row) => row.id === id);
+    if (!profile) throw new Error("Printer draft requires a loaded profile");
     setPrinterEdits((cur) => ({
       ...cur,
-      [id]: { ...(cur[id] ?? { name: "", model: "", nozzle: "", notes: "" }), ...patch },
+      [id]: { ...(cur[id] ?? { ...printerEdit(profile), base: profile }), ...patch },
     }));
   }
 
@@ -259,14 +250,20 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid filament cost"));
       return;
     }
+    const session = getSessionVersion();
     try {
-      await createFilamentProfile({
-        name: trimmedName,
-        material_type: newType.trim() || null,
-        material_brand: newBrand.trim() || null,
-        cost_per_kg: parsedCost,
-        notes: newNotes.trim() || null,
+      await commands.createFilament.mutateAsync({
+        session,
+        payload: {
+          name: trimmedName,
+          material_type: newType.trim() || null,
+          material_brand: newBrand.trim() || null,
+          cost_per_kg: parsedCost,
+          notes: newNotes.trim() || null,
+        },
       });
+      if (getSessionVersion() !== session) return;
+      setError(null);
       setNewName("");
       setNewType("");
       setNewBrand("");
@@ -274,9 +271,9 @@ export function FilamentProfilesCard() {
       setNewNotes("");
       setShowAddFilament(false);
       toast.success(uiText('Filament preset "{value1}" saved', { value1: String(trimmedName) }));
-      refresh();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
     }
   }
@@ -313,20 +310,23 @@ export function FilamentProfilesCard() {
       return;
     }
     setSyncing(true);
+    const session = getSessionVersion();
     try {
-      const r = await syncSpoolmanFilaments();
+      const r = await commands.syncSpoolman.mutateAsync(session);
+      if (getSessionVersion() !== session) return;
+      setError(null);
       toast.success(
         uiText("Synced from Spoolman — {value1} added, {value2} updated", {
           value1: String(r.created),
           value2: String(r.updated + r.adopted),
         }),
       );
-      await refresh();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
     } finally {
-      setSyncing(false);
+      if (getSessionVersion() === session) setSyncing(false);
     }
   }
 
@@ -335,7 +335,12 @@ export function FilamentProfilesCard() {
     // Synced presets mirror Spoolman and are read-only here.
     if (profile.spoolman_filament_id != null) return;
     const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
-    if (!filamentDirty(profile, edit) || !edit.name.trim()) return;
+    if (
+      rowStatus[`f${profile.id}`] === "saving" ||
+      !filamentDirty(filamentEdits[profile.id]?.base ?? profile, edit) ||
+      !edit.name.trim()
+    )
+      return;
     const parsedCost = parseOptionalNumber(edit.cost);
     if (parsedCost !== null && Number.isNaN(parsedCost)) {
       setFilamentValidationErrors((current) => ({
@@ -360,14 +365,20 @@ export function FilamentProfilesCard() {
       cost_per_kg: parsedCost,
       notes: edit.notes.trim() || null,
     };
+    const session = getSessionVersion();
     try {
-      await updateFilamentProfile(profile.id, payload);
-      const saved = { ...profile, ...payload };
-      setFilaments((cur) => cur.map((p) => (p.id === profile.id ? saved : p)));
-      setFilamentEdits((cur) => ({ ...cur, [profile.id]: filamentEdit(saved) }));
+      await commands.updateFilament.mutateAsync({ id: profile.id, payload, session });
+      if (getSessionVersion() !== session) return;
+      setError(null);
+      setFilamentEdits((cur) => {
+        const next = { ...cur };
+        delete next[profile.id];
+        return next;
+      });
       flashSaved(key);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
       clearStatus(key);
     }
@@ -380,21 +391,26 @@ export function FilamentProfilesCard() {
       return;
     }
     setDeleteBusy(true);
+    const session = getSessionVersion();
     try {
       if (deleteTarget.kind === "filament") {
-        await deleteFilamentProfile(deleteTarget.id);
+        await commands.removeFilament.mutateAsync({ id: deleteTarget.id, session });
+        if (getSessionVersion() !== session) return;
         toast.success(uiText("Filament preset removed"));
       } else {
-        await deletePrinterProfile(deleteTarget.id);
+        await commands.removePrinter.mutateAsync({ id: deleteTarget.id, session });
+        if (getSessionVersion() !== session) return;
         toast.success(uiText("Printer preset removed"));
       }
+      if (getSessionVersion() !== session) return;
+      setError(null);
       setDeleteTarget(null);
-      await refresh();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
     } finally {
-      setDeleteBusy(false);
+      if (getSessionVersion() === session) setDeleteBusy(false);
     }
   }
 
@@ -410,22 +426,28 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
+    const session = getSessionVersion();
     try {
-      await createPrinterProfile({
-        name: trimmedName,
-        printer_model: newPrinterModel.trim() || null,
-        nozzle_diameter_mm: parsedNozzle,
-        notes: newPrinterNotes.trim() || null,
+      await commands.createPrinter.mutateAsync({
+        session,
+        payload: {
+          name: trimmedName,
+          printer_model: newPrinterModel.trim() || null,
+          nozzle_diameter_mm: parsedNozzle,
+          notes: newPrinterNotes.trim() || null,
+        },
       });
+      if (getSessionVersion() !== session) return;
+      setError(null);
       setNewPrinterName("");
       setNewPrinterModel("");
       setNewPrinterNozzle("");
       setNewPrinterNotes("");
       setShowAddPrinter(false);
       toast.success(uiText('Printer preset "{value1}" saved', { value1: String(trimmedName) }));
-      refresh();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
     }
   }
@@ -433,7 +455,12 @@ export function FilamentProfilesCard() {
   async function autoSavePrinter(profile: PrinterProfileRead) {
     if (!auth.isAuthenticated) return;
     const edit = printerEdits[profile.id] ?? printerEdit(profile);
-    if (!printerDirty(profile, edit) || !edit.name.trim()) return;
+    if (
+      rowStatus[`p${profile.id}`] === "saving" ||
+      !printerDirty(printerEdits[profile.id]?.base ?? profile, edit) ||
+      !edit.name.trim()
+    )
+      return;
     const parsedNozzle = parseOptionalNumber(edit.nozzle);
     if (parsedNozzle !== null && Number.isNaN(parsedNozzle)) {
       toast.error(uiText("Invalid nozzle diameter"));
@@ -447,14 +474,20 @@ export function FilamentProfilesCard() {
       nozzle_diameter_mm: parsedNozzle,
       notes: edit.notes.trim() || null,
     };
+    const session = getSessionVersion();
     try {
-      await updatePrinterProfile(profile.id, payload);
-      const saved = { ...profile, ...payload };
-      setPrinters((cur) => cur.map((p) => (p.id === profile.id ? saved : p)));
-      setPrinterEdits((cur) => ({ ...cur, [profile.id]: printerEdit(saved) }));
+      await commands.updatePrinter.mutateAsync({ id: profile.id, payload, session });
+      if (getSessionVersion() !== session) return;
+      setError(null);
+      setPrinterEdits((cur) => {
+        const next = { ...cur };
+        delete next[profile.id];
+        return next;
+      });
       flashSaved(key);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      if (getSessionVersion() !== session) return;
+      setError(userMessage(e));
       toast.error(e);
       clearStatus(key);
     }
@@ -487,12 +520,17 @@ export function FilamentProfilesCard() {
           }
           confirmLabel={uiText("Delete preset")}
         />
-        {error && (
+        {(error || activeQuery.isError) && (
           <div
             role="alert"
             className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
           >
-            {error}
+            <p>{error ?? userMessage(activeQuery.error)}</p>
+            {activeQuery.isError && (
+              <Button variant="outline" onClick={() => void activeQuery.refetch()}>
+                {uiText("Retry")}
+              </Button>
+            )}
           </div>
         )}
 
@@ -651,7 +689,12 @@ export function FilamentProfilesCard() {
                       <X className="h-3.5 w-3.5" />
                       {uiText("Cancel")}
                     </Button>
-                    <Button type="submit" size="xs" disabled={!newName.trim()}>
+                    <Button
+                      type="submit"
+                      size="xs"
+                      loading={commands.createFilament.isPending}
+                      disabled={!newName.trim()}
+                    >
                       <Plus className="h-3.5 w-3.5" />
                       {uiText("Add preset")}
                     </Button>
@@ -665,7 +708,7 @@ export function FilamentProfilesCard() {
                     <Skeleton key={i} className="h-12" />
                   ))}
                 </div>
-              ) : filaments.length === 0 ? (
+              ) : filamentQuery.isError && !filamentQuery.data ? null : filaments.length === 0 ? (
                 <EmptyState
                   icon={Layers}
                   title={uiText("No filament presets")}
@@ -688,7 +731,8 @@ export function FilamentProfilesCard() {
                     {filaments.map((profile) => {
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
                       const linked = profile.spoolman_filament_id != null;
-                      const locked = !auth.isAuthenticated || linked;
+                      const locked =
+                        !auth.isAuthenticated || linked || rowStatus[`f${profile.id}`] === "saving";
                       return (
                         <div
                           key={profile.id}
@@ -812,7 +856,10 @@ export function FilamentProfilesCard() {
                                       name: edit.name,
                                     })
                                   }
-                                  disabled={!auth.isAuthenticated}
+                                  disabled={
+                                    !auth.isAuthenticated ||
+                                    rowStatus[`f${profile.id}`] === "saving"
+                                  }
                                   aria-label={uiText("Delete filament preset {value1}", {
                                     value1: String(edit.name),
                                   })}
@@ -902,7 +949,12 @@ export function FilamentProfilesCard() {
                       <X className="h-3.5 w-3.5" />
                       {uiText("Cancel")}
                     </Button>
-                    <Button type="submit" size="xs" disabled={!newPrinterName.trim()}>
+                    <Button
+                      type="submit"
+                      size="xs"
+                      loading={commands.createPrinter.isPending}
+                      disabled={!newPrinterName.trim()}
+                    >
                       <Plus className="h-3.5 w-3.5" />
                       {uiText("Add preset")}
                     </Button>
@@ -916,7 +968,7 @@ export function FilamentProfilesCard() {
                     <Skeleton key={i} className="h-12" />
                   ))}
                 </div>
-              ) : printers.length === 0 ? (
+              ) : printerQuery.isError && !printerQuery.data ? null : printers.length === 0 ? (
                 <EmptyState
                   icon={Printer}
                   title={uiText("No printer presets")}
@@ -951,7 +1003,9 @@ export function FilamentProfilesCard() {
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { name: e.target.value })
                               }
-                              disabled={!auth.isAuthenticated}
+                              disabled={
+                                !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                              }
                               aria-label={uiText("Printer preset name {value1}", {
                                 value1: String(profile.id),
                               })}
@@ -981,7 +1035,9 @@ export function FilamentProfilesCard() {
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { model: e.target.value })
                               }
-                              disabled={!auth.isAuthenticated}
+                              disabled={
+                                !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                              }
                               aria-label={uiText("Printer model {value1}", {
                                 value1: String(profile.id),
                               })}
@@ -996,7 +1052,9 @@ export function FilamentProfilesCard() {
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { nozzle: e.target.value })
                               }
-                              disabled={!auth.isAuthenticated}
+                              disabled={
+                                !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                              }
                               inputMode="decimal"
                               aria-label={uiText("Printer nozzle diameter {value1}", {
                                 value1: String(profile.id),
@@ -1012,7 +1070,9 @@ export function FilamentProfilesCard() {
                               onChange={(e) =>
                                 updatePrinterEdit(profile.id, { notes: e.target.value })
                               }
-                              disabled={!auth.isAuthenticated}
+                              disabled={
+                                !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                              }
                               aria-label={uiText("Printer notes {value1}", {
                                 value1: String(profile.id),
                               })}
@@ -1033,7 +1093,9 @@ export function FilamentProfilesCard() {
                                   name: edit.name,
                                 })
                               }
-                              disabled={!auth.isAuthenticated}
+                              disabled={
+                                !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                              }
                               aria-label={uiText("Delete printer preset {value1}", {
                                 value1: String(edit.name),
                               })}

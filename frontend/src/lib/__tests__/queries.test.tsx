@@ -290,11 +290,17 @@ describe("resource hooks", () => {
   it("usePrinterProfiles / useFilamentProfiles / useVaultStats pass fresh:true", async () => {
     const pp = renderHook(() => usePrinterProfiles(), { wrapper: wrapper() });
     await waitFor(() => expect(pp.result.current.isSuccess).toBe(true));
-    expect(stubs.listPrinterProfiles).toHaveBeenCalledWith({ fresh: true });
+    expect(stubs.listPrinterProfiles).toHaveBeenCalledWith({
+      fresh: true,
+      signal: expect.any(AbortSignal),
+    });
 
     const fp = renderHook(() => useFilamentProfiles(), { wrapper: wrapper() });
     await waitFor(() => expect(fp.result.current.isSuccess).toBe(true));
-    expect(stubs.listFilamentProfiles).toHaveBeenCalledWith({ fresh: true });
+    expect(stubs.listFilamentProfiles).toHaveBeenCalledWith({
+      fresh: true,
+      signal: expect.any(AbortSignal),
+    });
 
     const vs = renderHook(() => useVaultStats(), { wrapper: wrapper() });
     await waitFor(() => expect(vs.result.current.isSuccess).toBe(true));

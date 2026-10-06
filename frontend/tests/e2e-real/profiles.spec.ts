@@ -81,6 +81,56 @@ test.describe("profiles", () => {
       .toBe(false);
   });
 
+  test("keeps an invalid local draft while another preset refreshes the catalog", async ({
+    page,
+  }) => {
+    const name = `e2e-draft-${Date.now()}`;
+    const second = `${name}-second`;
+    await page.goto("/profiles");
+    const section = page.locator("section", { hasText: "Filament presets" });
+    const add = async (value: string) => {
+      await page.getByRole("button", { name: /New filament/ }).click();
+      const form = section.getByRole("form", { name: "Create filament preset" });
+      await form.getByLabel("Name").fill(value);
+      await form.getByLabel("Cost per kg").fill("25");
+      await form.getByRole("button", { name: "Add preset" }).click();
+      return inputByValue(section, /^Filament preset name/, value);
+    };
+    const first = await add(name);
+    const cost = rowOf(first).getByLabel(/Filament cost per kg/);
+    await cost.fill("-1");
+
+    await add(second);
+
+    await expect(cost).toHaveValue("-1");
+    await expect(cost).toHaveAttribute("aria-invalid", "true");
+    await expect(section.getByText("Cost must be 0 or more.")).toBeVisible();
+    await cost.fill("42");
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          /\/api\/v1\/filament-profiles\/\d+/.test(response.url()) &&
+          response.request().method() === "PATCH",
+      ),
+      section.getByRole("heading", { name: "Filament presets" }).click(),
+    ]);
+    await expect(cost).toBeEnabled();
+    await page.reload();
+    const persisted = await inputByValue(section, /^Filament preset name/, name);
+    await expect(rowOf(persisted).getByLabel(/Filament cost per kg/)).toHaveValue("42");
+    for (const value of [name, second]) {
+      const row = await inputByValue(section, /^Filament preset name/, value);
+      await rowOf(row)
+        .getByRole("button", { name: `Delete filament preset ${value}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Delete filament preset?" })
+        .getByRole("button", { name: "Delete preset" })
+        .click();
+      await expect(page.getByRole("dialog", { name: "Delete filament preset?" })).toBeHidden();
+    }
+  });
+
   test("create and delete a printer preset", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/profiles");

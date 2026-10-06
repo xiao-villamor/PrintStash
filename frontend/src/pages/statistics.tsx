@@ -610,7 +610,7 @@ export default function StatisticsPage() {
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
-  const { data, isLoading, isError } = usePrintStatistics(period);
+  const { data, isLoading, isError, refetch } = usePrintStatistics(period);
   const { data: config } = useVaultConfig();
   const currency = config?.currency ?? "USD";
 
@@ -688,7 +688,10 @@ export default function StatisticsPage() {
       {isError && (
         <Card className="animate-panel-in">
           <CardContent className="py-12 text-center text-sm text-destructive">
-            {translateUiText(locale, "Failed to load statistics.")}
+            <p>{translateUiText(locale, "Failed to load statistics.")}</p>
+            <Button variant="outline" onClick={() => void refetch()}>
+              {uiText("Retry")}
+            </Button>
           </CardContent>
         </Card>
       )}

@@ -10,9 +10,8 @@
  *
  * The prefix-collision cases are the sharp ones. `/filament-profiles` and
  * `/printer-profiles` both start with a path a naive check would read as
- * `/printers`, so a substring match busts the wrong cache and leaves the right
- * one stale — asserted in both directions, because either mistake looks like the
- * mapping working.
+ * `/printers`, so a substring match busts the wrong cache. Their feature command owner
+ * publishes and revalidates its catalogs; the transport must leave them alone.
  *
  * An unrecognised path invalidates nothing rather than everything. Blanket
  * invalidation would hide every one of the bugs above.
@@ -161,9 +160,9 @@ describe("invalidateQueriesForPath", () => {
     expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.printers]));
   });
 
-  it("busts filament profiles on the real /filament-profiles path", () => {
+  it("leaves filament catalog refresh to its command owner", () => {
     invalidateQueriesForPath("/api/v1/filament-profiles/9");
-    expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.filamentProfiles]));
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("does NOT mistake /filament-profiles for a printers write", () => {
@@ -171,11 +170,16 @@ describe("invalidateQueriesForPath", () => {
     expect(bustedKeys(spy.mock.calls)).not.toContain(keyName(queryKeys.printers));
   });
 
-  it("busts printer profiles on /printer-profiles (not the printers key)", () => {
+  it("leaves printer catalog refresh to its command owner", () => {
     invalidateQueriesForPath("/api/v1/printer-profiles/2");
-    const keys = bustedKeys(spy.mock.calls);
-    expect(keys).toContain(keyName(queryKeys.printerProfiles));
-    expect(keys).not.toContain(keyName(queryKeys.printers));
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("leaves synced filament refresh to profiles while retaining Spoolman reads", () => {
+    invalidateQueriesForPath("/api/v1/spoolman/sync-filaments");
+    expect(bustedKeys(spy.mock.calls)).toEqual(
+      keyNames([queryKeys.spoolmanStatus, queryKeys.spools]),
+    );
   });
 
   it("busts admin users on an admin user write", () => {

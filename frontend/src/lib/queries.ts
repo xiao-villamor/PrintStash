@@ -1,3 +1,5 @@
+import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
+import { printStatisticsOptions } from "@/lib/queries/statistics";
 import { markStartup } from "@/lib/startup-timing";
 
 import { listOutlinerCollections, listOutlinerEntries, searchOutliner } from "@/lib/api/outliner";
@@ -46,7 +48,6 @@ import type {
   CollectionRole,
   Dashboard,
   FleetSummary,
-  FilamentProfileRead,
   ListModelsParams,
   ModelPageRead,
   ModelSort,
@@ -55,10 +56,8 @@ import type {
   MultipartModelListItem,
   MultipartModelRead,
   OutlinerModelRead,
-  PrinterProfileRead,
   PrinterRead,
   PrintJobRead,
-  PrintStatisticsRead,
   SpoolmanStatus,
   SpoolRead,
   TagRead,
@@ -268,20 +267,15 @@ export function useFleetSummary(options?: { refetchInterval?: number }) {
   });
 }
 
+// Migrated option owners retain this injected facade until the M10 caller cutover.
 export function usePrinterProfiles() {
   const api = useQueryApi();
-  return useQuery<PrinterProfileRead[]>({
-    queryKey: queryKeys.printerProfiles,
-    queryFn: () => api.listPrinterProfiles({ fresh: true }),
-  });
+  return useQuery(printerProfilesOptions(api.listPrinterProfiles));
 }
 
 export function useFilamentProfiles() {
   const api = useQueryApi();
-  return useQuery<FilamentProfileRead[]>({
-    queryKey: queryKeys.filamentProfiles,
-    queryFn: () => api.listFilamentProfiles({ fresh: true }),
-  });
+  return useQuery(filamentProfilesOptions(api.listFilamentProfiles));
 }
 
 export function useVaultStats() {
@@ -375,10 +369,7 @@ export function useMultipartModelCandidates(
 
 export function usePrintStatistics(period: StatsPeriod) {
   const api = useQueryApi();
-  return useQuery<PrintStatisticsRead>({
-    queryKey: queryKeys.printStats(period),
-    queryFn: () => api.getPrintStatistics(period, { fresh: true }),
-  });
+  return useQuery(printStatisticsOptions(period, api.getPrintStatistics));
 }
 
 export function useVaultConfig() {
