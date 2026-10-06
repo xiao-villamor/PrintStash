@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add real database contracts for similarity ingestion continuation authority, durable analysis eligibility and caller write rollback.
+
 - Verify fingerprint publication preserves active caller transactions and leases,
   rejecting detached authority, changed recipes and invalid descriptor metadata.
 
