@@ -1080,3 +1080,14 @@ Pre-commit permission RED reproduced both S59/S60 leaks:2 failed/28 excluded6.39
 Closing permission/UI owner qualification passed45/45 across the two changed behavioral mirrors25.66s. These include the additional current-role boundary S59/S60 and all credential/cache/cancellation/draft scenarios; API mirrors and real WebDAV headline remain previously qualified. Manual review additionally covered test-support/render.tsx adminSession/memberSession, seeded canonical client and rerender wrapper; errors.ts ApiError/parseApiError; auth context-only role transitions and both final test bodies. The final denied helper consumes ApiError at its named boundary; no unknown-parameter exemption was introduced.
 
 Final static checks after the permission correction: complete app/UI/domain typecheck and full frontend lint passed. The prior 70 changed-mirror behaviors plus the two permission cases make 72 qualified behaviors across UI, feature owner and typed API mirrors. All RemoteStorage rows S1–S60 are ✅. Formatting/diff checks cover the exact 12 owned paths. Adjacent Backup/StorageMigration/ExternalLibraries consumer debt remains explicit; no broader ownership completion is claimed.
+
+
+### RemoteStorage integrated qualification
+
+Integrated as `c5c85afd`. The already-present Setup provider signal port was
+preserved; the only merge conflict was the appended validation history, resolved
+by retaining both checkpoint records. Root qualified 89 tests across the component,
+owner, storage/config API mirrors, suite hygiene and locale coverage in 23.98s with
+one test worker. Full app/UI/domain typecheck passed. This includes the current-role
+cache/Retry correction. The worker's real WebDAV headline remains the browser
+qualification; no additional unchanged browser run is claimed.
