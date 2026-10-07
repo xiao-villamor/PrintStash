@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Notification settings now show recoverable read errors instead of an invented
+  Off state or empty list. Preserve drafts through transient failures, prevent
+  changes during pending saves, and publish confirmed masked responses through
+  the shared query cache. Session changes retire pending commands and local input.
+
 - Detect competing browser-name edits. Preserve drafts for explicit review before
   retrying, and require adopting a replacement pairing before editing it. The API
   supports conditional edits while retaining legacy callers; duplicate names now

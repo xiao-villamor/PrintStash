@@ -4271,5 +4271,13 @@
   "settings.providerConnections.loadFailed": "No se pudieron cargar las cuentas de proveedores o los navegadores vinculados.",
   "settings.pairedBrowsers.reviewRequired": "Revisa el nombre actual antes de volver a guardar. Se conserva tu borrador.",
   "settings.pairedBrowsers.currentName": "Nombre actual del navegador: {name}",
-  "settings.pairedBrowsers.replaced": "Esta vinculación ha cambiado. Usa los valores actuales antes de iniciar otra edición."
+  "settings.pairedBrowsers.replaced": "Esta vinculación ha cambiado. Usa los valores actuales antes de iniciar otra edición.",
+  "Notification settings could not be loaded.": "No se ha podido cargar la configuración de notificaciones.",
+  "Retry notification settings": "Reintentar la configuración de notificaciones",
+  "Notification delivery history could not be loaded.": "No se ha podido cargar el historial de notificaciones.",
+  "Retry delivery history": "Reintentar el historial de notificaciones",
+  "Loading delivery history…": "Cargando el historial de notificaciones…",
+  "Printer choices could not be loaded.": "No se ha podido cargar la lista de impresoras.",
+  "Retry printer choices": "Reintentar la lista de impresoras",
+  "Loading printer choices…": "Cargando la lista de impresoras…"
 }

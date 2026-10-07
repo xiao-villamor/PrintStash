@@ -4271,5 +4271,13 @@
   "settings.providerConnections.loadFailed": "Provider accounts or paired browsers could not be loaded.",
   "settings.pairedBrowsers.reviewRequired": "This browser name needs review before another save. Your draft is preserved.",
   "settings.pairedBrowsers.currentName": "Current browser name: {name}",
-  "settings.pairedBrowsers.replaced": "This pairing has changed. Use current values before starting another edit."
+  "settings.pairedBrowsers.replaced": "This pairing has changed. Use current values before starting another edit.",
+  "Notification settings could not be loaded.": "Notification settings could not be loaded.",
+  "Retry notification settings": "Retry notification settings",
+  "Notification delivery history could not be loaded.": "Notification delivery history could not be loaded.",
+  "Retry delivery history": "Retry delivery history",
+  "Loading delivery history…": "Loading delivery history…",
+  "Printer choices could not be loaded.": "Printer choices could not be loaded.",
+  "Retry printer choices": "Retry printer choices",
+  "Loading printer choices…": "Loading printer choices…"
 }

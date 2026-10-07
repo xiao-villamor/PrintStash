@@ -37,6 +37,16 @@ afterEach(() => {
 });
 
 describe("getNotificationsSettings", () => {
+  it("reads current settings on every transport call", async () => {
+    respondWith({ enabled: false, channels: [] });
+    await getNotificationsSettings();
+    respondWith({ enabled: true, channels: [] });
+
+    const current = await getNotificationsSettings();
+
+    expect(current).toEqual({ enabled: true, channels: [] });
+  });
+
   it("reads the settings", async () => {
     respondWith({ enabled: false, channels: [] });
 
@@ -103,6 +113,16 @@ describe("testNotificationChannel", () => {
 });
 
 describe("listNotificationDeliveries", () => {
+  it("reads current deliveries on every transport call", async () => {
+    respondWith([{ id: 3 }]);
+    await listNotificationDeliveries();
+    respondWith([]);
+
+    const current = await listNotificationDeliveries();
+
+    expect(current).toEqual([]);
+  });
+
   it("asks for a default page", async () => {
     respondWith([]);
 

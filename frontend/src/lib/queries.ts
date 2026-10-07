@@ -57,7 +57,6 @@ import type {
   MultipartModelCandidate,
   MultipartModelListItem,
   OutlinerModelRead,
-  PrinterRead,
   PrintJobRead,
   SpoolmanStatus,
   SpoolRead,
@@ -228,11 +227,17 @@ export function useTags(options?: { enabled?: boolean }) {
  * `fresh: true` bypasses the legacy in-memory cache in `request.ts` so TanStack
  * Query stays the single source of truth, matching the other taxonomy hooks.
  */
-export function usePrinters(options?: { enabled?: boolean; refetchInterval?: number }) {
-  const api = useQueryApi();
-  return useQuery<PrinterRead[]>({
+export function printersOptions(api: Pick<QueryApi, "listPrinters"> = defaultQueryApi) {
+  return queryOptions({
     queryKey: queryKeys.printers,
     queryFn: ({ signal }) => api.listPrinters(undefined, { fresh: true, signal }),
+  });
+}
+
+export function usePrinters(options?: { enabled?: boolean; refetchInterval?: number }) {
+  const api = useQueryApi();
+  return useQuery({
+    ...printersOptions(api),
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval,
   });
