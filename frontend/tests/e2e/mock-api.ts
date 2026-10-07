@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { aVaultConfig } from "../../src/test-support/factories";
+import type { VaultConfigUpdate } from "../../src/types";
 import { aCaption } from "../../src/test-support/captions";
 import { searchPreferences, searchStatus } from "../../src/test-support/search";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -442,6 +444,7 @@ function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting"
 }
 
 export function resetMockApiState(): void {
+  configuration = aVaultConfig({ storage_tier: "unguarded" });
   state.externalLibrariesEnabled = false;
   state.ingestJobQueued = false;
   state.thumbnailRebuildQueued = false;
@@ -682,44 +685,16 @@ function provenance(): ModelProvenanceRead & { schema_version: 2 } {
 
 export function setExternalLibrariesEnabled(value: boolean): void {
   state.externalLibrariesEnabled = value;
+  configuration = {
+    ...configuration,
+    external_libraries_enabled: value,
+    edit_version: configuration.edit_version + 1,
+  };
 }
 
+let configuration = aVaultConfig({ storage_tier: "unguarded" });
 function vaultConfig() {
-  return {
-    storage_backend: "local",
-    storage_provider: "local",
-    storage_provider_config: {
-      provider: "local",
-      data_dir: "/data/files",
-      thumb_dir: "/data/thumbs",
-      root: "vault-data",
-    },
-    storage_tier: "unguarded",
-    storage_warnings: [],
-    storage_unverified_acknowledged: false,
-    data_dir: "/data/files",
-    thumb_dir: "/data/thumbs",
-    s3_bucket: "",
-    s3_endpoint_url: "",
-    s3_region: "",
-    s3_access_key: "",
-    s3_secret_key: "",
-    has_s3_access_key: false,
-    has_s3_secret_key: false,
-    backup_retention_days: 30,
-    trash_retention_days: 30,
-    backup_s3_bucket: "",
-    backup_s3_endpoint_url: "",
-    backup_s3_region: "",
-    backup_s3_access_key: "",
-    backup_s3_secret_key: "",
-    has_backup_s3_access_key: false,
-    has_backup_s3_secret_key: false,
-    has_backup_s3: false,
-    auto_mark_known_good: true,
-    external_libraries_enabled: state.externalLibrariesEnabled,
-    model_thumbnail_width: 640,
-  };
+  return { ...configuration, external_libraries_enabled: state.externalLibrariesEnabled };
 }
 
 function storageProviders() {
@@ -1925,7 +1900,72 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/config") {
     if (req.method === "PUT") {
-      drainRequest(req, () => sendJson(res, vaultConfig()));
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const base = `"vault-config-e${configuration.edit_epoch}-v${configuration.edit_version}"`;
+        if (
+          req.headers["x-printstash-edit-contract"] === "conditional-v1" &&
+          !req.headers["if-match"]
+        ) {
+          sendJson(res, { detail: "edit_precondition_required" }, 428);
+          return;
+        }
+        if (req.headers["if-match"] && req.headers["if-match"] !== base) {
+          sendJson(res, { detail: "edit_conflict" }, 412);
+          return;
+        }
+        const update: VaultConfigUpdate = JSON.parse(body);
+        const {
+          oidc_client_secret,
+          s3_access_key,
+          s3_secret_key,
+          backup_s3_access_key,
+          backup_s3_secret_key,
+          derivatives_mesh_enabled,
+          derivatives_gcode_enabled,
+          derivatives_toolpath_enabled,
+          ...publicFields
+        } = update;
+        configuration = {
+          ...configuration,
+          ...publicFields,
+          edit_version: configuration.edit_version + 1,
+          derivatives_mesh_enabled:
+            derivatives_mesh_enabled === undefined
+              ? configuration.derivatives_mesh_enabled
+              : (derivatives_mesh_enabled ?? true),
+          derivatives_gcode_enabled:
+            derivatives_gcode_enabled === undefined
+              ? configuration.derivatives_gcode_enabled
+              : (derivatives_gcode_enabled ?? true),
+          derivatives_toolpath_enabled:
+            derivatives_toolpath_enabled === undefined
+              ? configuration.derivatives_toolpath_enabled
+              : (derivatives_toolpath_enabled ?? true),
+          has_oidc_client_secret:
+            oidc_client_secret === undefined
+              ? configuration.has_oidc_client_secret
+              : !!oidc_client_secret,
+          has_s3_access_key:
+            s3_access_key === undefined ? configuration.has_s3_access_key : !!s3_access_key,
+          has_s3_secret_key:
+            s3_secret_key === undefined ? configuration.has_s3_secret_key : !!s3_secret_key,
+          has_backup_s3_access_key:
+            backup_s3_access_key === undefined
+              ? configuration.has_backup_s3_access_key
+              : !!backup_s3_access_key,
+          has_backup_s3_secret_key:
+            backup_s3_secret_key === undefined
+              ? configuration.has_backup_s3_secret_key
+              : !!backup_s3_secret_key,
+        };
+        state.externalLibrariesEnabled = configuration.external_libraries_enabled;
+        sendJson(res, vaultConfig());
+      });
       return;
     }
     sendJson(res, vaultConfig());

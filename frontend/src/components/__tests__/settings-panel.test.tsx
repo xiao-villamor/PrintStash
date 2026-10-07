@@ -1244,6 +1244,7 @@ describe("SettingsPanel", () => {
             updates.push(JSON.parse(String(init?.body)));
             return json({
               ...VAULT_CONFIG,
+              edit_version: 2,
               automatic_backups_enabled: true,
               automatic_backup_time_utc: "04:30",
             });
@@ -1275,7 +1276,7 @@ describe("SettingsPanel", () => {
             manual_local_backup_enabled: false,
             automatic_local_backup_enabled: true,
           },
-          { manual_backup_enabled: true, automatic_backup_enabled: true },
+          { automatic_backup_enabled: true },
         ]),
       );
     });
@@ -1292,7 +1293,7 @@ describe("SettingsPanel", () => {
         at: "/settings?section=backup",
         routes: {
           "GET /api/v1/storage-connections": json([backup, library]),
-          "PUT /api/v1/config": json(VAULT_CONFIG),
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2 }),
           "PATCH /api/v1/storage-connections/7": json({ ...backup, manual_backup_enabled: false }),
         },
       });
@@ -1869,6 +1870,213 @@ describe("SettingsPanel", () => {
     renderSettings({ at: "/settings?section=maintenance" });
     expect(await screen.findByRole("button", { name: "Run quick check" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Similar models" })).toBeNull();
+  });
+
+  describe("conditional backup policy", () => {
+    it("keeps the original policy snapshot during refresh", async () => {
+      const writes: Headers[] = [];
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "PUT /api/v1/config": (_url, init) => {
+            writes.push(new Headers(init?.headers));
+            return json({ detail: "edit_conflict" }, 412);
+          },
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await act(async () =>
+        app.client.setQueryData(queryKeys.vaultConfig, {
+          ...VAULT_CONFIG,
+          edit_version: 2,
+          automatic_backup_time_utc: "06:45",
+        }),
+      );
+      expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("02:00");
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await screen.findByRole("button", { name: "Review latest version" });
+      expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+      expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toMatchObject({
+        automatic_backup_time_utc: "02:00",
+      });
+    });
+    it.each([412, 503])(
+      "%s: reviews a failed policy save before destination writes",
+      async (status) => {
+        const connection = aStorageConnection({
+          id: 7,
+          name: "Archive",
+          automatic_backup_enabled: false,
+        });
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: "/settings?section=backup",
+          routes: {
+            "GET /api/v1/config": () =>
+              json({
+                ...VAULT_CONFIG,
+                edit_version: ++reads,
+                automatic_backup_time_utc: reads === 1 ? "02:00" : "06:45",
+              }),
+            "GET /api/v1/storage-connections": json([connection]),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, status)
+                : json({
+                    ...VAULT_CONFIG,
+                    edit_version: 3,
+                    automatic_backups_enabled: true,
+                    automatic_backup_time_utc: "06:45",
+                  });
+            },
+            "PATCH /api/v1/storage-connections/7": json({
+              ...connection,
+              automatic_backup_enabled: true,
+            }),
+          },
+        });
+        const enabled = await screen.findByLabelText("Enable automatic backups");
+        await waitFor(() => expect(enabled).toBeEnabled());
+        await userEvent.click(enabled);
+        await userEvent.click(screen.getByLabelText("Use Archive for automatic backups"));
+        await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+        await screen.findByRole("button", { name: "Review latest version" });
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled();
+        await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+        const latest = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(latest).getByText("06:45")).toBeVisible();
+        expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("02:00");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toMatchObject({
+          automatic_backups_enabled: true,
+          automatic_backup_time_utc: "06:45",
+        });
+        expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({
+          automatic_backup_enabled: true,
+        });
+      },
+    );
+    it("adopts a reviewed policy without writing destinations", async () => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () =>
+            json({
+              ...VAULT_CONFIG,
+              edit_version: ++reads,
+              automatic_backup_time_utc: reads === 1 ? "02:00" : "06:45",
+            }),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(enabled).not.toBeChecked();
+      expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("06:45");
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+    it("preserves confirmed destination receipts after partial failure", async () => {
+      const first = aStorageConnection({ id: 7, name: "First", automatic_backup_enabled: false });
+      const second = aStorageConnection({ id: 8, name: "Second", automatic_backup_enabled: false });
+      let version = 1;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([first, second]),
+          "PUT /api/v1/config": () => json({ ...VAULT_CONFIG, edit_version: ++version }),
+          "PATCH /api/v1/storage-connections/7": json({ ...first, automatic_backup_enabled: true }),
+          "PATCH /api/v1/storage-connections/8": json({ detail: "unavailable" }, 503),
+        },
+      });
+      const enabled = await screen.findByLabelText("Use First for automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByLabelText("Use Second for automatic backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeEnabled(),
+      );
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+        ...first,
+        automatic_backup_enabled: true,
+      });
+      app.route({
+        "PATCH /api/v1/storage-connections/8": json({ ...second, automatic_backup_enabled: true }),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(3));
+      expect(app.requestsWithMethod("PATCH").map((request) => request.url)).toEqual([
+        "/api/v1/storage-connections/7",
+        "/api/v1/storage-connections/8",
+        "/api/v1/storage-connections/8",
+      ]);
+      expect(enabled).toBeChecked();
+    });
+    it.each([403, 503])("%s: blocks policy retry after an unavailable review", async (status) => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json(VAULT_CONFIG) : json({ detail: "unavailable" }, status),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled(),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).toBeNull();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+    it("retires a pending policy review on logout", async () => {
+      let reads = 0;
+      const pending = Promise.withResolvers<Response>();
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () => (++reads === 1 ? json(VAULT_CONFIG) : pending.promise),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(json({ ...VAULT_CONFIG, edit_version: 2 }));
+      });
+      expect(screen.queryByRole("region", { name: "Latest saved version" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).toBeNull();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
   });
 
   describe("retention configuration editing", () => {

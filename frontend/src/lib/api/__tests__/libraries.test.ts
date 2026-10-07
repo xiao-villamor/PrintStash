@@ -26,6 +26,8 @@ import {
   updateExternalLibrary,
 } from "@/lib/api/libraries";
 import { getVaultConfig, updateVaultConfig } from "@/lib/api/config";
+import { aVaultConfig } from "@/test-support/factories";
+import { json } from "@/test-support/render";
 import { invalidateApiCache } from "@/lib/api/request";
 
 /**
@@ -203,9 +205,14 @@ describe("getVaultConfig", () => {
   });
 
   it("PUTs a toggle of external_libraries_enabled", async () => {
-    respondWith({ storage_backend: "local", external_libraries_enabled: false });
+    fetchMock.mockResolvedValueOnce(
+      json(aVaultConfig({ edit_version: 2, external_libraries_enabled: false })),
+    );
 
-    const cfg = await updateVaultConfig({ external_libraries_enabled: false });
+    const cfg = await updateVaultConfig(
+      { external_libraries_enabled: false },
+      { base: aVaultConfig() },
+    );
 
     expect(cfg.external_libraries_enabled).toBe(false);
     const { url, init } = lastCall();

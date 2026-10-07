@@ -33,7 +33,7 @@ import {
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
 import { savedPreference, useSettingsPreferenceCommand } from "@/lib/queries/settings-preferences";
-import { useVaultConfigCommand } from "@/lib/queries/settings-config";
+import { useBackupPolicyDraft } from "@/lib/queries/settings-backup-policy";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
   collectionAccessOptions,
@@ -619,7 +619,6 @@ export function SettingsPanel() {
       !!user?.is_superuser && ["design", "previews", "backup", "trash"].includes(activeSection),
     retry: false,
   });
-  const configCommand = useVaultConfigCommand();
   const configDenied =
     remoteConfig.isError && [401, 403, 404].includes(parseApiError(remoteConfig.error).status);
   const remoteConfigData = configDenied ? undefined : remoteConfig.data;
@@ -696,20 +695,11 @@ export function SettingsPanel() {
         .filter((connection) => connection.purpose === "backup" || connection.purpose === "both")
         .map((connection) => ({ ...connection, ...backupConnectionDrafts[connection.id] }))
     : [];
-  const [automaticBackupsDraft, setAutomaticBackupsEnabled] = useState<boolean | null>(null);
-  const automaticBackupsEnabled =
-    automaticBackupsDraft ?? remoteConfigData?.automatic_backups_enabled ?? false;
-  const [automaticBackupTimeDraft, setAutomaticBackupTimeUtc] = useState<string | null>(null);
-  const automaticBackupTimeUtc =
-    automaticBackupTimeDraft ?? remoteConfigData?.automatic_backup_time_utc ?? "02:00";
-  const [manualLocalBackupDraft, setManualLocalBackupEnabled] = useState<boolean | null>(null);
-  const manualLocalBackupEnabled =
-    manualLocalBackupDraft ?? remoteConfigData?.manual_local_backup_enabled ?? true;
-  const [automaticLocalBackupDraft, setAutomaticLocalBackupEnabled] = useState<boolean | null>(
-    null,
-  );
-  const automaticLocalBackupEnabled =
-    automaticLocalBackupDraft ?? remoteConfigData?.automatic_local_backup_enabled ?? true;
+  const backupPolicy = useBackupPolicyDraft(remoteConfigData);
+  const automaticBackupsEnabled = backupPolicy.values?.automatic_backups_enabled ?? false;
+  const automaticBackupTimeUtc = backupPolicy.values?.automatic_backup_time_utc ?? "02:00";
+  const manualLocalBackupEnabled = backupPolicy.values?.manual_local_backup_enabled ?? true;
+  const automaticLocalBackupEnabled = backupPolicy.values?.automatic_local_backup_enabled ?? true;
   const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [deleteBackupTarget, setDeleteBackupTarget] = useState<BackupMeta | null>(null);
@@ -750,10 +740,6 @@ export function SettingsPanel() {
       setAdoptRemoteTarget(null);
       setBackupRetentionDays(null);
       setTrashRetentionDraft(null);
-      setAutomaticBackupsEnabled(null);
-      setAutomaticBackupTimeUtc(null);
-      setManualLocalBackupEnabled(null);
-      setAutomaticLocalBackupEnabled(null);
       setBackupConnectionDrafts({});
     });
     return () => {
@@ -947,7 +933,7 @@ export function SettingsPanel() {
       !user?.is_superuser ||
       !remoteConfigData ||
       remoteConfig.isError ||
-      configCommand.isPending ||
+      backupPolicy.isPending ||
       preferenceCommand.blocked
     )
       return;
@@ -967,7 +953,7 @@ export function SettingsPanel() {
       !user?.is_superuser ||
       !remoteConfigData ||
       remoteConfig.isError ||
-      configCommand.isPending ||
+      backupPolicy.isPending ||
       preferenceCommand.blocked
     )
       return;
@@ -992,7 +978,7 @@ export function SettingsPanel() {
       !user?.is_superuser ||
       !remoteConfigData ||
       remoteConfig.isError ||
-      configCommand.isPending ||
+      backupPolicy.isPending ||
       preferenceCommand.blocked
     )
       return;
@@ -1067,7 +1053,7 @@ export function SettingsPanel() {
       parsedBackupRetentionDays === null ||
       !remoteConfigData ||
       backupConfigUnavailable ||
-      configCommand.isPending ||
+      backupPolicy.isPending ||
       preferenceCommand.blocked
     )
       return;
@@ -1095,25 +1081,28 @@ export function SettingsPanel() {
     field: "manual_backup_enabled" | "automatic_backup_enabled",
     value: boolean,
   ) {
+    backupPolicy.begin();
     setBackupConnectionDrafts((current) => ({
       ...current,
       [connectionId]: { ...current[connectionId], [field]: value },
     }));
   }
 
-  async function saveBackupPolicy() {
+  async function saveBackupPolicy(revised = false) {
     if (
       !user?.is_superuser ||
       backupConfigUnavailable ||
       backupConnectionRead.isError ||
       !backupConnectionRead.data ||
-      configCommand.isPending ||
+      backupPolicy.isPending ||
       backupConnectionCommand.isPending ||
+      (!revised && backupPolicy.blocked) ||
       backupPolicyBusy
     )
       return;
+    const policy = backupPolicy.candidate(revised);
     const manualDestinationSelected =
-      manualLocalBackupEnabled ||
+      policy.manual_local_backup_enabled ||
       backupConnections.some(
         (connection) => connection.enabled && connection.manual_backup_enabled,
       );
@@ -1122,53 +1111,34 @@ export function SettingsPanel() {
       return;
     }
     const automaticDestinationSelected =
-      automaticLocalBackupEnabled ||
+      policy.automatic_local_backup_enabled ||
       backupConnections.some(
         (connection) => connection.enabled && connection.automatic_backup_enabled,
       );
-    if (automaticBackupsEnabled && !automaticDestinationSelected) {
+    if (policy.automatic_backups_enabled && !automaticDestinationSelected) {
       toast.error(t("settings.backupAutomaticDestinationRequired"));
       return;
     }
     const session = getSessionVersion();
-    const sent = {
-      enabled: automaticBackupsDraft,
-      time: automaticBackupTimeDraft,
-      manual: manualLocalBackupDraft,
-      automatic: automaticLocalBackupDraft,
-      connections: backupConnectionDrafts,
-    };
+    const sent = backupConnectionDrafts;
     setBackupPolicyBusy(true);
     try {
       // These are separate server transactions. Publish every acknowledged part
       // through its owner before moving on; a later failure cannot undo it.
-      await configCommand.mutateAsync({
-        session,
-        payload: {
-          automatic_backups_enabled: automaticBackupsEnabled,
-          automatic_backup_time_utc: automaticBackupTimeUtc,
-          manual_local_backup_enabled: manualLocalBackupEnabled,
-          automatic_local_backup_enabled: automaticLocalBackupEnabled,
-        },
-      });
+      await backupPolicy.save(revised);
       if (!accountCurrent(session)) return;
-      setAutomaticBackupsEnabled((current) => (current === sent.enabled ? null : current));
-      setAutomaticBackupTimeUtc((current) => (current === sent.time ? null : current));
-      setManualLocalBackupEnabled((current) => (current === sent.manual ? null : current));
-      setAutomaticLocalBackupEnabled((current) => (current === sent.automatic ? null : current));
       for (const connection of backupConnections) {
+        const changes = sent[connection.id];
+        if (!changes) continue;
         await backupConnectionCommand.mutateAsync({
           kind: "update",
           session,
           id: connection.id,
-          payload: {
-            manual_backup_enabled: connection.manual_backup_enabled,
-            automatic_backup_enabled: connection.automatic_backup_enabled,
-          },
+          payload: changes,
         });
         if (!accountCurrent(session)) return;
         setBackupConnectionDrafts((current) => {
-          if (current[connection.id] !== sent.connections[connection.id]) return current;
+          if (current[connection.id] !== sent[connection.id]) return current;
           const next = { ...current };
           delete next[connection.id];
           return next;
@@ -1605,7 +1575,7 @@ export function SettingsPanel() {
       remoteConfig.isError ||
       parsedTrashRetentionDays === null ||
       preferenceCommand.blocked ||
-      configCommand.isPending
+      backupPolicy.isPending
     )
       return;
     const session = getSessionVersion();
@@ -3198,6 +3168,78 @@ export function SettingsPanel() {
 
             {activeSection === "backup" && (
               <div className="space-y-6 animate-panel-in">
+                {backupPolicy.review.phase !== "idle" && (
+                  <div role="alert" className="space-y-3 rounded border border-border p-4">
+                    <p>
+                      {uiText(
+                        backupPolicy.review.problem === "conflict"
+                          ? "library.editConflict"
+                          : "library.saveUnconfirmed",
+                      )}
+                    </p>
+                    <Button
+                      variant="outline"
+                      disabled={backupPolicy.review.phase === "loading" || backupPolicyBusy}
+                      onClick={() => {
+                        const session = getSessionVersion();
+                        void backupPolicy.reviewLatest().catch((error) => {
+                          if (accountCurrent(session)) toast.error(error);
+                        });
+                      }}
+                    >
+                      {uiText("library.reviewLatest")}
+                    </Button>
+                    {backupPolicy.review.phase === "ready" && !remoteConfig.isError && (
+                      <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                        <dl className="grid grid-cols-2 gap-2 text-sm">
+                          <dt>{t("settings.backupAutomaticEnable")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.automatic_backups_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                          <dt>{t("settings.backupAutomaticTime")}</dt>
+                          <dd>{backupPolicy.review.snapshot.automatic_backup_time_utc}</dd>
+                          <dt>{t("settings.backupLocalManual")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.manual_local_backup_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                          <dt>{t("settings.backupLocalAutomatic")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.automatic_local_backup_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                        </dl>
+                        <Button
+                          variant="outline"
+                          disabled={backupPolicyBusy}
+                          onClick={backupPolicy.adopt}
+                        >
+                          {uiText("library.useLatest")}
+                        </Button>
+                        <Button
+                          disabled={
+                            backupPolicyBusy ||
+                            backupConnectionRead.isError ||
+                            !backupConnectionRead.data
+                          }
+                          onClick={() => void saveBackupPolicy(true)}
+                        >
+                          {uiText("library.retryDraft")}
+                        </Button>
+                      </section>
+                    )}
+                  </div>
+                )}
                 {(remoteConfig.isError || backupConnectionRead.isError) && (
                   <p role="alert" className="text-sm text-destructive">
                     {uiText("Could not load backup settings.")}
@@ -3217,7 +3259,7 @@ export function SettingsPanel() {
                         backupConfigUnavailable ||
                         parsedBackupRetentionDays === null ||
                         preferenceCommand.blocked ||
-                        configCommand.isPending
+                        backupPolicy.isPending
                       }
                       className={BTN_PRIMARY}
                     >
@@ -3275,9 +3317,10 @@ export function SettingsPanel() {
                   action={
                     <button
                       type="button"
-                      onClick={saveBackupPolicy}
+                      onClick={() => void saveBackupPolicy()}
                       disabled={
                         !user?.is_superuser ||
+                        backupPolicy.blocked ||
                         backupPolicyBusy ||
                         backupsLoading ||
                         backupConfigUnavailable ||
@@ -3308,7 +3351,9 @@ export function SettingsPanel() {
                         </span>
                         <Checkbox
                           checked={automaticBackupsEnabled}
-                          onChange={setAutomaticBackupsEnabled}
+                          onChange={(value) =>
+                            backupPolicy.edit("automatic_backups_enabled", value)
+                          }
                           ariaLabel={t("settings.backupAutomaticEnable")}
                           disabled={
                             !user?.is_superuser ||
@@ -3325,11 +3370,14 @@ export function SettingsPanel() {
                         <input
                           type="time"
                           value={automaticBackupTimeUtc}
-                          onChange={(event) => setAutomaticBackupTimeUtc(event.target.value)}
+                          onChange={(event) =>
+                            backupPolicy.edit("automatic_backup_time_utc", event.target.value)
+                          }
                           disabled={
                             !user?.is_superuser ||
                             backupPolicyBusy ||
                             !automaticBackupsEnabled ||
+                            backupConfigUnavailable ||
                             backupsLoading
                           }
                           className={cn(inputClasses, "mt-1.5 w-full font-mono")}
@@ -3356,7 +3404,9 @@ export function SettingsPanel() {
                           <div className="flex justify-center">
                             <Checkbox
                               checked={manualLocalBackupEnabled}
-                              onChange={setManualLocalBackupEnabled}
+                              onChange={(value) =>
+                                backupPolicy.edit("manual_local_backup_enabled", value)
+                              }
                               ariaLabel={t("settings.backupLocalManual")}
                               disabled={
                                 !user?.is_superuser ||
@@ -3371,7 +3421,9 @@ export function SettingsPanel() {
                           <div className="flex justify-center">
                             <Checkbox
                               checked={automaticLocalBackupEnabled}
-                              onChange={setAutomaticLocalBackupEnabled}
+                              onChange={(value) =>
+                                backupPolicy.edit("automatic_local_backup_enabled", value)
+                              }
                               ariaLabel={t("settings.backupLocalAutomatic")}
                               disabled={
                                 !user?.is_superuser ||
@@ -4027,7 +4079,7 @@ export function SettingsPanel() {
                         !remoteConfigData ||
                         remoteConfig.isError ||
                         preferenceCommand.blocked ||
-                        configCommand.isPending
+                        backupPolicy.isPending
                       }
                       onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
@@ -4064,7 +4116,7 @@ export function SettingsPanel() {
                         !remoteConfigData ||
                         remoteConfig.isError ||
                         preferenceCommand.blocked ||
-                        configCommand.isPending
+                        backupPolicy.isPending
                       }
                       className={`${INPUT} max-w-xs`}
                     >
@@ -4320,7 +4372,7 @@ export function SettingsPanel() {
                           remoteConfig.isError ||
                           previewBusy !== null ||
                           preferenceCommand.blocked ||
-                          configCommand.isPending
+                          backupPolicy.isPending
                         }
                         className={INPUT}
                       >
@@ -4424,7 +4476,7 @@ export function SettingsPanel() {
                         !remoteConfigData ||
                         remoteConfig.isError ||
                         preferenceCommand.blocked ||
-                        configCommand.isPending ||
+                        backupPolicy.isPending ||
                         parsedTrashRetentionDays === null
                       }
                       className={BTN_PRIMARY}

@@ -70,9 +70,18 @@ the first edit; refreshing Trash does not read or overwrite configuration. Its
 pending intent survives conflict; authorized review permits explicit revised save
 or adoption. The revised retention value is validated before submission. Members
 cannot edit retention, and an unavailable configuration read has explicit retry.
-Compound backup policy still uses the additive legacy path. The optional client
-base must become required when their M9 cutover is complete; this is not yet
-application-wide conflict protection.
+`settings-backup-policy.ts` owns the compound schedule/local-destination draft:
+a captured base, a frozen snapshot and deliberate changes. Review shows authorized
+current values; explicit revised save merges only deliberate changes onto that
+snapshot. Config must acknowledge before remote-destination commands begin. Each
+separate destination acknowledgement remains canonical if a later one fails; only
+changed destination fields are sent, and confirmed drafts are removed individually.
+
+The configuration transport and command owner now require an editing base for every
+first-party write. The backend retains its documented legacy-client compatibility;
+legacy writes advance the version but remain unprotected themselves. This cutover
+covers vault configuration, not every editable aggregate. Remote connection edit
+versions and the reviewed-root enrollment precondition remain separate open work.
 
 ### Implemented backup seam (M9 increment)
 

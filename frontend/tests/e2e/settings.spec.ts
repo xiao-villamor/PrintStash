@@ -23,6 +23,34 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("settings route", () => {
+  test("rejects a stale configuration write in the browser fake", async ({ request }) => {
+    const before = await (await request.get("/api/v1/config")).json();
+    const headers = {
+      "If-Match": `"vault-config-e${before.edit_epoch}-v${before.edit_version}"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    };
+    const first = await request.put("/api/v1/config", { headers, data: { currency: "EUR" } });
+    expect(first.status()).toBe(200);
+    expect((await first.json()).edit_version).toBe(before.edit_version + 1);
+    const stale = await request.put("/api/v1/config", { headers, data: { currency: "GBP" } });
+    expect(stale.status()).toBe(412);
+    expect((await (await request.get("/api/v1/config")).json()).currency).toBe("EUR");
+  });
+  test("persists a conditional preference in the browser fake", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    const input = page.getByLabel("Display currency");
+    await expect(input).toBeEnabled();
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/config") && response.request().method() === "PUT",
+    );
+    await input.selectOption("EUR");
+    const receipt = await saved;
+    expect(receipt.status()).toBe(200);
+    expect(receipt.request().headers()["x-printstash-edit-contract"]).toBe("conditional-v1");
+    await page.reload();
+    await expect(page.getByLabel("Display currency")).toHaveValue("EUR");
+  });
   test("scheduled backup progress appears in Tasks", async ({ page }) => {
     const now = "2026-01-01T00:00:00Z";
     await page.route("**/api/v1/jobs**", async (route) => {

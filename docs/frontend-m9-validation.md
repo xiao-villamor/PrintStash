@@ -868,3 +868,53 @@ passed **28 tests in 16.54 s** (157 unrelated cases deselected). The backup save
 fixture now returns an advancing edit receipt and asserts the accepted field.
 This increment does not migrate compound backup policy, Trash/GC list ownership,
 or the remaining M9 surfaces. M9 remains active.
+
+## Compound backup policy editing and first-party config cutover (M9 increment)
+
+The config aggregate owns its captured policy snapshot and deliberate field changes.
+A config conflict or uncertain receipt must stop destination writes until explicit
+review. Independent destination receipts remain published after partial failure;
+only deliberately changed destination fields are submitted. Connection-version
+contracts remain a separate incomplete boundary, not covered by the config ETag.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| BP1 | keeps the original policy snapshot during refresh | Edge | First edit v1; background v2 changes untouched fields | PUT retains v1 snapshot and precondition | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::keeps the original policy snapshot during refresh` |
+| BP2 | reviews a failed policy save before destination writes | Error | Config returns 412 or 503; review v2 | No destination writes before explicit revised save | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::reviews a failed policy save before destination writes` |
+| BP3 | adopts a reviewed policy without writing destinations | Happy | Config conflict; authorized review | Server policy replaces draft; no further writes | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::adopts a reviewed policy without writing destinations` |
+| BP4 | preserves confirmed destination receipts after partial failure | Error | First destination ACK; second fails | Confirmed value retained; retry only remaining destination | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::preserves confirmed destination receipts after partial failure` |
+| BP5 | blocks policy retry after an unavailable review | Error | Review returns 403 or 503 | No revised-save action or destination write | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::blocks policy retry after an unavailable review` |
+| BP6 | retires a pending policy review on logout | Edge | Logout while review read pending | No old review or destination write after response | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::retires a pending policy review on logout` |
+| BP7 | saves the complete automatic-backup policy | Happy | Admin changes policy and one destination flag | Conditional config ACK then deliberate destination patch | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::saves the complete automatic-backup policy` |
+| BP8 | configure automatic backups with independent destinations | Happy | Real server; explicit schedule and remote flag edits | Saved config and destination values read back | Playwright | ✅ `tests/e2e-real/settings.spec.ts::configure automatic backups with independent destinations` |
+| BP9 | sends the reviewed configuration base | Happy | First-party config writer | Mandatory conditional headers; advancing receipt | Frontend unit | ✅ `src/lib/api/__tests__/config.test.ts::sends the reviewed configuration base` |
+| BP10 | rejects an invalid configuration base before dispatch | Error | Invalid epoch or version | No network write | Frontend unit | ✅ `src/lib/api/__tests__/config.test.ts::rejects an invalid configuration base before dispatch` |
+| BP11 | rejects an invalid conditional configuration receipt | Error | Stale or foreign receipt | No confirmation | Frontend unit | ✅ `src/lib/api/__tests__/config.test.ts::rejects an invalid conditional configuration receipt` |
+| BP12 | rejects a stale configuration write in the browser fake | Error | Two edits using one base | Second write 412; first value retained | Playwright | ✅ `tests/e2e/settings.spec.ts::rejects a stale configuration write in the browser fake` |
+| BP13 | persists a conditional preference in the browser fake | Happy | UI changes currency then reloads | Advancing receipt and persisted selection | Playwright | ✅ `tests/e2e/settings.spec.ts::persists a conditional preference in the browser fake` |
+
+Validation to date: the eight new component cases failed before implementation
+(**8 failed in 15.97 s**). After the owner migration, **13 affected cases passed
+in 13.92 s**. Mandatory configuration transport/owner tests: **40 passed in 3.70 s**;
+legacy library-client fixture updated to the conditional contract: **15 passed in
+3.48 s**. Typecheck caught that old call and its fixture's JSON type; both corrected.
+Types (app and packages), lint, format (770 files) and production build pass.
+
+The two mock-browser regressions passed **2/2 in 9.7 s**. The fake now uses the
+shared complete configuration factory, advances edit versions, rejects stale
+preconditions and persists patches; dedicated credential write values are not echoed in its
+responses. Existing source-toggle fixture changes advance the same version.
+
+The first selected real-browser run stopped during fixture creation (**422**):
+backup-selection flags belong to PATCH, not connection creation. The fixture now
+creates then configures the destination through the documented endpoint. The
+corrected selected flow passed **1/1 in 47.8 s**, including startup (body **7.9 s**).
+The existing source-enabled upload flow also passed **1/1 in 5.1 s** (body **2.4 s**).
+No full test suite was run.
+
+All production `updateVaultConfig` callers now carry a captured base; the transport
+and Query command require it in their public types and validate it at runtime.
+Temporary optional-base/legacy-publication branches are removed. The backend's
+legacy compatibility is unchanged and is explicitly outside conditional protection.
+M9 still includes the reviewed-root contract, remaining administrative query owners
+and independent editable-aggregate contracts. M10 and M11 have not been advanced.

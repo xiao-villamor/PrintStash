@@ -10,7 +10,10 @@ import { aVaultConfig } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import type { EditingBase } from "@/types/editing";
 import { updateVaultConfig } from "@/lib/api/config";
-function Editor({ writer, base }: { writer?: typeof updateVaultConfig; base?: EditingBase } = {}) {
+function Editor({
+  writer,
+  base = aVaultConfig(),
+}: { writer?: typeof updateVaultConfig; base?: EditingBase } = {}) {
   const query = useQuery({ ...vaultConfigOptions(), retry: false });
   const command = useVaultConfigCommand(writer);
   return (
@@ -106,7 +109,9 @@ describe("Vault configuration owner", () => {
   it("publishes the injected concrete writer full DTO", async () => {
     const writer = vi
       .fn<typeof updateVaultConfig>()
-      .mockResolvedValue(aVaultConfig({ oidc_display_name: "Injected", currency: "EUR" }));
+      .mockResolvedValue(
+        aVaultConfig({ edit_version: 2, oidc_display_name: "Injected", currency: "EUR" }),
+      );
     const app = renderApp(<Editor writer={writer} />, {
       routes: { "GET /api/v1/config": json(aVaultConfig({ oidc_display_name: "Base" })) },
     });
@@ -128,7 +133,9 @@ describe("Vault configuration owner", () => {
     const app = renderApp(<Editor />, {
       routes: {
         "GET /api/v1/config": json(aVaultConfig({ oidc_display_name: "Base" })),
-        "PUT /api/v1/config": json(aVaultConfig({ oidc_display_name: "Server", currency: "EUR" })),
+        "PUT /api/v1/config": json(
+          aVaultConfig({ edit_version: 2, oidc_display_name: "Server", currency: "EUR" }),
+        ),
       },
     });
     await screen.findByText("Base");
@@ -171,7 +178,7 @@ describe("Vault configuration owner", () => {
       await act(async () => {
         response.resolve(
           status === 200
-            ? json(aVaultConfig({ oidc_display_name: "Saved" }))
+            ? json(aVaultConfig({ edit_version: 2, oidc_display_name: "Saved" }))
             : json({ detail: "unavailable" }, status),
         );
       });
@@ -212,7 +219,7 @@ describe("Vault configuration owner", () => {
     const app = renderApp(<Editor />, {
       routes: {
         "GET /api/v1/config": json(aVaultConfig({ oidc_display_name: "Base" })),
-        "PUT /api/v1/config": json(aVaultConfig({ oidc_display_name: "Old" })),
+        "PUT /api/v1/config": json(aVaultConfig({ edit_version: 2, oidc_display_name: "Old" })),
       },
     });
     await screen.findByText("Base");

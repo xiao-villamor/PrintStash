@@ -116,10 +116,12 @@ describe("updateVaultConfig", () => {
     ).rejects.toThrow(/Invalid editing (acknowledgement|base)/);
   });
   it("PUTs a change", async () => {
-    const acknowledged = aVaultConfig({ storage_backend: "s3" });
+    const acknowledged = aVaultConfig({ edit_version: 2, storage_backend: "s3" });
     fetchMock.mockResolvedValueOnce(json(acknowledged));
 
-    expect(await updateVaultConfig({ storage_backend: "s3" })).toEqual(acknowledged);
+    expect(await updateVaultConfig({ storage_backend: "s3" }, { base: aVaultConfig() })).toEqual(
+      acknowledged,
+    );
 
     expectRequest("/api/v1/config", "PUT");
     expect(lastBody()).toEqual({ storage_backend: "s3" });

@@ -104,22 +104,19 @@ export function getLatestRelease(refresh = false): Promise<ReleaseStatus> {
 
 export async function updateVaultConfig(
   body: VaultConfigUpdate,
-  options: Pick<GetJsonOptions, "signal"> & { base?: EditingBase } = {},
+  options: Pick<GetJsonOptions, "signal"> & { base: EditingBase },
 ): Promise<VaultConfigRead> {
-  // Optional only during the M9 first-party form cutover.
   const base = options.base;
-  if (base) requireEditingBase(base);
+  requireEditingBase(base);
   const headers = jsonHeaders();
-  if (base) {
-    headers["If-Match"] = `"vault-config-e${base.edit_epoch}-v${base.edit_version}"`;
-    headers["X-PrintStash-Edit-Contract"] = "conditional-v1";
-  }
+  headers["If-Match"] = `"vault-config-e${base.edit_epoch}-v${base.edit_version}"`;
+  headers["X-PrintStash-Edit-Contract"] = "conditional-v1";
   const row = await requestApi<VaultConfigRead>("/api/v1/config", {
     method: "PUT",
     headers,
     body: JSON.stringify(body),
     signal: options.signal,
   });
-  if (base) requireEditingReceipt(row, base);
+  requireEditingReceipt(row, base);
   return row;
 }

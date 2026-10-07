@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Protect backup schedule and local-destination drafts with conditional config
+  saves. Preserve confirmed destination updates after partial failure and submit
+  only deliberately changed destination fields. First-party configuration writes
+  now require their captured editing base.
+
 - Preserve backup and trash retention drafts across refreshes. Detect concurrent
   edits and require an explicit review before retrying with revised days; retry
   failed configuration loads without losing input.

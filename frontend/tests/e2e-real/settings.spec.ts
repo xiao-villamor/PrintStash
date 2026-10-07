@@ -984,13 +984,18 @@ test.describe("settings", () => {
     const connection = await created.json();
 
     try {
+      const seeded = await page.request.patch(`/api/v1/storage-connections/${connection.id}`, {
+        data: { automatic_backup_enabled: false },
+      });
+      expect(seeded.status()).toBe(200);
       await page.goto("/settings?section=backup");
       await expect(page.getByLabel(`Use ${connectionName} for manual backups`)).toBeVisible();
       await page.getByLabel("Enable automatic backups").click();
       await page.getByLabel("Daily time (UTC)").fill("04:30");
       await page.getByLabel("Use local storage for manual backups").click();
+      await page.getByLabel(`Use ${connectionName} for automatic backups`).click();
 
-      await Promise.all([
+      const [policyResponse] = await Promise.all([
         page.waitForResponse(
           (response) =>
             response.url().endsWith("/api/v1/config") && response.request().method() === "PUT",
@@ -1003,6 +1008,13 @@ test.describe("settings", () => {
         page.getByRole("button", { name: "Save backup settings" }).click(),
       ]);
 
+      expect(policyResponse.status()).toBe(200);
+      expect(policyResponse.request().headers()["if-match"]).toMatch(
+        /^"vault-config-e[0-9a-f]{32}-v\d+"$/,
+      );
+      expect(policyResponse.request().headers()["x-printstash-edit-contract"]).toBe(
+        "conditional-v1",
+      );
       const [configResponse, connectionsResponse] = await Promise.all([
         page.request.get("/api/v1/config"),
         page.request.get("/api/v1/storage-connections"),
