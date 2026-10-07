@@ -78,9 +78,13 @@ reads, so current-location summaries follow the accepted storage transition.
 the currently observed reviewed path. The configuration PUT now stages its owned
 policy/flag/schedule/provider writes and commits them together before publishing
 runtime values or derivative hints. A database failure rolls back the whole patch.
-Conditional configuration edit versions and a backend reviewed-root precondition
-remain required before M9 closes; local fingerprints and path comparisons do not
-provide that protection.
+`SystemConfig.vault_edit_version` now advances transactionally for every editable
+vault configuration field, including legacy SQL/ORM writes and provider credentials.
+The same immutable database trigger installs through migrations and fresh bootstrap;
+backup-attempt timestamps and independently owned feature settings do not advance it.
+Conditional HTTP comparison, coherent editing-base reads, client conflict recovery
+and a backend reviewed-root precondition remain required before M9 closes. Local
+fingerprints and path comparisons do not provide that protection.
 
 ## Proposed directory tree
 

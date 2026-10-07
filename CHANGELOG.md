@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Persist vault configuration edit versions separately from operational bookkeeping,
+  including changes made by legacy writers. The conditional HTTP/client rollout
+  remains in progress; existing clients keep their current write contract.
+
 - Save compound configuration changes in one transaction so a failed final write
   cannot leave earlier policy, schedule, currency or provider changes committed.
 

@@ -42,6 +42,11 @@ class SystemConfig(SQLModel, table=True):
     __tablename__ = "system_config"
 
     id: Optional[int] = Field(default=1, primary_key=True)
+    # Only the vault-config editing aggregate. Operational bookkeeping and
+    # independently owned feature settings do not invalidate its editing base.
+    vault_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
 
     # Random installation identity used to bind managed filesystem roots to
     # this database. It is generated once and never derived from a path.

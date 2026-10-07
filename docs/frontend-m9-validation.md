@@ -428,3 +428,68 @@ Validation (2026-10-07):
 
 This removes partial database commits. It does **not** yet provide conditional
 edit versions, reviewed-root enforcement, or complete M9 acceptance.
+
+
+## Durable configuration edit version (M9, locally qualified)
+
+Before wiring conditional HTTP writes, persist a version for the editable vault
+configuration aggregate. Its scope is the fields accepted by the configuration
+PUT, including legacy storage projections and typed provider credentials. Direct
+SQL, ORM and legacy writes must advance it in the same transaction. Backup-run
+bookkeeping, setup markers and unrelated feature settings must not create false
+conflicts. The database-history epoch already rotated during restore will pair
+with this version in the subsequent HTTP contract; the storage-root installation
+identity remains unchanged.
+
+This is an additive schema step, not complete conflict protection. Generate the
+migration from the model, install the same immutable trigger contract on upgrades
+and fresh databases, and preserve existing configuration on downgrade/upgrade.
+The HTTP/client rollout follows this prerequisite; no frontend claim is enabled
+by this step alone.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| CV1 | new configuration starts with a positive version | Happy | Fresh SQLite/PostgreSQL singleton | Stored vault edit version is one | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_new_configuration_starts_with_a_positive_version` |
+| CV2 | legacy edits advance the configuration version | Happy | Each editable configuration field changes through SQL without a version | Fresh read has a greater version | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_legacy_edits_advance_the_configuration_version` |
+| CV3 | operational bookkeeping preserves the editing base | Edge | Backup attempt time, setup marker, unrelated notification setting change | Stored vault edit version unchanged | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_operational_bookkeeping_preserves_the_editing_base` |
+| CV4 | rollback preserves the previous editing base | Error | Editable field changed then transaction rolled back | Field and version both unchanged | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_rollback_preserves_the_previous_editing_base` |
+| CV5 | an explicit version advance is not counted twice | Edge | Conditional writer advances version with edited fields | Stored version equals the supplied advance | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_an_explicit_version_advance_is_not_counted_twice` |
+| CV6 | no-op writes preserve the editing base | Edge | SQL writes the existing currency again | Stored version unchanged | Integration | ✅ `integration/db/test_config_edit_contracts.py::TestConfigurationEditVersion::test_no_op_writes_preserve_the_editing_base` |
+| CV7 | upgrade preserves existing configuration | Happy | Previous-head database with stored settings | New version initialized; settings preserved; legacy write advances it | Integration | ✅ `integration/db/migrations/test_config_edit_version.py::TestConfigEditMigration::test_upgrade_preserves_existing_configuration` |
+| CV8 | downgrade and reupgrade preserve existing settings | Edge | New schema with edited settings, round trip to previous head | Settings preserved; contract works after reupgrade | Integration | ✅ `integration/db/migrations/test_config_edit_version.py::TestConfigEditMigration::test_round_trip_preserves_existing_settings` |
+| CV9 | operators can render the upgrade without a database connection | Happy | Offline SQL for the previous-to-new range on SQLite/PostgreSQL | Output includes the additive column and installed trigger | Integration | ✅ `integration/db/migrations/test_config_edit_version.py::TestOfflineConfigEditMigration::test_renders_the_upgrade_without_a_database_connection` |
+
+Validation (2026-10-07):
+
+- Initial SQLite regression failed because the durable version column did not
+  exist: **1 failed, 93 deselected** in 3.21 s.
+- Database contract and migration selection: **96 passed, 2 setup errors** in
+  108.09 s. All **94** fresh-schema contract cases passed on SQLite/PostgreSQL,
+  including each of the 42 edited columns; both SQLite migration cases passed.
+  PostgreSQL setup attempted to replay the historical baseline, which references
+  `models` before that table exists. The corrected fixture follows the existing
+  PostgreSQL migration-test pattern: supported fresh installation, downgrade to
+  the previous revision, then exercise this upgrade with historical data.
+- Only the two corrected PostgreSQL migration cases were repeated:
+  **2 passed, 2 deselected** in 53.26 s.
+- Offline upgrade rendering plus the preceding compound-write rollback cases:
+  **6 passed** in 4.67 s.
+- Selected schema/factory guards (`test_models_versus_chain`, migration patterns,
+  database parity, schema DDL and `TestBuildSystemConfig`): **170 passed** in
+  186.33 s. No additional schema migration is emitted by autogenerate.
+- Ruff check passed for all seven touched Python files; DB source format check
+  passed. The new trigger module passes targeted Pyright (**0 errors**).
+  An explicitly broadened model-file check reports six existing SQLModel
+  `__tablename__` assignment diagnostics; this model file is outside the
+  configured Pyright include list, and its table-name declarations are unchanged.
+- The generated migration contains exactly the new non-null version column with
+  a server default. Trigger installation/removal was then added, as Alembic does
+  not generate non-table objects. Existing migrations were not edited.
+- A direct comparison with the configuration request schema found no missing or
+  extra editable columns after mapping its typed provider payload to stored
+  configuration/secret projections. No public API or frontend wire type changed.
+
+HTTP preconditions, coherent editing-base reads, concurrent-request regression
+coverage, restore-incarnation checks and frontend conflict recovery remain the
+next portion of M9. This prerequisite does not close the milestone. No full
+backend/frontend suite, browser suite, build or performance benchmark was rerun.
