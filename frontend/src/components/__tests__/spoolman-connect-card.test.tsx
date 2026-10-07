@@ -122,6 +122,68 @@ describe("SpoolmanConnectCard", () => {
   });
 
   describe("editing recovery", () => {
+    it("validates a revised connection URL before dispatch", async () => {
+      const app = renderCard({
+        routes: { "PUT /api/v1/spoolman": json({ detail: "edit_conflict" }, 412) },
+      });
+      await userEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      await userEvent.click(await screen.findByRole("button", { name: /Review latest/ }));
+      const retry = await screen.findByRole("button", {
+        name: "Save my draft against this version",
+      });
+      const input = screen.getByDisplayValue("http://spoolman.test:7912");
+      await userEvent.clear(input);
+      await userEvent.type(input, "invalid-url");
+      await userEvent.click(retry);
+      expect(input).toBeInvalid();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
+    it("requires adoption after database history changes", async () => {
+      const app = renderCard({
+        routes: { "PUT /api/v1/spoolman": json({ detail: "edit_conflict" }, 412) },
+      });
+      await userEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      app.route({ "GET /api/v1/spoolman": json(aStatus({ edit_epoch: "b".repeat(32) })) });
+      await act(async () => {
+        app.client.setQueryData(queryKeys.spoolmanStatus, aStatus({ edit_epoch: "b".repeat(32) }));
+      });
+      await userEvent.click(await screen.findByRole("button", { name: /Review latest/ }));
+      expect(
+        await screen.findByRole("button", { name: "Save my draft against this version" }),
+      ).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it("adopts current settings without writing", async () => {
+      const app = renderCard({
+        routes: { "PUT /api/v1/spoolman": json({ detail: "edit_conflict" }, 412) },
+      });
+      await userEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      app.route({
+        "GET /api/v1/spoolman": json(aStatus({ edit_version: 2, base_url: "http://preview.test" })),
+      });
+      await userEvent.click(await screen.findByRole("button", { name: /Review latest/ }));
+      await screen.findByText("http://preview.test");
+      app.route({
+        "GET /api/v1/spoolman": json(
+          aStatus({
+            edit_version: 3,
+            base_url: "http://current.test",
+            has_api_key: false,
+            write_enabled: true,
+          }),
+        ),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Use latest version" }));
+      expect(await screen.findByDisplayValue("http://current.test")).toBeVisible();
+      expect(
+        screen.getByRole("checkbox", { name: /Write consumption back to Spoolman/ }),
+      ).toBeChecked();
+      expect(screen.queryByDisplayValue("********")).not.toBeInTheDocument();
+      expect(app.client.getQueryData(queryKeys.spoolmanStatus)).toMatchObject({ edit_version: 3 });
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
     it("blocks editing without an initial status", async () => {
       const app = renderApp(<SpoolmanConnectCard canEdit />, {
         routes: { "GET /api/v1/spoolman": json({ detail: "unavailable" }, 503) },

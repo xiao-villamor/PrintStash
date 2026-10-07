@@ -7,7 +7,7 @@ const buildCommand = buildMode === "react-compiler" ? "pnpm build:react-compiler
 
 export default defineConfig({
   testDir: "./tests/performance",
-  testIgnore: ["library-startup.spec.ts", "startup-behaviour.spec.ts"],
+  testIgnore: ["library-startup.spec.ts", "startup-behaviour.spec.ts", "startup-resources.spec.ts"],
   outputDir: `test-results/performance-${buildMode}`,
   timeout: 60_000,
   fullyParallel: false,

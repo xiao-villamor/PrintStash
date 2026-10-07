@@ -1,8 +1,7 @@
 # Frontend architecture evidence and review coverage
 
 2026-10-06. This is the evidence supporting a plan, not certification that every
-frontend file or behaviour has been manually audited. Production implementation
-and comprehensive qualification remain pending.
+frontend file or behaviour has been manually audited. The findings below retain their original evidence labels. Current implementation disposition is recorded at the end of this document; final qualification remains tracked separately.
 
 For implementation-base accounting and fresh bounded evidence, see
 [inventory reconciliation](inventory.md), [baseline failure evidence](baseline-evidence.md)
@@ -122,3 +121,36 @@ motion contracts; outliner branch/reveal query identities; lazy 3D/PDF/Markdown
 viewers and cancellable G-code work; authorized resync on event reconnect; local
 upload progress; existing real API/browser tests. Large files or legacy naming
 alone do not justify replacing any of these designs.
+
+
+## Implementation disposition (M11 reconciliation)
+
+This table updates disposition without rewriting the historical observations above.
+The full migration is qualified through the [behavior matrix](validation.md);
+[final review](final-review.md) records additional findings and precise inspection
+scope. Current working-source provenance lives in the ledger final columns.
+
+| Findings | Current behavior and owner | Qualification |
+|---|---|---|
+| F01–F02 | Server browse filters and orders the combined authorized live set before keyset pagination; only Everything/Multipart Sets are offered. | M2/M3 closure; matrix1–19 |
+| F03, F15 | Feature commands fence stale reads and publish confirmed receipts; backend atomic editing bases detect competing edits. | M4 closure; matrix20–27 |
+| F04, F14 | Normalized Router URL state and entry-specific bounded Library restoration; ignored Link/navigation options removed. | M5 closure; matrix32–36; final Link regressions |
+| F05 | Leases protect mounted images, four-download viewport admission and idle-byte/entry limits bound retained work. The unused compatibility reader is removed. | M6 validation and final lease selection; measured decoded images reported separately |
+| F06–F08 | Complete browse identity and native cancellation; no transport JSON TTL/dedup/path invalidation; session generation fences reads, writes, bodies and private bytes. | M1/M3/M10; matrix28–31; executable dependency gate |
+| F09 | Documents have a canonical Query owner and distinct error/retry/empty states. | M8; matrix47 |
+| F10–F12 | Shared Inbox reads; Task Center retains remote Job ownership separate from transfers; disposed socket/ticket generations cannot reconnect. | M7; matrix42–46 |
+| F13 | Selection intent is captured once outside replayable state updaters; Shift after append and drag contracts are covered. | M6; actual render-cost improvement is not inferred from the callback change |
+| F16 | Bounded stale-chunk recovery and static-only PWA caching are implemented. Both locale catalogs remain eager by deliberate choice; no evidence justified another loading architecture. | M10; matrix50–53 |
+| F17 | Existing package public APIs retained; browser preference seams stay explicit and app subscriptions own lifecycle. | Domain/UI qualification and dependency gate; no package rename |
+| F18 | Named administration, profiles, statistics, Search, Similarity, upload and extension owners have flow-specific contracts. The final review additionally closed the Spoolman gap. | M8/M9/M10 records and final corrections; file-level limitations remain explicit in the ledger |
+
+Additional P3 findings retained for later maintenance: `frontend/components.json`
+still describes the historical scaffolder CSS location/RSC setting; `.mise.toml`
+contains historical Next.js names and development environment variables, while
+actual runtime/build scripts use Vite. Neither was used to qualify runtime behavior.
+The no-op Localized wrapper and app UI re-exports are presentation compatibility,
+not parallel remote-state owners. Their removal alone would be cosmetic.
+
+No exhaustive accessibility, physical-printer, live-provider, all-browser or
+line-by-line assertion audit is claimed. These are review limits, not substitutes
+for the observable migration acceptance contracts.

@@ -26,15 +26,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireAssetUrl,
   getAssetCacheStats,
-  getCachedAssetUrl,
   invalidateCachedAsset,
   peekCachedAssetUrl,
 } from "@/lib/asset-cache";
 
+/** Complete a non-mounted test consumer through the production lease interface. */
+async function readReleasedAsset(path: string): Promise<string> {
+  const lease = acquireAssetUrl(path);
+  try {
+    return await lease.url;
+  } finally {
+    lease.release();
+  }
+}
+
 /** Resolve `count` distinct assets, to push the cache past its cap. */
 async function fill(prefix: string, count: number) {
   for (let index = 0; index < count; index += 1) {
-    await getCachedAssetUrl(`/files/${prefix}-${index}/thumbnail`);
+    await readReleasedAsset(`/files/${prefix}-${index}/thumbnail`);
   }
 }
 
@@ -69,7 +78,7 @@ afterEach(() => {
 describe("assetCache", () => {
   it("revokes cached thumbnails when another tab changes the session", async () => {
     const path = "/files/cross-tab/thumbnail";
-    const oldUrl = await getCachedAssetUrl(path);
+    const oldUrl = await readReleasedAsset(path);
     window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
     expect(peekCachedAssetUrl(path)).toBeNull();
     expect(revoked).toContain(oldUrl);
@@ -77,11 +86,11 @@ describe("assetCache", () => {
 
   it("revokes cached thumbnails when the session owner changes", async () => {
     const path = "/files/session/thumbnail";
-    const oldUrl = await getCachedAssetUrl(path);
+    const oldUrl = await readReleasedAsset(path);
     window.dispatchEvent(new Event("printstash:auth-changed"));
     expect(peekCachedAssetUrl(path)).toBeNull();
     expect(revoked).toContain(oldUrl);
-    expect(await getCachedAssetUrl(path)).not.toBe(oldUrl);
+    expect(await readReleasedAsset(path)).not.toBe(oldUrl);
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 
@@ -90,18 +99,19 @@ describe("assetCache", () => {
     const current = Promise.withResolvers<Response>();
     vi.mocked(fetch).mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
     const path = "/files/session-pending/thumbnail";
-    const oldRead = getCachedAssetUrl(path);
+    const oldRead = readReleasedAsset(path);
     const oldOutcome = oldRead.catch((error: Error) => error);
     window.dispatchEvent(new Event("printstash:auth-changed"));
-    const newRead = getCachedAssetUrl(path);
+    const newRead = readReleasedAsset(path);
     previous.resolve(new Response("previous owner"));
     expect(await oldOutcome).toMatchObject({
       name: "AbortError",
       message: "request_session_changed",
     });
-    expect(getCachedAssetUrl(path)).toBe(newRead);
+    const sharedRead = readReleasedAsset(path);
     current.resolve(new Response("current owner"));
     expect(await newRead).toBe(created[0]);
+    expect(await sharedRead).toBe(created[0]);
     expect(created).toHaveLength(1);
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
@@ -110,7 +120,7 @@ describe("assetCache", () => {
     const previous = Promise.withResolvers<Response>();
     vi.mocked(fetch).mockReturnValueOnce(previous.promise);
     const path = "/files/invalidated-pending/thumbnail";
-    const oldRead = getCachedAssetUrl(path);
+    const oldRead = readReleasedAsset(path);
     const oldOutcome = oldRead.catch((error: Error) => error);
     invalidateCachedAsset(path);
     previous.resolve(new Response("old bytes"));
@@ -121,13 +131,13 @@ describe("assetCache", () => {
 
   describe("fetching an asset", () => {
     it("returns an object URL for the blob", async () => {
-      const url = await getCachedAssetUrl("/files/1/thumbnail");
+      const url = await readReleasedAsset("/files/1/thumbnail");
 
       expect(url).toBe(created[0]);
     });
 
     it("fetches the path it was given", async () => {
-      await getCachedAssetUrl("/files/2/thumbnail");
+      await readReleasedAsset("/files/2/thumbnail");
 
       expect(vi.mocked(fetch).mock.calls[0][0]).toContain("/files/2/thumbnail");
     });
@@ -137,18 +147,18 @@ describe("assetCache", () => {
       // transient 500.
       vi.mocked(fetch).mockResolvedValueOnce(new Response("nope", { status: 500 }));
 
-      await expect(getCachedAssetUrl("/files/3/thumbnail")).rejects.toThrow(/500/);
+      await expect(readReleasedAsset("/files/3/thumbnail")).rejects.toThrow(/500/);
 
       vi.mocked(fetch).mockResolvedValueOnce(new Response("png-bytes", { status: 200 }));
-      await expect(getCachedAssetUrl("/files/3/thumbnail")).resolves.toBeTruthy();
+      await expect(readReleasedAsset("/files/3/thumbnail")).resolves.toBeTruthy();
     });
   });
 
   describe("reusing what it already has", () => {
     it("answers a second request without fetching again", async () => {
-      await getCachedAssetUrl("/files/4/thumbnail");
+      await readReleasedAsset("/files/4/thumbnail");
 
-      await getCachedAssetUrl("/files/4/thumbnail");
+      await readReleasedAsset("/files/4/thumbnail");
 
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
     });
@@ -160,15 +170,15 @@ describe("assetCache", () => {
     });
 
     it("knows a path it has resolved", async () => {
-      const url = await getCachedAssetUrl("/files/6/thumbnail");
+      const url = await readReleasedAsset("/files/6/thumbnail");
 
       expect(peekCachedAssetUrl("/files/6/thumbnail")).toBe(url);
     });
 
     it("collapses concurrent requests for the same path into one fetch", async () => {
       // A grid mounts fifty cards at once, and several may share a thumbnail.
-      const first = getCachedAssetUrl("/files/7/thumbnail");
-      const second = getCachedAssetUrl("/files/7/thumbnail");
+      const first = readReleasedAsset("/files/7/thumbnail");
+      const second = readReleasedAsset("/files/7/thumbnail");
 
       await Promise.all([first, second]);
 
@@ -177,8 +187,8 @@ describe("assetCache", () => {
 
     it("gives concurrent callers the same URL", async () => {
       const [first, second] = await Promise.all([
-        getCachedAssetUrl("/files/8/thumbnail"),
-        getCachedAssetUrl("/files/8/thumbnail"),
+        readReleasedAsset("/files/8/thumbnail"),
+        readReleasedAsset("/files/8/thumbnail"),
       ]);
 
       expect(first).toBe(second);
@@ -188,7 +198,7 @@ describe("assetCache", () => {
   describe("invalidating one", () => {
     it("forgets the path", async () => {
       // A re-upload can reuse a file id, which no cache key can see.
-      await getCachedAssetUrl("/files/9/thumbnail");
+      await readReleasedAsset("/files/9/thumbnail");
 
       invalidateCachedAsset("/files/9/thumbnail");
 
@@ -198,7 +208,7 @@ describe("assetCache", () => {
     it("revokes the URL it dropped", async () => {
       // Forgetting without revoking leaks the decoded image the URL holds
       // alive.
-      const url = await getCachedAssetUrl("/files/10/thumbnail");
+      const url = await readReleasedAsset("/files/10/thumbnail");
 
       invalidateCachedAsset("/files/10/thumbnail");
 
@@ -206,10 +216,10 @@ describe("assetCache", () => {
     });
 
     it("re-fetches the path afterwards", async () => {
-      await getCachedAssetUrl("/files/11/thumbnail");
+      await readReleasedAsset("/files/11/thumbnail");
       invalidateCachedAsset("/files/11/thumbnail");
 
-      await getCachedAssetUrl("/files/11/thumbnail");
+      await readReleasedAsset("/files/11/thumbnail");
 
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
     });
@@ -306,7 +316,7 @@ describe("asset leases and admission", () => {
   it("bounds inactive image bytes", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
     const urls: string[] = [];
-    for (let i = 0; i < 5; i++) urls.push(await getCachedAssetUrl(`/lease/bytes-${i}`));
+    for (let i = 0; i < 5; i++) urls.push(await readReleasedAsset(`/lease/bytes-${i}`));
     expect(revoked).toContain(urls[0]);
     expect(peekCachedAssetUrl("/lease/bytes-4")).toBe(urls[4]);
   });
@@ -384,7 +394,7 @@ describe("private asset scope", () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(new Uint8Array(8 * 1024 * 1024)));
     const mounted = acquireAssetUrl("/lease/byte-mounted");
     const url = await mounted.url;
-    for (let i = 0; i < 5; i++) await getCachedAssetUrl(`/lease/byte-pressure-${i}`);
+    for (let i = 0; i < 5; i++) await readReleasedAsset(`/lease/byte-pressure-${i}`);
     expect(revoked).not.toContain(url);
     expect(peekCachedAssetUrl("/lease/byte-mounted")).toBe(url);
     expect(getAssetCacheStats()).toMatchObject({

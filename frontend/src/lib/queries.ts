@@ -1,3 +1,4 @@
+import { spoolmanStatusOptions } from "./queries/settings-spoolman";
 import { multipartDetailOptions } from "@/features/library/multipart";
 import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
@@ -58,7 +59,6 @@ import type {
   MultipartModelListItem,
   OutlinerModelRead,
   PrintJobRead,
-  SpoolmanStatus,
   SpoolRead,
   TagRead,
   VaultStatsRead,
@@ -373,10 +373,8 @@ export function useVaultConfig(options?: { enabled?: boolean; retry?: false }) {
 
 export function useSpoolmanStatus(options?: { enabled?: boolean }) {
   const api = useQueryApi();
-  return useQuery<SpoolmanStatus>({
-    queryKey: queryKeys.spoolmanStatus,
-    queryFn: ({ signal }) => api.getSpoolmanStatus({ signal }),
-    retry: false,
+  return useQuery({
+    ...spoolmanStatusOptions(api.getSpoolmanStatus),
     enabled: options?.enabled ?? true,
   });
 }

@@ -1,3 +1,4 @@
+/** Internal links preserve Router push/replace history and their complete destination. */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";

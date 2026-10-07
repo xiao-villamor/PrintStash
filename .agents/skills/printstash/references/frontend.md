@@ -4,6 +4,20 @@ Vite + React + TS in `frontend/src/{pages,components,lib,types}`.
 **`DESIGN.md` is binding** — read it before adding or restyling anything; this
 file only routes and adds the checklist.
 
+## State and integration ownership
+
+Before changing queries, mutations, navigation, sessions, events or protected assets,
+read [the frontend architecture](../../../../docs/architecture/frontend.md). Use its
+named owner and public interface; the dependency gate enforces package, transport
+and feature directions. The milestone records linked there explain exceptional
+contracts such as stable Library snapshots, conditional editing and Job recovery.
+
+A new read declares its response-shaping key and cancellation. A write declares
+its captured authority, confirmed receipt and affected reads at the feature owner.
+A form retains its original base while dirty; conflict or unknown outcome requires
+explicit review. Validate these behaviors through the real Query/router/transport
+harness and the relevant browser flow before reporting the change complete.
+
 ## UI change checklist
 
 - [ ] Compose existing primitives from `src/components/ui/` (button, card,

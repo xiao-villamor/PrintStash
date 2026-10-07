@@ -2735,6 +2735,9 @@ describe("SettingsPanel", () => {
           edit_version: 3,
         });
       },
+      // Full Settings rendering plus two saves and a review exceeds five seconds
+      // under V8 coverage; individual UI/network waits retain their own bounds.
+      15_000,
     );
     it("retires a pending preference review on logout", async () => {
       let reads = 0;

@@ -5,7 +5,7 @@ const apiPort = Number(process.env.STARTUP_API_PORT ?? 8420);
 const source = resolve(process.env.STARTUP_FRONTEND_DIR ?? ".");
 export default defineConfig({
   testDir: "./tests/performance",
-  testMatch: ["library-startup.spec.ts", "startup-behaviour.spec.ts"],
+  testMatch: ["library-startup.spec.ts", "startup-behaviour.spec.ts", "startup-resources.spec.ts"],
   outputDir: ".startup-results/browser",
   timeout: 300_000,
   workers: 1,

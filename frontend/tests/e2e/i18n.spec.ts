@@ -3,7 +3,40 @@ import { test, expect } from "@playwright/test";
 import { useMockApi } from "./_setup";
 useMockApi();
 
+declare global {
+  interface Window {
+    __initialLocaleHeadings: string[];
+  }
+}
+
 test.describe("localization", () => {
+  for (const { locale, expected, forbidden } of [
+    { locale: "en", expected: "Settings", forbidden: "Ajustes" },
+    { locale: "es", expected: "Ajustes", forbidden: "Settings" },
+  ]) {
+    test(`uses the saved locale from the first heading: ${locale}`, async ({ page }) => {
+      await page.addInitScript(
+        ({ locale }) => {
+          localStorage.setItem("printstash.locale", locale);
+          const headings: string[] = [];
+          Object.defineProperty(window, "__initialLocaleHeadings", { value: headings });
+          new MutationObserver(() => {
+            document.querySelectorAll("h1").forEach((heading) => {
+              headings.push(heading.textContent ?? "");
+            });
+          }).observe(document, { subtree: true, childList: true, characterData: true });
+        },
+        { locale },
+      );
+      await page.goto("/settings");
+      await expect(page.getByRole("heading", { name: expected, exact: true })).toBeVisible();
+      const headings = await page.evaluate(() => window.__initialLocaleHeadings);
+      expect(headings).toContain(expected);
+      expect(headings).not.toContain(forbidden);
+      await expect(page.locator("html")).toHaveAttribute("lang", locale);
+    });
+  }
+
   for (const width of [1280, 390]) {
     test(`language selection survives reload at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });

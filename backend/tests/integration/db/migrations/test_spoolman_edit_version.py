@@ -126,6 +126,40 @@ class TestSpoolmanEditMigration:
         finally:
             engine.dispose()
 
+    def test_preserves_independent_configuration_triggers(
+        self, legacy_config_url: str
+    ) -> None:
+        config = _alembic_config(legacy_config_url)
+        command.upgrade(config, REVISION)
+        command.downgrade(config, PREVIOUS)
+        engine = create_engine(normalize_database_url(legacy_config_url))
+        try:
+            for revision, currency, enabled, settings, expected in [
+                (PREVIOUS, "GBP", True, '{"enabled":true}', 2),
+                (REVISION, "USD", False, "{}", 3),
+            ]:
+                command.upgrade(config, revision)
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "UPDATE system_config SET currency=:currency, "
+                            "notifications_enabled=:enabled, ai_search_settings_json=:settings WHERE id=1"
+                        ),
+                        {
+                            "currency": currency,
+                            "enabled": enabled,
+                            "settings": settings,
+                        },
+                    )
+                    assert connection.execute(
+                        text(
+                            "SELECT vault_edit_version, notification_edit_version, search_edit_version "
+                            "FROM system_config WHERE id=1"
+                        )
+                    ).one() == (expected, expected, expected)
+        finally:
+            engine.dispose()
+
 
 class TestOfflineSpoolmanEditMigration:
     @pytest.mark.parametrize(

@@ -26,6 +26,31 @@ async function createLinkAndGetUrl(page: import("@playwright/test").Page): Promi
 }
 
 test.describe("share links", () => {
+  test("keeps anonymous share access separate from the private library", async ({
+    page,
+    browser,
+  }) => {
+    const name = `e2e-anonymous-share-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await openShareDialog(page, name);
+    const url = await createLinkAndGetUrl(page);
+    const guest = await browser.newContext();
+    try {
+      const visitor = await guest.newPage();
+      await visitor.goto(url);
+      await expect(visitor.getByRole("heading", { name, exact: true })).toBeVisible();
+      await visitor.goto(new URL("/", url).href);
+      await expect(visitor).toHaveURL(/\/login/);
+      await expect(visitor.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+      await expect(visitor.getByRole("heading", { name, exact: true })).toHaveCount(0);
+      const denied = await guest.request.get(new URL("/api/v1/models", url).href);
+      expect(denied.status()).toBe(401);
+      expect(await denied.text()).not.toContain(name);
+    } finally {
+      await guest.close();
+    }
+  });
+
   test("view-only vs downloadable public share links", async ({ page }) => {
     const name = `e2e-lnk-${Date.now()}`;
     await uploadGcodeModel(page, name);

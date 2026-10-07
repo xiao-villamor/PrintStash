@@ -47,6 +47,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
     null,
   );
   const live = useRef(true);
+  const connectionForm = useRef<HTMLFormElement>(null);
   useEffect(() => {
     live.current = true;
     const retire = () => {
@@ -75,6 +76,9 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
     }
   }
   const connected = !!status?.connected;
+  const historyChanged =
+    review.phase === "ready" && review.snapshot.edit_epoch !== (draftBase ?? status)?.edit_epoch;
+
   const beginDraft = () => {
     if (status && !draftBase) setDraftBase(captureEditingBase(status));
   };
@@ -84,7 +88,14 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
     ok?: string,
     revised?: SpoolmanStatus,
   ) {
-    if (!canEdit || !status || busy || (review.phase !== "idle" && !revised)) return;
+    if (
+      !canEdit ||
+      !status ||
+      busy ||
+      (review.phase !== "idle" && !revised) ||
+      (revised && historyChanged)
+    )
+      return;
     const session = getSessionVersion();
     setBusy(true);
     setError("");
@@ -104,6 +115,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
       setError(userMessage(e));
       const code = parseApiError(e).status;
       if ([412, 428].includes(code) || code === 0 || code >= 500) {
+        setDraftBase((base) => base ?? captureEditingBase(status));
         setFailedToggle(ok ? null : body);
         setReview({ phase: "required" });
       }
@@ -111,12 +123,14 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
       if (current(session)) setBusy(false);
     }
   }
-  const saveConnection = (revised?: SpoolmanStatus) =>
-    mutate(
+  const saveConnection = (revised?: SpoolmanStatus) => {
+    if (!baseUrl.trim() || !connectionForm.current?.reportValidity()) return;
+    return mutate(
       { base_url: baseUrl.trim(), api_key: apiKey === SECRET_MASK ? undefined : apiKey },
       uiText("Saved."),
       revised,
     );
+  };
   const toggleEnabled = (next: boolean) => mutate({ enabled: next });
   const toggleWrite = (next: boolean) => mutate({ write_enabled: next });
   const toggleWriteForce = (next: boolean) => mutate({ write_force: next });
@@ -129,6 +143,25 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
       if (current(session)) setReview({ phase: "ready", snapshot });
     } catch (e) {
       if (current(session)) setError(userMessage(e));
+    } finally {
+      if (current(session)) setBusy(false);
+    }
+  }
+  async function adoptLatest() {
+    const session = getSessionVersion();
+    setBusy(true);
+    setError("");
+    try {
+      const snapshot = await commands.adopt(session);
+      if (!current(session)) return;
+      setBaseUrl(snapshot.base_url ?? "");
+      setApiKey(snapshot.has_api_key ? SECRET_MASK : "");
+      setDraftBase(null);
+      setHydratedFrom(snapshot);
+      setReview({ phase: "idle" });
+      setFailedToggle(null);
+    } catch (error) {
+      if (current(session)) setError(userMessage(error));
     } finally {
       if (current(session)) setBusy(false);
     }
@@ -211,6 +244,14 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                   {review.phase === "ready" && (
                     <>
                       <p>{uiText("library.latestVersion")}</p>
+                      {historyChanged && (
+                        <p>
+                          {uiText(
+                            "The database history changed. Use current values before trying again.",
+                          )}
+                        </p>
+                      )}
+
                       <p>{review.snapshot.base_url}</p>
                       <dl>
                         <dt>{uiText("Enable Spoolman integration")}</dt>
@@ -222,7 +263,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                       </dl>
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={busy || historyChanged}
                         onClick={() =>
                           void (failedToggle
                             ? mutate(failedToggle, undefined, review.snapshot)
@@ -231,17 +272,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                       >
                         {uiText("library.retryDraft")}
                       </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => {
-                          setBaseUrl(review.snapshot.base_url ?? "");
-                          setApiKey(review.snapshot.has_api_key ? SECRET_MASK : "");
-                          setDraftBase(captureEditingBase(review.snapshot));
-                          setReview({ phase: "idle" });
-                          setError("");
-                        }}
-                      >
+                      <button type="button" disabled={busy} onClick={() => void adoptLatest()}>
                         {uiText("library.useLatest")}
                       </button>
                     </>
@@ -264,6 +295,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
 
               {/* Connection */}
               <form
+                ref={connectionForm}
                 className="space-y-3"
                 onSubmit={(e) => {
                   e.preventDefault();

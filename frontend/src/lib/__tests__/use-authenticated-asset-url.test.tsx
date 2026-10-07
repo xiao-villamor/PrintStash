@@ -1,7 +1,7 @@
 /** Protected image ownership preserves visible URLs and bounds authorized work. */
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCachedAssetUrl, invalidateCachedAsset } from "@/lib/asset-cache";
+import { acquireAssetUrl, invalidateCachedAsset } from "@/lib/asset-cache";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { retirePrivateSessionScope } from "@/lib/auth-store";
 
@@ -26,11 +26,17 @@ afterEach(() => {
 
 describe("useAuthenticatedAssetUrl", () => {
   it("acquires a lease for an already cached image", async () => {
-    const cached = await getCachedAssetUrl("/hook/cached");
+    const seed = acquireAssetUrl("/hook/cached");
+    const cached = await seed.url;
+    seed.release();
     const hook = renderHook(() => useAuthenticatedAssetUrl("/hook/cached"));
     expect(hook.result.current).toBe(cached);
     await act(async () => {
-      for (let i = 0; i < 405; i++) await getCachedAssetUrl(`/hook/pressure-${i}`);
+      for (let i = 0; i < 405; i++) {
+        const lease = acquireAssetUrl(`/hook/pressure-${i}`);
+        await lease.url;
+        lease.release();
+      }
     });
     expect(hook.result.current).toBe(cached);
     expect(revoked).not.toContain(cached);
@@ -49,7 +55,9 @@ describe("useAuthenticatedAssetUrl", () => {
   });
 
   it("rejects late image state after a path switch", async () => {
-    const cached = await getCachedAssetUrl("/hook/B");
+    const seed = acquireAssetUrl("/hook/B");
+    const cached = await seed.url;
+    seed.release();
     const old = Promise.withResolvers<Response>();
     vi.mocked(fetch).mockReturnValueOnce(old.promise);
     const hook = renderHook(({ path }) => useAuthenticatedAssetUrl(path), {

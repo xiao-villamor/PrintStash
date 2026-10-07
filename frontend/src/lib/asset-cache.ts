@@ -20,7 +20,6 @@ class AssetEntry {
   data: AssetData | null = null;
   references = 0;
   counted = false;
-  compatibilityRead: Promise<string> | null = null;
 
   constructor(readonly path: string) {
     let resolve!: (url: string) => void;
@@ -168,17 +167,6 @@ export function peekCachedAssetUrl(path: string): string | null {
   if (!entry?.data) return null;
   touch(entry);
   return entry.data.url;
-}
-
-/** Compatibility read for non-display callers. Mounted consumers use acquireAssetUrl. */
-export function getCachedAssetUrl(path: string): Promise<string> {
-  const entry = getEntry(path);
-  if (!entry.compatibilityRead) {
-    entry.references += 1;
-    entry.compatibilityRead = entry.promise.finally(() => releaseReference(entry));
-  }
-  pump();
-  return entry.compatibilityRead;
 }
 
 /** A known server-side replacement must fetch fresh bytes on the next acquisition. */

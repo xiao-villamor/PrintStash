@@ -1,6 +1,6 @@
 /** Spoolman settings own conditional writes and masked receipts; secrets remain local. */
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/lib/api/spoolman";
 import { queryKeys } from "@/lib/query-client";
 import { onAuthChange } from "@/lib/auth-store";
@@ -9,6 +9,14 @@ import { parseApiError } from "@/lib/errors";
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { SpoolmanStatus, SpoolmanUpdate } from "@/types";
+
+export function spoolmanStatusOptions(read = api.getSpoolmanStatus) {
+  return queryOptions({
+    queryKey: queryKeys.spoolmanStatus,
+    queryFn: ({ signal }) => read({ signal }),
+    retry: false,
+  });
+}
 
 export function useSpoolmanCommands(canEdit: boolean) {
   const client = useQueryClient();
@@ -69,6 +77,14 @@ export function useSpoolmanCommands(canEdit: boolean) {
         );
         void client.invalidateQueries({ queryKey: queryKeys.spools });
         return row;
+      }),
+    adopt: (session: number) =>
+      run(session, async (_signal, current) => {
+        await client.cancelQueries({ queryKey: queryKeys.spoolmanStatus, exact: true });
+        current();
+        const snapshot = await client.fetchQuery({ ...spoolmanStatusOptions(), staleTime: 0 });
+        current();
+        return snapshot;
       }),
     review: (session: number) => run(session, async (signal) => api.getSpoolmanStatus({ signal })),
     test: (body: Parameters<typeof api.testSpoolman>[0], session: number) =>

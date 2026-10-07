@@ -68,3 +68,18 @@ Failed-request notifications are not classified as network failures: the observe
 does not record abort reasons. No inference about browser scheduling queue time,
 render CPU, JS execution time or decoded/GPU memory comes from these counts.
 Correctness and module ownership are evaluated separately in the milestone matrices.
+
+## Supplemental resource observation contract
+
+The comparable readiness observer remains unchanged. A separate instrumented run
+records Chromium script/task/layout time, React root commits, encoded Blob URL
+retention and resource transfer/response timings after dense content is usable.
+It records the first page and all 90 Models, then observes Blob retirement on real
+sign-out. Instrumentation overhead makes these diagnostic values ineligible for
+the readiness comparison. No baseline CPU/render/Blob numbers were collected;
+these measurements cannot establish an improvement for those dimensions.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| P1 | records resources for a usable dense library | Happy | production build and real seeded API | decoded visible images; CPU/commit counters populated; all 90 Models reachable | Playwright measurement | ❌ execution pending |
+| P2 | retires measured Blob URLs on sign-out | Edge | mounted private thumbnails then real sign-out | zero retained encoded Blob URL bytes | Playwright measurement | ❌ execution pending |

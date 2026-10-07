@@ -1,10 +1,6 @@
 # Frontend target architecture
 
-Status: proposed migration architecture, 2026-10-06. The current implementation
-still contains legacy owners. The [plan](../frontend-architecture/plan.md) records
-accepted product decisions and rollout order; the [review](../frontend-architecture/review.md)
-distinguishes inspected facts from unfinished investigation. This document does
-not claim these modules or guarantees have already shipped.
+Status: implemented ownership contracts through M10, with M11 integration qualification in progress (2026-10-07). The [plan](../frontend-architecture/plan.md) records decisions and dependency order; the [validation matrix](../frontend-architecture/validation.md) and individual milestone records distinguish accepted local results from outstanding final gates. This document describes source behavior, not a released version.
 
 ## Ownership and module interfaces
 
@@ -15,10 +11,10 @@ without a changed contract is not an increment.
 | Concern               | Owner / public interface                                                                                                                | Concrete problem resolved                                                                         |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | Route composition     | Existing `router.tsx` + thin `pages/`; validate route parameters and compose public feature exports.                                    | Pages no longer coordinate sockets, transport caches and forms together.                          |
-| Session lifecycle     | `lib/session`: identity validation, session generation, begin/end lifecycle, private-resource cleanup.                                  | A delayed read, write response, asset or socket cannot act on a later session.                    |
+| Session lifecycle     | `lib/auth-store.ts`, `session-transport.ts` and Query bootstrap: identity, generation and cleanup.                                  | A delayed read, write response, asset or socket cannot act on a later session.                    |
 | HTTP transport        | `lib/api/request`: typed error parsing, auth, cancellation, session checks, JSON/forms/actions/protected bytes.                         | Remove the second JSON freshness cache and transport knowledge of feature invalidation.           |
 | Typed endpoints       | Existing domain endpoint files under `lib/api/`.                                                                                        | Keep actual HTTP/domain contracts explicit; no generic repository layer.                          |
-| Feature remote state  | `features/<feature>/queries.ts`: key/options factories; `mutations.ts`: commands with declared affected reads.                          | Multiple surfaces observe one freshness/invalidation policy.                                      |
+| Feature remote state  | `features/library`, `features/printers`, `features/work` and named `lib/queries/*` owners: options, commands and affected reads.                          | Multiple surfaces observe one freshness/invalidation policy.                                      |
 | Library navigation    | `features/library/url.ts`, `filters.ts`, `browse.ts`, `navigation.tsx`, `navigation-state.ts`, `reading-position.ts`.                                                                                   | One URL codec, one page order, one restoration policy for the nested scroll container.            |
 | Event policy          | Event transport owns connections; feature adapters classify notices as read invalidation, controlled-refresh hint or authorized resync. | Events cannot independently install unvalidated private entity data or bypass stable-list policy. |
 | Local operation state | Workflow controller where upload bytes, cancellation and retries have a lifecycle.                                                      | Client transfer progress does not get confused with the durable server Job.                       |
@@ -74,11 +70,10 @@ versions, replacement histories and confirmed absence. Legacy external API write
 remain compatible and advance versions but do not themselves detect conflicts.
 Evidence and remaining work: `docs/frontend-m9-notifications-validation.md`.
 
-### Provider accounts and paired browsers (M9 partial increment)
+### Provider accounts and paired browsers
 
 `lib/queries/settings-providers.ts` owns provider/device reads and their command
-lifetime. These reads use native cancellation and bypass the compatibility GET
-cache. Non-secret connection/device receipts update or invalidate Query; Cults
+lifetime. These reads use native cancellation; transport has no JSON freshness cache. Non-secret connection/device receipts update or invalidate Query; Cults
 credentials and temporary pairing codes stay outside Query and mutation history.
 The panel owns drafts, confirmations and the active OAuth navigation handoff.
 Session changes or disposal retire pending receipts. Transient read errors retain
@@ -102,7 +97,7 @@ First-folder setup retains only the accepted source identity for scan retry.
 Upload retains a local selected destination, never a second source catalog;
 loss of eligibility blocks submission until recovery or explicit selection.
 Accepted scans belong to TaskCenter even after their originating form closes.
-These increments do not yet complete the broader administration migration.
+Each administration workflow retains its domain-specific command and recovery contract.
 
 ### Conditional configuration forms (M9 incremental cutover)
 
@@ -140,8 +135,7 @@ changed destination fields are sent, and confirmed drafts are removed individual
 The configuration transport and command owner now require an editing base for every
 first-party write. The backend retains its documented legacy-client compatibility;
 legacy writes advance the version but remain unprotected themselves. This cutover
-covers vault configuration, not every editable aggregate. Remote connection edit
-versions remain separate open work. Local-root enrollment now carries its exact
+covers vault configuration, not every editable aggregate. Remote connections use their own conditional version and authorized review contract; see `frontend-m9-storage-edit-validation.md`. Local-root enrollment now carries its exact
 reviewed path through the separate enrollment command.
 
 ### Implemented backup seam (M9 increment)
@@ -198,48 +192,44 @@ snapshot and matching ETag. PUT accepts `If-Match`, requires it for
 Legacy writes remain accepted and advance the version. A receipt is captured
 before releasing the write transaction; later commits cannot replace it. Runtime
 publication reads the latest locked row and only publishes the edited fields.
-The remaining Settings conflict recovery and other editable-aggregate contracts
-remain required before M9 closes. The root-enrollment precondition is independent
+Settings conflict recovery and independent aggregate contracts have separate qualification records. The root-enrollment precondition is independent
 of vault configuration edit versions.
 
-## Proposed directory tree
+## Implemented directory structure
+
+The original proposal grouped every workflow under `features/`. The implementation keeps existing query modules where they already provide a clear behavioral owner. A cosmetic move is unnecessary; the import gate and explicit interfaces enforce responsibility.
 
 ```text
 frontend/
   src/
-    main.tsx                   # providers and bootstrap
-    router.tsx                 # React Router composition
-    pages/                     # route parameters and feature composition
+    main.tsx, router.tsx        # bootstrap, access gates and React Router
+    pages/                     # route composition and route-local drafts
     features/
-      library/                 # browse, URL, history, collection actions
-      models/                  # detail, artifacts, revisions, edit contracts
-      multipart/               # sets, parts, choices, builds
-      documents/               # reads and editing with draft ownership
-      search/                  # text/image/search-result workflows
-      similarity/              # comparison and review
-      inbox/                   # pending imports and capture review
-      tasks/                   # remote Jobs plus local transfer lifecycle
-      printers/                # fleet, queue, live connection ownership
-      profiles/                # printer/filament presets
-      statistics/              # period-scoped read models
-      settings/                # administrative feature composition
-        storage/               # provider/capability-specific workflows
-        backups/               # process state and explicit commands
-        sources/               # discovery workflows
-        identity/              # users/tokens/preferences
-      access/                  # login/setup/public-share feature contracts
+      library/                 # browse, edits, taxonomy, history and builds
+      printers/                # catalog and conditional settings commands
+      work/                    # durable work queries
+      auth/, setup/            # entry contracts
     lib/
-      api/                     # transport and typed endpoint clients
-      session/                 # identity/generation lifetime
-      events/                  # connection and subscription lifetime
-      assets/                  # protected-byte lifecycle
-      preferences/             # browser preferences/subscriptions
-    components/ui/             # localized application adapters
-    types/                     # explicit shared API/domain contracts
-  packages/ui/                 # reusable primitives, no application workflows
-  packages/domain/             # portable helpers; explicit browser-only legacy seams
-  tests/e2e*/                  # observable browser contracts
-browser-extension/             # independent capture client and its API contract
+      api/                     # HTTP transport and typed endpoint clients
+      queries/                 # named workflow read/command owners
+        documents.ts, captions.ts, inbox.ts
+        profiles.ts, search.ts, similarity.ts, statistics.ts, share.ts
+        settings-*.ts          # independent administration workflows
+      auth-store.ts            # validated identity and lifecycle notification
+      session-transport.ts     # generation fencing and cancellation
+      query-client.ts          # bootstrap/defaults and cache cleanup
+      events.ts                # connection lifetime, no entity cache
+      asset-cache.ts           # protected bytes and leased object URLs
+      task-center.ts           # durable Job progress and terminal waiters
+      artifact-upload.ts       # local byte transfer/resume protocol
+      model-upload-workflow.ts # accepted upload orchestration
+    components/                # presentation, drafts and feature composition
+      ui/                      # localized app adapters
+    types/                     # explicit shared wire/domain contracts
+  packages/ui/                 # reusable presentation primitives
+  packages/domain/             # shared pure helpers and explicit preferences
+  tests/e2e*/                  # browser behavior and delivery contracts
+browser-extension/             # independent capture client
 ```
 
 Create a module only when its behaviour is migrated. Keep reusable domain enums
@@ -417,9 +407,9 @@ observable contract. Query options own real data prefetch; feature commands own
 invalidation; Library owns reading-position recovery.
 
 
-## Existing-to-future owner map
+## Replaced mechanisms and current owners
 
-| Current responsibility                                      | Future owner / mechanism to remove                                                                               |
+| Original responsibility                                     | Current owner / removed mechanism                                                                               |
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `components/model-grid.tsx` merge, sort, membership         | library browse + authorized server page; delete local mixed ordering and group downloads.                        |
 | model-grid URL state / history listeners                    | library URL codec + React Router location; remove synchronized mirrors.                                          |
@@ -606,7 +596,7 @@ requires explicit review/adoption, and never retries a gesture automatically.
 Review snapshots remain local to the active editor. See the [Search matrix](../frontend-m8-search-edit-validation.md)
 and the [earlier M8 qualification](../frontend-m8-validation.md).
 
-### Static delivery recovery (M10 checkpoint)
+### Static delivery recovery
 
 The service worker owns navigation shell and explicit public static paths only;
 API and Authorization-bearing requests never enter its cache. Shell version v6
@@ -616,3 +606,7 @@ automatic reload per tab session; an unrelated successful import cannot reset
 that budget. An eager RouteError uses the existing UI primitives and localized
 reload/back actions when a route still cannot load. No server rendering/runtime
 or routing-framework change is required. Evidence: `docs/frontend-m10-validation.md`.
+
+### Spoolman settings
+
+`lib/queries/settings-spoolman.ts` owns the masked read and conditional command lifecycle. Connection drafts capture an editing base; status/probe refresh cannot replace typed fields. A conflict or uncertain write requires explicit current-state review. Adoption discards old secret input, and a changed database history cannot authorize replay of the old draft. Secrets remain outside MutationCache. Server claims and the independent Spoolman counter commit with all edited fields; telemetry does not advance that counter. Existing unversioned external clients remain compatible and unprotected. See [the integration correction](../frontend-m11-spoolman-validation.md).
