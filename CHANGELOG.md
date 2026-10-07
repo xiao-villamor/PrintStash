@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep storage configuration drafts coherent across background refreshes. Use
+  server edit versions for conflicts, require explicit review before revised save,
+  and retain newer credential input while an earlier save finishes.
+
 - Stop first-folder connection when source activation conflicts or cannot be
   confirmed. Keep the folder draft for explicit review, avoid repeating an
   activation confirmed by a fresh read, and retire local setup input on logout.

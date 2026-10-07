@@ -13,6 +13,8 @@ import {
   useStorageRootEnrollment,
   type ReviewedStorageRoot,
 } from "@/lib/queries/settings-storage-root";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
 import { parseApiError } from "@/lib/errors";
@@ -43,17 +45,13 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 interface StorageDraft {
   providerId: string;
   values: ProviderValues;
-  base: string;
+  base: EditingBase;
+  snapshot: ProviderValues;
 }
-function storageStamp(cfg: VaultConfigRead): string {
-  return JSON.stringify([
-    cfg.storage_provider,
-    cfg.storage_backend,
-    cfg.data_dir,
-    cfg.thumb_dir,
-    cfg.storage_provider_config,
-  ]);
-}
+type StorageReview =
+  | { phase: "idle" }
+  | { phase: "required" | "loading"; problem: "conflict" | "unconfirmed" }
+  | { phase: "ready"; problem: "conflict" | "unconfirmed"; snapshot: VaultConfigRead };
 
 export function StorageConfigCard({
   storageHealth,
@@ -78,6 +76,7 @@ export function StorageConfigCard({
   const providers = denied || catalogue.isError ? [] : (catalogue.data ?? []);
   const loading = enabled && (configuration.isPending || catalogue.isPending);
   const [draft, setDraft] = useState<StorageDraft | null>(null);
+  const [review, setReview] = useState<StorageReview>({ phase: "idle" });
   const draftRef = useRef(draft);
   useLayoutEffect(() => {
     draftRef.current = draft;
@@ -85,9 +84,9 @@ export function StorageConfigCard({
   const providerId =
     draft?.providerId ?? cfg?.storage_provider ?? (cfg?.storage_backend === "s3" ? "s3" : "local");
   const providerValues: ProviderValues = {};
-  if (cfg && providerId === cfg.storage_provider)
+  if (draft) Object.assign(providerValues, draft.snapshot, draft.values);
+  else if (cfg && providerId === cfg.storage_provider)
     Object.assign(providerValues, cfg.storage_provider_config);
-  Object.assign(providerValues, draft?.values);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [enrollment, setEnrollment] = useState<ReviewedStorageRoot | null>(null);
@@ -102,6 +101,7 @@ export function StorageConfigCard({
     const release = onAuthChange(() => {
       setRetired(true);
       setDraft(null);
+      setReview({ phase: "idle" });
       setEnrollment(null);
       setSaveState("idle");
       setErrorMsg("");
@@ -115,22 +115,30 @@ export function StorageConfigCard({
     if (!cfg) return;
     setDraft((previous) => ({
       providerId,
-      base: previous?.base ?? storageStamp(cfg),
+      base: previous?.base ?? captureEditingBase(cfg),
+      snapshot: previous?.snapshot ?? { ...providerValues },
       values: { ...previous?.values, [name]: value },
     }));
     setSaveState("idle");
     setErrorMsg("");
   }
-  async function save() {
-    if (!canEdit || !cfg || !current() || configCommand.isPending) return;
-    if (draft && draft.base !== storageStamp(cfg)) {
-      setSaveState("error");
-      setErrorMsg(t("settings.storageReviewChanged"));
+  async function save(reviewed?: VaultConfigRead) {
+    if (
+      !canEdit ||
+      !cfg ||
+      !current() ||
+      configCommand.isPending ||
+      (review.phase !== "idle" && !reviewed)
+    )
       return;
-    }
     setSaveState("saving");
     setErrorMsg("");
     const submitted = draft;
+    // A reviewed retry keeps explicit edits while adopting untouched current fields.
+    const writeValues: ProviderValues =
+      reviewed && providerId === reviewed.storage_provider
+        ? { ...reviewed.storage_provider_config, ...draft?.values }
+        : providerValues;
     try {
       const selected = providers.find((provider) => provider.id === providerId);
       if (!selected || !selected.available || !selected.selectable) {
@@ -138,11 +146,11 @@ export function StorageConfigCard({
         setErrorMsg(t("settings.storageReadFailed"));
         return;
       }
-      const stored = Array.isArray(providerValues.secret_fields_set)
-        ? providerValues.secret_fields_set
+      const stored = Array.isArray(writeValues.secret_fields_set)
+        ? writeValues.secret_fields_set
         : [];
       const values = Object.fromEntries(
-        Object.entries(providerValues).filter(([, value]) => value !== ""),
+        Object.entries(writeValues).filter(([, value]) => value !== ""),
       );
       const invalid = providerFormError(selected, values, "vault", stored);
       if (invalid) {
@@ -155,21 +163,30 @@ export function StorageConfigCard({
         storage_provider_config: {
           provider: providerId,
           ...Object.fromEntries(
-            Object.entries(providerValues).filter(
+            Object.entries(writeValues).filter(
               ([name, value]) => name !== "secret_fields_set" && value !== "",
             ),
           ),
         },
       };
-      const receipt = await configCommand.mutateAsync({ session, payload: body });
+      const receipt = await configCommand.mutateAsync({
+        session,
+        payload: body,
+        base: reviewed ? captureEditingBase(reviewed) : (draft?.base ?? captureEditingBase(cfg)),
+      });
       if (!current()) return;
       setSaveState(draftRef.current === submitted ? "saved" : "idle");
+      setReview({ phase: "idle" });
       setDraft((latest) => {
         if (latest === submitted) return null;
         if (!latest) return latest;
         return {
           ...latest,
-          base: storageStamp(receipt),
+          base: captureEditingBase(receipt),
+          snapshot:
+            latest.providerId === receipt.storage_provider
+              ? { ...receipt.storage_provider_config }
+              : latest.snapshot,
           values: Object.fromEntries(
             Object.entries(latest.values).filter(
               ([name, value]) =>
@@ -181,11 +198,40 @@ export function StorageConfigCard({
     } catch (error) {
       if (current()) {
         setSaveState("error");
+        const status = parseApiError(error).status;
+        if (status === 412 || status === 428 || status === 0 || status >= 500)
+          setReview({
+            phase: "required",
+            problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+          });
         setErrorMsg(parseApiError(error).message);
       }
     }
   }
 
+  async function reviewStorage() {
+    if (
+      !current() ||
+      !enabled ||
+      configCommand.isPending ||
+      review.phase === "idle" ||
+      review.phase === "loading"
+    )
+      return;
+    const problem = review.problem;
+    setReview({ phase: "loading", problem });
+    setErrorMsg("");
+    try {
+      const result = await configuration.refetch({ throwOnError: true });
+      if (!result.data) throw new Error("Configuration review has no data");
+      if (current()) setReview({ phase: "ready", problem, snapshot: result.data });
+    } catch (error) {
+      if (current()) {
+        setReview({ phase: "required", problem });
+        setErrorMsg(parseApiError(error).message);
+      }
+    }
+  }
   if (loading) {
     return (
       <Localized>
@@ -286,26 +332,97 @@ export function StorageConfigCard({
               </Button>
             </div>
           )}
+          {!denied && review.phase !== "idle" && (
+            <div role="alert" className="space-y-3 text-sm">
+              <p>
+                {uiText(
+                  review.problem === "conflict"
+                    ? "library.editConflict"
+                    : "library.saveUnconfirmed",
+                )}
+              </p>
+              <Button
+                variant="outline"
+                disabled={configCommand.isPending || review.phase === "loading"}
+                onClick={() => void reviewStorage()}
+              >
+                {uiText("library.reviewLatest")}
+              </Button>
+              {review.phase === "ready" && (
+                <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                  <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+                  <p>
+                    {knownUiText(
+                      providers.find((provider) => provider.id === review.snapshot.storage_provider)
+                        ?.label ?? review.snapshot.storage_provider,
+                    )}
+                  </p>
+                  <dl className="grid gap-2">
+                    {providers
+                      .filter((provider) => provider.id === review.snapshot.storage_provider)
+                      .flatMap((provider) => providerFields(provider))
+                      .map((field) => {
+                        const stored = review.snapshot.storage_provider_config.secret_fields_set;
+                        const value = field.secret
+                          ? Array.isArray(stored) && stored.includes(field.name)
+                            ? uiText("Configured — enter to replace")
+                            : uiText("None")
+                          : String(review.snapshot.storage_provider_config[field.name] ?? "");
+                        return (
+                          <div key={field.name}>
+                            <dt className="text-muted-foreground">{knownUiText(field.label)}</dt>
+                            <dd>{value}</dd>
+                          </div>
+                        );
+                      })}
+                  </dl>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={!canEdit || configCommand.isPending}
+                      onClick={() => {
+                        setDraft(null);
+                        setReview({ phase: "idle" });
+                        setErrorMsg("");
+                        setSaveState("idle");
+                      }}
+                    >
+                      {uiText("library.useLatest")}
+                    </Button>
+                    <Button
+                      disabled={!canEdit || configCommand.isPending}
+                      onClick={() => void save(review.snapshot)}
+                    >
+                      {uiText("library.retryDraft")}
+                    </Button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
           {errorMsg && (
             <p role="alert" className="text-sm text-destructive">
               {errorMsg}
             </p>
           )}
-          {draft && cfg && draft.base !== storageStamp(cfg) && (
-            <div className="space-y-2 text-sm">
-              <p>{t("settings.storageReviewChanged")}</p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setDraft(null);
-                  setSaveState("idle");
-                  setErrorMsg("");
-                }}
-              >
-                {t("settings.storageDiscardDraft")}
-              </Button>
-            </div>
-          )}
+          {draft &&
+            cfg &&
+            (draft.base.edit_epoch !== cfg.edit_epoch ||
+              draft.base.edit_version !== cfg.edit_version) && (
+              <div className="space-y-2 text-sm">
+                <p>{t("settings.storageReviewChanged")}</p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDraft(null);
+                    setSaveState("idle");
+                    setErrorMsg("");
+                  }}
+                >
+                  {t("settings.storageDiscardDraft")}
+                </Button>
+              </div>
+            )}
 
           {storageHealth && !storageHealth.ok && (
             <div
@@ -469,11 +586,12 @@ export function StorageConfigCard({
                 disabled={!canEdit}
                 onProviderChange={(provider) => {
                   if (cfg)
-                    setDraft({
+                    setDraft((previous) => ({
                       providerId: provider.id,
                       values: defaultProviderValues(provider),
-                      base: storageStamp(cfg),
-                    });
+                      snapshot: {},
+                      base: previous?.base ?? captureEditingBase(cfg),
+                    }));
                   setSaveState("idle");
                   setErrorMsg("");
                 }}
@@ -492,8 +610,8 @@ export function StorageConfigCard({
             <div className="flex items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={save}
-                disabled={configCommand.isPending}
+                onClick={() => void save()}
+                disabled={configCommand.isPending || review.phase !== "idle"}
                 className="flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
                 <Save className="h-3.5 w-3.5" />

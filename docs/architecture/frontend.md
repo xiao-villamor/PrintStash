@@ -60,7 +60,11 @@ First-folder connection also uses conditional activation. Conflict or uncertain
 activation stops source creation until explicit review; an already-enabled fresh
 read permits continuation without repeating the activation. Local folder drafts
 and pending reviews retire with the session.
-StorageConfigCard and Settings still use the additive legacy path. The optional client
+StorageConfigCard now replaces its JSON fingerprint with a captured editing base
+and initial provider snapshot. Refetch cannot mix new untouched fields into an
+existing draft. Explicit revised save merges deliberate overrides onto reviewed
+current values; newer credentials typed during save retain their local intent.
+Settings still uses the additive legacy path. The optional client
 base must become required when their M9 cutover is complete; this is not yet
 application-wide conflict protection.
 
@@ -110,7 +114,7 @@ snapshot and matching ETag. PUT accepts `If-Match`, requires it for
 Legacy writes remain accepted and advance the version. A receipt is captured
 before releasing the write transaction; later commits cannot replace it. Runtime
 publication reads the latest locked row and only publishes the edited fields.
-Client conflict recovery and a backend reviewed-root precondition remain required
+The remaining Settings conflict recovery and a backend reviewed-root precondition remain required
 before M9 closes. Local
 fingerprints and path comparisons do not provide that protection.
 

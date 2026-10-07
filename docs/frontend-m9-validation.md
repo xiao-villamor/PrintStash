@@ -729,3 +729,46 @@ when a fresh review confirms activation already succeeded. Session retirement
 removes the local folder form and prevents delayed review completion from acting.
 StorageConfigCard and Settings remain the configuration-cutover consumers; their
 migration is required before removing the optional-base compatibility path.
+
+
+## Storage form conditional editing (M9 increment)
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| SF1 | retains a storage draft during background configuration refresh | Race | Draft from v1; new provider values at v2 | Frozen draft fields and v1 header; server conflict surfaced | Unit | ✅ |
+| SF2 | reviews a storage conflict before revised save | Error | 412 or uncertain 503; fresh sanitized v2 | Draft retained; reviewed values shown; explicit v2 retry merges only deliberate overrides | Unit | ✅ |
+| SF3 | preserves a newer credential draft after an older save finishes | Race | Credential changed during v1 save | New credential remains; next save uses accepted v2 base | Unit | ✅ |
+| SF4 | adopts the reviewed storage configuration without writing | Happy | Explicit adoption after conflict | Local override discarded; no second PUT | Unit | ✅ |
+| SF5 | retires a pending storage review on logout | Auth | Session ends while review read pending | No retired review or credential displayed | Unit | ✅ |
+| SF6 | configures WebDAV through restart with safe GC preview | Integration | Credential draft followed by competing config write | 412, explicit review/retry200, continued real WebDAV lifecycle | Real browser | ✅ |
+| SF7 | blocks storage retry when latest configuration cannot be read | Error/Auth | Review GET returns 503 or 403 | No revised save; denied review hidden; no second PUT | Unit | ✅ |
+
+Validation:
+
+- Initial focused regressions: **5 failed in 9.29 s**. The affected component file
+  passed **49 tests in 7.75 s** after replacing the fingerprint check with the
+  backend editing contract and freezing the initial provider values.
+- A stronger revised-save assertion exposed an attempt to resend untouched old
+  fields: **2 failed / 1 passed in 3.87 s**. Explicit reviewed retries now merge
+  only intentional field overrides onto the reviewed provider configuration.
+  Revised-save/newer-credential cases passed **3 tests in 3.96 s**.
+- Permission/transient review failures: **2 passed in 3.89 s**. The strengthened
+  background-refresh assertion verifies the v1 request header and frozen untouched
+  fields: **1 passed in 3.21 s**. A previous three-case run occurred before the
+  intended test edit applied; it supplied no new regression evidence.
+- Real WebDAV/browser lifecycle: **1 passed in 1.1 minutes**, including startup,
+  process restart, credential conflict/review/revised save, upload and safe GC
+  behavior. The actual test body took 34.9 s. Other provider/browser suites were
+  not repeated.
+- Typecheck initially rejected an untranslated label; using the existing `None`
+  message corrected it. App/package typechecks, lint, format (768 files), build
+  and diff checks passed. Existing large-chunk build warnings remain. Test timings
+  are not application-performance measurements.
+
+The JSON storage fingerprint is removed. Each local draft owns an editing base,
+initial sanitized provider snapshot and deliberate overrides. Newer credentials
+typed during an accepted save remain local and advance to that receipt's base.
+Review shows sanitized provider fields and credential-presence indicators only.
+Settings remains the final configuration PUT consumer to migrate. Root enrollment
+still requires its separate server-side reviewed-root contract; this increment
+qualifies storage configuration editing, not that filesystem command or M9 closure.

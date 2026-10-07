@@ -173,3 +173,6 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 
 - `onboarding/first-model.spec.ts`: first-folder activation sends the reviewed
   configuration precondition before source creation and scan.
+
+- `storage/storage-provider.spec.ts`: the WebDAV lifecycle includes a competing
+  configuration edit, retained credential draft and explicit conditional retry.
