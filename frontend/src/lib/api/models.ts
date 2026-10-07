@@ -221,23 +221,18 @@ export function importPrintJobsFromPrinter(
   );
 }
 
-/** Legacy callers are migrated incrementally; remove the optional version in M4. */
+/** Every editor sends the version of the snapshot its intent was based on. */
 export function updateModel(
   id: number,
   payload: ModelUpdate,
-  editVersion?: number,
+  editVersion: number,
 ): Promise<ModelRead> {
-  return sendJson<ModelRead>(
-    `/api/v1/models/${id}`,
-    "PATCH",
-    payload,
-    editVersion === undefined
-      ? {}
-      : {
-          "If-Match": `"model-${id}-v${editVersion}"`,
-          "X-PrintStash-Edit-Contract": "conditional-v1",
-        },
-  );
+  if (!Number.isSafeInteger(editVersion) || editVersion < 1)
+    throw new Error("Invalid Model edit version");
+  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload, {
+    "If-Match": `"model-${id}-v${editVersion}"`,
+    "X-PrintStash-Edit-Contract": "conditional-v1",
+  });
 }
 
 export function deleteModel(id: number): Promise<void> {

@@ -62,13 +62,55 @@ test.describe("outliner pagination", () => {
       const from = await target.boundingBox();
       if (!from) throw new Error("missing drag source");
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+      const beforeMove = await (
+        await page.request.get(`/api/v1/models/${seeded.target.id}`)
+      ).json();
       await page.mouse.down();
       await page.mouse.move(from.x + 10, from.y - 10, { steps: 4 });
+      // Another editor changes the same Model after this gesture acquired its editing base.
+      const concurrent = await page.request.patch(`/api/v1/models/${seeded.target.id}`, {
+        headers: {
+          "If-Match": `"model-${seeded.target.id}-v${beforeMove.edit_version}"`,
+          "X-PrintStash-Edit-Contract": "conditional-v1",
+        },
+        data: { description: "Changed during the drag" },
+      });
+      expect(concurrent.status()).toBe(200);
+      const reviewedVersion = (await concurrent.json()).edit_version;
       await destination.scrollIntoViewIfNeeded();
       const to = await destination.boundingBox();
       if (!to) throw new Error("missing drop destination");
       await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 10 });
+      const conflictResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname === `/api/v1/models/${seeded.target.id}`,
+      );
       await page.mouse.up();
+      const rejected = await conflictResponse;
+      expect(rejected.status()).toBe(412);
+      expect(rejected.request().headers()["if-match"]).toBe(
+        `"model-${seeded.target.id}-v${beforeMove.edit_version}"`,
+      );
+      const review = page.getByRole("dialog", { name: "Review model move" });
+      await expect(
+        review.getByText(`Move ${seeded.target.name} to ${seeded.destination.path}.`, {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await review.getByRole("button", { name: "Review latest version" }).click();
+      const retriedResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname === `/api/v1/models/${seeded.target.id}`,
+      );
+      await review.getByRole("button", { name: "Save my draft against this version" }).click();
+      const retried = await retriedResponse;
+      expect(retried.status()).toBe(200);
+      expect(retried.request().headers()["if-match"]).toBe(
+        `"model-${seeded.target.id}-v${reviewedVersion}"`,
+      );
+      await expect(review).not.toBeVisible();
       await expect
         .poll(async () => {
           const response = await page.request.get(`/api/v1/models/${seeded.target.id}`);

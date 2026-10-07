@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve the editing version when dragging Models from the grid, list or
+  paginated tree. Retain the destination after conflicts or uncertain moves,
+  and require explicit review before retrying with the current version.
+
 - Include aggregate editing versions in lightweight Model and Multipart tree
   reads, keeping collection search matches distinct and reads bounded.
 

@@ -4218,5 +4218,10 @@
   "storage.connectionsLoadFailed": "No se pudieron cargar las conexiones.",
   "storage.providersLoadFailed": "No se pudieron cargar los proveedores de almacenamiento.",
   "storage.connectionUnavailable": "Esta conexión ya no está disponible. Copia el borrador que necesites antes de cancelar.",
-  "source.reviewChanged": "La fuente cambió durante la revisión. Revisa de nuevo la última versión."
+  "source.reviewChanged": "La fuente cambió durante la revisión. Revisa de nuevo la última versión.",
+  "library.moveReview": "Revisar movimiento del modelo",
+  "library.moveUnavailable": "Este modelo ya no está disponible para ti.",
+  "library.moveIntent": "Mover {name} a {destination}.",
+  "library.moveReviewFailed": "No se ha podido cargar el modelo actual. Revísalo de nuevo antes de reintentar el movimiento.",
+  "library.moveLocation": "Ubicación actual: {location}"
 }

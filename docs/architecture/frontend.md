@@ -249,6 +249,23 @@ Do not add private Query persistence simply to preserve navigation within a tab.
 | package browser preferences and app wrappers                | explicit app preference subscriptions; retain proven package helpers and UI primitives.                          |
 | extension capture/auth clients                              | independent extension boundary, tested against FastAPI; do not import the web app's Query cache.                 |
 
+## Implemented Model movement owner (M4)
+
+`features/library/moves.ts` owns conditional Model movement and its recovery.
+Native cards/list rows and paginated outliner leaves capture a Model's displayed
+version and session at drag start. Drop targets supply the intended collection;
+they never fetch a newer version to authorize an older intent. `lib/model-dnd.ts`
+validates native DataTransfer input and rejects id-only or retired-session drags.
+
+The owner permits one outstanding intent per Model and concurrent independent
+Models. A412 or uncertain response retains the original destination. Only an
+explicit authorized read enables a reviewed retry or adoption of the current
+location. `components/model-move-review.tsx` presents this state using shared
+primitives; it owns no server cache. Confirmation cancels an obsolete detail read
+before version-ordered publication and coordinated Library refresh. Navigation,
+unmount and session retirement fence publication and abort outstanding reviews.
+Every first-party `updateModel` call now requires its editing base.
+
 ## Contributor conventions and tests
 
 Tests live beside the behavioural owner under `__tests__`; packages test their

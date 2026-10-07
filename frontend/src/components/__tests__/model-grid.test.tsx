@@ -27,7 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { ModelBrowser } from "@/components/model-grid";
-import { MODEL_DND_MIME } from "@/lib/model-dnd";
+import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 import { queryKeys } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
 import type {
@@ -3482,10 +3482,46 @@ describe("ModelBrowser", () => {
     function modelDrag(id: number) {
       return {
         types: [MODEL_DND_MIME],
-        getData: () => String(id),
+        getData: () => JSON.stringify(captureModelDrag(aModelListItem({ id }))),
         dropEffect: "",
       };
     }
+
+    it.each(["grid", "list"])(
+      "moves with the version captured by the native %s drag",
+      async (layout) => {
+        window.localStorage.setItem("ps-vault-view", layout);
+        const versions: (string | null)[] = [];
+        renderVault({
+          collections: [aCollection()],
+          models: [aModelListItem({ id: 1, name: "Benchy", edit_version: 7 })],
+          routes: {
+            "PATCH /api/v1/models/1": (_url, init) => {
+              versions.push(new Headers(init?.headers).get("If-Match"));
+              return json({ id: 1, edit_version: 8, collection: "parts" });
+            },
+          },
+        });
+        const folder = await folderCard();
+        await screen.findByText("Benchy");
+        const values = new Map<string, string>();
+        const dataTransfer = {
+          types: [MODEL_DND_MIME],
+          setData: (kind: string, value: string) => values.set(kind, value),
+          getData: (kind: string) => values.get(kind) ?? "",
+          effectAllowed: "",
+          dropEffect: "",
+        };
+        fireEvent.dragStart(
+          layout === "grid"
+            ? screen.getByRole("article")
+            : screen.getByRole("link", { name: /Benchy/ }),
+          { dataTransfer },
+        );
+        fireEvent.drop(folder, { dataTransfer });
+        await waitFor(() => expect(versions).toEqual(['"model-1-v7"']));
+      },
+    );
 
     it("moves the model into the folder it was dropped on", async () => {
       const { requestsWithMethod } = renderVault({
@@ -3503,6 +3539,19 @@ describe("ModelBrowser", () => {
         }),
       );
     });
+
+    it.each(["1", "{", "null", JSON.stringify({ id: 1, edit_version: 0 })])(
+      "ignores malformed native drag data %s",
+      async (raw) => {
+        const view = renderVault({
+          collections: [aCollection()],
+          models: [aModelListItem({ id: 1 })],
+        });
+        const folder = await folderCard();
+        fireEvent.drop(folder, { dataTransfer: { types: [MODEL_DND_MIME], getData: () => raw } });
+        expect(view.requestsWithMethod("PATCH")).toHaveLength(0);
+      },
+    );
 
     it("ignores a file drag over a folder", async () => {
       // An OS file drag carries no model id; treating it as one would move a

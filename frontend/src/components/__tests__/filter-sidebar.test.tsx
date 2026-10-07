@@ -3,11 +3,12 @@
  * Counts describe the whole visible branch; pages describe only downloaded
  * rows. Global name search is independent of which branches are open.
  */
+import { queryKeys } from "@/lib/query-client";
 import { outlinerRoutes } from "@/test-support/outliner";
 
 import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -140,6 +141,38 @@ async function openFolder(user: ReturnType<typeof userEvent.setup>, name: string
 }
 
 describe("FilterSidebar", () => {
+  it("keeps the gesture version when an outliner read changes during dragging", async () => {
+    const user = userEvent.setup();
+    const models = [aOutlinerModel({ id: 1, name: "Original model", edit_version: 7 })];
+    const view = renderSidebar({ models });
+    await openFolder(user, "Parts");
+    const source = await screen.findByRole("button", { name: "Original model" });
+    const destination = await folderRow("Toys");
+    // jsdom has no geometry. Give the actual mouse sensor two separated hit regions.
+    const sourceRect = vi
+      .spyOn(source, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 100, 20));
+    const destinationRect = vi
+      .spyOn(destination, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 100, 100, 20));
+    try {
+      fireEvent.mouseDown(source, { button: 0, buttons: 1, clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 10 });
+      await waitFor(() => expect(source).toHaveAttribute("aria-pressed", "true"));
+      models[0] = aOutlinerModel({ id: 1, name: "Changed model", edit_version: 8 });
+      await act(async () => view.client.invalidateQueries({ queryKey: queryKeys.outliner }));
+      await screen.findByRole("button", { name: "Changed model" });
+      fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 110 });
+      fireEvent.mouseUp(document, { button: 0, clientX: 20, clientY: 110 });
+      expect(view.onMoveModel).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, name: "Original model", edit_version: 7 }),
+        "toys",
+      );
+    } finally {
+      sourceRect.mockRestore();
+      destinationRect.mockRestore();
+    }
+  });
   describe("the folder tree", () => {
     it("lists the root folders", async () => {
       renderSidebar();

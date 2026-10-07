@@ -54,6 +54,15 @@ describe("getModel", () => {
 });
 
 describe("updateModel", () => {
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid editing version %s before HTTP",
+    (version) => {
+      expect(() => updateModel(1, { collection: "parts" }, version)).toThrow(
+        "Invalid Model edit version",
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
   it("sends the editor's Model version", async () => {
     respondWith({ id: 1, edit_version: 8 });
 
@@ -67,7 +76,7 @@ describe("updateModel", () => {
   it("PATCHes only what changed", async () => {
     respondWith({ id: 1 });
 
-    await updateModel(1, { name: "Renamed" });
+    await updateModel(1, { name: "Renamed" }, 7);
 
     expectRequest("/api/v1/models/1", "PATCH");
     expect(lastBody()).toEqual({ name: "Renamed" });

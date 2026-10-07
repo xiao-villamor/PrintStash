@@ -4218,5 +4218,10 @@
   "storage.connectionsLoadFailed": "Connections could not be loaded.",
   "storage.providersLoadFailed": "Storage providers could not be loaded.",
   "storage.connectionUnavailable": "This connection is no longer available. Copy any draft you need before cancelling.",
-  "source.reviewChanged": "The source changed during review. Review the latest version again."
+  "source.reviewChanged": "The source changed during review. Review the latest version again.",
+  "library.moveReview": "Review model move",
+  "library.moveUnavailable": "This model is no longer available to you.",
+  "library.moveIntent": "Move {name} to {destination}.",
+  "library.moveReviewFailed": "Could not load the current model. Review it again before retrying the move.",
+  "library.moveLocation": "Current location: {location}"
 }

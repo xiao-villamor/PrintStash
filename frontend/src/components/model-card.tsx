@@ -17,7 +17,7 @@ import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Localized } from "@/components/ui/localized";
-import { MODEL_DND_MIME } from "@/lib/model-dnd";
+import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 
 import {
   CARD_METRIC_STORAGE_KEY,
@@ -219,7 +219,7 @@ function ModelCardInner({
         onDragStart={
           draggable
             ? (e) => {
-                e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
+                e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
                 e.dataTransfer.effectAllowed = "move";
                 setDragging(true);
               }

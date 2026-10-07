@@ -57,7 +57,9 @@ import {
 import { ModelCard } from "@/components/model-card";
 import { DeferredDialog } from "@/components/deferred-dialog";
 import { lazyImport } from "@/lib/lazy-component";
-import { MODEL_DND_MIME } from "@/lib/model-dnd";
+import { useModelMoves } from "@/features/library/moves";
+import { ModelMoveReview } from "@/components/model-move-review";
+import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
@@ -105,7 +107,6 @@ import {
   createCollection,
   listCollectionChildren,
   searchCollections,
-  updateModel,
   moveCollection,
   renameCollection,
   deleteCollection,
@@ -928,6 +929,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !modelQuery.isPlaceholderData;
 
   const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
+  const modelMoves = useModelMoves(entry, refresh);
   const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
   const refreshScope = useRef({ entry, sequence: 0 });
   useLayoutEffect(() => {
@@ -1604,18 +1606,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
 
-  async function handleMoveModel(modelId: number, targetCollection: string | null) {
+  function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
-    try {
-      await updateModel(modelId, { collection: targetCollection ?? "" });
-      toast.success(uiText("Moved"));
-      refresh();
-    } catch (e: any) {
-      toast.error(e);
-    }
+    void modelMoves.move(source, targetCollection);
   }
 
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
@@ -1795,6 +1791,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   return (
     <Localized>
       <>
+        <ModelMoveReview moves={modelMoves} />
         <Modal
           open={saveViewOpen && saveViewSession === savedViewsOwner.session}
           onClose={() => {
@@ -2948,9 +2945,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 }
 
 // Makes a collection card accept a dragged model: highlights on hover and calls
-// onDropModel(modelId, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
+// onDropModel(source, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
 // so those still bubble to the main upload handler.
-function useModelDropTarget(path: string, onDropModel?: (modelId: number, path: string) => void) {
+function useModelDropTarget(path: string, onDropModel?: (source: ModelDrag, path: string) => void) {
   const [dragOver, setDragOver] = useState(false);
   const handlers = {
     onDragOver: (e: React.DragEvent) => {
@@ -2966,8 +2963,8 @@ function useModelDropTarget(path: string, onDropModel?: (modelId: number, path: 
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
-      const id = Number(e.dataTransfer.getData(MODEL_DND_MIME));
-      if (id) onDropModel(id, path);
+      const source = readModelDrag(e.dataTransfer.getData(MODEL_DND_MIME));
+      if (source) onDropModel(source, path);
     },
   };
   return { dragOver, handlers };
@@ -2986,7 +2983,7 @@ function CollectionFolderCard({
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
   onIntent?: (path: string) => void;
-  onDropModel?: (modelId: number, path: string) => void;
+  onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -3061,7 +3058,7 @@ function CollectionListRow({
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
   onIntent?: (path: string) => void;
-  onDropModel?: (modelId: number, path: string) => void;
+  onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -3210,7 +3207,7 @@ function ModelListRow({
         onDragStart={
           draggable
             ? (e) => {
-                e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
+                e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
                 e.dataTransfer.effectAllowed = "move";
               }
             : undefined
