@@ -404,6 +404,7 @@ describe("aOutlinerModel", () => {
       "collection",
       "collection_id",
       "collection_label",
+      "edit_epoch",
       "edit_version",
       "id",
       "name",

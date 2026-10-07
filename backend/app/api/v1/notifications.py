@@ -17,7 +17,7 @@ from app.api.edit_preconditions import edit_precondition
 from app.core.security import require_superuser
 from app.db.models import NotificationTarget, User
 from app.db.session import get_session
-from app.modules.administration import runtime_config
+from app.modules.administration import config_repository, runtime_config
 from app.modules.notifications import editing, notifications
 from app.schemas.editing import EditingBase, EditPrecondition
 
@@ -112,7 +112,7 @@ def update_settings(
     actor: User = Depends(require_superuser),
     precondition: EditPrecondition = Depends(edit_precondition),
 ) -> NotificationsSettings:
-    config = runtime_config.get_or_create(session, commit=False)
+    config = config_repository.get_or_create(session, commit=False)
     session.flush()
     editing.claim_settings(session, actor, config, precondition)
     runtime_config.set_notifications_enabled(session, body.enabled, commit=False)

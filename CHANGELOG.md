@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve Spoolman connection drafts during background status refreshes. Detect
+  competing edits and require explicit review before retrying; session changes
+  retire pending commands. Existing settings survive the additive version migration.
+
 - Add conditional storage-connection edits with independent versions and identity
   checks. Preserve credential omission and target-in-use restrictions; legacy
   clients remain compatible while the first-party editor adopts the contract.

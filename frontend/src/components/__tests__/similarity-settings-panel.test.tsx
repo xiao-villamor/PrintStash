@@ -2,6 +2,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { librarySourceKeys } from "@/lib/queries/settings-library-sources";
 import { SimilaritySettingsPanel } from "@/components/similarity-settings-panel";
 import { aSimilarityRun, similaritySettings, similarityStatus } from "@/test-support/similarity";
 import { aCollection, aModel, anExternalLibrary } from "@/test-support/factories";
@@ -60,7 +61,7 @@ describe("SimilaritySettingsPanel", () => {
     );
     app.route({ "GET /api/v1/libraries": json({ detail: "feature_disabled" }, 404) });
     await act(async () => {
-      await app.client.invalidateQueries({ queryKey: ["similarity", "sources"] });
+      await app.client.invalidateQueries({ queryKey: librarySourceKeys.all });
     });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Start analysis" })).toBeDisabled(),
@@ -81,7 +82,7 @@ describe("SimilaritySettingsPanel", () => {
       routes: { "GET /api/v1/libraries": json({ detail: "feature_disabled" }, 404) },
     });
     await waitFor(() =>
-      expect(app.client.getQueryState(["similarity", "sources"])?.status).toBe("success"),
+      expect(app.client.getQueryState(librarySourceKeys.all)?.status).toBe("success"),
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start analysis" })).toBeEnabled();

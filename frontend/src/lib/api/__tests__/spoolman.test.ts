@@ -35,6 +35,8 @@ function jsonResponse<T>(data: T, status = 200): Response {
 const fetchMock = vi.fn<typeof fetch>();
 
 const status = {
+  edit_epoch: "a".repeat(32),
+  edit_version: 2,
   enabled: true,
   base_url: "http://spoolman.local:7912",
   has_api_key: false,
@@ -75,7 +77,7 @@ describe("updateSpoolman", () => {
   it("PUTs the partial config body", async () => {
     fetchMock.mockResolvedValue(jsonResponse(status));
     const body = { base_url: "http://spoolman.local:7912", enabled: true };
-    await updateSpoolman(body);
+    await updateSpoolman(body, { base: { ...status, edit_version: 1 } });
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/spoolman");
     expect(init).toMatchObject({ method: "PUT" });

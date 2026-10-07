@@ -107,6 +107,7 @@ def build_system_config(
     overrides.setdefault("setup_storage_pending", False)
     overrides.setdefault("vault_edit_version", 1)
     overrides.setdefault("search_edit_version", 1)
+    overrides.setdefault("spoolman_edit_version", 1)
     return save(
         session,
         SystemConfig(

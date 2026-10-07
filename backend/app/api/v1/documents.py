@@ -49,7 +49,7 @@ from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.modules.identity import rbac
 from app.modules.library import multipart_models
-from app.modules.library.edit_preconditions import EditKind, EditPrecondition, etag
+from app.modules.library.edit_preconditions import EditKind, etag
 from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.trash import (
     StorageRiskConfirmationRequired,
@@ -73,6 +73,7 @@ from app.schemas.documents import (
     DocumentRead,
     DocumentUpdate,
 )
+from app.schemas.editing import EditPrecondition
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 

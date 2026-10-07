@@ -375,7 +375,8 @@ export function useSpoolmanStatus(options?: { enabled?: boolean }) {
   const api = useQueryApi();
   return useQuery<SpoolmanStatus>({
     queryKey: queryKeys.spoolmanStatus,
-    queryFn: () => api.getSpoolmanStatus(),
+    queryFn: ({ signal }) => api.getSpoolmanStatus({ signal }),
+    retry: false,
     enabled: options?.enabled ?? true,
   });
 }
@@ -385,7 +386,7 @@ export function useSpools(options?: { enabled?: boolean }) {
   const api = useQueryApi();
   return useQuery<SpoolRead[]>({
     queryKey: queryKeys.spools,
-    queryFn: () => api.listSpools(),
+    queryFn: ({ signal }) => api.listSpools(false, { signal }),
     enabled: options?.enabled ?? true,
   });
 }

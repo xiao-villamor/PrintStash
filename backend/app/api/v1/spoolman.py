@@ -11,20 +11,23 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session
 
+from app.api.edit_preconditions import edit_precondition
 from app.core.logging import get_logger
 from app.core.security import require_superuser
+from app.db.models import User
 from app.db.session import get_session
-from app.modules.administration import runtime_config
-from app.modules.printing import filament_sync
+from app.modules.administration import config_repository, runtime_config
+from app.modules.printing import filament_sync, spoolman_editing
 from app.modules.printing.spoolman import (
     SpoolmanClient,
     SpoolmanError,
     get_spoolman_client,
 )
+from app.schemas.editing import EditingBase, EditPrecondition
 
 logger = get_logger(__name__)
 
@@ -37,7 +40,7 @@ _SECRET_MASK = "********"
 # --------------------------------------------------------------------------- #
 # schemas
 # --------------------------------------------------------------------------- #
-class SpoolmanStatus(BaseModel):
+class SpoolmanStatus(EditingBase):
     enabled: bool = False
     base_url: Optional[str] = None
     has_api_key: bool = False
@@ -142,24 +145,35 @@ async def _probe(client: SpoolmanClient) -> Dict[str, Any]:
     dependencies=[Depends(require_superuser)],
     summary="Spoolman connection status + config",
 )
-async def get_status(session: Session = Depends(get_session)) -> SpoolmanStatus:
-    config = runtime_config.spoolman_config(session)
-    enabled = runtime_config.spoolman_enabled(session)
-    out = SpoolmanStatus(
-        enabled=enabled,
-        base_url=config.get("base_url"),
-        has_api_key=bool(config.get("api_key")),
-        write_enabled=runtime_config.spoolman_write_enabled(session),
-        write_force=runtime_config.spoolman_write_force(session),
+async def get_status(
+    response: Response, session: Session = Depends(get_session)
+) -> SpoolmanStatus:
+    result, key = _status_snapshot(session)
+    response.headers["ETag"] = spoolman_editing.etag(result)
+    return await _probe_status(result, key)
+
+
+def _status_snapshot(session: Session) -> tuple[SpoolmanStatus, str | None]:
+    base, config = spoolman_editing.read(session)
+    result = SpoolmanStatus(
+        **base.model_dump(),
+        enabled=False if config is None else config.spoolman_enabled,
+        base_url=None if config is None else config.spoolman_base_url,
+        has_api_key=bool(config and config.spoolman_api_key),
+        write_enabled=False if config is None else config.spoolman_write_enabled,
+        write_force=False if config is None else config.spoolman_write_force,
     )
-    # Only hit the network when there's something to probe.
-    if enabled and config.get("base_url"):
-        probe = await _probe(SpoolmanClient(config["base_url"], config.get("api_key")))
-        out.connected = probe["connected"]
-        out.version = probe["version"]
-        out.error = probe["error"]
-        out.native_hook_detected = probe["native_hook_detected"]
-    return out
+    return result, None if config is None else config.spoolman_api_key
+
+
+async def _probe_status(result: SpoolmanStatus, key: str | None) -> SpoolmanStatus:
+    if result.enabled and result.base_url:
+        probe = await _probe(SpoolmanClient(result.base_url, key))
+        result.connected = probe["connected"]
+        result.version = probe["version"]
+        result.error = probe["error"]
+        result.native_hook_detected = probe["native_hook_detected"]
+    return result
 
 
 @router.put(
@@ -168,31 +182,42 @@ async def get_status(session: Session = Depends(get_session)) -> SpoolmanStatus:
     summary="Update Spoolman connection + toggles",
 )
 async def update_status(
-    body: SpoolmanUpdate, session: Session = Depends(get_session)
+    body: SpoolmanUpdate,
+    response: Response,
+    session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> SpoolmanStatus:
+    base = spoolman_editing.expected_base(precondition)
+    config = config_repository.get_or_create(session, commit=False)
+    session.flush()
+    spoolman_editing.claim(session, actor, config, base)
+    was_enabled = config.spoolman_enabled
     if body.base_url is not None or body.api_key is not None:
-        # Omitted and masked fields keep their stored value; an empty string clears it.
         changes = {}
         if body.base_url is not None:
             changes["base_url"] = body.base_url
         if body.api_key not in (None, _SECRET_MASK):
             changes["api_key"] = body.api_key
-        runtime_config.set_spoolman_config(session, **changes)
+        runtime_config.set_spoolman_config(session, **changes, commit=False)
     if body.write_enabled is not None:
-        runtime_config.set_spoolman_write_enabled(session, body.write_enabled)
+        runtime_config.set_spoolman_write_enabled(
+            session, body.write_enabled, commit=False
+        )
     if body.write_force is not None:
-        runtime_config.set_spoolman_write_force(session, body.write_force)
+        runtime_config.set_spoolman_write_force(session, body.write_force, commit=False)
     if body.enabled is not None:
-        was_enabled = runtime_config.spoolman_enabled(session)
-        runtime_config.set_spoolman_enabled(session, body.enabled)
-        # Pull filaments once on enable so presets reflect Spoolman immediately.
-        # Best-effort: a failure here must not fail the settings save.
-        if body.enabled and not was_enabled:
-            try:
-                await filament_sync.sync_from_spoolman(session)
-            except SpoolmanError as exc:
-                logger.warning("initial Spoolman filament sync skipped: %s", exc)
-    return await get_status(session)
+        runtime_config.set_spoolman_enabled(session, body.enabled, commit=False)
+    result, key = _status_snapshot(session)
+    session.commit()
+    response.headers["ETag"] = spoolman_editing.etag(result)
+    # Preserve the existing enable-time synchronization contract after the atomic save.
+    if body.enabled and not was_enabled:
+        try:
+            await filament_sync.sync_from_spoolman(session)
+        except SpoolmanError as exc:
+            logger.warning("initial Spoolman filament sync skipped: %s", exc)
+    return await _probe_status(result, key)
 
 
 @router.post(

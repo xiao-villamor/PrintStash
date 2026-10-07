@@ -53,6 +53,10 @@ class SystemConfig(SQLModel, table=True):
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )
 
+    spoolman_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+
     notification_edit_version: int = Field(
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )

@@ -87,7 +87,6 @@ from app.modules.library import (
 )
 from app.modules.library.edit_preconditions import (
     EditKind,
-    EditPrecondition,
     etag,
     expected_base,
 )
@@ -121,6 +120,7 @@ from app.modules.storage.storage_ownership import (
 )
 from app.modules.work import nudge
 from app.modules.work import service as work_service
+from app.schemas.editing import EditPrecondition
 from app.schemas.jobs import JobAccepted
 from app.schemas.library_browse import (
     BrowsePage,

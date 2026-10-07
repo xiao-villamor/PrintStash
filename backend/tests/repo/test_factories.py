@@ -1088,3 +1088,13 @@ class TestMultipartScaleBuilder:
             group.edit_version == 1 and group.collection_id is not None
             for group in groups
         )
+
+
+class TestSpoolmanEditingFactory:
+    def test_system_configuration_starts_with_a_valid_spoolman_version(
+        self, db_session
+    ):
+        from tests.factories import build_system_config
+
+        config = build_system_config(db_session)
+        assert config.spoolman_edit_version == 1

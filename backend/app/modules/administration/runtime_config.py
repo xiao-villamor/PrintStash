@@ -462,7 +462,7 @@ def publish_config_edit(config: SystemConfig, fields: frozenset[str]) -> None:
 def _json_object(value: str | None) -> dict[str, Any]:
     try:
         parsed = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -844,7 +844,7 @@ def update_config(
             fallback = _env_or_default(field_name)
             try:
                 pending_overlay[field_name] = int(fallback or 0)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pending_overlay[field_name] = 30
 
     def _apply_bool(field_name: str, value: Optional[bool]) -> None:
@@ -967,13 +967,18 @@ def spoolman_enabled(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_enabled)
 
 
-def set_spoolman_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -986,13 +991,18 @@ def spoolman_write_enabled(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_write_enabled)
 
 
-def set_spoolman_write_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_write_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_write_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -1004,13 +1014,18 @@ def spoolman_write_force(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_write_force)
 
 
-def set_spoolman_write_force(session: Session, force: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_write_force(
+    session: Session, force: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_write_force = force
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -1030,18 +1045,22 @@ def set_spoolman_config(
     *,
     base_url: Any = _UNSET,
     api_key: Any = _UNSET,
+    commit: bool = True,
 ) -> SystemConfig:
     """Persist base URL and/or API key. ``_UNSET`` leaves a field untouched so a
     blank/masked key from the UI never clobbers a stored secret."""
-    config = get_or_create(session)
+    config = get_or_create(session, commit=commit)
     if base_url is not _UNSET:
         config.spoolman_base_url = (base_url or "").strip().rstrip("/") or None
     if api_key is not _UNSET:
         config.spoolman_api_key = api_key or None
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 

@@ -44,7 +44,6 @@ from app.modules.identity import rbac
 from app.modules.library import multipart_models, taxonomy
 from app.modules.library.edit_preconditions import (
     EditKind,
-    EditPrecondition,
     etag,
     expected_base,
 )
@@ -66,6 +65,7 @@ from app.modules.storage.storage_ownership import (
     finish_publication_batch,
     prepare_bytes,
 )
+from app.schemas.editing import EditPrecondition
 from app.schemas.models import TagSetUpdate
 from app.schemas.multipart_models import (
     MultipartMemberRead,

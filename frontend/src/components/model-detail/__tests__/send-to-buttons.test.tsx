@@ -160,6 +160,8 @@ function weighing(grams: number): MetadataRead {
 
 function spoolmanStatus(enabled: boolean): SpoolmanStatus {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     enabled,
     base_url: null,
     has_api_key: false,
