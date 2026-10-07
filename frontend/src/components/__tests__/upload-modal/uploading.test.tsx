@@ -29,11 +29,17 @@ import { UploadModal } from "@/components/upload-modal";
 import { TaskList } from "@/components/task-list";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
 import { queryKeys } from "@/lib/query-client";
-import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
+import { clearLogin, storeLogin } from "@/lib/auth-store";
+import {
+  listTasks,
+  setJobSource,
+  syncImportJobs,
+  startTaskCenterSessionScope,
+} from "@/lib/task-center";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
-import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { ExternalLibrary, JobStatus, ModelRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
@@ -98,10 +104,16 @@ function aLibrary(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   };
 }
 
-function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<void> } = {}) {
+function renderUpload(
+  options: RenderAppOptions & {
+    onUploaded?: () => Promise<void>;
+    beforeChunk?: () => Promise<void>;
+  } = {},
+) {
   const {
     seed = [],
     routes = {},
+    beforeChunk,
     onUploaded = vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ...rest
   } = options;
@@ -174,7 +186,8 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
             expires_at: FROZEN_NOW,
           });
         },
-        "PUT /api/v1/artifact-uploads/": (url) => {
+        "PUT /api/v1/artifact-uploads/": async (url) => {
+          await beforeChunk?.();
           const { id, request } = requestForUrl(url);
           return json({
             session: status(id, request, {
@@ -214,8 +227,11 @@ function fileInputs(container: HTMLElement) {
   return container.ownerDocument.querySelectorAll<HTMLInputElement>('input[type="file"]');
 }
 
+let stopSessionScope: (() => void) | undefined;
+
 beforeEach(() => {
   window.localStorage.clear();
+  stopSessionScope = startTaskCenterSessionScope();
   FetchBackedXhr.requests = [];
   vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
   jobSeq += 1;
@@ -235,6 +251,7 @@ afterEach(async () => {
     { timeout: 5000 },
   );
   setJobSource(async () => []);
+  stopSessionScope?.();
   vi.unstubAllGlobals();
 });
 
@@ -438,6 +455,96 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("a bulk drop", () => {
+    it("reports a failed final bulk publication", async () => {
+      const user = userEvent.setup();
+      const onUploaded = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue(new Error("Refresh failed"));
+      const { container } = renderUpload({ onUploaded });
+      await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+      await user.upload(fileInputs(container)[0], [
+        new File(["x"], "a.stl"),
+        new File(["x"], "b.stl"),
+      ]);
+      await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+      expect(
+        await screen.findByText(
+          "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(onUploaded).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["transfer", "job"] as const)(
+      "retires remaining bulk files during a held %s",
+      async (phase) => {
+        const held = Promise.withResolvers<void>();
+        let entered = false;
+        const beforeChunk =
+          phase === "transfer"
+            ? async () => {
+                entered = true;
+                await held.promise;
+              }
+            : undefined;
+        if (phase === "job")
+          setJobSource(async () => {
+            entered = true;
+            await held.promise;
+            return [aJob()];
+          });
+        const user = userEvent.setup();
+        const { container, uploadRequests, onUploaded } = renderUpload({ beforeChunk });
+        await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+        await user.upload(fileInputs(container)[0], [
+          new File(["x"], "private-a.stl"),
+          new File(["x"], "private-b.stl"),
+        ]);
+        await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+        await waitFor(() => expect(entered).toBe(true));
+        await act(async () => {
+          clearLogin();
+          const replacement = adminSession().user;
+          if (!replacement) throw new Error("Missing replacement account");
+          storeLogin("", { ...replacement, id: 90 });
+          held.resolve();
+          // Flush the released transfer and any incorrectly dispatched WebCrypto work.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        });
+        try {
+          expect(uploadRequests().map((request) => request.filename)).toEqual(["private-a.stl"]);
+          expect(onUploaded).not.toHaveBeenCalled();
+          expect(listTasks()).toEqual([]);
+        } finally {
+          // A red regression can have incorrectly registered new-session work.
+          act(() => clearLogin());
+        }
+      },
+    );
+
+    it("continues accepted bulk work after the form unmounts", async () => {
+      const held = Promise.withResolvers<void>();
+      let entered = false;
+      const user = userEvent.setup();
+      const { container, uploadRequests, onUploaded, unmount } = renderUpload({
+        beforeChunk: async () => {
+          entered = true;
+          await held.promise;
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+      await user.upload(fileInputs(container)[0], [
+        new File(["x"], "a.stl"),
+        new File(["x"], "b.stl"),
+      ]);
+      await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+      await waitFor(() => expect(entered).toBe(true));
+      unmount();
+      held.resolve();
+      await waitFor(() => expect(onUploaded).toHaveBeenCalledTimes(1));
+      expect(uploadRequests()).toHaveLength(2);
+    });
+
     it("queues one job per file", async () => {
       const user = userEvent.setup();
       const { container, uploadRequests } = renderUpload();

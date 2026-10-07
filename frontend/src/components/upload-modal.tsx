@@ -16,17 +16,11 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import {
-  createTag,
-  capturePendingImport,
-  getModel,
-  getVaultConfig,
-  listExternalLibraries,
-} from "@/lib/api";
+import { createTag, capturePendingImport, getVaultConfig, listExternalLibraries } from "@/lib/api";
 import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
 import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
-import { createTask, linkTaskToJob, updateTask, waitForImportJob } from "@/lib/task-center";
+import { createTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
@@ -35,7 +29,6 @@ import { ModalShell } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import {
-  bulkTargetCollection,
   entriesFromDataTransfer,
   extensionOf,
   fileListToItems,
@@ -47,10 +40,14 @@ import {
   MESH_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
-import { CollectionNodeRead, ExternalLibrary, JobStatus } from "@/types";
+import { CollectionNodeRead, ExternalLibrary } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
-import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
+import {
+  runModelUpload,
+  runBulkModelUpload,
+  type ModelUploadFiles,
+} from "@/lib/model-upload-workflow";
 import { startArchiveTransfer } from "@/lib/archive-upload";
 
 // `webkitdirectory` enables folder selection on a file input but isn't in the
@@ -332,242 +329,6 @@ export function UploadModal({
     onClose();
   }
 
-  async function waitForJob(
-    jid: string,
-    taskId: string,
-    {
-      progressStart,
-      progressEnd,
-      pendingDetail,
-      runningDetail,
-      completedDetail,
-      completeTask,
-    }: {
-      progressStart: number;
-      progressEnd: number;
-      pendingDetail: string;
-      runningDetail: string;
-      completedDetail: string;
-      completeTask: boolean;
-    },
-  ): Promise<JobStatus> {
-    void progressStart;
-    void pendingDetail;
-    void runningDetail;
-    const status = await waitForImportJob(jid);
-    if (status.state === "failed" || status.state === "cancelled") {
-      throw new Error(status.error || "Ingestion job failed");
-    }
-    updateTask(taskId, {
-      status: completeTask ? "completed" : "running",
-      progress: completeTask ? 100 : progressEnd,
-      detail: completedDetail,
-    });
-    return status;
-  }
-
-  async function runUploadTask({
-    taskId,
-    mesh,
-    gcode,
-    name,
-    collection,
-    tagsForUpload,
-    libraryId,
-    refreshAfter = true,
-  }: {
-    taskId: string;
-    mesh: File | null;
-    gcode: File | null;
-    name: string;
-    collection: string;
-    tagsForUpload: string[];
-    libraryId: number | "";
-    refreshAfter?: boolean;
-  }) {
-    const reportProgress = (progress: ArtifactUploadProgress) => {
-      const ratio = progress.totalBytes ? progress.transferredBytes / progress.totalBytes : 0;
-      const phase = {
-        hashing: { detail: uiText("Hashing file"), progress: 8 },
-        transferring: {
-          detail: uiText("Transferring file"),
-          progress: 10 + Math.round(ratio * 55),
-        },
-        verifying: { detail: uiText("Verifying upload"), progress: 72 },
-        ingesting: { detail: uiText("Processing upload"), progress: 80 },
-        completed: { detail: uiText("Upload processed"), progress: 100 },
-      }[progress.phase];
-      updateTask(taskId, { ...phase, status: phase.progress === 100 ? "completed" : "running" });
-    };
-    const durableUpload = (file: File, purpose: "model" | "gcode", sourceHash?: string) =>
-      uploadArtifact(
-        file,
-        {
-          purpose,
-          target_role: "new_model",
-          model_name: name || file.name,
-          collection: collection || undefined,
-          tags: tagsForUpload.length ? tagsForUpload.join(",") : undefined,
-          source_hash: sourceHash,
-          target_library_id: libraryId === "" ? undefined : libraryId,
-        },
-        {
-          onProgress: reportProgress,
-          onSession: (uploadSessionId) =>
-            updateTask(taskId, {
-              uploadSessionId,
-              uploadPaused: false,
-              retryable: true,
-            }),
-        },
-      );
-    try {
-      if (mesh) {
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(mesh.name) }),
-          status: "running",
-          progress: 15,
-        });
-        const meshRes = await durableUpload(mesh, "model");
-        if (!meshRes.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, meshRes.job_id);
-
-        updateTask(taskId, {
-          detail: uiMessage("Processing mesh and thumbnail"),
-          status: "running",
-          progress: 35,
-        });
-        const meshStatus = await waitForJob(meshRes.job_id, taskId, {
-          progressStart: 35,
-          progressEnd: gcode ? 55 : 100,
-          pendingDetail: "Waiting for the vault to start processing",
-          runningDetail: "Extracting mesh metadata and thumbnail",
-          completedDetail: gcode ? "Mesh processed; linking G-code" : "Upload processed",
-          completeTask: !gcode,
-        });
-
-        if (!gcode) {
-          if (refreshAfter) await onUploaded();
-          return;
-        }
-
-        if (meshStatus.model_id == null) {
-          throw new Error("Mesh job completed but no model_id returned");
-        }
-
-        const full = await getModel(meshStatus.model_id);
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
-          status: "running",
-          progress: 60,
-        });
-        const gcodeRes = await durableUpload(gcode, "gcode", full.hash);
-        if (!gcodeRes.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, gcodeRes.job_id);
-        await waitForJob(gcodeRes.job_id, taskId, {
-          progressStart: 70,
-          progressEnd: 100,
-          pendingDetail: "Waiting for the vault to start processing G-code",
-          runningDetail: "Parsing slicer metadata and thumbnail",
-          completedDetail: "Upload processed",
-          completeTask: true,
-        });
-        if (refreshAfter) await onUploaded();
-        return;
-      }
-
-      if (gcode) {
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
-          status: "running",
-          progress: 25,
-        });
-        const res = await durableUpload(gcode, "gcode");
-        if (!res.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, res.job_id);
-        await waitForJob(res.job_id, taskId, {
-          progressStart: 45,
-          progressEnd: 100,
-          pendingDetail: "Waiting for the vault to start processing",
-          runningDetail: "Parsing slicer metadata and thumbnail",
-          completedDetail: "Upload processed",
-          completeTask: true,
-        });
-        if (refreshAfter) await onUploaded();
-      }
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        updateTask(taskId, {
-          status: "running",
-          uploadPaused: true,
-          retryable: true,
-          detail: uiText("Paused"),
-        });
-        return;
-      }
-      const msg =
-        err instanceof ApiError ? err.code : err instanceof Error ? err.message : String(err);
-      updateTask(taskId, {
-        status: "failed",
-        progress: 100,
-        detail: msg,
-      });
-      toast.error(err);
-    }
-  }
-
-  // Bulk: create one task per mesh upfront (so the whole queue is visible in
-  // the task center), then process sequentially to avoid hammering the vault
-  // with concurrent uploads. Each file becomes its own model — no G-code
-  // linking, which is what keeps this distinct from the "Files" tab.
-  async function runBulkUpload({
-    files,
-    collection,
-    tagsForUpload,
-    libraryId,
-  }: {
-    files: BulkItem[];
-    collection: string;
-    tagsForUpload: string[];
-    libraryId: number | "";
-  }) {
-    const queue = files.map((item) => ({
-      item,
-      taskId: createTask({
-        title: uiMessage("Upload {value1}{value2}", {
-          value1: String(item.relPath ? `${item.relPath}/` : ""),
-          value2: String(item.file.name),
-        }),
-        detail: uiMessage("Queued"),
-        status: "pending" as const,
-        progress: 0,
-        expectedJobCount: 1,
-      }),
-    }));
-    try {
-      for (const { item, taskId } of queue) {
-        // Mirror the file's source folder into a nested collection under the
-        // chosen base — the backend auto-creates intermediate collections.
-        const targetCollection = bulkTargetCollection(collection, item.relPath);
-        // runUploadTask owns its own error handling and marks the task failed,
-        // so one bad file doesn't abort the rest of the queue.
-        await runUploadTask({
-          taskId,
-          mesh: item.file,
-          gcode: null,
-          name: stemName(item.file.name),
-          collection: targetCollection,
-          tagsForUpload,
-          libraryId,
-          refreshAfter: false,
-        });
-      }
-    } finally {
-      // One invalidation after the entire queue, including partial failures.
-      await onUploaded();
-    }
-  }
-
   function collectionGate(): boolean {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
@@ -635,12 +396,15 @@ export function UploadModal({
     if (mode === "bulk") {
       if (bulkFiles.length === 0) return;
       if (!collectionGate()) return;
-      void runBulkUpload({
-        files: bulkFiles,
-        collection: collectionPath,
-        tagsForUpload: [...selectedTags],
-        libraryId: targetLibraryId,
-      });
+      void runBulkModelUpload(
+        {
+          files: bulkFiles,
+          collection: collectionPath,
+          tagsForUpload: [...selectedTags],
+          libraryId: targetLibraryId,
+        },
+        onUploaded,
+      );
       toast.success(
         uiText("uploads.queued", {
           value1: String(bulkFiles.length),
@@ -651,7 +415,12 @@ export function UploadModal({
       onClose();
       return;
     }
-    if (!meshFile && !gcodeFile) return;
+    const files: ModelUploadFiles | null = meshFile
+      ? { mesh: meshFile, gcode: gcodeFile }
+      : gcodeFile
+        ? { mesh: null, gcode: gcodeFile }
+        : null;
+    if (!files) return;
     if (!collectionGate()) return;
     const taskId = createTask({
       title: uiMessage("Upload {value1}", {
@@ -664,15 +433,17 @@ export function UploadModal({
     });
     setSubmitting(true);
     onTaskStarted?.(taskId);
-    void runUploadTask({
-      taskId,
-      mesh: meshFile,
-      gcode: gcodeFile,
-      name: modelName,
-      collection: collectionPath,
-      tagsForUpload: [...selectedTags],
-      libraryId: targetLibraryId,
-    });
+    void runModelUpload(
+      {
+        taskId,
+        ...files,
+        name: modelName,
+        collection: collectionPath,
+        tagsForUpload: [...selectedTags],
+        libraryId: targetLibraryId,
+      },
+      onUploaded,
+    );
     reset();
     onClose();
   }

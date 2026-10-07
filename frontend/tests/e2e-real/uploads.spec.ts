@@ -8,9 +8,63 @@
  * a queue that reports success while a render is still missing.
  */
 import { test, expect } from "./helpers";
-import { bgcodeFor, createCollectionViaVault, modelCard, uploadModel } from "./util";
+import { bgcodeFor, createCollectionViaVault, modelCard, stlFor, uploadModel } from "./util";
 
 test.describe("uploads", () => {
+  test("recovers remote Job state after missed events", async ({ page }) => {
+    const name = `e2e-job-reconnect-${Date.now()}`;
+    let disconnected = true;
+    let connections = 0;
+    const closeConnections: Array<() => void> = [];
+    await page.routeWebSocket("**/api/v1/events/ws?*", (socket) => {
+      connections += 1;
+      const server = socket.connectToServer();
+      server.onMessage((message) => {
+        if (!disconnected) socket.send(message);
+      });
+      closeConnections.push(() => {
+        socket.close({ code: 1001, reason: "Simulated connection loss" });
+        server.close({ code: 1001, reason: "Simulated connection loss" });
+      });
+    });
+    await page.route(/\/api\/v1\/jobs(?:\?.*)?$/, (route) =>
+      disconnected ? route.abort("internetdisconnected") : route.continue(),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Upload model" });
+    await dialog.locator('input[accept=".stl,.3mf,.obj,.step,.stp,.dxf"]').setInputFiles({
+      name: `${name}.stl`,
+      mimeType: "model/stl",
+      buffer: Buffer.from(stlFor(name)),
+    });
+    await page.getByPlaceholder("e.g. Bracket v2").fill(name);
+    const accepted = page.waitForResponse((response) =>
+      /\/artifact-uploads\/[^/]+\/finalize$/.test(response.url()),
+    );
+    await page.getByRole("button", { name: /upload to vault/i }).click();
+    const upload = await (await accepted).json();
+    expect(upload.job_id).toBeTruthy();
+    await expect(async () => {
+      const response = await page.request.get(`/api/v1/jobs/${upload.job_id}`);
+      expect(response.ok()).toBe(true);
+      expect((await response.json()).state).toBe("completed");
+    }).toPass({ timeout: 60_000 });
+    await page.getByRole("button", { name: "Notifications" }).click();
+    const task = page.getByText(`Upload ${name}`, { exact: true }).locator("..");
+    await expect(task.getByText("completed", { exact: true })).toHaveCount(0);
+    const previousConnections = connections;
+
+    disconnected = false;
+    closeConnections.forEach((close) => close());
+
+    await expect.poll(() => connections).toBeGreaterThan(previousConnections);
+    await expect(task.getByText("completed", { exact: true })).toBeVisible();
+    const completed = await (await page.request.get(`/api/v1/jobs/${upload.job_id}`)).json();
+    expect(completed.model_id).toBeGreaterThan(0);
+    expect((await page.request.delete(`/api/v1/models/${completed.model_id}`)).ok()).toBe(true);
+  });
+
   test("clears legacy browser upload queues after a reload", async ({ page }) => {
     await page.goto("/");
     await page.evaluate(() => {
@@ -259,7 +313,10 @@ test.describe("uploads", () => {
     await page.goto(`/?c=${encodeURIComponent(collection)}`);
 
     for (const name of names) {
-      const image = modelCard(page, name).getByRole("img", { name });
+      const card = modelCard(page, name);
+      // Protected bytes are admitted near the viewport, including later rows.
+      await card.scrollIntoViewIfNeeded();
+      const image = card.getByRole("img", { name });
       await expect(image).toBeVisible({ timeout: 60_000 });
       await expect
         .poll(() => image.evaluate<number, HTMLImageElement>((node) => node.naturalWidth))

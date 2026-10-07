@@ -140,7 +140,7 @@ export function bgcodeFor(name: string): Buffer {
 }
 
 // A minimal single-triangle ASCII STL; the solid name keeps the bytes unique.
-function stlFor(name: string): string {
+export function stlFor(name: string): string {
   return [
     `solid ${name}`,
     "facet normal 0 0 1",

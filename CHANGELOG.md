@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep accepted Model uploads running after their form closes, while binding the
+  entire bulk queue to its initiating session. Stop remaining files and stale
+  completion notifications when that session retires.
+
 - Keep protected thumbnail URLs alive while displayed, admit images near the
   viewport under a four-download limit, and cancel abandoned work. Bound idle
   encoded image data without evicting mounted consumers. Fix Shift range

@@ -377,3 +377,15 @@ handler. Functional React state updaters must remain pure: React can replay them
 and moving an anchor inside the updater changes the meaning of a Shift range.
 The existing ModelBrowser controller owns selection; this does not require a
 second selection store or a generic state abstraction.
+
+### Accepted uploads (M7 checkpoint)
+
+`lib/model-upload-workflow.ts` owns accepted single, linked mesh/G-code and
+sequential bulk execution under one captured session. `UploadModal` owns form
+drafts and hands off accepted work; closing it is not cancellation.
+`artifact-upload.ts` owns byte transfer and resume; `task-center.ts` owns durable
+Job progress and terminal waiters, with event wakeups and a completion-chained
+fallback poll. A session change stops remaining bulk dispatch and publication.
+Do not add component-local Job timers or copy Task Center progress into a second
+remote store. Archive review's remaining read/recovery ownership is still under
+M7 qualification; this checkpoint does not claim that entire milestone closed.
