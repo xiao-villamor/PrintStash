@@ -4,7 +4,7 @@
  * and keeps the chosen destination while allowing the user to change it.
  */
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,8 @@ import { ArchiveReviewDialog } from "@/components/archive-review";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { clearCompletedTasks, createTask, listTasks, updateTask } from "@/lib/task-center";
 import { aCollection, aJob } from "@/test-support/factories";
-import { json, renderApp } from "@/test-support/render";
+import { json, renderApp, type RouteAnswer } from "@/test-support/render";
+import { storeLogin } from "@/lib/auth-store";
 import type { ArchiveEntry } from "@/types";
 
 const entries: ArchiveEntry[] = [
@@ -24,7 +25,13 @@ const entries: ArchiveEntry[] = [
 
 let sequence = 0;
 function openReview(
-  options: { broken?: boolean; entries?: ArchiveEntry[]; collection?: string | null } = {},
+  options: {
+    broken?: boolean;
+    entries?: ArchiveEntry[];
+    collection?: string | null;
+    readJob?: RouteAnswer;
+    select?: RouteAnswer;
+  } = {},
 ) {
   const jobId = `review-${++sequence}`;
   const taskId = createTask({
@@ -38,25 +45,25 @@ function openReview(
   const onClose = vi.fn<() => void>();
   const result = renderApp(<ArchiveReviewDialog jobId={jobId} onClose={onClose} />, {
     routes: {
-      [`GET /api/v1/jobs/${jobId}`]: json(
-        aJob({
-          job_id: jobId,
-          kind: "ingestion.archive_inspect",
-          state: "completed",
-          result: options.broken
-            ? null
-            : {
-                kind: "archive_manifest",
-                archive_id: "archive-1",
-                archive_name: "parts.zip",
-                entries: options.entries ?? entries,
-              },
-        }),
-      ),
-      "POST /api/v1/ingest/archive/archive-1/select": json(
-        { job_id: `import-${jobId}`, state: "queued" },
-        202,
-      ),
+      [`GET /api/v1/jobs/${jobId}`]:
+        options.readJob ??
+        json(
+          aJob({
+            job_id: jobId,
+            kind: "ingestion.archive_inspect",
+            state: "completed",
+            result: options.broken
+              ? null
+              : {
+                  kind: "archive_manifest",
+                  archive_id: "archive-1",
+                  archive_name: "parts.zip",
+                  entries: options.entries ?? entries,
+                },
+          }),
+        ),
+      "POST /api/v1/ingest/archive/archive-1/select":
+        options.select ?? json({ job_id: `import-${jobId}`, state: "queued" }, 202),
       ...collectionTreeRoutes([
         aCollection({ name: "My Parts", path: "My Parts", effective_role: "admin" }),
       ]),
@@ -73,6 +80,145 @@ afterEach(() => {
 });
 
 describe("ArchiveReviewDialog", () => {
+  it.each([403, 404])("removes a refused cached ZIP manifest (%s)", async (status) => {
+    const app = openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    app.route({ [`GET /api/v1/jobs/${app.jobId}`]: json({ detail: "forbidden" }, status) });
+
+    await act(async () => app.client.invalidateQueries({ queryKey: ["archive-manifest"] }));
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Import 3 selected" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open folder Animals" })).not.toBeInTheDocument();
+  });
+
+  it("preserves ZIP selection through a temporary read failure", async () => {
+    const app = openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    app.route({ [`GET /api/v1/jobs/${app.jobId}`]: json({ detail: "unavailable" }, 503) });
+
+    await act(async () => app.client.invalidateQueries({ queryKey: ["archive-manifest"] }));
+
+    expect(screen.getByRole("button", { name: "Import 3 selected" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+  });
+
+  it("retries an unavailable ZIP manifest", async () => {
+    const app = openReview({ readJob: json({ detail: "unavailable" }, 503) });
+    await screen.findByRole("alert");
+    app.route({
+      [`GET /api/v1/jobs/${app.jobId}`]: json(
+        aJob({
+          job_id: app.jobId,
+          kind: "ingestion.archive_inspect",
+          state: "completed",
+          result: {
+            kind: "archive_manifest",
+            archive_id: "archive-1",
+            archive_name: "parts.zip",
+            entries,
+          },
+        }),
+      ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("button", { name: "Open folder Animals" })).toBeVisible();
+  });
+
+  it("cancels an abandoned ZIP manifest read", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = openReview({
+      readJob: (_url, init) => {
+        signal = init?.signal;
+        return pending.promise;
+      },
+    });
+    await waitFor(() =>
+      expect(app.requestsWithMethod("GET").some((r) => r.url.includes("/jobs/"))).toBe(true),
+    );
+
+    app.unmount();
+
+    expect(signal?.aborted).toBe(true);
+    pending.resolve(json({ detail: "gone" }, 404));
+  });
+
+  it("retires the previous ZIP draft when the Job changes", async () => {
+    const app = openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    const pending = Promise.withResolvers<Response>();
+    app.route({ "GET /api/v1/jobs/replacement": () => pending.promise });
+
+    app.rerender(<ArchiveReviewDialog jobId="replacement" onClose={app.onClose} />);
+
+    expect(screen.queryByRole("button", { name: "Import 3 selected" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open folder Animals" })).not.toBeInTheDocument();
+    await act(async () =>
+      pending.resolve(
+        json(
+          aJob({
+            job_id: "replacement",
+            kind: "ingestion.archive_inspect",
+            state: "completed",
+            result: {
+              kind: "archive_manifest",
+              archive_id: "archive-2",
+              archive_name: "replacement.zip",
+              entries: [entries[2]],
+            },
+          }),
+        ),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Open folder Vehicles" })).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 1 files selected");
+  });
+
+  it("shares a completed ZIP manifest read", async () => {
+    const app = openReview();
+    await screen.findByRole("button", { name: "Open folder Animals" });
+
+    app.rerender(
+      <>
+        <ArchiveReviewDialog jobId={app.jobId} onClose={app.onClose} />
+        <ArchiveReviewDialog jobId={app.jobId} onClose={app.onClose} />
+      </>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Open folder Animals" })).toHaveLength(2),
+    );
+    expect(app.requestsWithMethod("GET").filter((r) => r.url.includes("/jobs/"))).toHaveLength(1);
+  });
+
+  it("rejects a ZIP gesture from a retired session", async () => {
+    const app = openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    const gesture = screen.getByRole("button", { name: "Import 3 selected" });
+    act(() => storeLogin("", { id: 9, username: "replacement", email: null, is_superuser: true }));
+
+    await userEvent.click(gesture);
+
+    expect(app.requestsWithMethod("POST")).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Open folder Animals" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a ZIP receipt after its review closes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = openReview({ select: () => pending.promise });
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    await userEvent.click(screen.getByRole("button", { name: "Import 3 selected" }));
+    app.rerender(<p>Replacement review</p>);
+
+    await act(async () => pending.resolve(json({ job_id: "late-import", state: "queued" }, 202)));
+
+    expect(app.onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("Replacement review")).toBeVisible();
+  });
+
   it("lists files by name within a folder", async () => {
     const user = userEvent.setup();
     openReview({ entries: [entries[1], entries[0]] });

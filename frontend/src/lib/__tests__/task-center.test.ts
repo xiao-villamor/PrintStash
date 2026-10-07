@@ -1133,12 +1133,143 @@ describe("syncImportJobs", () => {
   });
 });
 
+describe("attachTaskToImportJob", () => {
+  it("preserves a discovered Job after local task removal", async () => {
+    const localId = tc.createTask({ title: "Prepare parts.zip", status: "completed" });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+    tc.clearCompletedTasks();
+    const discovered = tc.listTasks();
+
+    tc.attachTaskToImportJob(localId, "zip-job");
+
+    expect(tc.listTasks()).toEqual(discovered);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "zip-job", status: "running" }]);
+  });
+
+  it("attaches a ZIP receipt after Job discovery", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveCollection: "Parts",
+      archiveTags: ["tag"],
+      archiveUploading: true,
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+
+    tc.attachTaskToImportJob(taskId, "zip-job");
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        id: taskId,
+        title: "Prepare parts.zip",
+        status: "completed",
+        archiveCollection: "Parts",
+        archiveTags: ["tag"],
+      },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+
+  it("attaches a ZIP receipt after terminal discovery", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveUploading: true,
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+    await tc.syncImportJobs();
+
+    tc.attachTaskToImportJob(taskId, "zip-job");
+
+    expect(tc.listTasks()).toMatchObject([
+      { id: taskId, title: "Prepare parts.zip", status: "completed" },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+
+  it("repairs a persisted duplicate ZIP task", async () => {
+    tc.createTask({
+      title: "Prepare ZIP",
+      jobId: "zip-job",
+      status: "completed",
+      jobKind: "ingestion.archive_inspect",
+    });
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      jobId: "zip-job",
+      archiveSizeBytes: 100,
+      archiveCollection: "Parts",
+      archiveTags: ["tag"],
+      status: "pending",
+    });
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        id: taskId,
+        title: "Prepare parts.zip",
+        status: "completed",
+        archiveCollection: "Parts",
+        archiveTags: ["tag"],
+      },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+});
+
 describe("createImportJobSynchronizer", () => {
   async function handshake() {
     await vi.advanceTimersByTimeAsync(0);
     socket.deliver({ type: "resync" });
     await vi.advanceTimersByTimeAsync(0);
   }
+
+  it("resumes Job synchronization when the tab becomes visible", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    listJobs.mockResolvedValue([aJob({ job_id: "visible-job", state: "running" })]);
+    const stop = tc.startImportJobSync();
+    try {
+      await handshake();
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      listJobs.mockResolvedValue([aJob({ job_id: "visible-job", state: "completed" })]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      expect(tc.listTasks()).toMatchObject([{ jobId: "visible-job", status: "running" }]);
+
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      expect(tc.listTasks()).toMatchObject([{ jobId: "visible-job", status: "completed" }]);
+    } finally {
+      stop();
+      visibility.mockRestore();
+    }
+  });
 
   it("shares one handshake snapshot between subscribers", async () => {
     const stopA = tc.startImportJobSync();

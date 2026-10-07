@@ -2,8 +2,11 @@ import { getJson, sendJson, requestApi, jsonHeaders, type GetJsonOptions } from 
 import type { JobStatus } from "@/types";
 
 /** One Job, uncached: a cached status never sees its Job finish. */
-export function getJobStatus(jobId: string): Promise<JobStatus> {
-  return getJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, { fresh: true });
+export function getJobStatus(jobId: string, options: GetJsonOptions = {}): Promise<JobStatus> {
+  return getJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+    fresh: true,
+    ...options,
+  });
 }
 
 /**

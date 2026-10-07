@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M6 are closed locally in dependency order. M7 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M7 are closed locally in dependency order. M8 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -192,7 +192,10 @@ real paged detail return, and removal of ignored navigation APIs are qualified.
 M6 is locally closed with its [startup/assets acceptance](../frontend-m6-validation.md)
 and [200-observation comparison](../frontend-m6-performance.md). Asset leases,
 progressive restoration and Shift selection after append are qualified.
-M7 is now the only active target.
+M7 is locally closed with its [async workflow qualification](../frontend-m7-validation.md):
+shared Inbox/Job ownership, socket retirement, real reconnect and upload recovery,
+ZIP review lifetime and early Job handoff are qualified.
+M8 is now the only active target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recover ZIP review after read failures, cancel abandoned manifest reads, and
+  retire selections and delayed receipts with their review/session. Reconcile
+  early-discovered archive Jobs into the original upload task so it reaches Ready
+  once, with its chosen destination and tags.
+
 - Keep accepted Model uploads running after their form closes, while binding the
   entire bulk queue to its initiating session. Stop remaining files and stale
   completion notifications when that session retires.

@@ -447,6 +447,10 @@ export function linkTaskToJob(taskId: string, jobId: string): void {
 
 /** Attach a one-job import to an existing browser task without losing its review metadata. */
 export function attachTaskToImportJob(taskId: string, jobId: string): void {
+  if (!tasks.some((task) => task.id === taskId)) return;
+  // A socket snapshot may discover the Job before the upload receipt arrives.
+  // The local workflow owns its name and review destination; adopt that Job.
+  tasks = tasks.filter((task) => task.id === taskId || task.jobId !== jobId);
   dismissedJobIds.delete(jobId);
   persistDismissedJobIds();
   updateTask(taskId, {
@@ -457,6 +461,8 @@ export function attachTaskToImportJob(taskId: string, jobId: string): void {
     status: "pending",
     detail: uiText("Queued · continues in background"),
   });
+  const terminal = terminalJobs.get(jobId);
+  if (terminal) applyJob(terminal, null, { epoch: taskStoreEpoch, version: getSessionVersion() });
   wakeImportJobSync();
 }
 
@@ -866,15 +872,16 @@ export function waitForImportJob(
 }
 
 function reconcileLinkedJobDuplicates(): void {
-  const groupedOwners = new Map<string, string>();
+  const workflowOwners = new Map<string, string>();
   for (const task of tasks) {
-    for (const jobId of task.jobIds ?? []) groupedOwners.set(jobId, task.id);
+    for (const jobId of task.jobIds ?? []) workflowOwners.set(jobId, task.id);
+    if (task.jobId && task.archiveSizeBytes !== undefined) workflowOwners.set(task.jobId, task.id);
   }
   const next = tasks.filter(
     (task) =>
       task.jobId === undefined ||
-      groupedOwners.get(task.jobId) === undefined ||
-      groupedOwners.get(task.jobId) === task.id,
+      workflowOwners.get(task.jobId) === undefined ||
+      workflowOwners.get(task.jobId) === task.id,
   );
   if (next.length === tasks.length) return;
   tasks = next;

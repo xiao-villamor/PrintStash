@@ -696,6 +696,32 @@ describe("UploadModal ingestion", () => {
       );
     });
 
+    it("retires ZIP transfer feedback with its session", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => pending.promise },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "private.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await act(async () => {
+        clearLogin();
+        storeLogin("", { id: 90, username: "replacement", email: null, is_superuser: true });
+        pending.resolve(json(queued()));
+      });
+
+      expect(listTasks()).toEqual([]);
+      expect(screen.queryByText("Something went wrong. Please try again.")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          "ZIP preparation continues in the background. We'll notify you when it's ready.",
+        ),
+      ).not.toBeInTheDocument();
+      expect(document.querySelector("[data-sonner-toast]")).toBeNull();
+    });
+
     it("cancels an in-flight ZIP upload from Tasks", async () => {
       const user = userEvent.setup();
       const { container } = renderUpload({

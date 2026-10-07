@@ -387,5 +387,9 @@ drafts and hands off accepted work; closing it is not cancellation.
 Job progress and terminal waiters, with event wakeups and a completion-chained
 fallback poll. A session change stops remaining bulk dispatch and publication.
 Do not add component-local Job timers or copy Task Center progress into a second
-remote store. Archive review's remaining read/recovery ownership is still under
-M7 qualification; this checkpoint does not claim that entire milestone closed.
+remote store. The ZIP review reads one immutable completed manifest through Query, distinct
+from live Job progress. Key the draft by Job and retire it with its session;
+cancel an abandoned read and offer Retry on failure. Attachment reconciles early
+server discovery into the named local workflow, preserving review metadata.
+Never let a delayed receipt close a replacement review. M7 browser closure
+qualification is recorded separately.

@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CheckSquare, ChevronRight, File, Folder, Search, Square } from "lucide-react";
 
 import { getJobStatus } from "@/lib/api/jobs";
 import { selectArchiveEntries } from "@/lib/api/models";
 import { useAuth } from "@/lib/auth-context";
-import { userMessage } from "@/lib/errors";
+import { ApiError, userMessage } from "@/lib/errors";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { formatBytes } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { uiMessage, uiText } from "@/lib/locale";
@@ -52,14 +55,53 @@ function parentOf(entry: ArchiveEntry): string | null {
 }
 
 export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [mountedSession] = useState(getSessionVersion);
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  if (session !== mountedSession) return null;
+  return <ArchiveReview key={jobId} jobId={jobId} onClose={onClose} session={session} />;
+}
+
+function ArchiveReview({
+  jobId,
+  onClose,
+  session,
+}: {
+  jobId: string;
+  onClose: () => void;
+  session: number;
+}) {
   useUiLocale();
   const { user } = useAuth();
   // The first folder a non-administrator may write to, found without listing
   // the library (#295).
   const writableProbe = useCollectionSearch("", "edit", { enabled: !user?.is_superuser });
   const firstWritable = writableProbe.data?.pages[0]?.items[0] ?? null;
-  const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // A completed archive manifest is immutable review input, not a live Job poll.
+  const manifestQuery = useQuery({
+    queryKey: ["archive-manifest", session, jobId],
+    queryFn: async ({ signal }) => {
+      requireSessionVersion(session);
+      return manifestFromJob(await getJobStatus(jobId, { signal }));
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
+  const denied =
+    manifestQuery.error instanceof ApiError && [401, 403, 404].includes(manifestQuery.error.status);
+  const manifest = denied ? null : (manifestQuery.data ?? null);
+  const loadError =
+    manifestQuery.error instanceof ArchiveReviewUnavailableError
+      ? manifestQuery.error.message
+      : manifestQuery.error
+        ? userMessage(manifestQuery.error)
+        : null;
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folder, setFolder] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -85,24 +127,6 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
         ? destinationLookup.data.collection.display_path
         : null;
   const tags = task?.archiveTags ?? [];
-
-  useEffect(() => {
-    let active = true;
-    getJobStatus(jobId)
-      .then(manifestFromJob)
-      .then((value) => {
-        if (active) setManifest(value);
-      })
-      .catch((error: Error) => {
-        if (active)
-          setLoadError(
-            error instanceof ArchiveReviewUnavailableError ? error.message : userMessage(error),
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, [jobId]);
 
   const importable = useMemo(
     () => manifest?.entries.filter((entry) => entry.file_type !== null) ?? [],
@@ -161,11 +185,15 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
       return;
     setSubmitting(true);
     try {
+      if (!live.current) return;
+      requireSessionVersion(session);
       const accepted = await selectArchiveEntries(manifest.archive_id, {
         names: [...selected],
         collection: collection ?? undefined,
         tags: tags.length ? tags.join(",") : undefined,
       });
+      requireSessionVersion(session);
+      if (!live.current) return;
       trackImportJob(
         accepted.job_id,
         uiMessage("Import {value1}", { value1: manifest.archive_name }),
@@ -174,6 +202,7 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
       toast.info(uiText("Selected ZIP files are importing in the background."));
       onClose();
     } catch (error) {
+      if (!live.current || session !== getSessionVersion()) return;
       toast.error(error);
       setSubmitting(false);
     }
@@ -202,6 +231,14 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
             <p role="alert" className="text-sm text-destructive">
               {loadError}
             </p>
+            <Button
+              variant="outline"
+              className="self-end"
+              onClick={() => void manifestQuery.refetch()}
+              disabled={manifestQuery.isFetching}
+            >
+              {uiText("Retry")}
+            </Button>
             <Button variant="outline" className="self-end" onClick={onClose}>
               {uiText("Cancel")}
             </Button>
