@@ -4234,5 +4234,9 @@
   "{value1} not attempted": "{value1} not attempted",
   "Move to: {value1}": "Move to: {value1}",
   "Add tags: {value1}": "Add tags: {value1}",
-  "Remove tags: {value1}": "Remove tags: {value1}"
+  "Remove tags: {value1}": "Remove tags: {value1}",
+  "librarySources.configFailed": "Library source settings could not be loaded.",
+  "librarySources.sourcesFailed": "Library sources could not be loaded.",
+  "librarySources.connectionsFailed": "Remote source connections could not be loaded.",
+  "librarySources.adminRequired": "Superuser access is required."
 }

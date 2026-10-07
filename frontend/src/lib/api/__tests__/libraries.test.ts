@@ -236,3 +236,41 @@ describe("reader cancellation", () => {
     expect(delivered).toMatchObject({ aborted: true });
   });
 });
+
+describe("management caller cancellation", () => {
+  it.each([
+    {
+      label: "create",
+      call: (signal: AbortSignal) =>
+        createExternalLibrary({ name: "Test", root_path: "/mnt/test" }, { signal }),
+    },
+    {
+      label: "update",
+      call: (signal: AbortSignal) => updateExternalLibrary(7, { enabled: false }, { signal }),
+    },
+    {
+      label: "enroll",
+      call: (signal: AbortSignal) =>
+        enrollExternalLibraryRoot(7, { confirm_root_path: "/mnt/test" }, { signal }),
+    },
+    { label: "delete", call: (signal: AbortSignal) => deleteExternalLibrary(7, { signal }) },
+    { label: "scan", call: (signal: AbortSignal) => scanExternalLibrary(7, { signal }) },
+  ])("aborts the exact $label command", async ({ call }) => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          delivered = options?.signal;
+          delivered?.addEventListener("abort", () => reject(delivered?.reason), { once: true });
+        }),
+    );
+
+    const pending = call(controller.signal).catch((error: Error) => error);
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -22,7 +22,7 @@ type ConfigCommandState =
   | { status: "idle" | "pending" | "success" }
   | { status: "error"; error: unknown };
 /** A secret-bearing patch never becomes MutationCache variables, data or a retained closure. */
-export function useVaultConfigCommand() {
+export function useVaultConfigCommand(writer: typeof updateVaultConfig = updateVaultConfig) {
   const client = useQueryClient();
   const [state, setState] = useState<ConfigCommandState>({ status: "idle" });
   const live = useRef(true);
@@ -52,7 +52,7 @@ export function useVaultConfigCommand() {
       await client.cancelQueries({ queryKey: queryKeys.vaultConfig, exact: true });
       requireSessionVersion(command.session);
       controller.signal.throwIfAborted();
-      const row = await updateVaultConfig(command.payload, { signal: controller.signal });
+      const row = await writer(command.payload, { signal: controller.signal });
       requireSessionVersion(command.session);
       controller.signal.throwIfAborted();
       await client.cancelQueries({ queryKey: queryKeys.vaultConfig, exact: true });

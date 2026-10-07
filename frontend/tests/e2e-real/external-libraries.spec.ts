@@ -211,6 +211,14 @@ test.describe("mounted library source root recovery", () => {
   });
 
   test("reenrolls a root with a missing marker before external write-back", async ({ page }) => {
+    let sourceReads = 0;
+    const enrollmentPosts: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "GET" && path === "/api/v1/libraries") sourceReads += 1;
+      if (request.method() === "POST" && path.endsWith("/root/enroll")) enrollmentPosts.push(path);
+    });
+
     if (!externalRoot) {
       test.skip(
         true,
@@ -253,8 +261,11 @@ test.describe("mounted library source root recovery", () => {
       const confirmation = page.getByRole("dialog", { name: "Enroll mounted source root?" });
       await expect(confirmation).toBeVisible();
       await expect(confirmation).toContainText(root);
+      const initialSourceReads = sourceReads;
       await confirmation.getByRole("button", { name: "Enroll root" }).click();
       await expect(page.getByText("Source verified")).toBeVisible();
+      expect(sourceReads).toBe(initialSourceReads);
+      expect(enrollmentPosts).toEqual([`/api/v1/libraries/${libraryId}/root/enroll`]);
 
       await page.goto("/");
       await page.getByRole("button", { name: "Upload", exact: true }).click();

@@ -1,4 +1,11 @@
-import { type GetJsonOptions, getJson, sendAction, sendJson } from "@/lib/api/request";
+import {
+  type GetJsonOptions,
+  getJson,
+  requestApi,
+  jsonHeaders,
+  expectOk,
+  sendJson,
+} from "@/lib/api/request";
 import {
   ExternalLibrary,
   ExternalLibraryCreate,
@@ -11,30 +18,65 @@ export function listExternalLibraries(options?: GetJsonOptions): Promise<Externa
   return getJson<ExternalLibrary[]>("/api/v1/libraries", { fresh: true, ...options });
 }
 
-export function createExternalLibrary(body: ExternalLibraryCreate): Promise<ExternalLibrary> {
-  return sendJson<ExternalLibrary>("/api/v1/libraries", "POST", body);
+export function createExternalLibrary(
+  body: ExternalLibraryCreate,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<ExternalLibrary> {
+  return requestApi<ExternalLibrary>("/api/v1/libraries", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
 export function updateExternalLibrary(
   id: number,
   body: ExternalLibraryUpdate,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<ExternalLibrary> {
-  return sendJson<ExternalLibrary>(`/api/v1/libraries/${id}`, "PATCH", body);
+  return requestApi<ExternalLibrary>(`/api/v1/libraries/${id}`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
 export function enrollExternalLibraryRoot(
   id: number,
   body: ExternalLibraryRootEnrollment,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<ExternalLibrary> {
-  return sendJson<ExternalLibrary>(`/api/v1/libraries/${id}/root/enroll`, "POST", body);
+  return requestApi<ExternalLibrary>(`/api/v1/libraries/${id}/root/enroll`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
-export function deleteExternalLibrary(id: number): Promise<void> {
-  return sendAction(`/api/v1/libraries/${id}`, "DELETE");
+export function deleteExternalLibrary(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<void> {
+  return requestApi(
+    `/api/v1/libraries/${id}`,
+    { method: "DELETE", signal: options.signal },
+    expectOk,
+  );
 }
 
-export function scanExternalLibrary(id: number): Promise<JobAccepted> {
-  return sendJson<JobAccepted>(`/api/v1/libraries/${id}/scan`, "POST", {});
+export function scanExternalLibrary(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<JobAccepted> {
+  return requestApi<JobAccepted>(`/api/v1/libraries/${id}/scan`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({}),
+    signal: options.signal,
+  });
 }
 
 export function scanExternalLibraryPath(id: number, path: string): Promise<JobAccepted> {

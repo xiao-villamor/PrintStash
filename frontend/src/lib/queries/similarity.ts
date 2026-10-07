@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { getModel, getModelPrintJobs, listModels } from "@/lib/api/models";
 import { listMultipartModels } from "@/lib/api/multipart-models";
-import { listExternalLibraries } from "@/lib/api/libraries";
+export { librarySourcesOptions as similaritySourcesOptions } from "@/lib/queries/settings-library-sources";
 import {
   cancelSimilarityRun,
   decideSimilarity,
@@ -22,7 +22,6 @@ import {
   searchSimilarModels,
   startSimilarityRun,
 } from "@/lib/api/similarity";
-import { parseApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { isSimilarityRunActive } from "@/lib/similarity";
@@ -145,24 +144,6 @@ export function similarityModelChoicesOptions(
     queryKey: ["similarity", "model-choices", q, offset],
     queryFn: ({ signal }) => read({ q, limit: 25, offset }, { signal }),
     enabled,
-  });
-}
-type SimilaritySources =
-  | { kind: "enabled"; items: Awaited<ReturnType<typeof listExternalLibraries>> }
-  | { kind: "disabled" };
-export function similaritySourcesOptions(read = listExternalLibraries) {
-  return queryOptions({
-    queryKey: ["similarity", "sources"],
-    queryFn: async ({ signal }): Promise<SimilaritySources> => {
-      try {
-        return { kind: "enabled", items: await read({ signal }) };
-      } catch (error) {
-        const failure = parseApiError(error);
-        if (failure.status === 404 && failure.code === "feature_disabled")
-          return { kind: "disabled" };
-        throw error;
-      }
-    },
   });
 }
 export function similarityTargetsOptions(q: string, enabled: boolean, read = listMultipartModels) {

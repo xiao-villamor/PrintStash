@@ -4234,5 +4234,9 @@
   "{value1} not attempted": "{value1} sin intentar",
   "Move to: {value1}": "Mover a: {value1}",
   "Add tags: {value1}": "Añadir etiquetas: {value1}",
-  "Remove tags: {value1}": "Quitar etiquetas: {value1}"
+  "Remove tags: {value1}": "Quitar etiquetas: {value1}",
+  "librarySources.configFailed": "No se pudo cargar la configuración de las fuentes de biblioteca.",
+  "librarySources.sourcesFailed": "No se pudieron cargar las fuentes de biblioteca.",
+  "librarySources.connectionsFailed": "No se pudieron cargar las conexiones de las fuentes remotas.",
+  "librarySources.adminRequired": "Se requiere acceso de superusuario."
 }

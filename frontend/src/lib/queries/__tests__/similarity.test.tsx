@@ -4,6 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { useQuery } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useMultipartModels } from "@/lib/queries";
+import { librarySourcesOptions, librarySourceKeys } from "@/lib/queries/settings-library-sources";
+import { similaritySourcesOptions } from "@/lib/queries/similarity";
+import { anExternalLibrary } from "@/test-support/factories";
 import { aMultipartModel } from "@/test-support/factories";
 import { aSimilarityCandidate } from "@/test-support/similarity";
 import { clearLogin } from "@/lib/auth-store";
@@ -183,5 +186,28 @@ describe("similarity resolution publication", () => {
       app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/multipart-models"),
     ).toHaveLength(2);
     expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+});
+
+describe("similarity source projection", () => {
+  it("shares the management source owner", async () => {
+    function Sources() {
+      const direct = useQuery(librarySourcesOptions());
+      const similarity = useQuery(similaritySourcesOptions());
+      return (
+        <p>
+          {direct.data?.kind === "enabled" && similarity.data?.kind === "enabled"
+            ? similarity.data.items[0]?.name
+            : "Loading"}
+        </p>
+      );
+    }
+    const app = renderApp(<Sources />, {
+      routes: { "GET /api/v1/libraries": json([anExternalLibrary({ name: "Shared source" })]) },
+    });
+    expect(await screen.findByText("Shared source")).toBeVisible();
+    expect(app.requestsWithMethod("GET")).toHaveLength(1);
+    expect(app.client.getQueryCache().findAll({ queryKey: librarySourceKeys.all })).toHaveLength(1);
+    expect(app.client.getQueryData(["similarity", "sources"])).toBeUndefined();
   });
 });

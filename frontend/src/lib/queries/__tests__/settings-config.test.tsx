@@ -8,9 +8,10 @@ import { getSessionVersion } from "@/lib/session-transport";
 import { clearLogin } from "@/lib/auth-store";
 import { aVaultConfig } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
-function Editor() {
+import { updateVaultConfig } from "@/lib/api/config";
+function Editor({ writer }: { writer?: typeof updateVaultConfig } = {}) {
   const query = useQuery({ ...vaultConfigOptions(), retry: false });
-  const command = useVaultConfigCommand();
+  const command = useVaultConfigCommand(writer);
   return (
     <>
       <p>{query.data?.oidc_display_name}</p>
@@ -33,6 +34,27 @@ function Editor() {
 }
 afterEach(() => vi.restoreAllMocks());
 describe("Vault configuration owner", () => {
+  it("publishes the injected concrete writer full DTO", async () => {
+    const writer = vi
+      .fn<typeof updateVaultConfig>()
+      .mockResolvedValue(aVaultConfig({ oidc_display_name: "Injected", currency: "EUR" }));
+    const app = renderApp(<Editor writer={writer} />, {
+      routes: { "GET /api/v1/config": json(aVaultConfig({ oidc_display_name: "Base" })) },
+    });
+    await screen.findByText("Base");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Injected")).toBeVisible();
+    expect(app.client.getQueryData(["vault-config"])).toMatchObject({ currency: "EUR" });
+    expect(writer).toHaveBeenCalledWith(
+      { oidc_client_secret: "FakePrivateSecret", oidc_display_name: "Gesture" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(app.client.getMutationCache().getAll()).toHaveLength(0);
+    expect(app.requestsWithMethod("GET")).toHaveLength(1);
+  });
+
   it("publishes the complete authoritative configuration without another GET", async () => {
     const app = renderApp(<Editor />, {
       routes: {

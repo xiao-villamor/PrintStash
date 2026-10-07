@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Share Library source management reads and publish confirmed source changes
+  without redundant refreshes. Keep failed reads recoverable, hide denied data,
+  preserve newer drafts and exact-root confirmations, and retain accepted scan
+  Jobs after the settings view closes.
+
 - Keep manufacturing result drafts during background updates and require explicit
   review after a concurrent confirmation. Reconcile confirmed Builds against late
   reads, cancel abandoned reads, recover failed history/detail views, and reuse
