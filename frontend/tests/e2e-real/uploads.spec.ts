@@ -65,7 +65,7 @@ test.describe("uploads", () => {
     expect((await page.request.delete(`/api/v1/models/${completed.model_id}`)).ok()).toBe(true);
   });
 
-  test("clears legacy browser upload queues after a reload", async ({ page }) => {
+  test("discards ownerless legacy browser upload queues after a reload", async ({ page }) => {
     await page.goto("/");
     await page.evaluate(() => {
       // An older client saved queue rows before these files reached the server.
@@ -90,9 +90,9 @@ test.describe("uploads", () => {
 
     await page.reload();
     await page.getByRole("button", { name: "Notifications" }).click();
-    await expect(page.getByText("Task interrupted. Start it again.")).toHaveCount(2);
+    // An ownerless legacy snapshot cannot safely be attributed to this session.
+    await expect(page.getByText("No active tasks")).toBeVisible();
     await expect(page.getByText("pending", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Clear done" }).click();
     await expect(page.getByText("Upload holder.stl", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Upload palette.stl", { exact: true })).toHaveCount(0);
 
@@ -207,6 +207,7 @@ test.describe("uploads", () => {
       },
     });
 
+    await modelCard(page, name).scrollIntoViewIfNeeded();
     const preview = modelCard(page, name).getByRole("img", { name });
     // The thumbnail is derived after the upload commits; it arrives on the card
     // when its render runs, behind whatever the native lane is already doing.
@@ -237,6 +238,7 @@ test.describe("uploads", () => {
     // load even in the headless CI image (no GL/display dependency).
     await expect(async () => {
       await page.goto("/");
+      await modelCard(page, name).scrollIntoViewIfNeeded();
       const thumbnail = modelCard(page, name).getByRole("img", { name });
       await expect(thumbnail).toBeVisible({ timeout: 2_000 });
       expect(

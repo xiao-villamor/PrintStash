@@ -610,3 +610,17 @@ or routing-framework change is required. Evidence: `docs/frontend-m10-validation
 ### Spoolman settings
 
 `lib/queries/settings-spoolman.ts` owns the masked read and conditional command lifecycle. Connection drafts capture an editing base; status/probe refresh cannot replace typed fields. A conflict or uncertain write requires explicit current-state review. Adoption discards old secret input, and a changed database history cannot authorize replay of the old draft. Secrets remain outside MutationCache. Server claims and the independent Spoolman counter commit with all edited fields; telemetry does not advance that counter. Existing unversioned external clients remain compatible and unprotected. See [the integration correction](../frontend-m11-spoolman-validation.md).
+
+### Setup admission and transient route state
+
+`SetupGate` owns the setup-status decision for each pathname entry. Before the
+first accepted response it mounts no application content. During a later probe,
+React Activity hides the admitted subtree and cleans up its effects while
+preserving transient state, such as a newly created document's editor mode. A
+redirect retires that subtree with a new identity; the private AuthProvider
+session key independently removes it on session changes. Never implement a
+loading indicator by discarding an already admitted editor's state.
+
+The storage card accepts the existing legacy configuration contract: an empty
+`storage_provider` means the explicit `storage_backend` and its native path/S3
+fields identify the configured storage. It is not an unknown catalog provider.

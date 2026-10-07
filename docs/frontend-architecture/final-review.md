@@ -321,3 +321,77 @@ unchanged in **37.20s with `--maxWorkers=2`** (13 files, 856 unrelated cases not
 selected). This is a bounded recheck, not a global coverage result. No assertion
 or timeout was loosened. The Search API regression and permission/hygiene selection
 passed **46 tests in 4.62s**; real NL-filter workflow passed in **29.4s**.
+
+### Ordered-run database isolation and remaining browser qualification
+
+Required CI on `6eabc187` exposed two `files` browse-trigger failures. Both pass
+alone; running `TestMeasureIngestion` first with `--randomly-dont-reorganize`
+reproduced **2 failed / 3 passed in 3.84s**. The benchmark error test dropped
+the shared `files` table and recreated only its columns, losing its triggers.
+The correction must isolate its intentionally broken schema, rather than repair
+production DDL or make unrelated tests reinstall the missing triggers.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C24 | retains source probe failure | Error | Separate database without the source table | Failed observation retains probe timing and missing-table reason | Integration | ✅ `backend/tests/integration/scripts/test_benchmark_ingestion.py::TestMeasureIngestion::test_retains_source_probe_failure` — corrected ordered selection: 73 passed in 55.63s |
+| C25 | rejects continuation after each catalog dependency writer | Edge | Benchmark failure test precedes a committed file change | Old browse cursor is rejected, file triggers remain installed | Integration | ✅ `backend/tests/integration/db/test_library_contracts_v1.py::TestInstall` — existing assertions, corrected ordered selection: 73 passed in 55.63s |
+
+Real captions and Similarity regression selection passed **3 tests in 2.4min**.
+The isolated ingestion retry-eight case passed **1 test in 171.35s**; this does
+not replace the interrupted full-suite result recorded above.
+
+The real-browser document failure is a production lifetime defect: SetupGate
+unmounts the previously admitted application on every pathname probe, destroying
+the new document's selected edit mode. Preserve the admitted subtree's state
+while hiding it during the pending probe, using React's installed Activity API;
+initial admission still mounts nothing, rejected admission removes the subtree,
+and AuthProvider's session key still retires the entire private tree.
+[React Activity contract](https://react.dev/reference/react/Activity): hidden
+content retains state while its effects are cleaned up.
+
+Storage's real legacy configuration returns an empty `storage_provider` with an
+explicit `storage_backend`. The current card's nullish fallback treats the empty
+provider as a catalog ID, hiding the actual configured paths. Interpret that
+existing legacy wire contract explicitly, retaining the backend selection.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C26 | preserves admitted UI state across a setup probe | Edge | Typed draft, path changes, pending then configured status | Hidden while pending; same draft visible after admission | Frontend unit | ✅ `frontend/src/components/__tests__/setup-gate.test.tsx` — 47-case gate/auth/router selection passed |
+| C27 | removes admitted content when setup rejects the next entry | Error | Previously admitted draft; next status unconfigured | Private draft removed; setup navigation occurs | Frontend unit | ✅ `frontend/src/components/__tests__/setup-gate.test.tsx` — rejection retires hidden state; selection passed |
+| C28 | shows legacy backend storage paths | Edge | Empty provider ID, explicit local/S3 backend | Correct provider and configured location visible | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx` — local/S3 cases passed |
+| C29 | preserves new-document editing through route admission | Happy | Real create receipt replaces new-document route | Editor survives; Preview, edit and save lifecycle succeeds | Playwright | ✅ `frontend/tests/e2e-real/documents.spec.ts` — corrected real workflow passed (14.0s) |
+| C30 | targets the tag editor with existing suggestions | Edge | Multipart tag dialog contains input and suggestion list | Local tag can be entered before conflict review | Playwright | ✅ `frontend/tests/e2e-real/multipart-models.spec.ts` — role-specific input locator; real workflow passed (13.8s) |
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C31 | discards ownerless legacy browser upload queues after reload | Error | Legacy localStorage rows have no verified session owner | No task description is exposed; stale rows remain absent after reload | Playwright | ✅ `frontend/tests/e2e-real/uploads.spec.ts::discards ownerless legacy browser upload queues after a reload` — passed (3.2s) |
+| C32 | renders an asymmetric preview with a downloadable screenshot | Happy | Real mesh; collection tiles put its card below viewport | Scrolling the card into view admits and decodes thumbnail; screenshot downloads | Playwright | ✅ `frontend/tests/e2e-real/uploads.spec.ts` — visible-card precondition corrected; six-case real selection passed |
+| C33 | renders an uploaded STL thumbnail | Happy | Real mesh-only upload in populated library | Visible card decodes authenticated thumbnail; source Artifact is retained | Playwright | ✅ `frontend/tests/e2e-real/uploads.spec.ts` — visible-card precondition corrected; six-case real selection passed |
+
+The old CI thumbnail traces contain ready thumbnail URLs in browse and thumbnail
+DTOs, but no image GET: collection tiles placed the cards below the viewport.
+M6 deliberately admits visible thumbnails first. The browser assertion must scroll
+the card into view before waiting for image decoding. The ownerless legacy queue
+expectation predates M7 isolation; exposing its descriptions would regress that
+contract. Neither correction changes production thumbnail admission or ownership.
+
+Full frontend coverage on `6eabc187` passed: **4,410 app + 85 domain + 199 UI
+tests**, every floor held. App statements/branches **86.59%/81.14%**, domain
+**97.20%/93.91%**, UI **98.78%/97.60%**. The gate reports maintenance notices
+for improved floors; none was lowered. Later gate/storage corrections have
+focused evidence and require the final-sha CI checks below.
+
+Gate/storage/document unit selection: **105 passed**, one new test initially
+found rejected hidden state surviving redirect. The gate now explicitly retires
+that subtree before redirect. Corrected gate/auth/router selection:
+**47 passed in 6.59s**. Real document/Multipart/storage selection:
+**3 passed in 1.4min**. Lint and app/package type checks passed.
+
+The older Python compatibility job completed **20,187 passed / 2 failed in
+3,571.27s**, then its job deadline marked it cancelled during cleanup. Its only
+assertion failures were the reproduced, corrected shared-table isolation defect.
+This is failure evidence, not a passing full gate.
+
+Final selected real-browser run: **6 passed in 1.3min**, including all three
+Document conditional-write scenarios, legacy task isolation and both mesh preview
+flows. Formatting passed across 793 files.

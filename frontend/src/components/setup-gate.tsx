@@ -19,7 +19,7 @@ import { useUiLocale } from "@/lib/i18n";
  * no background polling competes with explicit setup recovery.
  */
 
-import { useEffect, useId, useState } from "react";
+import { Activity, useEffect, useId, useState } from "react";
 import { usePathname, useRouter } from "@/lib/navigation";
 import { Loader2 } from "lucide-react";
 
@@ -45,6 +45,7 @@ export function SetupGate({ children }: Props) {
   // This is the accepted entry decision, not a second status snapshot. A public
   // credential entry must survive its own intentional auth/cache retirement.
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
+  const [retiredAt, setRetiredAt] = useState<number | null>(null);
   const status = probe.data;
   const choiceDecided = Boolean(status?.storage_choice_required) && !auth.loading;
   const toStorageStep = choiceDecided && isSuperuser && pathname !== "/getting-started";
@@ -53,6 +54,10 @@ export function SetupGate({ children }: Props) {
     if (!status.configured && pathname !== "/setup") redirect = "/setup";
     else if (status.configured && pathname === "/setup") redirect = "/login";
     else if (toStorageStep) redirect = "/getting-started";
+  }
+  if (redirect && acceptedAt !== null) {
+    setAcceptedAt(null);
+    setRetiredAt(navigation.generation);
   }
   const admitted =
     !probe.isPending &&
@@ -70,13 +75,20 @@ export function SetupGate({ children }: Props) {
     } else if (redirect) router.replace(redirect);
   }, [probe.error, redirect, router]);
 
-  if (!ready) {
-    return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-surface-container-lowest">
-        <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
-      </div>
-    );
-  }
-
-  return <>{children}</>;
+  // A new route must wait for admission without destroying the already admitted
+  // shell's transient state. Activity retires effects while hidden; rejection
+  // removes the subtree, and AuthProvider independently keys it by session.
+  const retain = ready || (probe.isPending && acceptedAt !== null);
+  return (
+    <>
+      {!ready && (
+        <div className="min-h-screen w-full flex items-center justify-center bg-surface-container-lowest">
+          <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
+        </div>
+      )}
+      <Activity key={retiredAt} mode={ready ? "visible" : "hidden"}>
+        {retain ? children : null}
+      </Activity>
+    </>
+  );
 }

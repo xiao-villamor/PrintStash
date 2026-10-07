@@ -82,11 +82,20 @@ export function StorageConfigCard({
     draftRef.current = draft;
   }, [draft]);
   const providerId =
-    draft?.providerId ?? cfg?.storage_provider ?? (cfg?.storage_backend === "s3" ? "s3" : "local");
+    draft?.providerId ??
+    (cfg?.storage_provider || (cfg?.storage_backend === "s3" ? "s3" : "local"));
   const providerValues: ProviderValues = {};
   if (draft) Object.assign(providerValues, draft.snapshot, draft.values);
   else if (cfg && providerId === cfg.storage_provider)
     Object.assign(providerValues, cfg.storage_provider_config);
+  else if (cfg?.storage_provider === "" && cfg.storage_backend === "s3") {
+    // Older installations expose native S3 through these explicit wire fields.
+    Object.assign(providerValues, {
+      bucket: cfg.s3_bucket,
+      endpoint_url: cfg.s3_endpoint_url,
+      region: cfg.s3_region,
+    });
+  }
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [enrollment, setEnrollment] = useState<ReviewedStorageRoot | null>(null);

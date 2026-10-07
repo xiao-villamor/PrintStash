@@ -275,6 +275,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Keep admitted editor state while setup navigation is checked, retire it on rejection, and show legacy local/S3 storage details.
+
 - Preserve confirmed Model batch results when a later request loses its response, with explicit review and conditional undo of acknowledged changes.
 
 - Bounded STL previews report whether all source triangles are represented independently from a complete source scan. Mesh processing now uses separate admission, loading, measurement and preview owners with validated geometry and fingerprint contracts.

@@ -4,18 +4,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlmodel import SQLModel
+from sqlmodel import create_engine
 
+from app.db.session import (
+    SQLiteSessionFactory,
+    get_session_factory,
+    override_session_factory,
+)
 from scripts.benchmark_cleanup import CleanupObservation
 from scripts.benchmark_ingestion import measure_ingestion, observe_teardown
 from scripts.benchmark_pipeline_contracts import InputIdentity, SampleOutcome
 
 
 class TestMeasureIngestion:
-    def test_retains_source_probe_failure(self, db_session, client):
-        engine = db_session.get_bind()
-        table = SQLModel.metadata.tables["files"]
-        table.drop(engine)
+    def test_retains_source_probe_failure(self, client, tmp_path):
+        # An intentionally incomplete schema belongs to this test alone. Dropping
+        # the shared files table also removed its browse triggers for later tests.
+        engine = create_engine(f"sqlite:///{tmp_path / 'missing-source.sqlite'}")
+        previous = get_session_factory()
+        override_session_factory(SQLiteSessionFactory(engine))
         try:
             result = measure_ingestion(
                 client,
@@ -24,7 +31,8 @@ class TestMeasureIngestion:
                 deadline_seconds=1,
             )
         finally:
-            table.create(engine)
+            override_session_factory(previous)
+            engine.dispose()
         assert result.outcome == SampleOutcome.FAILED
         assert "OperationalError" in result.reason
         assert "no such table: files" in result.reason

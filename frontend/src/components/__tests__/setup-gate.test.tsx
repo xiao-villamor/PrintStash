@@ -8,7 +8,7 @@
  * time: running it again on a live vault is how somebody creates a second
  * "first" admin.
  *
- * Nothing renders while the probe is in flight. Painting the shell first and
+ * Nothing is visible while the probe is in flight. Painting the shell first and
  * redirecting afterwards flashes a UI the user cannot use, and on a slow link
  * they get long enough to click something in it.
  *
@@ -181,9 +181,60 @@ describe("setup gate entry lifetime", () => {
 
     await user.click(screen.getByRole("link", { name: "Next entry" }));
 
-    expect(screen.queryByText("the vault")).not.toBeInTheDocument();
+    expect(screen.getByText("the vault")).not.toBeVisible();
     await act(async () => next.resolve(json(CONFIGURED)));
     expect(await screen.findByText("the vault")).toBeVisible();
+  });
+
+  it("preserves admitted UI state across a setup probe", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <SetupGate>
+          <input aria-label="Draft" defaultValue="" />
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await user.type(await screen.findByRole("textbox", { name: "Draft" }), "Keep my draft");
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    expect(screen.queryByRole("textbox", { name: "Draft" })).not.toBeInTheDocument();
+    await act(async () => next.resolve(json(CONFIGURED)));
+    expect(await screen.findByRole("textbox", { name: "Draft" })).toHaveValue("Keep my draft");
+  });
+
+  it("removes admitted content when setup rejects the next entry", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <input aria-label="Draft" defaultValue="" />
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await user.type(await screen.findByRole("textbox", { name: "Draft" }), "Private draft");
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    await act(async () => next.resolve(json(UNCONFIGURED)));
+    await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent("/setup"));
+    expect(screen.queryByDisplayValue("Private draft")).not.toBeInTheDocument();
   });
 
   it("aborts a superseded setup gate probe", async () => {

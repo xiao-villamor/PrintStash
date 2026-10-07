@@ -239,7 +239,7 @@ test.describe("Multipart auxiliary editing", () => {
       await page.getByRole("button", { name: "Add tags" }).click();
       // The dialog label reflects the composition draft's title at opening.
       const tagDialog = page.getByRole("dialog");
-      await tagDialog.getByLabel("Tags to add").fill("Local review tag");
+      await tagDialog.getByRole("textbox", { name: "Tags to add" }).fill("Local review tag");
       await tagDialog.getByRole("button", { name: "Create tag" }).click();
       const competing = await page.request.put(`${api}${path}/tags`, {
         headers: {

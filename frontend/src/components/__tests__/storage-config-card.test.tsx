@@ -594,6 +594,32 @@ describe("Configured Vault migration entry", () => {
     expect(within(details).getByText("/data/thumbs")).toBeVisible();
     expect(within(details).queryByText("Root")).toBeNull();
   });
+  it.each([
+    {
+      backend: "local" as const,
+      label: "Local disk",
+      location: "/data/files",
+      config: aVaultConfig(),
+    },
+    {
+      backend: "s3" as const,
+      label: "Amazon S3",
+      location: "vault-prod",
+      config: anS3Config({ s3_bucket: "vault-prod" }),
+    },
+  ])("shows legacy $backend storage paths", async ({ backend, label, location, config }) => {
+    renderCard({
+      migrationManaged: true,
+      config: {
+        ...config,
+        storage_backend: backend,
+        storage_provider: "",
+        storage_provider_config: {},
+      },
+    });
+    expect(await screen.findByText(label)).toBeVisible();
+    expect(screen.getByText(location)).toBeVisible();
+  });
   it("keeps guarded deletion consequences visible when location changes require migration", async () => {
     renderCard({ migrationManaged: true, config: anS3Config() });
     expect(await screen.findByText("Guarded storage consequences")).toBeVisible();
