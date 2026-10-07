@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Detect competing filament and printer preset edits. Retain drafts for explicit
+  review after conflicts or uncertain saves, preserve untouched fields, and
+  prevent an older saved indicator from unlocking a pending row. Spoolman-linked
+  presets remain read-only; recreated presets cannot inherit an obsolete draft.
+
 - Detect competing printer settings and quick model edits without treating live
   telemetry as an edit. Preserve drafts for explicit review after conflicts or
   uncertain saves; retire the editor and live connection when access is denied.

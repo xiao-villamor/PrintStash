@@ -179,3 +179,6 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 
 - `printers.spec.ts`: two settings editors detect a stale save, retain the losing
   draft and explicitly save revised changes without replacing untouched settings.
+
+- `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
+  while preserving the other editor’s notes, verified after reload.

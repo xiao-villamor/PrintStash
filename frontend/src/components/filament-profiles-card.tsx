@@ -11,8 +11,14 @@ import {
   useProfileCommands,
 } from "@/lib/queries/profiles";
 import { getSessionVersion } from "@/lib/session-transport";
-import { ApiError, userMessage } from "@/lib/errors";
-import { FilamentProfileRead, PrinterProfileRead } from "@/types";
+import { ApiError, parseApiError, userMessage } from "@/lib/errors";
+import { captureEditingBase } from "@/lib/api/editing";
+import {
+  FilamentProfileRead,
+  PrinterProfileRead,
+  FilamentProfileUpdate,
+  PrinterProfileUpdate,
+} from "@/types";
 
 import { useSpoolmanStatus } from "@/lib/queries";
 import { toast } from "@/lib/toast";
@@ -58,6 +64,18 @@ type PrinterEdit = {
 };
 
 type PrinterDraft = PrinterEdit & { base: PrinterProfileRead };
+
+type PresetReview<Row> = { phase: "required" | "loading" } | { phase: "ready"; snapshot: Row };
+
+function needsPresetReview(parsed: ApiError): boolean {
+  return (
+    parsed.status === 412 ||
+    parsed.status === 428 ||
+    parsed.status === 0 ||
+    parsed.status >= 500 ||
+    parsed.code === "filament_profile_linked"
+  );
+}
 
 type DeletePresetTarget = {
   kind: "filament" | "printer";
@@ -168,6 +186,90 @@ function RowStatus({ state }: { state?: "saving" | "saved" }) {
   return null;
 }
 
+function PresetReviewPanel({
+  review,
+  busy,
+  canSave,
+  replaced,
+  onReview,
+  onAdopt,
+  onSave,
+}: {
+  review: PresetReview<FilamentProfileRead | PrinterProfileRead>;
+  busy: boolean;
+  canSave: boolean;
+  replaced: boolean;
+  onReview: () => void;
+  onAdopt: () => void;
+  onSave: () => void;
+}) {
+  useUiLocale();
+  const row = review.phase === "ready" ? review.snapshot : null;
+  return (
+    <div
+      role="status"
+      aria-label={uiText("Current preset values")}
+      className="col-span-full space-y-2 rounded-md border p-3 text-sm"
+    >
+      <p>{uiText("This preset needs review before another save. Your draft is preserved.")}</p>
+      {replaced && (
+        <p>{uiText("Preset history changed. Use current values before starting another edit.")}</p>
+      )}
+      {row && (
+        <dl className="grid grid-cols-2 gap-2">
+          <dt>{uiText("Name")}</dt>
+          <dd>{row.name}</dd>
+          {"material_type" in row ? (
+            <>
+              <dt>{uiText("Material")}</dt>
+              <dd>{row.material_type}</dd>
+              <dt>{uiText("Brand")}</dt>
+              <dd>{row.material_brand}</dd>
+              <dt>{uiText("Cost per kg")}</dt>
+              <dd>{row.cost_per_kg}</dd>
+              {row.spoolman_filament_id !== null && (
+                <>
+                  <dt>{uiText("Spoolman")}</dt>
+                  <dd>{uiText("Synced")}</dd>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <dt>{uiText("Printer model")}</dt>
+              <dd>{row.printer_model}</dd>
+              <dt>{uiText("Nozzle")}</dt>
+              <dd>{row.nozzle_diameter_mm}</dd>
+            </>
+          )}
+          <dt>{uiText("Notes")}</dt>
+          <dd>{row.notes}</dd>
+        </dl>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={onReview}
+          disabled={busy || review.phase === "loading"}
+        >
+          {uiText("Review current values")}
+        </Button>
+        {row && (
+          <>
+            <Button size="xs" variant="outline" onClick={onAdopt} disabled={busy}>
+              {uiText("Use current values")}
+            </Button>
+            <Button size="xs" onClick={onSave} disabled={busy || !canSave}>
+              {uiText("Save revised changes")}
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FilamentProfilesCard() {
   useUiLocale();
   const auth = useRequireAuth();
@@ -187,6 +289,12 @@ export function FilamentProfilesCard() {
   const loading = activeQuery.isPending;
   const [filamentEdits, setFilamentEdits] = useState<Record<number, FilamentDraft>>({});
   const [printerEdits, setPrinterEdits] = useState<Record<number, PrinterDraft>>({});
+  const [filamentReviews, setFilamentReviews] = useState<
+    Record<number, PresetReview<FilamentProfileRead>>
+  >({});
+  const [printerReviews, setPrinterReviews] = useState<
+    Record<number, PresetReview<PrinterProfileRead>>
+  >({});
   const [error, setError] = useState<string | null>(null);
   // Per-row auto-save indicator, keyed "f{id}" / "p{id}".
   const [rowStatus, setRowStatus] = useState<Record<string, "saving" | "saved">>({});
@@ -288,6 +396,8 @@ export function FilamentProfilesCard() {
     setTimeout(
       () =>
         setRowStatus((s) => {
+          // An earlier success indicator must not unlock a later pending save.
+          if (s[key] !== "saved") return s;
           const n = { ...s };
           delete n[key];
           return n;
@@ -335,11 +445,53 @@ export function FilamentProfilesCard() {
     }
   }
 
-  async function autoSaveFilament(profile: FilamentProfileRead) {
+  async function reviewFilament(id: number) {
+    const session = getSessionVersion();
+    setFilamentReviews((current) => ({ ...current, [id]: { phase: "loading" } }));
+    try {
+      const snapshot = await commands.reviewFilament(id, session);
+      if (getSessionVersion() !== session) return;
+      setFilamentReviews((current) => ({ ...current, [id]: { phase: "ready", snapshot } }));
+      setError(null);
+    } catch (error) {
+      if (getSessionVersion() !== session) return;
+      setFilamentReviews((current) => ({ ...current, [id]: { phase: "required" } }));
+      setError(userMessage(error));
+    }
+  }
+
+  function adoptFilament(id: number) {
+    const review = filamentReviews[id];
+    if (review?.phase !== "ready") throw new Error("Review current preset values first");
+    setFilamentEdits((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setFilamentValidationErrors((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setFilamentReviews((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setError(null);
+  }
+
+  async function autoSaveFilament(profile: FilamentProfileRead, revised = false) {
     if (!auth.isAuthenticated || filamentDenied) return;
     // Synced presets mirror Spoolman and are read-only here.
     if (profile.spoolman_filament_id != null) return;
+    const review = filamentReviews[profile.id];
+    if (revised ? review?.phase !== "ready" : Boolean(review)) return;
+    const original = filamentEdits[profile.id]?.base ?? profile;
+    const target = revised && review?.phase === "ready" ? review.snapshot : original;
+    if (target.edit_epoch !== original.edit_epoch) return;
     const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
+    const initial = filamentEdit(original);
     if (
       rowStatus[`f${profile.id}`] === "saving" ||
       !filamentDirty(filamentEdits[profile.id]?.base ?? profile, edit) ||
@@ -363,16 +515,22 @@ export function FilamentProfilesCard() {
     });
     const key = `f${profile.id}`;
     setRowStatus((s) => ({ ...s, [key]: "saving" }));
-    const payload = {
-      name: edit.name.trim(),
-      material_type: edit.materialType.trim() || null,
-      material_brand: edit.materialBrand.trim() || null,
-      cost_per_kg: parsedCost,
-      notes: edit.notes.trim() || null,
-    };
+    const payload: FilamentProfileUpdate = {};
+    if (edit.name !== initial.name) payload.name = edit.name.trim();
+    if (edit.materialType !== initial.materialType)
+      payload.material_type = edit.materialType.trim() || null;
+    if (edit.materialBrand !== initial.materialBrand)
+      payload.material_brand = edit.materialBrand.trim() || null;
+    if (edit.cost !== initial.cost) payload.cost_per_kg = parsedCost;
+    if (edit.notes !== initial.notes) payload.notes = edit.notes.trim() || null;
     const session = getSessionVersion();
     try {
-      await commands.updateFilament.mutateAsync({ id: profile.id, payload, session });
+      await commands.updateFilament.mutateAsync({
+        id: profile.id,
+        payload,
+        session,
+        base: captureEditingBase(target),
+      });
       if (getSessionVersion() !== session) return;
       setError(null);
       setFilamentEdits((cur) => {
@@ -380,9 +538,16 @@ export function FilamentProfilesCard() {
         delete next[profile.id];
         return next;
       });
+      setFilamentReviews((current) => {
+        const next = { ...current };
+        delete next[profile.id];
+        return next;
+      });
       flashSaved(key);
     } catch (e) {
       if (getSessionVersion() !== session) return;
+      if (needsPresetReview(parseApiError(e)))
+        setFilamentReviews((current) => ({ ...current, [profile.id]: { phase: "required" } }));
       setError(userMessage(e));
       toast.error(e);
       clearStatus(key);
@@ -457,9 +622,46 @@ export function FilamentProfilesCard() {
     }
   }
 
-  async function autoSavePrinter(profile: PrinterProfileRead) {
+  async function reviewPrinter(id: number) {
+    const session = getSessionVersion();
+    setPrinterReviews((current) => ({ ...current, [id]: { phase: "loading" } }));
+    try {
+      const snapshot = await commands.reviewPrinter(id, session);
+      if (getSessionVersion() !== session) return;
+      setPrinterReviews((current) => ({ ...current, [id]: { phase: "ready", snapshot } }));
+      setError(null);
+    } catch (error) {
+      if (getSessionVersion() !== session) return;
+      setPrinterReviews((current) => ({ ...current, [id]: { phase: "required" } }));
+      setError(userMessage(error));
+    }
+  }
+
+  function adoptPrinter(id: number) {
+    const review = printerReviews[id];
+    if (review?.phase !== "ready") throw new Error("Review current preset values first");
+    setPrinterEdits((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setPrinterReviews((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setError(null);
+  }
+
+  async function autoSavePrinter(profile: PrinterProfileRead, revised = false) {
     if (!auth.isAuthenticated || printerDenied) return;
+    const review = printerReviews[profile.id];
+    if (revised ? review?.phase !== "ready" : Boolean(review)) return;
+    const original = printerEdits[profile.id]?.base ?? profile;
+    const target = revised && review?.phase === "ready" ? review.snapshot : original;
+    if (target.edit_epoch !== original.edit_epoch) return;
     const edit = printerEdits[profile.id] ?? printerEdit(profile);
+    const initial = printerEdit(original);
     if (
       rowStatus[`p${profile.id}`] === "saving" ||
       !printerDirty(printerEdits[profile.id]?.base ?? profile, edit) ||
@@ -473,15 +675,19 @@ export function FilamentProfilesCard() {
     }
     const key = `p${profile.id}`;
     setRowStatus((s) => ({ ...s, [key]: "saving" }));
-    const payload = {
-      name: edit.name.trim(),
-      printer_model: edit.model.trim() || null,
-      nozzle_diameter_mm: parsedNozzle,
-      notes: edit.notes.trim() || null,
-    };
+    const payload: PrinterProfileUpdate = {};
+    if (edit.name !== initial.name) payload.name = edit.name.trim();
+    if (edit.model !== initial.model) payload.printer_model = edit.model.trim() || null;
+    if (edit.nozzle !== initial.nozzle) payload.nozzle_diameter_mm = parsedNozzle;
+    if (edit.notes !== initial.notes) payload.notes = edit.notes.trim() || null;
     const session = getSessionVersion();
     try {
-      await commands.updatePrinter.mutateAsync({ id: profile.id, payload, session });
+      await commands.updatePrinter.mutateAsync({
+        id: profile.id,
+        payload,
+        session,
+        base: captureEditingBase(target),
+      });
       if (getSessionVersion() !== session) return;
       setError(null);
       setPrinterEdits((cur) => {
@@ -489,9 +695,16 @@ export function FilamentProfilesCard() {
         delete next[profile.id];
         return next;
       });
+      setPrinterReviews((current) => {
+        const next = { ...current };
+        delete next[profile.id];
+        return next;
+      });
       flashSaved(key);
     } catch (e) {
       if (getSessionVersion() !== session) return;
+      if (needsPresetReview(parseApiError(e)))
+        setPrinterReviews((current) => ({ ...current, [profile.id]: { phase: "required" } }));
       setError(userMessage(e));
       toast.error(e);
       clearStatus(key);
@@ -737,6 +950,7 @@ export function FilamentProfilesCard() {
                   </div>
                   <div className="divide-y">
                     {filaments.map((profile) => {
+                      const review = filamentReviews[profile.id];
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
                       const linked = profile.spoolman_filament_id != null;
                       const locked =
@@ -879,6 +1093,27 @@ export function FilamentProfilesCard() {
                               </>
                             )}
                           </div>
+                          {review && (
+                            <PresetReviewPanel
+                              review={review}
+                              replaced={
+                                review.phase === "ready" &&
+                                review.snapshot.edit_epoch !==
+                                  (filamentEdits[profile.id]?.base ?? profile).edit_epoch
+                              }
+                              busy={rowStatus[`f${profile.id}`] === "saving"}
+                              canSave={
+                                !linked &&
+                                Boolean(edit.name.trim()) &&
+                                review.phase === "ready" &&
+                                review.snapshot.edit_epoch ===
+                                  (filamentEdits[profile.id]?.base ?? profile).edit_epoch
+                              }
+                              onReview={() => void reviewFilament(profile.id)}
+                              onAdopt={() => adoptFilament(profile.id)}
+                              onSave={() => void autoSaveFilament(profile, true)}
+                            />
+                          )}
                         </div>
                       );
                     })}
@@ -997,6 +1232,7 @@ export function FilamentProfilesCard() {
                   </div>
                   <div className="divide-y">
                     {printers.map((profile) => {
+                      const review = printerReviews[profile.id];
                       const edit = printerEdits[profile.id] ?? printerEdit(profile);
                       return (
                         <div
@@ -1113,6 +1349,26 @@ export function FilamentProfilesCard() {
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
+                          {review && (
+                            <PresetReviewPanel
+                              review={review}
+                              replaced={
+                                review.phase === "ready" &&
+                                review.snapshot.edit_epoch !==
+                                  (printerEdits[profile.id]?.base ?? profile).edit_epoch
+                              }
+                              busy={rowStatus[`p${profile.id}`] === "saving"}
+                              canSave={
+                                Boolean(edit.name.trim()) &&
+                                review.phase === "ready" &&
+                                review.snapshot.edit_epoch ===
+                                  (printerEdits[profile.id]?.base ?? profile).edit_epoch
+                              }
+                              onReview={() => void reviewPrinter(profile.id)}
+                              onAdopt={() => adoptPrinter(profile.id)}
+                              onSave={() => void autoSavePrinter(profile, true)}
+                            />
+                          )}
                         </div>
                       );
                     })}

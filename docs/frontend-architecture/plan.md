@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M7 retain local acceptance, including the reopened M7 printer-settings correction. M8 is active for the remaining Profiles/Search conditional-edit contracts. M9 work is preserved pending M8. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M7 retain local acceptance, including the reopened M7 printer-settings correction. M8 remains active: Profile conditional edits are locally qualified; Search configuration is next. M9 work is preserved pending M8. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -195,7 +195,7 @@ progressive restoration and Shift selection after append are qualified.
 M7 async ownership, recovery and printer-settings conflicts now have
 [qualified evidence](../frontend-m7-validation.md) and local acceptance.
 M8's [qualified Library work](../frontend-m8-validation.md) remains implemented,
-but Profiles and Search settings still lack the required competing-edit contracts.
+and the [Profile contract](../frontend-m8-profile-edit-validation.md) is now locally qualified; Search settings still lack the required competing-edit contract.
 The [reassessment](../frontend-milestone-reassessment.md) records the exact source
 contradictions and required regression rows. M8 is the only active target;
 preserved M9 work waits for that prerequisite closure. A disclosed limitation is

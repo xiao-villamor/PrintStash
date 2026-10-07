@@ -8,6 +8,9 @@ from app.db import library_contracts_v1 as _library_contracts_v1  # noqa: F401, 
 from app.db import (
     printer_edit_contracts_v1 as _printer_edit_contracts_v1,  # noqa: F401, E402
 )
+from app.db import (
+    profile_edit_contracts_v1 as _profile_edit_contracts_v1,  # noqa: F401, E402
+)
 
 from .administration import (
     AuditLog as AuditLog,

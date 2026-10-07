@@ -314,3 +314,100 @@ class TestDeletePrinterProfile:
         )
 
         assert response.status_code == 403, response.text
+
+
+class TestConditionalPrinterEditing:
+    def test_rejects_a_competing_preset_edit(
+        self, client, auth_headers, make_printer_profile
+    ):
+        profile = make_printer_profile()
+        rows = client.get("/api/v1/printer-profiles", headers=auth_headers).json()
+        base = next(row for row in rows if row["id"] == profile.id)
+        assert "edit_epoch" in base
+        assert "edit_version" in base
+        headers = {
+            **auth_headers,
+            "X-PrintStash-Edit-Contract": "conditional-v1",
+            "If-Match": f'"printer-profile-{profile.id}-e{base["edit_epoch"]}-v{base["edit_version"]}"',
+        }
+        url = f"/api/v1/printer-profiles/{profile.id}"
+        first = client.patch(url, headers=headers, json={"notes": "First editor"})
+        assert first.status_code == 200
+        assert first.json()["edit_version"] > base["edit_version"]
+        second = client.patch(url, headers=headers, json={"name": "Stale editor"})
+        assert second.status_code == 412
+        rows = client.get("/api/v1/printer-profiles", headers=auth_headers).json()
+        current = next(row for row in rows if row["id"] == profile.id)
+        assert current["notes"] == "First editor"
+        assert current["name"] == profile.name
+
+    def test_requires_the_advertised_preset_precondition(
+        self, client, auth_headers, make_printer_profile
+    ):
+        profile = make_printer_profile()
+        response = client.patch(
+            f"/api/v1/printer-profiles/{profile.id}",
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+            json={"name": "Unreviewed"},
+        )
+        assert response.status_code == 428
+
+    @pytest.mark.parametrize(
+        "token,contract,expected",
+        [
+            ('"printer-profile-999-e' + "a" * 32 + '-v1"', "conditional-v1", 412),
+            ('"wrong-1-e' + "a" * 32 + '-v1"', "conditional-v1", 412),
+            ('"printer-profile-1-e' + "a" * 32 + '-v0"', "conditional-v1", 412),
+            (
+                '"printer-profile-1-e' + "a" * 32 + '-v9223372036854775808"',
+                "conditional-v1",
+                412,
+            ),
+            (
+                '"printer-profile-1-e' + "a" * 32 + "-v" + "9" * 100 + '"',
+                "conditional-v1",
+                412,
+            ),
+            ("*", "conditional-v1", 412),
+            ("*", "unknown", 400),
+        ],
+    )
+    def test_rejects_malformed_preset_bases(
+        self, client, auth_headers, make_printer_profile, token, contract, expected
+    ):
+        profile = make_printer_profile()
+        response = client.patch(
+            f"/api/v1/printer-profiles/{profile.id}",
+            headers={
+                **auth_headers,
+                "X-PrintStash-Edit-Contract": contract,
+                "If-Match": token,
+            },
+            json={"notes": "Unreviewed"},
+        )
+        assert response.status_code == expected
+        rows = client.get("/api/v1/printer-profiles", headers=auth_headers).json()
+        current = next(row for row in rows if row["id"] == profile.id)
+        assert current["notes"] == profile.notes
+        assert current["edit_version"] == profile.edit_version
+
+    def test_rolls_back_a_duplicate_preset_name(
+        self, client, auth_headers, make_printer_profile
+    ):
+        profile = make_printer_profile()
+        make_printer_profile(name="Taken")
+        rows = client.get("/api/v1/printer-profiles", headers=auth_headers).json()
+        base = next(row for row in rows if row["id"] == profile.id)
+        headers = {
+            **auth_headers,
+            "X-PrintStash-Edit-Contract": "conditional-v1",
+            "If-Match": f'"printer-profile-{profile.id}-e{base["edit_epoch"]}-v{base["edit_version"]}"',
+        }
+        url = f"/api/v1/printer-profiles/{profile.id}"
+        assert (
+            client.patch(url, headers=headers, json={"name": "Taken"}).status_code
+            == 409
+        )
+        accepted = client.patch(url, headers=headers, json={"notes": "After rollback"})
+        assert accepted.status_code == 200
+        assert accepted.json()["notes"] == "After rollback"

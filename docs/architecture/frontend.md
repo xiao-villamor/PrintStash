@@ -541,7 +541,16 @@ Canonical Model/Multipart/printer queries supply secondary catalogs. No local
 server-response arrays or independent polling interval should return. Definitive
 read denial hides protected cached content; transient failure offers recovery.
 
-Profiles and Statistics apply the same denial distinction. Profile edits and
-Search settings still lack a backend conditional-write contract; preserving local
-drafts alone must never be described as external concurrency protection. M8's
-[qualification](../frontend-m8-validation.md) records these boundaries.
+Profiles and Statistics apply the same denial distinction. Profile conditional
+editing is now qualified in the [preset matrix](../frontend-m8-profile-edit-validation.md).
+`lib/queries/profiles.ts` owns captured-base commands, review reads and monotonic
+receipt publication. The row component owns its draft and authorized review
+snapshot; blur never resubmits a conflicted or uncertain edit. Revised save sends
+only deliberate overrides. Backend `modules/printing/profile_edits.py` owns the
+atomic claim and current authority check. Its epoch binds database history to the
+preset incarnation, including reuse of a deleted SQLite ID. Spoolman-linked rows
+remain read-only. Do not bypass these commands with unconditioned `sendJson` calls.
+
+Search settings still lack the required conditional-write contract. M8 remains
+open; preserving local drafts alone does not prove concurrency protection. The
+[qualification](../frontend-m8-validation.md) preserves earlier evidence.

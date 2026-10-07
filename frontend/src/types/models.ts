@@ -978,7 +978,7 @@ export interface CollectionPermissionUpdate {
   role: CollectionRole;
 }
 
-export interface FilamentProfileRead {
+export interface FilamentProfileRead extends EditingBase {
   id: number;
   name: string;
   material_type: string | null;
@@ -1009,7 +1009,7 @@ export interface FilamentProfileUpdate {
   notes?: string | null;
 }
 
-export interface PrinterProfileRead {
+export interface PrinterProfileRead extends EditingBase {
   id: number;
   name: string;
   printer_model: string | null;

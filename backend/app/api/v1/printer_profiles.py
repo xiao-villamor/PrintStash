@@ -8,11 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 import app.modules.printing.costing as models_costing
+from app.api.edit_preconditions import edit_precondition
 from app.core.http import get_or_404
 from app.core.security import require_superuser, require_user
 from app.core.time import utcnow
-from app.db.models import PrinterProfile
+from app.db.models import PrinterProfile, User
 from app.db.session import get_session
+from app.modules.printing import profile_edits
+from app.schemas.editing import EditPrecondition
 from app.schemas.models import (
     PrinterProfileCreate,
     PrinterProfileRead,
@@ -30,7 +33,11 @@ def _clean(value: str | None) -> str | None:
 
 
 def _read(profile: PrinterProfile, usage_count: int = 0) -> PrinterProfileRead:
-    return PrinterProfileRead(**profile.model_dump(), usage_count=usage_count)
+    return PrinterProfileRead(
+        **profile.model_dump(),
+        edit_epoch=profile_edits.editing_base(profile).edit_epoch,
+        usage_count=usage_count,
+    )
 
 
 @router.get(
@@ -90,10 +97,13 @@ def update_printer_profile(
     profile_id: int,
     payload: PrinterProfileUpdate,
     session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> PrinterProfileRead:
     profile = get_or_404(
         session, PrinterProfile, profile_id, "printer_profile_not_found"
     )
+    profile_edits.claim(session, actor, profile, precondition)
 
     if payload.name is not None:
         name = payload.name.strip()
@@ -121,9 +131,11 @@ def update_printer_profile(
 
     profile.updated_at = utcnow()
     session.add(profile)
-    session.commit()
+    session.flush()
     session.refresh(profile)
-    return _read(profile)
+    receipt = _read(profile)
+    session.commit()
+    return receipt
 
 
 @router.delete(

@@ -733,7 +733,7 @@ class FilamentProfileUpdate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=4096)
 
 
-class FilamentProfileRead(FilamentProfileBase):
+class FilamentProfileRead(FilamentProfileBase, EditingBase):
     id: int
     usage_count: int = 0
     # Present when this preset mirrors a Spoolman filament — the UI shows a
@@ -767,7 +767,7 @@ class PrinterProfileUpdate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=4096)
 
 
-class PrinterProfileRead(PrinterProfileBase):
+class PrinterProfileRead(PrinterProfileBase, EditingBase):
     id: int
     usage_count: int = 0
     created_at: datetime

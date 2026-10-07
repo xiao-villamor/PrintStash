@@ -1,4 +1,6 @@
 /** A retired profiles acknowledgement cannot cancel or replace reads from the next private incarnation. */
+import { anEditingBase } from "@/test-support/factories";
+
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
@@ -13,6 +15,7 @@ import {
 } from "@/lib/queries/profiles";
 import type { FilamentProfileRead, PrinterProfileRead } from "@/types";
 const filament: FilamentProfileRead = {
+  ...anEditingBase(),
   id: 1,
   name: "Earlier profile",
   material_type: "PLA",
@@ -27,6 +30,7 @@ const filament: FilamentProfileRead = {
   updated_at: FROZEN_NOW,
 };
 const printer: PrinterProfileRead = {
+  ...anEditingBase(),
   id: 1,
   name: "Earlier profile",
   printer_model: "Voron",
@@ -60,7 +64,12 @@ function Editor({ kind }: { kind: Kind }) {
         commands.createFilament.mutate({ payload: { name: "Saved" }, session });
         break;
       case "updateFilament":
-        commands.updateFilament.mutate({ id: 1, payload: { name: "Saved" }, session });
+        commands.updateFilament.mutate({
+          id: 1,
+          payload: { name: "Saved" },
+          base: anEditingBase(),
+          session,
+        });
         break;
       case "removeFilament":
         commands.removeFilament.mutate({ id: 1, session });
@@ -69,7 +78,12 @@ function Editor({ kind }: { kind: Kind }) {
         commands.createPrinter.mutate({ payload: { name: "Saved" }, session });
         break;
       case "updatePrinter":
-        commands.updatePrinter.mutate({ id: 1, payload: { name: "Saved" }, session });
+        commands.updatePrinter.mutate({
+          id: 1,
+          payload: { name: "Saved" },
+          base: anEditingBase(),
+          session,
+        });
         break;
       case "removePrinter":
         commands.removePrinter.mutate({ id: 1, session });
@@ -92,10 +106,10 @@ function renderCommand(kind: Kind) {
       "GET /api/v1/filament-profiles": json([filament]),
       "GET /api/v1/printer-profiles": json([printer]),
       "POST /api/v1/filament-profiles": json({ ...filament, name: "Saved" }),
-      "PATCH /api/v1/filament-profiles/1": json({ ...filament, name: "Saved" }),
+      "PATCH /api/v1/filament-profiles/1": json({ ...filament, edit_version: 2, name: "Saved" }),
       "DELETE /api/v1/filament-profiles/1": json(null, 204),
       "POST /api/v1/printer-profiles": json({ ...printer, name: "Saved" }),
-      "PATCH /api/v1/printer-profiles/1": json({ ...printer, name: "Saved" }),
+      "PATCH /api/v1/printer-profiles/1": json({ ...printer, edit_version: 2, name: "Saved" }),
       "DELETE /api/v1/printer-profiles/1": json(null, 204),
       "POST /api/v1/spoolman/sync-filaments": json({
         created: 0,

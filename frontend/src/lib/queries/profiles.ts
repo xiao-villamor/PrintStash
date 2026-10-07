@@ -1,3 +1,5 @@
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { useRef } from "react";
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -83,7 +85,13 @@ export function useProfileCommands() {
       if (!rows) return rows;
       const found = rows.some((item) => item.id === row.id);
       return found
-        ? rows.map((item) => (item.id === row.id ? row : item))
+        ? rows.map((item) =>
+            item.id === row.id &&
+            item.edit_epoch === row.edit_epoch &&
+            item.edit_version <= row.edit_version
+              ? row
+              : item,
+          )
         : append
           ? [...rows, row]
           : rows;
@@ -104,7 +112,13 @@ export function useProfileCommands() {
       if (!rows) return rows;
       const found = rows.some((item) => item.id === row.id);
       return found
-        ? rows.map((item) => (item.id === row.id ? row : item))
+        ? rows.map((item) =>
+            item.id === row.id &&
+            item.edit_epoch === row.edit_epoch &&
+            item.edit_version <= row.edit_version
+              ? row
+              : item,
+          )
         : append
           ? [...rows, row]
           : rows;
@@ -113,6 +127,36 @@ export function useProfileCommands() {
     void client.invalidateQueries({ queryKey: profileKeys.printers });
   };
   return {
+    reviewFilament: async (id: number, session: number) => {
+      requireSessionVersion(session);
+      await client.cancelQueries({ queryKey: profileKeys.filaments, exact: true });
+      requireSessionVersion(session);
+      const rows = await client.fetchQuery({
+        ...filamentProfilesOptions(),
+        staleTime: 0,
+        retry: false,
+      });
+      requireSessionVersion(session);
+      const row = rows.find((item) => item.id === id);
+      if (!row) throw new Error("filament_profile_not_found");
+      captureEditingBase(row);
+      return row;
+    },
+    reviewPrinter: async (id: number, session: number) => {
+      requireSessionVersion(session);
+      await client.cancelQueries({ queryKey: profileKeys.printers, exact: true });
+      requireSessionVersion(session);
+      const rows = await client.fetchQuery({
+        ...printerProfilesOptions(),
+        staleTime: 0,
+        retry: false,
+      });
+      requireSessionVersion(session);
+      const row = rows.find((item) => item.id === id);
+      if (!row) throw new Error("printer_profile_not_found");
+      captureEditingBase(row);
+      return row;
+    },
     createFilament: useMutation({
       mutationFn: ({
         payload,
@@ -132,14 +176,16 @@ export function useProfileCommands() {
       mutationFn: ({
         id,
         payload,
+        base,
         session,
       }: {
         id: number;
         payload: Parameters<typeof updateFilamentProfile>[1];
+        base: EditingBase;
         session: number;
       }) => {
         requireSessionVersion(session);
-        return updateFilamentProfile(id, payload);
+        return updateFilamentProfile(id, payload, { base });
       },
       onMutate: ({ id, session }) => prepare(session, { kind: "filament", id }),
       onSuccess: (row, _, context) => publishFilament(row, context, false),
@@ -183,14 +229,16 @@ export function useProfileCommands() {
       mutationFn: ({
         id,
         payload,
+        base,
         session,
       }: {
         id: number;
         payload: Parameters<typeof updatePrinterProfile>[1];
+        base: EditingBase;
         session: number;
       }) => {
         requireSessionVersion(session);
-        return updatePrinterProfile(id, payload);
+        return updatePrinterProfile(id, payload, { base });
       },
       onMutate: ({ id, session }) => prepare(session, { kind: "printer", id }),
       onSuccess: (row, _, context) => publishPrinter(row, context, false),

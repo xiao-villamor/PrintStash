@@ -7,7 +7,9 @@
  * backend — so every case here asserts the request that was made rather than the
  * value that came back.
  */
-import { afterEach, beforeEach, describe, it, vi } from "vitest";
+import { anEditingBase } from "@/test-support/factories";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createPrinterProfile,
@@ -52,11 +54,26 @@ describe("createPrinterProfile", () => {
 
 describe("updatePrinterProfile", () => {
   it("PATCHes only what changed", async () => {
-    respondWith({ id: 1, name: "Voron" });
+    respondWith({ ...anEditingBase({ edit_version: 2 }), id: 1, name: "Voron" });
 
-    await updatePrinterProfile(1, { name: "Voron 2.4" });
+    await updatePrinterProfile(1, { name: "Voron 2.4" }, { base: anEditingBase() });
 
     expectRequest("/api/v1/printer-profiles/1", "PATCH");
+  });
+  it.each([
+    { label: "unchanged version", saved: { ...anEditingBase(), id: 1 } },
+    {
+      label: "other history",
+      saved: { ...anEditingBase({ edit_epoch: "f".repeat(32), edit_version: 2 }), id: 1 },
+    },
+    { label: "other identity", saved: { ...anEditingBase({ edit_version: 2 }), id: 2 } },
+  ])("rejects an acknowledgement with $label", async ({ saved }) => {
+    respondWith(saved);
+    await expect(
+      updatePrinterProfile(1, { name: "Changed" }, { base: anEditingBase() }),
+    ).rejects.toThrow(
+      saved.id === 1 ? "Invalid editing acknowledgement" : "profile_identity_mismatch",
+    );
   });
 });
 

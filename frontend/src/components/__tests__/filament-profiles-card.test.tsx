@@ -24,6 +24,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
+import { anEditingBase } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { queryKeys } from "@/lib/query-client";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -33,6 +34,7 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aFilamentProfile(over: Partial<FilamentProfileRead> = {}): FilamentProfileRead {
   return {
+    ...anEditingBase(),
     id: 1,
     name: "Everyday PLA",
     material_type: "PLA",
@@ -51,6 +53,7 @@ function aFilamentProfile(over: Partial<FilamentProfileRead> = {}): FilamentProf
 
 function aPrinterProfile(over: Partial<PrinterProfileRead> = {}): PrinterProfileRead {
   return {
+    ...anEditingBase(),
     id: 1,
     name: "Voron 2.4 — 0.4 mm",
     printer_model: "Voron 2.4",
@@ -312,10 +315,414 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("editing a preset in place", () => {
+    it.each(["filament", "printer"] as const)(
+      "sends the original %s base after background refresh",
+      async (kind) => {
+        const user = userEvent.setup();
+        let headers = new Headers();
+        const app = renderCard({
+          routes: {
+            [`PATCH /api/v1/${kind}-profiles/1`]: (_url, init) => {
+              headers = new Headers(init?.headers);
+              return json({ detail: "edit_conflict" }, 412);
+            },
+          },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        const name = await screen.findByRole("textbox", { name: `${label} preset name 1` });
+        await user.type(name, " draft");
+        app.route({
+          [`GET /api/v1/${kind}-profiles`]: json([
+            { ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()), edit_version: 7 },
+          ]),
+        });
+        await act(async () =>
+          app.client.invalidateQueries({
+            queryKey: kind === "filament" ? queryKeys.filamentProfiles : queryKeys.printerProfiles,
+          }),
+        );
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        await screen.findByRole("button", { name: "Review current values" });
+        expect(headers.get("If-Match")).toBe(
+          `"${kind}-profile-1-e${anEditingBase().edit_epoch}-v1"`,
+        );
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it("keeps a pending profile locked after an earlier saved indicator expires", async () => {
+      let current = aFilamentProfile();
+      const pending = Promise.withResolvers<Response>();
+      let writes = 0;
+      renderCard({
+        routes: {
+          "GET /api/v1/filament-profiles": () => json([current]),
+          "PATCH /api/v1/filament-profiles/1": () => {
+            writes += 1;
+            if (writes === 1) {
+              current = aFilamentProfile({ name: "First", edit_version: 2 });
+              return json(current);
+            }
+            return pending.promise;
+          },
+        },
+      });
+      const name = await screen.findByRole("textbox", { name: "Filament preset name 1" });
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      try {
+        await user.clear(name);
+        await user.type(name, "First");
+        await user.click(screen.getByRole("heading", { name: "Filament presets" }));
+        await waitFor(() => expect(name).toBeEnabled());
+        await user.clear(name);
+        await user.type(name, "Second");
+        await user.click(screen.getByRole("heading", { name: "Filament presets" }));
+        await waitFor(() => expect(writes).toBe(2));
+        expect(name).toBeDisabled();
+        await act(async () => vi.advanceTimersByTimeAsync(1600));
+        expect(name).toBeDisabled();
+      } finally {
+        current = aFilamentProfile({ name: "Second", edit_version: 3 });
+        await act(async () => {
+          pending.resolve(json(current));
+          await pending.promise;
+        });
+        vi.useRealTimers();
+      }
+    });
+
+    it("clears obsolete filament validation after adopting current values", async () => {
+      const user = userEvent.setup();
+      const app = renderCard({
+        routes: { "PATCH /api/v1/filament-profiles/1": json({ detail: "edit_conflict" }, 412) },
+      });
+      await user.type(
+        await screen.findByRole("textbox", { name: "Filament preset name 1" }),
+        " draft",
+      );
+      await user.click(screen.getByRole("heading", { name: "Filament presets" }));
+      const review = await screen.findByRole("button", { name: "Review current values" });
+      app.route({ "GET /api/v1/filament-profiles": json([aFilamentProfile({ edit_version: 2 })]) });
+      await user.click(review);
+      const cost = screen.getByRole("textbox", { name: "Filament cost per kg 1" });
+      await user.clear(cost);
+      await user.type(cost, "-1");
+      await user.click(screen.getByRole("button", { name: "Save revised changes" }));
+      expect(cost).toHaveAttribute("aria-invalid", "true");
+      await user.click(screen.getByRole("button", { name: "Use current values" }));
+      expect(cost).toHaveValue("24.5");
+      expect(cost).toHaveAttribute("aria-invalid", "false");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it.each(["filament", "printer"] as const)(
+      "requires adoption of a different %s history",
+      async (kind) => {
+        const user = userEvent.setup();
+        const app = renderCard({
+          routes: { [`PATCH /api/v1/${kind}-profiles/1`]: json({ detail: "edit_conflict" }, 412) },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        const name = await screen.findByRole("textbox", { name: `${label} preset name 1` });
+        await user.type(name, " draft");
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        const review = await screen.findByRole("button", { name: "Review current values" });
+        app.route({
+          [`GET /api/v1/${kind}-profiles`]: json([
+            {
+              ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()),
+              edit_epoch: "f".repeat(32),
+              name: "New history",
+            },
+          ]),
+        });
+        await user.click(review);
+        expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+        expect(
+          screen.getByText(
+            "Preset history changed. Use current values before starting another edit.",
+          ),
+        ).toBeVisible();
+        await user.click(screen.getByRole("button", { name: "Use current values" }));
+        expect(name).toHaveValue("New history");
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it.each(["filament", "printer"] as const)(
+      "adopts an uncertain %s save without another write",
+      async (kind) => {
+        const user = userEvent.setup();
+        const app = renderCard({
+          routes: {
+            [`PATCH /api/v1/${kind}-profiles/1`]: () =>
+              Promise.reject(new TypeError("Failed to fetch")),
+          },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        const name = await screen.findByRole("textbox", { name: `${label} preset name 1` });
+        await user.clear(name);
+        await user.type(name, "Possibly saved");
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        const review = await screen.findByRole("button", { name: "Review current values" });
+        const current = {
+          ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()),
+          edit_version: 2,
+          name: "Possibly saved",
+        };
+        app.route({ [`GET /api/v1/${kind}-profiles`]: json([current]) });
+        await user.click(review);
+        await user.click(await screen.findByRole("button", { name: "Use current values" }));
+        expect(name).toHaveValue("Possibly saved");
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+        expect(
+          screen.queryByRole("button", { name: "Save revised changes" }),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it.each(["filament", "printer"] as const)(
+      "retires a pending %s review with its session",
+      async (kind) => {
+        const user = userEvent.setup();
+        const app = renderCard({
+          routes: { [`PATCH /api/v1/${kind}-profiles/1`]: json({ detail: "edit_conflict" }, 412) },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        await user.type(
+          await screen.findByRole("textbox", { name: `${label} preset name 1` }),
+          " draft",
+        );
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        const review = await screen.findByRole("button", { name: "Review current values" });
+        const pending = Promise.withResolvers<Response>();
+        let signal: AbortSignal | null | undefined;
+        app.route({
+          [`GET /api/v1/${kind}-profiles`]: (_url, init) => {
+            signal = init?.signal;
+            return pending.promise;
+          },
+        });
+        await user.click(review);
+        await waitFor(() => expect(signal).toBeDefined());
+        await act(async () => {
+          app.unmount();
+          clearLogin();
+          pending.resolve(
+            json([
+              {
+                ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()),
+                name: "Retired values",
+                edit_version: 2,
+              },
+            ]),
+          );
+          await pending.promise;
+        });
+        expect(signal?.aborted).toBe(true);
+        expect(
+          app.client.getQueryData(
+            kind === "filament" ? queryKeys.filamentProfiles : queryKeys.printerProfiles,
+          ),
+        ).toBeUndefined();
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it.each(["filament", "printer"] as const)(
+      "retains a newer %s row across a delayed acknowledgement",
+      async (kind) => {
+        const user = userEvent.setup();
+        const pending = Promise.withResolvers<Response>();
+        const app = renderCard({
+          routes: { [`PATCH /api/v1/${kind}-profiles/1`]: () => pending.promise },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        const name = await screen.findByRole("textbox", { name: `${label} preset name 1` });
+        await user.type(name, " draft");
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+        const newer = {
+          ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()),
+          edit_version: 3,
+          name: "Newest profile",
+        };
+        app.route({ [`GET /api/v1/${kind}-profiles`]: json([newer]) });
+        await act(async () => {
+          app.client.setQueryData(
+            kind === "filament" ? queryKeys.filamentProfiles : queryKeys.printerProfiles,
+            [newer],
+          );
+          pending.resolve(json({ ...newer, edit_version: 2, name: "Earlier receipt" }));
+          await pending.promise;
+        });
+        await waitFor(() => expect(name).toHaveValue("Newest profile"));
+        expect(
+          app.client.getQueryData(
+            kind === "filament" ? queryKeys.filamentProfiles : queryKeys.printerProfiles,
+          ),
+        ).toEqual([newer]);
+      },
+    );
+
+    it.each(["filament", "printer"] as const)(
+      "validates a revised %s numeric draft",
+      async (kind) => {
+        const user = userEvent.setup();
+        const app = renderCard({
+          routes: { [`PATCH /api/v1/${kind}-profiles/1`]: json({ detail: "edit_conflict" }, 412) },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        await user.type(
+          await screen.findByRole("textbox", { name: `${label} preset name 1` }),
+          " draft",
+        );
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        const review = await screen.findByRole("button", { name: "Review current values" });
+        app.route({
+          [`GET /api/v1/${kind}-profiles`]: json([
+            { ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()), edit_version: 2 },
+          ]),
+        });
+        await user.click(review);
+        const input = screen.getByRole("textbox", {
+          name: kind === "filament" ? "Filament cost per kg 1" : "Printer nozzle diameter 1",
+        });
+        await user.clear(input);
+        await user.type(input, "-1");
+        await user.click(screen.getByRole("button", { name: "Save revised changes" }));
+        expect(input).toHaveValue("-1");
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it.each([
+      { kind: "filament", failure: "denied" },
+      { kind: "filament", failure: "deleted" },
+      { kind: "printer", failure: "denied" },
+      { kind: "printer", failure: "deleted" },
+    ])("retires a $failure $kind profile review", async ({ kind, failure }) => {
+      const user = userEvent.setup();
+      const app = renderCard({
+        routes: { [`PATCH /api/v1/${kind}-profiles/1`]: json({ detail: "edit_conflict" }, 412) },
+      });
+      if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+      const label = kind === "filament" ? "Filament" : "Printer";
+      await user.type(
+        await screen.findByRole("textbox", { name: `${label} preset name 1` }),
+        " draft",
+      );
+      await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+      const review = await screen.findByRole("button", { name: "Review current values" });
+      app.route({
+        [`GET /api/v1/${kind}-profiles`]:
+          failure === "denied" ? json({ detail: "permission_denied" }, 403) : json([]),
+      });
+      await user.click(review);
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("textbox", { name: `${label} preset name 1` }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Save revised changes" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("refuses a reviewed filament that now belongs to Spoolman", async () => {
+      const user = userEvent.setup();
+      const app = renderCard({
+        routes: {
+          "PATCH /api/v1/filament-profiles/1": json({ detail: "filament_profile_linked" }, 409),
+        },
+      });
+      const name = await screen.findByRole("textbox", { name: "Filament preset name 1" });
+      await user.type(name, " draft");
+      await user.click(screen.getByRole("heading", { name: "Filament presets" }));
+      const review = await screen.findByRole("button", { name: "Review current values" });
+      app.route({
+        "GET /api/v1/filament-profiles": json([
+          aFilamentProfile({ edit_version: 2, spoolman_filament_id: 42 }),
+        ]),
+      });
+      await user.click(review);
+      expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+      expect(name).toBeDisabled();
+      expect(name).toHaveValue("Everyday PLA draft");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it.each(["filament", "printer"] as const)(
+      "preserves a conflicting %s profile draft for explicit review",
+      async (kind) => {
+        const user = userEvent.setup();
+        const app = renderCard({
+          routes: {
+            [`PATCH /api/v1/${kind}-profiles/1`]: json({ detail: "edit_conflict" }, 412),
+          },
+        });
+        if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
+        const label = kind === "filament" ? "Filament" : "Printer";
+        const name = await screen.findByRole("textbox", { name: `${label} preset name 1` });
+        await user.clear(name);
+        await user.type(name, "My draft");
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        await screen.findByRole("button", { name: "Review current values" });
+        expect(name).toHaveValue("My draft");
+        await user.click(name);
+        await user.click(screen.getByRole("heading", { name: `${label} presets` }));
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+        const current = {
+          ...(kind === "filament" ? aFilamentProfile() : aPrinterProfile()),
+          edit_version: 2,
+          notes: "Other editor notes",
+        };
+        app.route({ [`GET /api/v1/${kind}-profiles`]: json([current]) });
+        await user.click(screen.getByRole("button", { name: "Review current values" }));
+        expect(await screen.findByText("Other editor notes")).toBeVisible();
+        const saved = { ...current, edit_version: 3, name: "My draft" };
+        let revisedHeaders = new Headers();
+        app.route({
+          [`PATCH /api/v1/${kind}-profiles/1`]: (_url, init) => {
+            revisedHeaders = new Headers(init?.headers);
+            return json(saved);
+          },
+          [`GET /api/v1/${kind}-profiles`]: json([saved]),
+        });
+        await user.click(screen.getByRole("button", { name: "Save revised changes" }));
+        await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+        const revised = app.requestsWithMethod("PATCH")[1];
+        expect(revisedHeaders.get("If-Match")).toBe(
+          `"${kind}-profile-1-e${current.edit_epoch}-v2"`,
+        );
+        expect(JSON.parse(revised.body)).toEqual({ name: "My draft" });
+        await waitFor(() =>
+          expect(
+            screen.queryByRole("button", { name: "Save revised changes" }),
+          ).not.toBeInTheDocument(),
+        );
+        expect(screen.getByRole("textbox", { name: `${label} notes 1` })).toHaveValue(
+          "Other editor notes",
+        );
+      },
+    );
+
     it("saves a changed field when the row is left", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({
-        routes: { "PATCH /api/v1/filament-profiles/1": json(aFilamentProfile({ name: "PETG" })) },
+        routes: {
+          "PATCH /api/v1/filament-profiles/1": json(
+            aFilamentProfile({ name: "PETG", edit_version: 2 }),
+          ),
+        },
       });
       const name = await screen.findByLabelText("Filament preset name 1");
 
@@ -339,7 +746,7 @@ describe("FilamentProfilesCard", () => {
         routes: {
           "GET /api/v1/filament-profiles": () => json([current]),
           "PATCH /api/v1/filament-profiles/1": () => {
-            current = aFilamentProfile({ name: "Server normalized name" });
+            current = aFilamentProfile({ name: "Server normalized name", edit_version: 2 });
             return json(current);
           },
         },
@@ -369,7 +776,7 @@ describe("FilamentProfilesCard", () => {
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
       expect(name).toBeDisabled();
       await act(async () => {
-        respond(json(aFilamentProfile({ name: "Everyday PLA edited" })));
+        respond(json(aFilamentProfile({ name: "Everyday PLA edited", edit_version: 2 })));
         await pending;
       });
     });
@@ -392,7 +799,7 @@ describe("FilamentProfilesCard", () => {
       });
       const refresh = app.client.invalidateQueries({ queryKey: queryKeys.filamentProfiles });
       await waitFor(() => expect(signal).toBeDefined());
-      const saved = aFilamentProfile({ name: "Authoritative saved name" });
+      const saved = aFilamentProfile({ name: "Authoritative saved name", edit_version: 2 });
       app.route({
         "GET /api/v1/filament-profiles": json([saved]),
         "PATCH /api/v1/filament-profiles/1": json(saved),
@@ -442,7 +849,11 @@ describe("FilamentProfilesCard", () => {
     it("does not publish a retired profile save after delayed cancellation", async () => {
       const user = userEvent.setup();
       const app = renderCard({
-        routes: { "PATCH /api/v1/filament-profiles/1": json(aFilamentProfile({ name: "Saved" })) },
+        routes: {
+          "PATCH /api/v1/filament-profiles/1": json(
+            aFilamentProfile({ name: "Saved", edit_version: 2 }),
+          ),
+        },
       });
       const name = await screen.findByRole("textbox", { name: "Filament preset name 1" });
       await user.type(name, " edited");
@@ -721,7 +1132,11 @@ describe("FilamentProfilesCard", () => {
     it("saves a changed field when the row is left", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({
-        routes: { "PATCH /api/v1/printer-profiles/1": json(aPrinterProfile({ name: "MK4" })) },
+        routes: {
+          "PATCH /api/v1/printer-profiles/1": json(
+            aPrinterProfile({ name: "MK4", edit_version: 2 }),
+          ),
+        },
       });
       await screen.findByText("Filament presets");
       await user.click(screen.getByRole("tab", { name: /Printers/ }));

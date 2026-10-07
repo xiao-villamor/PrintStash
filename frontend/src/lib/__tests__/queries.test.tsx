@@ -25,6 +25,7 @@
  * requested only on demand. A client that re-sorted locally would paginate a
  * different order than the one it displays.
  */
+import { anEditingBase } from "@/test-support/factories";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -100,6 +101,7 @@ const tag: TagRead = { id: 1, name: "petg", slug: "petg", model_count: 1 };
 const printer = aPrinter({ name: "Voron", moonraker_url: "http://10.0.0.1:7125" });
 
 const printerProfile: PrinterProfileRead = {
+  ...anEditingBase(),
   id: 1,
   name: "Ender",
   printer_model: null,
@@ -112,6 +114,7 @@ const printerProfile: PrinterProfileRead = {
 };
 
 const filamentProfile: FilamentProfileRead = {
+  ...anEditingBase(),
   id: 1,
   name: "PLA",
   material_type: null,

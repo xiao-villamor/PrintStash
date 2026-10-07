@@ -4259,5 +4259,10 @@
   "Current printer settings": "Current printer settings",
   "Stored credential": "Stored credential",
   "Configured": "Configured",
-  "Not configured": "Not configured"
+  "Not configured": "Not configured",
+  "Current preset values": "Current preset values",
+  "This preset needs review before another save. Your draft is preserved.": "This preset needs review before another save. Your draft is preserved.",
+  "Review current values": "Review current values",
+  "Spoolman": "Spoolman",
+  "Preset history changed. Use current values before starting another edit.": "Preset history changed. Use current values before starting another edit."
 }

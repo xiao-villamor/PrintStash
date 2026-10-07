@@ -4,7 +4,9 @@
 > evidence for implemented behaviors, but do not prove complete plan acceptance.
 > See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
 > competing-edit contracts and corrected execution order. M7 has since satisfied
-> its reopened contract; M8 is now active. The closure text below is historical.
+> its reopened contract. The [Profile correction](frontend-m8-profile-edit-validation.md)
+> is now locally qualified; Search configuration is the active gap. The closure
+> text below is historical.
 
 
 Status: locally closed after M7 acceptance c4b43c25. Scope: Model/Multipart detail,
@@ -131,8 +133,8 @@ keep transiently unavailable data recoverable and retain existing draft semantic
 
 This is a reconciliation of existing manual review plus named new inspection,
 not a claim that every source was reread in this pass. The repository-wide ledger
-and remaining source review belong to M10/M11. Existing Profiles and Search settings
-have no backend conditional editing protocol: local draft preservation does not
+and remaining source review belong to M10/M11. At that original checkpoint Profiles and Search settings
+had no backend conditional editing protocol: local draft preservation does not
 promise detection of external last-writer-wins conflicts. No new protocol or
 stateless/server runtime migration is introduced.
 

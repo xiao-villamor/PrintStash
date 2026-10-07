@@ -41,6 +41,7 @@ from tests.factories.protocols import (
     MakeDocument,
     MakeEmbeddingSpace,
     MakeExternalLibrary,
+    MakeFilamentProfile,
     MakeFile,
     MakeGeometryFingerprint,
     MakeInboxItem,
@@ -63,6 +64,7 @@ from tests.factories.protocols import (
     MakePassageVector,
     MakePrinter,
     MakePrinterFile,
+    MakePrinterProfile,
     MakePrintJob,
     MakeProvenanceSource,
     MakeSearchDependency,
@@ -419,7 +421,12 @@ def make_share_link(db_session: Session) -> MakeShareLink:
 
 
 @pytest.fixture
-def make_filament_profile(db_session: Session) -> Any:
+def make_printer_profile(db_session: Session) -> MakePrinterProfile:
+    return _bound(factories.build_printer_profile, db_session)
+
+
+@pytest.fixture
+def make_filament_profile(db_session: Session) -> MakeFilamentProfile:
     return _bound(factories.build_filament_profile, db_session)
 
 
@@ -532,6 +539,7 @@ __all__ = [
     "make_external_library",
     "make_file",
     "make_filament_profile",
+    "make_printer_profile",
     "make_inbox_item",
     "make_inbox_result",
     "make_metadata",

@@ -4259,5 +4259,10 @@
   "Current printer settings": "Ajustes actuales de la impresora",
   "Stored credential": "Credencial guardada",
   "Configured": "Configurada",
-  "Not configured": "Sin configurar"
+  "Not configured": "Sin configurar",
+  "Current preset values": "Valores actuales del perfil",
+  "This preset needs review before another save. Your draft is preserved.": "Revisa este perfil antes de volver a guardarlo. Tu borrador se conserva.",
+  "Review current values": "Revisar valores actuales",
+  "Spoolman": "Spoolman",
+  "Preset history changed. Use current values before starting another edit.": "El historial del perfil ha cambiado. Usa los valores actuales antes de iniciar otra edición."
 }
