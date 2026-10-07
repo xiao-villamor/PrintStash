@@ -48,6 +48,7 @@ export const MIGRATION_EXCEPTIONS: readonly MigrationException[] = [];
 export const FEATURE_PUBLIC_MODULES = new Set([
   "src/features/auth/entry.ts",
   "src/features/setup/entry.ts",
+  "src/features/setup/guide.ts",
   "src/features/work/queries.ts",
   "src/features/printers/queries.ts",
   "src/features/printers/settings-edit.ts",

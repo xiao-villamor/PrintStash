@@ -4,7 +4,12 @@ import { Link } from "react-router-dom";
 import { useRouter } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/lib/i18n";
-import { prepareSetupStorage, listModelPage, discoverLibraryLocations } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import {
+  guideModelsOptions,
+  guideLocationsOptions,
+  usePrepareGuideStorage,
+} from "@/features/setup/guide";
 import { listTasks, subscribeTasks, taskDetail, type TaskItem } from "@/lib/task-center";
 import { SetupFrame } from "@/components/setup-frame";
 import { SetupFolder } from "@/components/setup-folder";
@@ -12,7 +17,6 @@ import { SetupStorageChoice } from "@/components/setup-storage-choice";
 import { ApiError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
 import { UploadModal } from "@/components/upload-modal";
-import type { ModelListItem } from "@/types";
 
 export default function GettingStartedPage() {
   const { user, loading } = useAuth();
@@ -23,56 +27,47 @@ export default function GettingStartedPage() {
   const [upload, setUpload] = useState(false);
   const [folder, setFolder] = useState(false);
   const [folderBusy, setFolderBusy] = useState(false);
-  const [locations, setLocations] = useState<string[]>([]);
-  const [loadError, setLoadError] = useState(false);
-  const [catalogBusy, setCatalogBusy] = useState(false);
-  const [models, setModels] = useState<ModelListItem[]>([]);
-  const [modelCount, setModelCount] = useState(0);
+  const prepare = usePrepareGuideStorage();
+  const enabled = !loading && !!user?.is_superuser && storage === "ready";
+  const catalog = useQuery({ ...guideModelsOptions(), enabled });
+  const discovery = useQuery({ ...guideLocationsOptions(), enabled });
+  const locations = discovery.data ?? [];
+  const models = catalog.data?.items ?? [];
+  const modelCount = catalog.data?.total ?? 0;
+  const loadError = catalog.isError;
+  const catalogBusy = catalog.isFetching;
+  const { refetch } = catalog;
   const [taskId, setTaskId] = useState<string | null>(null);
   const [task, setTask] = useState<TaskItem | undefined>();
   const refresh = useCallback(async () => {
-    setCatalogBusy(true);
-    try {
-      const page = await listModelPage({ limit: 5 });
-      setModels(page.items);
-      setModelCount(page.total);
-      setLoadError(false);
-      return page.total;
-    } catch {
-      setLoadError(true);
-      return null;
-    } finally {
-      setCatalogBusy(false);
-    }
-  }, []);
-  const handlePrepared = useCallback(async () => {
-    setStorage("ready");
-    await Promise.all([
-      refresh(),
-      discoverLibraryLocations().then(setLocations, () => setLocations([])),
-    ]);
-  }, [refresh]);
+    const result = await refetch();
+    return result.isError ? null : (result.data?.total ?? null);
+  }, [refetch]);
+  const handlePrepared = useCallback(() => setStorage("ready"), []);
   // An owner provisioned from VAULT_SETUP_ADMIN_* has no storage yet: the
   // server says so instead of finishing a choice nobody made.
   const handleUnprepared = useCallback((error: Error) => {
+    if (error instanceof DOMException && error.name === "AbortError") return;
     setStorage(
       error instanceof ApiError && error.code === "setup_storage_choice_required"
         ? "choose"
         : "pending",
     );
   }, []);
+  const userId = user?.id;
+  const isAdmin = user?.is_superuser;
   useEffect(() => {
     if (loading) return;
-    if (!user) {
+    if (userId === undefined) {
       router.replace("/login");
       return;
     }
-    if (!user.is_superuser) {
+    if (!isAdmin) {
       router.replace("/");
       return;
     }
-    void prepareSetupStorage().then(handlePrepared, handleUnprepared);
-  }, [loading, user, router, handlePrepared, handleUnprepared]);
+    void prepare().then(handlePrepared, handleUnprepared);
+  }, [loading, userId, isAdmin, router, prepare, handlePrepared, handleUnprepared]);
   useEffect(() => {
     if (!taskId) return;
     const update = () => setTask(listTasks().find((item) => item.id === taskId));
@@ -156,7 +151,7 @@ export default function GettingStartedPage() {
               <Button
                 onClick={() => {
                   setStorage("checking");
-                  void prepareSetupStorage().then(handlePrepared, handleUnprepared);
+                  void prepare().then(handlePrepared, handleUnprepared);
                 }}
               >
                 {t("setup.retry")}

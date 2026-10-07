@@ -1302,7 +1302,7 @@ test.describe("settings", () => {
     await page.getByRole("button", { name: "Design" }).click();
 
     const sw = page.getByRole("switch", { name: "Auto-mark known good on successful print" });
-    await expect(sw).toBeVisible();
+    await expect(sw).toBeEnabled();
     const before = await sw.getAttribute("aria-checked");
 
     await Promise.all([
@@ -1311,14 +1311,14 @@ test.describe("settings", () => {
       ),
       sw.click(),
     ]);
-    const after = await sw.getAttribute("aria-checked");
-    expect(after).not.toBe(before);
+    const after = before === "true" ? "false" : "true";
+    await expect(sw).toHaveAttribute("aria-checked", after);
 
     await page.reload();
     await page.getByRole("button", { name: "Design" }).click();
     await expect(
       page.getByRole("switch", { name: "Auto-mark known good on successful print" }),
-    ).toHaveAttribute("aria-checked", after!);
+    ).toHaveAttribute("aria-checked", after);
 
     // Restore the original so the shared DB doesn't drift for later runs.
     await Promise.all([

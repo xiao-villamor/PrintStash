@@ -395,3 +395,78 @@ This is failure evidence, not a passing full gate.
 Final selected real-browser run: **6 passed in 1.3min**, including all three
 Document conditional-write scenarios, legacy task isolation and both mesh preview
 flows. Formatting passed across 793 files.
+
+### First-page read contention
+
+The remaining Share/ZIP flakes showed an empty initial library with
+`browse_refresh_required`, not a missing uploaded Model. A background writer
+changed the catalog during the backend's first-page authority window. A single
+fresh first-page retry is safe before a cursor has been accepted; continuation
+conflicts must still preserve the displayed snapshot and require explicit refresh.
+Sustained churn still surfaces recovery after that bounded retry. This does not
+relax the backend revision fence or merge inconsistent pages.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C34 | recovers first-page read contention once | Edge | First page returns browse_refresh_required, fresh request succeeds | A coherent first page appears without user refresh | Frontend unit | ✅ `frontend/src/features/library/__tests__/browse.test.tsx` — red/green verified |
+| C35 | exposes sustained first-page contention | Error | Both first-page attempts conflict | Explicit refresh required after exactly two requests | Frontend unit | ✅ `frontend/src/features/library/__tests__/browse.test.tsx` — exactly two attempts |
+| C36 | does not retry authorization rejection | Error | First page returns 403 | No retry or private page publication | Frontend unit | ✅ `frontend/src/features/library/__tests__/browse.test.tsx` — one denied request |
+| C37 | retains displayed pages when continuation requires refresh | Edge | Accepted first page, next cursor conflicts | Existing page unchanged; exactly one continuation request | Frontend unit | ✅ `frontend/src/features/library/__tests__/browse.test.tsx` |
+| C38 | auto-mark-known-good toggle persists across reload | Happy | Successful PUT followed by Query receipt publication | Wait for rendered checked state, then verify reload and restore original | Playwright | ✅ `frontend/tests/e2e-real/settings.spec.ts` — replace instantaneous post-response read with observable wait |
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C39 | does not revive a disposed first-page conflict | Error | Unmount while first response is pending; late conflict arrives | Original request aborted, no recovery GET or page publication | Frontend unit | ✅ `frontend/src/features/library/__tests__/browse.test.tsx` — nine-case file passed |
+
+The scalar-toggle recheck exposed an additional test race: the test read the
+disabled placeholder's `false` before configuration arrived, then Playwright
+waited for the enabled `true` control before clicking. Its expected opposite
+therefore used the wrong base. Await the enabled control before reading its
+value, then await receipt publication before reload. Production already blocks
+the unloaded control. The other four selected Share/filter/ZIP flows passed.
+
+Browse/authority/mutation selection passed **45 tests in 5.84s**; the final
+browse file including cancellation passed **9 in 3.34s**. The corrected scalar
+toggle passed against the real backend in **6.7s** (46.1s including startup).
+
+### Authenticated first-run guide ownership
+
+The final M9 caller review found local copies of configuration/catalog reads in
+`SetupStorageChoice` and Model/location reads in `GettingStartedPage`. A locale
+change reruns the choice bootstrap and overwrites a typed path; leaving the guide
+does not abort preparation and its late receipt can start new reads. Move the
+reads to named Query projections, retain only form drafts and workflow UI locally,
+and scope preparation to the mounted entry and current session. Credentials must
+never enter MutationCache. This is completion of M9 before M11 qualification.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C40 | retains a storage draft when locale changes | Edge | Typed local root; switch locale | Root remains typed; no duplicate bootstrap GET | Frontend unit | ✅ Guide/choice red/green selection |
+| C41 | retires a pending storage choice on unmount | Error | Delayed preparation receipt after leaving | Request aborted; no completion callback | Frontend unit | ✅ Guide/choice red/green selection |
+| C42 | shares configuration with the setup storage picker | Happy | Configuration Query already loaded | Picker uses canonical cached roots without a duplicate read | Frontend unit | ✅ Guide/choice red/green selection |
+| C43 | retires preparation before starting guide reads | Error | Guide unmounts while preparation pending | Aborted command; no Model/location request | Frontend unit | ✅ Guide/choice red/green selection |
+| C44 | retires guide catalog reads on unmount | Error | Delayed Model/location responses | Both network signals aborted; no retained result | Frontend unit | ✅ Guide/choice red/green selection |
+| C45 | retries catalog loading | Error | Catalog fails after successful preparation | Retry reveals verified Model without replaying preparation | Frontend unit | ✅ Existing `getting-started.test.tsx` |
+
+The five new guide/choice regressions first failed against the old ownership.
+After the cutover, both complete files passed **34 tests in 9.29s**. Configuration
+and provider metadata reuse their existing canonical Query keys; first-run Model
+preview (limit 5) and optional directory suggestions have cancellable named keys.
+Preparation is entry/session scoped, invalidates sanitized configuration only after
+a current receipt, and keeps credentials outside MutationCache. Lint and app/package
+type checks passed. No automatic write replay was added.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C46 | retires a storage choice when the session changes | Error | Pending choice; session clears before receipt | Request aborted, no continuation, no cached command credentials | Frontend unit | ✅ `setup-storage-choice.test.tsx` — final selection passed |
+| C47 | retains a storage draft during config refresh | Edge | Typed path; canonical config refetch publishes new defaults | Typed path remains unchanged | Frontend unit | ✅ `setup-storage-choice.test.tsx` — final selection passed |
+
+Final choice/boundary selection passed **88 tests in 4.25s**, including session
+retirement, canonical config refresh and the declared guide public interface.
+The preceding four-file selection passed 117 cases and exposed one incorrectly
+specified new boundary fixture; that fixture now declares its transport source.
+The real environment-provisioned owner flow passed **1 test in 1.0min** (14.9s
+for storage choice through first Model). Required PR CI on `dcfc34e5` completed
+successfully. The preceding Deep browser run (`6eabc187`) reported **122 passed,
+6 failed, 1 flaky**; its six failures map to C26–33 and the flaky toggle to C38.
+Those old-run failures are retained as evidence, not relabeled as a green run.

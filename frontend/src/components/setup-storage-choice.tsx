@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   defaultProviderValues,
   StorageProviderPicker,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
 import { Button } from "@/components/ui/button";
-import { getStorageProviders, getVaultConfig, prepareSetupStorage } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { storageProvidersOptions } from "@/lib/queries/settings-storage";
+import { vaultConfigOptions } from "@/lib/queries/settings-config";
+import { usePrepareGuideStorage } from "@/features/setup/guide";
 import { useI18n } from "@/lib/i18n";
 import { setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 import { storageOperationMessage } from "@/lib/storage-operations";
@@ -21,38 +24,25 @@ import type { StorageProvider } from "@/types";
  */
 export function SetupStorageChoice({ onPrepared }: { onPrepared: () => void }) {
   const { t } = useI18n();
-  const [providers, setProviders] = useState<StorageProvider[]>([]);
-  const [providerId, setProviderId] = useState("local");
-  const [values, setValues] = useState<ProviderValues>({});
-  const [localRoots, setLocalRoots] = useState<ProviderValues>({});
-  const [loaded, setLoaded] = useState(false);
+  const catalog = useQuery(storageProvidersOptions());
+  const config = useQuery(vaultConfigOptions());
+  const prepare = usePrepareGuideStorage();
+  const providers = catalog.data ?? [];
+  const loaded = catalog.isSuccess && config.isSuccess;
+  const localRoots: ProviderValues = config.data
+    ? { data_dir: config.data.data_dir, thumb_dir: config.data.thumb_dir }
+    : {};
+  const [draft, setDraft] = useState<{ providerId: string; values: ProviderValues } | null>(null);
+  const providerId = draft?.providerId ?? "local";
+  const values =
+    draft?.values ??
+    valuesFor(
+      providers.find((item) => item.id === "local"),
+      localRoots,
+    );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all([getStorageProviders(), getVaultConfig()]).then(
-      ([catalog, config]) => {
-        if (cancelled) return;
-        const roots = { data_dir: config.data_dir, thumb_dir: config.thumb_dir };
-        setProviders(catalog);
-        setLocalRoots(roots);
-        setValues(
-          valuesFor(
-            catalog.find((item) => item.id === "local"),
-            roots,
-          ),
-        );
-        setLoaded(true);
-      },
-      () => {
-        if (!cancelled) setError(t("setup.failed"));
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [t]);
+  const message = error || (catalog.isError || config.isError ? t("setup.failed") : "");
 
   async function submit() {
     const provider = providers.find((item) => item.id === providerId);
@@ -68,9 +58,10 @@ export function SetupStorageChoice({ onPrepared }: { onPrepared: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await prepareSetupStorage(setupStorageBody(providerId, values));
+      await prepare(setupStorageBody(providerId, values));
       onPrepared();
     } catch (failure) {
+      if (failure instanceof DOMException && failure.name === "AbortError") return;
       setError(setupErrorMessage(failure instanceof Error ? failure : new Error(), t));
     } finally {
       setBusy(false);
@@ -98,19 +89,18 @@ export function SetupStorageChoice({ onPrepared }: { onPrepared: () => void }) {
           providerId={providerId}
           values={values}
           onProviderChange={(provider) => {
-            setProviderId(provider.id);
-            setValues(valuesFor(provider, localRoots));
+            setDraft({ providerId: provider.id, values: valuesFor(provider, localRoots) });
             setError("");
           }}
           onValueChange={(name, value) => {
-            setValues((current) => ({ ...current, [name]: value }));
+            setDraft({ providerId, values: { ...values, [name]: value } });
             setError("");
           }}
         />
       )}
-      {error && (
+      {message && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {message}
         </p>
       )}
       <Button type="submit" className="h-11 w-full" loading={busy} disabled={!loaded}>

@@ -290,6 +290,12 @@ describe("inspectDependencies", () => {
       specifier: "@/features/setup/entry",
     },
     {
+      label: "authenticated guide",
+      from: "src/lib/api/config.ts",
+      target: "src/features/setup/guide.ts",
+      specifier: "@/features/setup/guide",
+    },
+    {
       label: "transport to endpoint",
       from: "src/lib/api/request.ts",
       target: "src/lib/api/models.ts",

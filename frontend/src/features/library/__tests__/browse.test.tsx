@@ -24,6 +24,66 @@ function Probe({ limit = 24 }: { limit?: number }) {
 }
 
 describe("useLibraryBrowse", () => {
+  it("recovers first-page read contention once", async () => {
+    let requests = 0;
+    renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/browse": () =>
+          ++requests === 1
+            ? json({ detail: "browse_refresh_required" }, 409)
+            : json({
+                items: [{ kind: "model", model: aModelListItem({ name: "Stable page" }) }],
+                next_cursor: null,
+                total: 1,
+                browse_revision: "2",
+                authorization_revision: "1",
+              }),
+      },
+    });
+    expect(await screen.findByText("Stable page")).toBeVisible();
+    expect(requests).toBe(2);
+    expect(screen.queryByText("Refresh required")).not.toBeInTheDocument();
+  });
+
+  it("exposes sustained first-page contention", async () => {
+    const app = renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/browse": () => json({ detail: "browse_refresh_required" }, 409),
+      },
+    });
+    expect(await screen.findByText("Refresh required")).toBeVisible();
+    expect(app.requests().filter((r) => r.url.includes("/models/browse"))).toHaveLength(2);
+  });
+
+  it("does not retry authorization rejection", async () => {
+    const app = renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/browse": () => json({ detail: "collection_permission_denied" }, 403),
+      },
+    });
+    await waitFor(() => expect(app.client.isFetching()).toBe(0));
+    expect(app.requests().filter((r) => r.url.includes("/models/browse"))).toHaveLength(1);
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("does not revive a disposed first-page conflict", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/browse": (_url, options) => {
+          signal = options?.signal;
+          return pending.promise;
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    await act(async () => pending.resolve(json({ detail: "browse_refresh_required" }, 409)));
+    expect(signal?.aborted).toBe(true);
+    expect(app.requests().filter((r) => r.url.includes("/models/browse"))).toHaveLength(1);
+  });
+
   it("appends the server sequence unchanged", async () => {
     renderApp(<Probe />, {
       routes: {

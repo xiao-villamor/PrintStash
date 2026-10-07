@@ -1,5 +1,5 @@
 /* The authenticated guide preserves storage recovery and shows only verified Models. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GettingStartedPage from "@/pages/getting-started";
@@ -118,6 +118,50 @@ afterEach(() => {
 });
 
 describe("Getting started", () => {
+  it("retires preparation before starting guide reads", async () => {
+    const response = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const guide = renderGuide({
+      "POST /api/v1/setup/prepare-storage": (_url, init) => {
+        signal = init?.signal;
+        return response.promise;
+      },
+    });
+    await waitFor(() => expect(guide.requestsWithMethod("POST")).toHaveLength(1));
+    guide.unmount();
+    await act(async () =>
+      response.resolve(json({ ready: true, storage_provider: "local", checks: [] })),
+    );
+    expect(signal?.aborted).toBe(true);
+    expect(
+      guide
+        .requestsWithMethod("GET")
+        .filter((r) => /models\/page|libraries\/locations/.test(r.url)),
+    ).toHaveLength(0);
+  });
+  it("retires guide catalog reads on unmount", async () => {
+    const models = Promise.withResolvers<Response>();
+    const locations = Promise.withResolvers<Response>();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const guide = renderGuide({
+      "GET /api/v1/models/page": (_url, init) => {
+        signals.push(init?.signal);
+        return models.promise;
+      },
+      "GET /api/v1/libraries/locations": (_url, init) => {
+        signals.push(init?.signal);
+        return locations.promise;
+      },
+    });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    guide.unmount();
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    await act(async () => {
+      models.resolve(json({ items: [], total: 0, next_cursor: null }));
+      locations.resolve(json([]));
+    });
+  });
+
   it("keeps uploads unavailable while storage needs preparation", async () => {
     renderGuide({
       "POST /api/v1/setup/prepare-storage": json({ detail: "storage_root_enrollment_failed" }, 503),

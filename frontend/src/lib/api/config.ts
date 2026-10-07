@@ -1,6 +1,6 @@
 import { requireEditingBase, requireEditingReceipt } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
-import { getJson, sendJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import {
   SetupRequest,
   SetupResponse,
@@ -50,8 +50,16 @@ export function checkSetupStorage(
  * Finish pending storage. With a body, choose it: the owner provisioned from
  * VAULT_SETUP_ADMIN_* signs in before any storage exists.
  */
-export function prepareSetupStorage(body: SetupStorageRequest = {}): Promise<SetupStorageCheck> {
-  return sendJson("/api/v1/setup/prepare-storage", "POST", body);
+export function prepareSetupStorage(
+  body: SetupStorageRequest = {},
+  options: GetJsonOptions = {},
+): Promise<SetupStorageCheck> {
+  return requestApi("/api/v1/setup/prepare-storage", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
 }
 
 export function completeSetup(

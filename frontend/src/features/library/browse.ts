@@ -26,9 +26,24 @@ export function libraryBrowseOptions(params: LibraryBrowseParams) {
   >({
     queryKey: libraryBrowseKeys.pages(params),
     initialPageParam: null,
-    queryFn: ({ pageParam, signal }) => {
+    queryFn: async ({ pageParam, signal }) => {
       markStartup("library-requests");
-      return listLibraryPage({ ...params, cursor: pageParam ?? undefined }, { signal });
+      try {
+        return await listLibraryPage({ ...params, cursor: pageParam ?? undefined }, { signal });
+      } catch (error) {
+        // No cursor has been accepted for a first page. One fresh read can
+        // recover a concurrent writer without changing any displayed sequence.
+        // A continuation conflict always belongs to the explicit refresh flow.
+        if (
+          pageParam !== null ||
+          !(error instanceof ApiError) ||
+          error.status !== 409 ||
+          error.code !== "browse_refresh_required"
+        )
+          throw error;
+        signal.throwIfAborted();
+        return listLibraryPage(params, { signal });
+      }
     },
     getNextPageParam: (lastPage) => lastPage.next_cursor,
     staleTime: Infinity,

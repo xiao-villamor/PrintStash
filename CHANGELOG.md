@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserve first-run storage drafts across locale changes, retire setup requests
+  on navigation, and recover one initial Library read conflict without mixing snapshots.
+
 - Keep Library view metadata out of AI Search filter requests, so filtered and saved searches remain usable.
 
 - Offer Everything and Multipart Sets as the two Library views. Filter and order

@@ -624,3 +624,14 @@ loading indicator by discarding an already admitted editor's state.
 The storage card accepts the existing legacy configuration contract: an empty
 `storage_provider` means the explicit `storage_backend` and its native path/S3
 fields identify the configured storage. It is not an unknown catalog provider.
+
+The authenticated first-run guide uses `features/setup/guide.ts`: cancellable
+first-five Model and directory-discovery queries, plus entry/session-scoped storage
+preparation. `SetupStorageChoice` reuses the canonical provider/configuration queries
+and owns only its draft. Changing language or refetching metadata cannot overwrite
+a dirty draft; retired preparation cannot advance the guide. Secret-bearing setup
+commands remain outside MutationCache.
+
+Before any Library cursor is accepted, one `browse_refresh_required` response can
+retry the initial page once. A second conflict exposes explicit refresh recovery.
+Continuation conflicts never retry automatically or replace an accepted snapshot.

@@ -88,6 +88,6 @@ export function scanExternalLibraryPath(id: number, path: string): Promise<JobAc
   return sendJson<JobAccepted>(`/api/v1/libraries/${id}/scan-path`, "POST", { path });
 }
 
-export function discoverLibraryLocations(): Promise<string[]> {
-  return getJson<string[]>("/api/v1/libraries/locations", {});
+export function discoverLibraryLocations(options?: GetJsonOptions): Promise<string[]> {
+  return getJson<string[]>("/api/v1/libraries/locations", options);
 }

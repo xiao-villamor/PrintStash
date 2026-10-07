@@ -86,12 +86,15 @@ export async function listModels(
   return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`, options);
 }
 
-export async function listModelPage(params?: ListModelPageParams): Promise<ModelPageRead> {
+export async function listModelPage(
+  params?: ListModelPageParams,
+  options?: GetJsonOptions,
+): Promise<ModelPageRead> {
   const search = modelListSearch(params);
   if (params?.sort) search.set("sort", params.sort);
   if (params?.cursor) search.set("cursor", params.cursor);
   const query = search.toString();
-  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, {});
+  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, options);
 }
 
 export async function listOutlinerModels(
