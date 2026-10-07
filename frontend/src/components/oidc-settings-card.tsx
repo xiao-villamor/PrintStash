@@ -16,6 +16,8 @@ import { useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { useAuth } from "@/lib/auth-context";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { parseApiError } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
@@ -92,16 +94,38 @@ export function OidcSettingsCard() {
         )}
         {query.isPending && <p role="status">{uiText("Loading…")}</p>}
         {query.data && !denied && user?.is_superuser && (
-          <OidcEditor config={query.data} unavailable={query.isError} />
+          <OidcEditor
+            config={query.data}
+            unavailable={query.isError}
+            reload={async () => {
+              const result = await query.refetch({ throwOnError: true });
+              if (!result.data) throw new Error("Configuration review has no data");
+              return result.data;
+            }}
+          />
         )}
       </>
     </Localized>
   );
 }
-function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavailable: boolean }) {
+type ConfigReview =
+  | { phase: "idle" }
+  | { phase: "required" | "loading"; problem: "conflict" | "unconfirmed" }
+  | { phase: "ready"; problem: "conflict" | "unconfirmed"; snapshot: VaultConfigRead };
+function OidcEditor({
+  config,
+  unavailable,
+  reload,
+}: {
+  config: VaultConfigRead;
+  unavailable: boolean;
+  reload: () => Promise<VaultConfigRead>;
+}) {
   useUiLocale();
   const [chosenDraft, setDraft] = useState(() => oidcDraft(config));
   const [edited, setEdited] = useState(false);
+  const [base, setBase] = useState(() => captureEditingBase(config));
+  const [review, setReview] = useState<ConfigReview>({ phase: "idle" });
   const draft = edited ? chosenDraft : oidcDraft(config);
   const [clientSecret, setClientSecret] = useState("");
   const [clearClientSecret, setClearClientSecret] = useState(false);
@@ -127,36 +151,67 @@ function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavaila
   const hasClientSecret = config.has_oidc_client_secret;
   function set<K extends keyof OidcDraft>(key: K, value: OidcDraft[K]) {
     generation.current += 1;
+    if (!edited) setBase(captureEditingBase(config));
     setDraft((current) => ({ ...(edited ? current : oidcDraft(config)), [key]: value }));
     setEdited(true);
   }
 
-  async function save() {
+  async function save(reviewedBase?: EditingBase) {
     if (draft.oidc_enabled && (!draft.oidc_issuer_url.trim() || !draft.oidc_client_id.trim())) {
       toast.error(uiText("Issuer URL and client ID are required before enabling SSO."));
       return;
     }
-    if (loading || retired || saving) return;
+    if (loading || retired || saving || (review.phase !== "idle" && !reviewedBase)) return;
     const session = getSessionVersion();
     const captured = generation.current;
     try {
       const payload: OidcConfigUpdate = { ...draft };
       if (clientSecret) payload.oidc_client_secret = clientSecret;
       else if (clearClientSecret) payload.oidc_client_secret = "";
-      const acknowledged = await command.mutateAsync({ session, payload });
+      const acknowledged = await command.mutateAsync({
+        session,
+        payload,
+        base: reviewedBase ?? (edited ? base : captureEditingBase(config)),
+      });
       if (!live.current || session !== getSessionVersion()) return;
       if (captured === generation.current) {
         setDraft(oidcDraft(acknowledged));
         setEdited(false);
+        setBase(captureEditingBase(acknowledged));
+        setReview({ phase: "idle" });
         setClientSecret("");
         setClearClientSecret(false);
       }
       toast.success(uiText("Single sign-on settings saved."));
     } catch (error) {
-      if (live.current && session === getSessionVersion()) toast.error(error);
+      if (live.current && session === getSessionVersion()) {
+        const status = parseApiError(error).status;
+        if (status === 412 || status === 428 || status === 0 || status >= 500)
+          setReview({
+            phase: "required",
+            problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+          });
+        toast.error(error);
+      }
     }
   }
 
+  async function reviewLatest() {
+    if (review.phase === "idle" || review.phase === "loading" || saving) return;
+    const session = getSessionVersion();
+    const problem = review.problem;
+    setReview({ phase: "loading", problem });
+    try {
+      const snapshot = await reload();
+      if (live.current && session === getSessionVersion())
+        setReview({ phase: "ready", problem, snapshot });
+    } catch (error) {
+      if (live.current && session === getSessionVersion()) {
+        setReview({ phase: "required", problem });
+        toast.error(error);
+      }
+    }
+  }
   if (retired) return null;
   return (
     <Localized>
@@ -180,6 +235,85 @@ function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavaila
           </div>
         </CardHeader>
         <CardContent className="space-y-5 p-4 sm:p-5">
+          {review.phase !== "idle" && (
+            <div role="alert" className="space-y-3">
+              <p>
+                {uiText(
+                  review.problem === "conflict"
+                    ? "library.editConflict"
+                    : "library.saveUnconfirmed",
+                )}
+              </p>
+              <Button
+                variant="outline"
+                disabled={saving || review.phase === "loading"}
+                onClick={() => void reviewLatest()}
+              >
+                {uiText("library.reviewLatest")}
+              </Button>
+              {review.phase === "ready" && (
+                <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                  <h3 className="text-sm font-semibold">{uiText("library.latestVersion")}</h3>
+                  <dl className="grid gap-2 text-sm">
+                    {[
+                      [
+                        uiText("Enable SSO login"),
+                        review.snapshot.oidc_enabled ? uiText("Enabled") : uiText("Disabled"),
+                      ],
+                      [uiText("Issuer URL"), review.snapshot.oidc_issuer_url],
+                      [uiText("Client ID"), review.snapshot.oidc_client_id],
+                      [
+                        uiText("Client secret"),
+                        review.snapshot.has_oidc_client_secret
+                          ? uiText("Configured — enter to replace")
+                          : uiText("Optional for public clients"),
+                      ],
+                      [uiText("Login button label"), review.snapshot.oidc_display_name],
+                      [uiText("Scopes"), review.snapshot.oidc_scopes],
+                      [uiText("Username claim"), review.snapshot.oidc_username_claim],
+                      [uiText("Groups claim"), review.snapshot.oidc_groups_claim],
+                      [uiText("Admin groups"), review.snapshot.oidc_admin_groups],
+                      [uiText("Public callback URL override"), review.snapshot.oidc_redirect_uri],
+                      [
+                        uiText("Allow insecure HTTP issuer"),
+                        review.snapshot.oidc_allow_insecure_http
+                          ? uiText("Enabled")
+                          : uiText("Disabled"),
+                      ],
+                    ].map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="text-muted-foreground">{label}</dt>
+                        <dd>{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={saving || loading}
+                      onClick={() => {
+                        setDraft(oidcDraft(review.snapshot));
+                        setBase(captureEditingBase(review.snapshot));
+                        setEdited(false);
+                        setClientSecret("");
+                        setClearClientSecret(false);
+                        setReview({ phase: "idle" });
+                        generation.current += 1;
+                      }}
+                    >
+                      {uiText("library.useLatest")}
+                    </Button>
+                    <Button
+                      disabled={saving || loading}
+                      onClick={() => void save(captureEditingBase(review.snapshot))}
+                    >
+                      {uiText("library.retryDraft")}
+                    </Button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
           <label className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
             <span>
               <span className="block text-sm font-medium text-foreground">
@@ -218,7 +352,10 @@ function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavaila
               value={clientSecret}
               onChange={(event) => {
                 generation.current += 1;
-                if (!edited) setDraft(oidcDraft(config));
+                if (!edited) {
+                  setDraft(oidcDraft(config));
+                  setBase(captureEditingBase(config));
+                }
                 setEdited(true);
                 setClientSecret(event.target.value);
                 setClearClientSecret(false);
@@ -245,7 +382,10 @@ function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavaila
                 checked={clearClientSecret}
                 onChange={(value) => {
                   generation.current += 1;
-                  if (!edited) setDraft(oidcDraft(config));
+                  if (!edited) {
+                    setDraft(oidcDraft(config));
+                    setBase(captureEditingBase(config));
+                  }
                   setEdited(true);
                   setClearClientSecret(value);
                 }}
@@ -306,7 +446,12 @@ function OidcEditor({ config, unavailable }: { config: VaultConfigRead; unavaila
           </details>
 
           <div className="flex justify-end border-t border-border pt-4">
-            <Button type="button" onClick={save} loading={saving} disabled={loading || retired}>
+            <Button
+              type="button"
+              onClick={() => void save()}
+              loading={saving}
+              disabled={loading || retired || review.phase !== "idle"}
+            >
               <KeyRound className="h-4 w-4" />
               {uiText("Save SSO settings")}
             </Button>

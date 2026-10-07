@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Protect SSO configuration drafts from competing edits. Keep local input after a
+  conflict or unconfirmed save, show the latest authorized values on review, and
+  require an explicit revised save. Late receipts cannot replace newer observed
+  configuration; client secrets stay outside shared caches.
+
 - Persist vault configuration edit versions separately from operational bookkeeping,
   including changes made by legacy writers, and add the atomic editing-claim
   operation with current administrator/session checks. Configuration GET returns

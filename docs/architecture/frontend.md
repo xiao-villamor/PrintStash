@@ -44,6 +44,19 @@ loss of eligibility blocks submission until recovery or explicit selection.
 Accepted scans belong to TaskCenter even after their originating form closes.
 These increments do not yet complete the broader administration migration.
 
+### Conditional configuration forms (M9 incremental cutover)
+
+`settings-config.ts` carries the form's captured editing base through cancellation
+and validates the receipt before publishing it. A late acknowledgement cannot
+replace a newer observed configuration. Secret-bearing payloads stay outside
+MutationCache. OIDC captures its base at the first local edit; background reads
+cannot silently change that base. Conflicts and uncertain receipts preserve the
+draft and require an explicit fresh review before revised save or adoption.
+Review state retires with the session; only sanitized server values are displayed.
+Other configuration forms still use the additive legacy path. The optional client
+base must become required when their M9 cutover is complete; this is not yet
+application-wide conflict protection.
+
 ### Implemented backup seam (M9 increment)
 
 `settings-backup-catalog.ts` owns independent exact-source and optional discovery

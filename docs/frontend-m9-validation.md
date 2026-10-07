@@ -597,3 +597,63 @@ and lint, and `git diff --check` passed.
 These results qualify this API increment, not M9 acceptance or final delivery.
 Frontend conditional headers, draft-base ownership and explicit conflict recovery
 remain pending. No full suite or browser suite was repeated for this increment.
+
+
+## Conditional configuration client transport (M9 increment)
+
+The configuration transport accepts an explicit draft base during the additive
+rollout. The existing secret-safe command owner forwards that base, validates
+injected receipts, and refuses to replace a newer configuration projection with a
+late acknowledgement. Unmigrated forms remain explicitly unprotected until the
+M9 cutover; an optional base is temporary compatibility, not a completed rollout.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| CF1 | sends the reviewed configuration base | Happy | Conditional update with captured epoch/version | Exact If-Match and opt-in headers; accepted receipt | Unit | ✅ |
+| CF2 | rejects an invalid configuration base before dispatch | Error | Malformed epoch, nonpositive or unsafe version | No request; invalid-base error | Unit | ✅ |
+| CF3 | rejects an invalid conditional configuration receipt | Error | Same/older version, changed history, malformed base | No false accepted result | Unit | ✅ |
+| CF4 | forwards a captured configuration base to an injected writer | Happy | Secret-bearing command with base | Writer receives captured base and signal; no MutationCache secrets | Unit | ✅ |
+| CF5 | retains a newer observed configuration after a late receipt | Race | Cache reaches version 3 before version 2 ACK | Visible/cache version 3 retained | Unit | ✅ |
+| CF6 | rejects a nonadvancing injected configuration receipt | Error | Injected writer returns original version | Error state; original cache preserved | Unit | ✅ |
+| CF7 | propagates a conflict without retrying the write | Error | Server returns 412 | Error state; exactly one PUT; original projection preserved | Unit | ✅ |
+
+
+## OIDC conditional form cutover (M9 increment)
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| OC1 | keeps the first-edit base across a background refresh | Race | Draft starts at v1; read publishes v2 | Save still sends v1 | Unit | ✅ |
+| OC2 | requires explicit review after a configuration conflict | Error | v1 PUT rejected; latest v2 authorized | Draft/secret retained; no blind retry; reviewed v2 save explicit | Unit | ✅ |
+| OC3 | requires explicit review after a configuration conflict (503/network cases) | Error | PUT returns 503 or fetch rejects | No success claim; fresh read before explicit action | Unit | ✅ |
+| OC4 | keeps saving blocked when latest configuration cannot be read | Error | Conflict followed by failed review read | Draft retained; no second PUT | Unit | ✅ |
+| OC5 | discards the local secret only when adopting the reviewed version | Happy | User explicitly adopts fresh values | Secret cleared; reviewed values shown; no PUT | Unit | ✅ |
+| OC6 | requires another review after a second conflict | Race | Revised save rejected again | Old review removed; no blind third write | Unit | ✅ |
+| OC7 | retires a pending conflict review on session change | Auth | Logout while review GET pending | No retired values/secret shown; no new write | Unit | ✅ |
+| OC8 | detects a competing SSO edit in two browser tabs | Integration | Both drafts share base; second tab saves first | First receives 412; keeps draft; explicit review/save persists it | Real browser | ✅ |
+
+Validation and limits:
+
+- Client regressions initially **12 failed / 28 passed in 3.66 s**; transport and
+  shared owner then passed **40 tests in 2.58 s**.
+- Initial OIDC regression selection: **4 failed in 6.70 s**. After the change,
+  **24 passed / 1 failed in 8.31 s** because an existing fake acknowledgement did
+  not advance its version. The fake now mirrors the actual write contract.
+- Final transport, shared owner and OIDC component selection: **69 passed across
+  3 files in 6.62 s**, including network loss, repeat conflict, adoption and session
+  retirement. This is behavioral evidence, not a performance benchmark.
+- Actual backend/browser: **2 passed in 58.8 s** (two-tab conflicting edits and
+  the existing SSO persistence/secret/login flow), using isolated ports/data.
+- Frontend typecheck (app and workspace packages), lint, format (768 files) and
+  production build passed. Initial lint rejected two conditional empty-object
+  spreads; corrected to explicit optional properties. Build retains its existing
+  >500 kB chunk warning. No bundle-performance improvement is claimed.
+- All other configuration forms still need first-edit base ownership and explicit
+  conflict recovery. The shared client's temporary optional base must be removed
+  at that cutover. Mock-API configuration fixtures still need a complete contract
+  audit; real-browser qualification above does not validate those fixtures.
+- M9 remains active; M10/M11 and final delivery gates have not been advanced.
+
+After preserving omission of the compatibility base in injected-writer options,
+the final owner selection passed **11 tests in 2.70 s**, and typecheck passed again.
+Remaining configuration writers include Settings (including the direct trash
+retention write), StorageConfigCard, ExternalLibrariesPanel and SetupFolder.

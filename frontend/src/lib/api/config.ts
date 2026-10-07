@@ -1,3 +1,5 @@
+import { requireEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { getJson, sendJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import {
   SetupRequest,
@@ -100,14 +102,24 @@ export function getLatestRelease(refresh = false): Promise<ReleaseStatus> {
   return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, { fresh: true });
 }
 
-export function updateVaultConfig(
+export async function updateVaultConfig(
   body: VaultConfigUpdate,
-  options: Pick<GetJsonOptions, "signal"> = {},
+  options: Pick<GetJsonOptions, "signal"> & { base?: EditingBase } = {},
 ): Promise<VaultConfigRead> {
-  return requestApi<VaultConfigRead>("/api/v1/config", {
+  // Optional only during the M9 first-party form cutover.
+  const base = options.base;
+  if (base) requireEditingBase(base);
+  const headers = jsonHeaders();
+  if (base) {
+    headers["If-Match"] = `"vault-config-e${base.edit_epoch}-v${base.edit_version}"`;
+    headers["X-PrintStash-Edit-Contract"] = "conditional-v1";
+  }
+  const row = await requestApi<VaultConfigRead>("/api/v1/config", {
     method: "PUT",
-    headers: jsonHeaders(),
+    headers,
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  if (base) requireEditingReceipt(row, base);
+  return row;
 }

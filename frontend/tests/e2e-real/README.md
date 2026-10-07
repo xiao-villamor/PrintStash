@@ -163,3 +163,7 @@ persisted only after reviewing the current source version and explicitly retryin
 `library-navigation.spec.ts` returns from real Model detail to a paginated Library,
 checking entry identity and scroll geometry in desktop grid and mobile list layouts,
 including browser Forward/Back. It seeds and cleans up a unique scale fixture.
+
+- `sso-settings.spec.ts`: conditional edits across two tabs preserve the losing
+  draft and require explicit review before saving against the latest version;
+  SSO configuration still persists without returning client secrets.

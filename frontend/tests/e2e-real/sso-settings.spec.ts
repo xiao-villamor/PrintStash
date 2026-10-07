@@ -15,6 +15,48 @@ import { test, expect } from "./helpers";
 // the login page grows an SSO button labeled with the configured display name.
 
 test.describe("SSO settings", () => {
+  test("detects a competing SSO edit in two browser tabs", async ({ page }) => {
+    const other = await page.context().newPage();
+    const mine = `my-sso-${Date.now()}`;
+    const theirs = `other-sso-${Date.now()}`;
+    try {
+      await page.goto("/settings?section=sso");
+      await page.getByLabel("Login button label").fill(mine);
+      await other.goto("/settings?section=sso");
+      await other.getByLabel("Login button label").fill(theirs);
+      const [accepted] = await Promise.all([
+        other.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        other.getByRole("button", { name: "Save SSO settings" }).click(),
+      ]);
+      expect(accepted.status()).toBe(200);
+      const [conflict] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        page.getByRole("button", { name: "Save SSO settings" }).click(),
+      ]);
+      expect(conflict.status()).toBe(412);
+      await expect(page.getByLabel("Login button label")).toHaveValue(mine);
+      await expect(page.getByRole("button", { name: "Save SSO settings" })).toBeDisabled();
+      await page.getByRole("button", { name: "Review latest version" }).click();
+      await expect(
+        page.getByRole("region", { name: "Latest saved version" }).getByText(theirs),
+      ).toBeVisible();
+      const [revised] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        page.getByRole("button", { name: "Save my draft against this version" }).click(),
+      ]);
+      expect(revised.status()).toBe(200);
+      await page.reload();
+      await expect(page.getByLabel("Login button label")).toHaveValue(mine);
+    } finally {
+      await other.close();
+    }
+  });
   test("configure OIDC in Settings, secret never round-trips, login page shows the SSO button", async ({
     page,
     browser,

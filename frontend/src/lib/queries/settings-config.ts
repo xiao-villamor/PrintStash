@@ -6,6 +6,8 @@ import { queryKeys } from "@/lib/query-client";
 import { parseApiError } from "@/lib/errors";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { captureEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
 export function vaultConfigOptions(reader: typeof getVaultConfig = getVaultConfig) {
@@ -17,6 +19,8 @@ export function vaultConfigOptions(reader: typeof getVaultConfig = getVaultConfi
 export interface ConfigCommand {
   session: number;
   payload: VaultConfigUpdate;
+  /** Temporary optionality until all M9 forms own their draft base. */
+  base?: EditingBase;
 }
 type ConfigCommandState =
   | { status: "idle" | "pending" | "success" }
@@ -45,6 +49,7 @@ export function useVaultConfigCommand(writer: typeof updateVaultConfig = updateV
     if (!live.current) throw new DOMException("Configuration view was disposed", "AbortError");
     if (active.current) throw new Error("A configuration command is already pending");
     requireSessionVersion(command.session);
+    const base = command.base ? captureEditingBase(command.base) : undefined;
     const controller = new AbortController();
     active.current = controller;
     setState({ status: "pending" });
@@ -52,7 +57,10 @@ export function useVaultConfigCommand(writer: typeof updateVaultConfig = updateV
       await client.cancelQueries({ queryKey: queryKeys.vaultConfig, exact: true });
       requireSessionVersion(command.session);
       controller.signal.throwIfAborted();
-      const row = await writer(command.payload, { signal: controller.signal });
+      const options: Parameters<typeof writer>[1] = { signal: controller.signal };
+      if (base) options.base = base;
+      const row = await writer(command.payload, options);
+      if (base) requireEditingReceipt(row, base);
       requireSessionVersion(command.session);
       controller.signal.throwIfAborted();
       await client.cancelQueries({ queryKey: queryKeys.vaultConfig, exact: true });
@@ -60,7 +68,13 @@ export function useVaultConfigCommand(writer: typeof updateVaultConfig = updateV
       controller.signal.throwIfAborted();
       client.setQueryData<VaultConfigRead>(queryKeys.vaultConfig, (previous) => {
         requireSessionVersion(command.session);
-        return previous ? row : previous;
+        if (!previous) return previous;
+        if (
+          base &&
+          (previous.edit_epoch !== row.edit_epoch || previous.edit_version > row.edit_version)
+        )
+          return previous;
+        return row;
       });
       if (live.current && active.current === controller && command.session === getSessionVersion())
         setState({ status: "success" });

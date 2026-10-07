@@ -84,6 +84,37 @@ describe("getVaultConfig", () => {
 });
 
 describe("updateVaultConfig", () => {
+  it("sends the reviewed configuration base", async () => {
+    const base = aVaultConfig({ edit_version: 4 });
+    const saved = aVaultConfig({ edit_version: 5, currency: "EUR" });
+    fetchMock.mockResolvedValueOnce(json(saved));
+    expect(await updateVaultConfig({ currency: "EUR" }, { base })).toEqual(saved);
+    const headers = new Headers(lastCall().init?.headers);
+    expect(headers.get("If-Match")).toBe(`"vault-config-e${base.edit_epoch}-v4"`);
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+  });
+  it.each([
+    { edit_epoch: "invalid" },
+    { edit_version: 0 },
+    { edit_version: -1 },
+    { edit_version: Number.MAX_SAFE_INTEGER + 1 },
+  ])("rejects an invalid configuration base before dispatch: %j", async (over) => {
+    await expect(
+      updateVaultConfig({ currency: "EUR" }, { base: aVaultConfig(over) }),
+    ).rejects.toThrow("Invalid editing base");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([
+    { edit_version: 4 },
+    { edit_version: 3 },
+    { edit_epoch: "b".repeat(32) },
+    { edit_epoch: "invalid" },
+  ])("rejects an invalid conditional configuration receipt: %j", async (over) => {
+    fetchMock.mockResolvedValueOnce(json(aVaultConfig({ edit_version: 5, ...over })));
+    await expect(
+      updateVaultConfig({ currency: "EUR" }, { base: aVaultConfig({ edit_version: 4 }) }),
+    ).rejects.toThrow(/Invalid editing (acknowledgement|base)/);
+  });
   it("PUTs a change", async () => {
     const acknowledged = aVaultConfig({ storage_backend: "s3" });
     fetchMock.mockResolvedValueOnce(json(acknowledged));

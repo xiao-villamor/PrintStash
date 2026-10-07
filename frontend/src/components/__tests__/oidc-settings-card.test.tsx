@@ -19,7 +19,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,7 +51,7 @@ function renderCard(over: Partial<OidcConfig> = {}) {
   const config = aConfig(over);
   const saveConfig = vi
     .fn<(payload: VaultConfigUpdate) => Promise<VaultConfigRead>>()
-    .mockResolvedValue(config);
+    .mockResolvedValue({ ...config, edit_version: config.edit_version + 1 });
   const result = renderApp(<OidcSettingsCard />, {
     routes: {
       "GET /api/v1/config": json(config),
@@ -71,6 +71,156 @@ afterEach(() => {
 });
 
 describe("OidcSettingsCard", () => {
+  it("keeps the first-edit base across a background refresh", async () => {
+    const base = aVaultConfig({ edit_version: 1 });
+    const headers: Headers[] = [];
+    const app = renderApp(<OidcSettingsCard />, {
+      routes: {
+        "GET /api/v1/config": json(base),
+        "PUT /api/v1/config": (_url, init) => {
+          headers.push(new Headers(init?.headers));
+          return json(aVaultConfig({ edit_version: 3 }));
+        },
+      },
+    });
+    await screen.findByRole("button", { name: "Save SSO settings" });
+    await userEvent.type(screen.getByLabelText("Login button label"), " draft");
+    await act(async () => {
+      app.client.setQueryData(
+        ["vault-config"],
+        aVaultConfig({ edit_version: 2, oidc_display_name: "Another editor" }),
+      );
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+    await waitFor(() => expect(headers).toHaveLength(1));
+    expect(headers[0].get("If-Match")).toBe(`"vault-config-e${base.edit_epoch}-v1"`);
+  });
+  it.each([412, 503, 0])(
+    "%s: requires explicit review after a configuration conflict",
+    async (status) => {
+      let reads = 0;
+      const writes: Headers[] = [];
+      const base = aVaultConfig({ oidc_display_name: "Original" });
+      const app = renderApp(<OidcSettingsCard />, {
+        routes: {
+          "GET /api/v1/config": () =>
+            json(
+              ++reads === 1 ? base : aVaultConfig({ edit_version: 2, oidc_display_name: "Remote" }),
+            ),
+          "PUT /api/v1/config": (_url, init) => {
+            writes.push(new Headers(init?.headers));
+            if (writes.length === 1 && status === 0) throw new TypeError("Failed to fetch");
+            return writes.length === 1
+              ? json({ detail: "edit_conflict" }, status)
+              : json(aVaultConfig({ edit_version: 3, oidc_display_name: "Mine" }));
+          },
+        },
+      });
+      const label = await screen.findByLabelText("Login button label");
+      await userEvent.clear(label);
+      await userEvent.type(label, "Mine");
+      await userEvent.type(screen.getByLabelText("Client secret"), "FakePrivateDraft");
+      await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+      const review = await screen.findByRole("button", { name: "Review latest version" });
+      expect(label).toHaveValue("Mine");
+      expect(screen.getByLabelText("Client secret")).toHaveValue("FakePrivateDraft");
+      expect(screen.getByRole("button", { name: "Save SSO settings" })).toBeDisabled();
+      expect(writes).toHaveLength(1);
+      await userEvent.click(review);
+      const latest = await screen.findByRole("region", { name: "Latest saved version" });
+      expect(within(latest).getByText("Remote")).toBeVisible();
+      expect(label).toHaveValue("Mine");
+      expect(writes).toHaveLength(1);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Save my draft against this version" }),
+      );
+      await waitFor(() => expect(writes).toHaveLength(2));
+      expect(writes[1].get("If-Match")).toBe(`"vault-config-e${base.edit_epoch}-v2"`);
+      expect(app.client.getMutationCache().getAll()).toHaveLength(0);
+    },
+  );
+  it("keeps saving blocked when latest configuration cannot be read", async () => {
+    let reads = 0;
+    const app = renderApp(<OidcSettingsCard />, {
+      routes: {
+        "GET /api/v1/config": () =>
+          ++reads === 1 ? json(aVaultConfig()) : json({ detail: "unavailable" }, 503),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText("Login button label"), " draft");
+    await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await waitFor(() => expect(reads).toBe(2));
+    expect(
+      screen.queryByRole("button", { name: "Save my draft against this version" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save SSO settings" })).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("discards the local secret only when adopting the reviewed version", async () => {
+    let reads = 0;
+    const app = renderApp(<OidcSettingsCard />, {
+      routes: {
+        "GET /api/v1/config": () =>
+          json(
+            ++reads === 1
+              ? aVaultConfig()
+              : aVaultConfig({ edit_version: 2, oidc_display_name: "Reviewed" }),
+          ),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText("Client secret"), "FakeDraftSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+    expect(screen.getByLabelText("Client secret")).toHaveValue("");
+    expect(screen.getByLabelText("Login button label")).toHaveValue("Reviewed");
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("requires another review after a second conflict", async () => {
+    let reads = 0;
+    const app = renderApp(<OidcSettingsCard />, {
+      routes: {
+        "GET /api/v1/config": () => json(aVaultConfig({ edit_version: ++reads })),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText("Login button label"), " draft");
+    await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Save SSO settings" })).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(2);
+  });
+  it("retires a pending conflict review on session change", async () => {
+    let reads = 0;
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(<OidcSettingsCard />, {
+      routes: {
+        "GET /api/v1/config": () => (++reads === 1 ? json(aVaultConfig()) : pending.promise),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText("Client secret"), "FakeDraftSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save SSO settings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await act(async () => {
+      clearLogin();
+      pending.resolve(json(aVaultConfig({ edit_version: 2, oidc_display_name: "RetiredReview" })));
+    });
+    expect(screen.queryByLabelText("Client secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("RetiredReview")).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
   describe("what it shows", () => {
     it("fills the form from the saved configuration", async () => {
       renderCard({ oidc_issuer_url: "https://auth.test/o/printstash" });
@@ -328,7 +478,7 @@ describe("OIDC acknowledgement intent", () => {
   it("uses the acknowledged saved fields without another configuration read", async () => {
     const app = renderCard({ oidc_issuer_url: "https://base.example.test" });
     app.saveConfig.mockResolvedValue(
-      aConfig({ oidc_issuer_url: "https://normalized.example.test" }),
+      aVaultConfig({ edit_version: 2, oidc_issuer_url: "https://normalized.example.test" }),
     );
     const issuer = await screen.findByLabelText("Issuer URL");
     await userEvent.clear(issuer);

@@ -8,8 +8,9 @@ import { getSessionVersion } from "@/lib/session-transport";
 import { clearLogin } from "@/lib/auth-store";
 import { aVaultConfig } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
+import type { EditingBase } from "@/types/editing";
 import { updateVaultConfig } from "@/lib/api/config";
-function Editor({ writer }: { writer?: typeof updateVaultConfig } = {}) {
+function Editor({ writer, base }: { writer?: typeof updateVaultConfig; base?: EditingBase } = {}) {
   const query = useQuery({ ...vaultConfigOptions(), retry: false });
   const command = useVaultConfigCommand(writer);
   return (
@@ -22,6 +23,7 @@ function Editor({ writer }: { writer?: typeof updateVaultConfig } = {}) {
           void command
             .mutateAsync({
               session: getSessionVersion(),
+              base,
               payload: { oidc_client_secret: "FakePrivateSecret", oidc_display_name: "Gesture" },
             })
             .catch(() => {})
@@ -34,6 +36,73 @@ function Editor({ writer }: { writer?: typeof updateVaultConfig } = {}) {
 }
 afterEach(() => vi.restoreAllMocks());
 describe("Vault configuration owner", () => {
+  it("forwards a captured configuration base to an injected writer", async () => {
+    const base = { edit_epoch: "a".repeat(32), edit_version: 4 };
+    const writer = vi
+      .fn<typeof updateVaultConfig>()
+      .mockResolvedValue(aVaultConfig({ ...base, edit_version: 5, oidc_display_name: "Accepted" }));
+    const app = renderApp(<Editor writer={writer} base={base} />, {
+      routes: { "GET /api/v1/config": json(aVaultConfig({ ...base, oidc_display_name: "Base" })) },
+    });
+    await screen.findByText("Base");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Accepted")).toBeVisible();
+    expect(writer).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ base, signal: expect.any(AbortSignal) }),
+    );
+    expect(app.client.getMutationCache().getAll()).toHaveLength(0);
+  });
+  it("retains a newer observed configuration after a late receipt", async () => {
+    const base = aVaultConfig({ edit_version: 1, oidc_display_name: "Base" });
+    const pending = Promise.withResolvers<ReturnType<typeof aVaultConfig>>();
+    const writer = vi.fn<typeof updateVaultConfig>().mockReturnValue(pending.promise);
+    const app = renderApp(<Editor writer={writer} base={base} />, {
+      routes: { "GET /api/v1/config": json(base) },
+    });
+    await screen.findByText("Base");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Pending");
+    await act(async () => {
+      app.client.setQueryData(
+        ["vault-config"],
+        aVaultConfig({ edit_version: 3, oidc_display_name: "Newer" }),
+      );
+    });
+    await act(async () => {
+      pending.resolve(aVaultConfig({ edit_version: 2, oidc_display_name: "Older" }));
+    });
+    expect(await screen.findByText("Ready")).toBeVisible();
+    expect(screen.getByText("Newer")).toBeVisible();
+    expect(app.client.getQueryData(["vault-config"])).toMatchObject({ edit_version: 3 });
+  });
+  it("rejects a nonadvancing injected configuration receipt", async () => {
+    const base = aVaultConfig({ oidc_display_name: "Base" });
+    const writer = vi
+      .fn<typeof updateVaultConfig>()
+      .mockResolvedValue(aVaultConfig({ oidc_display_name: "Unconfirmed" }));
+    const app = renderApp(<Editor writer={writer} base={base} />, {
+      routes: { "GET /api/v1/config": json(base) },
+    });
+    await screen.findByText("Base");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Failed")).toBeVisible();
+    expect(app.client.getQueryData(["vault-config"])).toEqual(base);
+  });
+  it("propagates a conflict without retrying the write", async () => {
+    const base = aVaultConfig({ oidc_display_name: "Base" });
+    const app = renderApp(<Editor base={base} />, {
+      routes: {
+        "GET /api/v1/config": json(base),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await screen.findByText("Base");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Failed")).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    expect(app.client.getQueryData(["vault-config"])).toEqual(base);
+  });
   it("publishes the injected concrete writer full DTO", async () => {
     const writer = vi
       .fn<typeof updateVaultConfig>()
