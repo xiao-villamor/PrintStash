@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep manual printer-material drafts after rejected saves and offer explicit review
+  before adoption; cancel obsolete reads when switching printers.
+
 - Preserve first-run storage drafts across locale changes, retire setup requests
   on navigation, and recover one initial Library read conflict without mixing snapshots.
 

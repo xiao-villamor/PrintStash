@@ -51,6 +51,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
   "src/features/setup/guide.ts",
   "src/features/work/queries.ts",
   "src/features/printers/queries.ts",
+  "src/features/printers/materials.ts",
   "src/features/printers/settings-edit.ts",
   "src/features/printers/settings-review.tsx",
   ...[

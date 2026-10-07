@@ -1,4 +1,5 @@
 {
+  "materials.loadFailed": "No se pudieron cargar los materiales de la impresora. Reintenta para recuperarlos.",
   "tags.reviewError": "No se han podido cargar las etiquetas actuales. Vuelve a intentarlo.",
   "savedView.loading": "Cargando vistas guardadas…",
   "savedView.loadError": "No se pudieron cargar las vistas guardadas",

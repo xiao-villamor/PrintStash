@@ -635,3 +635,11 @@ commands remain outside MutationCache.
 Before any Library cursor is accepted, one `browse_refresh_required` response can
 retry the initial page once. A second conflict exposes explicit refresh recovery.
 Continuation conflicts never retry automatically or replace an accepted snapshot.
+
+Manual printer materials use `features/printers/materials.ts` as their cancellable
+read/command owner. Provider observations can refresh while manual inputs retain
+their original timestamp base. Printer changes retire that editor; command feedback
+is entry/session scoped. A rejected or uncertain save preserves the draft and
+blocks resubmission until explicit current-state review/adoption. This preserves
+the existing material observation timestamp API, separate from printer-settings
+conditional versions.

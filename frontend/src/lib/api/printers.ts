@@ -76,19 +76,24 @@ export async function updatePrinter(
   return saved;
 }
 
-export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {
-  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, {});
+export function getPrinterMaterialState(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<PrinterMaterialStateRead> {
+  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, options);
 }
 
 export function updatePrinterManualMaterialState(
   id: number,
   payload: ManualMaterialStateUpdate,
+  options: GetJsonOptions = {},
 ): Promise<PrinterMaterialStateRead> {
-  return sendJson<PrinterMaterialStateRead>(
-    `/api/v1/printers/${id}/material-state/manual`,
-    "PUT",
-    payload,
-  );
+  return requestApi<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state/manual`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
 }
 
 export function deletePrinter(id: number): Promise<void> {

@@ -5,9 +5,10 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { getPrinterMaterialState, updatePrinterManualMaterialState } from "@/lib/api";
+import { usePrinterMaterials } from "@/features/printers/materials";
+import { parseApiError } from "@/lib/errors";
 import { useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import type { MaterialSlotRead, PrinterMaterialStateRead, PrinterRead } from "@/types";
@@ -45,7 +46,15 @@ function sourceLabel(slot: MaterialSlotRead): string {
 }
 
 export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
+  return <MaterialEditor key={printer.id} printer={printer} />;
+}
+function MaterialEditor({ printer }: { printer: PrinterRead }) {
   useUiLocale();
+  const owner = usePrinterMaterials(printer.id);
+  const [review, setReview] = useState<
+    | { phase: "idle" | "required" | "loading" }
+    | { phase: "ready"; snapshot: PrinterMaterialStateRead }
+  >({ phase: "idle" });
   const [state, setState] = useState<PrinterMaterialStateRead | null>(null);
   const [nozzle, setNozzle] = useState("");
   const [slots, setSlots] = useState<DraftSlot[]>([]);
@@ -53,8 +62,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
   const spoolmanEnabled = useSpoolmanStatus().data?.enabled ?? false;
   const spools = useSpools({ enabled: spoolmanEnabled }).data ?? [];
 
-  async function load() {
-    const next = await getPrinterMaterialState(printer.id);
+  function adopt(next: PrinterMaterialStateRead) {
     setState(next);
     const tool0 = next.tools.find((tool) => tool.tool_key === "tool0");
     setNozzle(tool0?.nozzle_diameter_mm?.toString() ?? "");
@@ -73,11 +81,19 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
     );
   }
 
-  useEffect(() => {
-    void load().catch(toast.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printer.id]);
-
+  if (!state && owner.query.data) adopt(owner.query.data);
+  async function reviewCurrent() {
+    setReview({ phase: "loading" });
+    const result = await owner.query.refetch();
+    if (!owner.current()) return;
+    setReview(
+      result.isError || !result.data
+        ? { phase: "required" }
+        : { phase: "ready", snapshot: result.data },
+    );
+  }
+  const readFailed = owner.query.isError;
+  const disabled = busy || readFailed || review.phase !== "idle" || !printer.access.can_print;
   function patchSlot(index: number, patch: Partial<DraftSlot>) {
     setSlots((current) =>
       current.map((slot, slotIndex) => (slotIndex === index ? { ...slot, ...patch } : slot)),
@@ -104,10 +120,10 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
   }
 
   async function save() {
-    if (!state) return;
+    if (!state || disabled) return;
     setBusy(true);
     try {
-      const result = await updatePrinterManualMaterialState(printer.id, {
+      const result = await owner.save({
         expected_updated_at: state.updated_at,
         tools: [
           {
@@ -139,16 +155,29 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
           };
         }),
       });
+      if (!owner.current()) return;
       setState(result);
       toast.success(uiText("Materials and tools saved"));
     } catch (error) {
+      if (!owner.current()) return;
+      const status = parseApiError(error).status;
+      if ([0, 409, 412, 428].includes(status) || status >= 500) setReview({ phase: "required" });
       toast.error(error);
-      await load().catch(() => undefined);
     } finally {
       setBusy(false);
     }
   }
 
+  const denied =
+    owner.retired ||
+    (readFailed && [401, 403, 404].includes(parseApiError(owner.query.error).status));
+  if (denied || (!state && readFailed))
+    return (
+      <div role="alert" className="space-y-3">
+        <p>{uiText("materials.loadFailed")}</p>
+        <Button onClick={() => void owner.query.refetch()}>{uiText("Retry")}</Button>
+      </div>
+    );
   if (!state)
     return (
       <div className="space-y-3">
@@ -157,9 +186,50 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
       </div>
     );
 
-  const providerSlots = state.slots.filter((slot) => slot.source !== "manual");
+  const providerSlots = (owner.query.data ?? state).slots.filter(
+    (slot) => slot.source !== "manual",
+  );
   return (
     <div className="space-y-5 animate-panel-in">
+      {(review.phase !== "idle" || readFailed) && (
+        <section role="alert" className="space-y-3 rounded border border-border p-4">
+          <p>{uiText("library.editConflict")}</p>
+          <Button
+            disabled={busy || review.phase === "loading"}
+            onClick={() => void reviewCurrent()}
+          >
+            {uiText("Review current values")}
+          </Button>
+          {review.phase === "ready" && (
+            <>
+              <p>
+                {uiText("library.latestVersion")}:{" "}
+                {review.snapshot.tools.find((tool) => tool.tool_key === "tool0")
+                  ?.nozzle_diameter_mm ?? uiText("Unknown")}
+              </p>
+              <ul>
+                {review.snapshot.slots
+                  .filter((slot) => slot.source === "manual")
+                  .map((slot) => (
+                    <li key={slot.slot_key}>
+                      {slot.label}: {slot.material_type ?? uiText("Unknown")}
+                    </li>
+                  ))}
+              </ul>
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  adopt(review.snapshot);
+                  setReview({ phase: "idle" });
+                }}
+              >
+                {uiText("Use current values")}
+              </Button>
+            </>
+          )}
+        </section>
+      )}
+
       <section className="rounded-lg border border-border bg-background">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4">
           <div>
@@ -168,12 +238,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
               {uiText("Loaded filament truth is kept here, independently from printer groups.")}
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => void save()}
-            loading={busy}
-            disabled={!printer.access.can_print}
-          >
+          <Button size="sm" onClick={() => void save()} loading={busy} disabled={disabled}>
             {uiText("Save state")}
           </Button>
         </div>
@@ -187,7 +252,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
               step="0.01"
               value={nozzle}
               onChange={(event) => setNozzle(event.target.value)}
-              disabled={!printer.access.can_print}
+              disabled={disabled}
               placeholder={uiText("Unknown")}
             />
             {state.tools.find((tool) => tool.tool_key === "tool0")?.source !== "manual" && (
@@ -249,7 +314,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                 type="button"
                 variant="outline"
                 size="xs"
-                disabled={!printer.access.can_print}
+                disabled={disabled}
                 onClick={addManualFeed}
               >
                 {uiText("Add feed")}
@@ -268,16 +333,16 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                 <Input
                   value={slot.label}
                   onChange={(event) => patchSlot(index, { label: event.target.value })}
-                  disabled={!printer.access.can_print}
+                  disabled={disabled}
                   aria-label={uiText("Feed label")}
                 />
                 <select
                   className={selectClassName}
-                  value={knownUiText(slot.state)}
+                  value={slot.state}
                   onChange={(event) =>
                     patchSlot(index, { state: parseSlotState(event.target.value) })
                   }
-                  disabled={!printer.access.can_print}
+                  disabled={disabled}
                 >
                   <option value="unknown">{uiText("Unknown")}</option>
                   <option value="empty">{uiText("Empty")}</option>
@@ -286,14 +351,14 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                 <Input
                   value={slot.material_type}
                   onChange={(event) => patchSlot(index, { material_type: event.target.value })}
-                  disabled={!printer.access.can_print || slot.state !== "loaded"}
+                  disabled={disabled || slot.state !== "loaded"}
                   placeholder="PLA"
                   aria-label={uiText("Material type")}
                 />
                 <Input
                   value={slot.material_brand}
                   onChange={(event) => patchSlot(index, { material_brand: event.target.value })}
-                  disabled={!printer.access.can_print || slot.state !== "loaded"}
+                  disabled={disabled || slot.state !== "loaded"}
                   placeholder={uiText("Brand")}
                   aria-label={uiText("Material brand")}
                 />
@@ -305,7 +370,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                     onChange={(event) =>
                       patchSlot(index, { color_hex: event.target.value.toUpperCase() })
                     }
-                    disabled={!printer.access.can_print || slot.state !== "loaded"}
+                    disabled={disabled || slot.state !== "loaded"}
                   />
                 </label>
                 {spoolmanEnabled && (
@@ -317,7 +382,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                         spool_id: event.target.value ? Number(event.target.value) : null,
                       })
                     }
-                    disabled={!printer.access.can_print}
+                    disabled={disabled}
                   >
                     <option value="">{uiText("No tracked spool")}</option>
                     {spools.map((spool) => (
@@ -333,6 +398,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                   <Button
                     type="button"
                     variant="outline"
+                    disabled={disabled}
                     onClick={() => {
                       const spool = spools.find((row) => row.id === slot.spool_id);
                       patchSlot(index, {
@@ -354,7 +420,7 @@ export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
                   onClick={() =>
                     setSlots((current) => current.filter((_, slotIndex) => slotIndex !== index))
                   }
-                  disabled={!printer.access.can_print}
+                  disabled={disabled}
                 >
                   {uiText("Remove")}
                 </Button>

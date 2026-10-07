@@ -470,3 +470,86 @@ for storage choice through first Model). Required PR CI on `dcfc34e5` completed
 successfully. The preceding Deep browser run (`6eabc187`) reported **122 passed,
 6 failed, 1 flaky**; its six failures map to C26–33 and the flaky toggle to C38.
 Those old-run failures are retained as evidence, not relabeled as a green run.
+
+### Final guide and browse revision inspection
+
+| Path | Inspected SHA-256 | Scope / result |
+|---|---|---|
+| `frontend/src/components/setup-storage-choice.tsx` | `7cb7c5110aa632e893676b7d467e14e58f62b22e7e2fff3cc70596acf6a9412b` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/pages/getting-started.tsx` | `22edd2b714f4ff84c42b07605a5f2f00d0ffb8b270d9b09207b4a0a14f04c871` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/features/setup/guide.ts` | `aa1274c655bccf33bab731aba4992f2833115ed967e55a7e6d53a56c2cf11231` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/features/library/browse.ts` | `ca9d0b839b2cbf20c57a68115d6b5fc5c5e54cb1c00b2bcc2e01877b70f0fb71` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/components/setup-gate.tsx` | `4717cf44276cf109e7177fa3f6b51e9e7b61dc002f2783409d09224869fce264` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/lib/session-transport.ts` | `e266d7300224997fb0c8c983f6738b04cc95f138fa1613667a78f4d92abf91ba` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+| `frontend/src/components/__tests__/setup-storage-choice.test.tsx` | `7285de57b3c73cbb173e00f44fd0139f469b9783c54773db8d937c240c0ed14e` | Complete file; guide lifetime, shared read ownership, admission preservation or bounded read-conflict recovery as described above. |
+
+### Artifact cache administration completion (M9 dependency)
+
+The previously recorded ArtifactCacheCard debt remained in the live Settings
+route: copied remote usage/policy, a competing one-second interval, unfenced
+command receipts and no conditional policy/reset contract. This requires a bounded
+owner cutover, not removal of safe materialization behavior. The cache policy is
+stored on SystemConfig, so it uses the existing vault editing epoch/version and
+atomic claim. No new table or migration is needed. Clear affects disposable bytes;
+save/reset affect policy. Background usage updates must not change a dirty policy.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C48 | rejects obsolete cache policy saves | Error | Two edits share original base | Second save rejected; winner policy retained | Backend integration | ❌ |
+| C49 | rejects obsolete cache policy resets | Error | Concurrent save before reset | Reset rejected; winner remains persisted | Backend integration | ❌ |
+| C50 | advances cache edit identity for legacy writes | Edge | Unversioned compatibility write | Prior conditional base no longer accepted | Backend integration | ❌ |
+| C51 | requires a base for opted-in cache policy writes | Error | Conditional contract header without If-Match | 428, no policy write | Backend integration | ❌ |
+| C52 | shares cancellable cache maintenance reads | Edge | Maintenance active; delayed read | Single in-flight read; disposal aborts it | Frontend unit | ❌ |
+| C53 | preserves cache policy draft during usage refresh | Edge | User edits size; maintenance read completes | Typed size stays; usage updates | Frontend unit | ❌ |
+| C54 | preserves cache policy draft when clearing bytes | Edge | Dirty policy then clear | Usage receipt published; dirty policy unchanged | Frontend unit | ❌ |
+| C55 | requires explicit review after a cache save conflict | Error | Save receives 412 or uncertain response | Draft retained; ordinary resubmit blocked; authorized adoption available | Frontend unit | ❌ |
+| C56 | retires cache command feedback with its session | Error | Session ends before receipt | No stale toast, draft reset or Query publication | Frontend unit | ❌ |
+| C57 | clears obsolete cache reads before acknowledging writes | Edge | Old usage/policy read races confirmed save | Aborted stale result cannot replace receipt | Frontend unit | ❌ |
+| C58 | recovers a denied cache read without private controls | Error | Previously loaded policy then 403 | Private controls hidden; explicit retry | Frontend unit | ❌ |
+| C59 | reviews a cache policy conflict in the browser | Edge | Two editors; one wins | Other preserves draft and explicitly adopts current policy | Playwright real | ❌ |
+
+### Dependency recheck before administration closure
+
+The complete remaining effect-owned reader scan also identifies live
+`PrinterMaterials` (M7) and `MaintenancePanel` (M9) callers. Materials already has
+a backend `expected_updated_at` contract, but its catch reload discards a conflicted
+draft. Maintenance keeps audit/backup snapshots and a second interval. Reopen these
+bounded acceptance gaps in dependency order: Materials before administration cache
+and maintenance. Earlier milestone evidence is retained, not presented as proof
+that these callers were migrated.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C60 | preserves manual material drafts after conflict | Error | Dirty feed; write returns 409 | Draft retained, no automatic reload/rebase; review offered | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+| C61 | retires material reads when changing printer | Edge | Old printer read pending; switch printer | Old read aborted; only new printer fields rendered | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+| C62 | separates material read failure from loading | Error | Initial material read fails | Error/retry, no endless skeleton | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+| C63 | adopts reviewed material state explicitly | Happy | Conflict then authorized latest read | Adoption replaces local draft without another write | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+| C64 | preserves manual draft during provider refresh | Edge | Typed manual material then new remote state | Draft/base stay original; provider observation updates | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+| C65 | retires material save feedback on unmount | Error | Write response arrives after leaving | Request aborted; no success feedback/cache publication | Frontend unit | ✅ `printer-materials.test.tsx` — 19-case final file passed |
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C66 | submits semantic searches against a local index | Edge | Keyword navigation normalizes other Library parameters | Decoded q remains intact independently of parameter order | Playwright real | ❌ Correct stale `/?q=` prefix expectation; pending selected execution |
+
+Deep CI on `90ecfbc0` passed environment-owner setup; its later AI Search test
+failed because it required q to be the first URL parameter. Actual canonical URL
+was `/?type=all&sort=date-desc&q=bike+lamp+attachment`. Assert path and decoded q,
+not serialization order. The old `6eabc187` ordinary backend lane finished
+**20,187 passed / 2 failed in 2,586.71s**; both failures are C24–25's corrected
+shared-table isolation defect. The superseded `66ba9036` coverage invocation was
+cancelled after its ordinary portion passed **20,189 tests in 3,756.77s**; it was
+still executing resources. This is not a complete coverage result.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C67 | reviews a manual material conflict in the browser | Edge | Two printer editors save different nozzles | Loser draft retained until explicit adoption; backend winner unchanged | Playwright real | ✅ `printer-materials.spec.ts` — 1 passed (7.5s body, 51.3s total) |
+
+Manual Materials M7 caller is qualified: the original six added cases produced
+five failures (the original local draft already survived a passive query-cache
+operation, which did not yet refetch its private reader). After migration, the
+strengthened provider-refresh assertion proves a new AMS observation appears
+without replacing the manual draft/base. The final 19-case file passes; broader
+material/API/dependency selection passed **141 tests in 4.44s**. Lint and all
+frontend type checks passed. The real two-editor nozzle conflict passed and
+requires explicit adoption, preserving the existing backend timestamp contract.
+No stronger backend material-state concurrency guarantee is claimed here.

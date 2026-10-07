@@ -1,4 +1,5 @@
 {
+  "materials.loadFailed": "Could not load printer materials. Retry to recover.",
   "tags.reviewError": "Could not load the current tags. Try again.",
   "savedView.loading": "Loading saved views…",
   "savedView.loadError": "Could not load saved views",

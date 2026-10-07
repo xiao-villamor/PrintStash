@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M10 have local acceptance. M11 is active: reconcile review coverage, measure the integrated result, finish documentation and qualify the implementation PR. Final completion is not yet claimed.**
+2026-10-07. **Implementation in progress. Earlier M0–M10 acceptance records are retained. Final integration review reopened bounded M7 (manual printer materials) and M9 (Artifact cache/maintenance) callers; these prerequisites close before M11. Final completion is not yet claimed.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
