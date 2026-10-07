@@ -493,3 +493,49 @@ HTTP preconditions, coherent editing-base reads, concurrent-request regression
 coverage, restore-incarnation checks and frontend conflict recovery remain the
 next portion of M9. This prerequisite does not close the milestone. No full
 backend/frontend suite, browser suite, build or performance benchmark was rerun.
+
+
+## Atomic configuration edit claim (M9, domain operation qualified)
+
+The persisted version now needs a domain-owned compare-and-advance operation.
+A conditional claim compares the database-history epoch and vault version in
+one UPDATE, then rechecks the actor's current administrator/session authority.
+The caller retains commit/rollback ownership, so rejected edits and downstream
+validation failures consume no version. Unconditional legacy callers remain
+explicitly unprotected against overwrites. The HTTP/read/client integration is
+still pending; this increment must not be described as complete conflict UI.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| CC1 | only one editor can commit from a shared base | Edge | Two real concurrent writers with the same epoch/version on SQLite/PostgreSQL | One committed value; one edit_conflict; positive advanced version | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_only_one_editor_can_commit_from_a_shared_base` |
+| CC2 | rollback preserves an unused editing base | Error | Claim and field edit followed by rollback | Previous field and version remain usable | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_rollback_preserves_an_unused_editing_base` |
+| CC3 | a restored database rejects a prior incarnation | Error | History epoch rotates while integer version stays equal | Old base rejected without a version advance | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_a_restored_database_rejects_a_prior_incarnation` |
+| CC4 | a legacy writer invalidates an earlier conditional base | Edge | Unconditional committed write before conditional save | Conditional claim rejected; legacy value retained | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_a_legacy_writer_invalidates_an_earlier_conditional_base` |
+| CC5 | revoked administrator authority rejects the edit | Error | Actor disabled, demoted, deleted, or session version rotated since authentication | Permission denied; configuration and version unchanged after rollback | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_revoked_administrator_authority_rejects_the_edit` |
+| CC6 | a current administrator can commit an explicit edit | Happy | Current epoch/version and administrator | Accepted value and greater version persist | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_a_current_administrator_can_commit_an_explicit_edit` |
+| CC7 | explicit legacy commands can save without a base | Happy | Current administrator deliberately supplies no base | Value persists with an advanced version; no conflict protection claimed | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_explicit_legacy_commands_can_save_without_a_base` |
+| CC8 | a non-singleton configuration cannot be edited through this contract | Error | Persisted row with id other than one | Invalid-target error; singleton value and version unchanged | Integration | ✅ `integration/modules/administration/test_config_edits.py::TestClaim::test_rejects_a_non_singleton_target` |
+
+Validation (2026-10-07):
+
+- Initial selected case: **1 failed, 17 deselected** in 24.56 s because the new
+  domain operation did not exist. This was missing-contract evidence, not a
+  reproduction through the still-unconditional HTTP endpoint.
+- The first complete selection was deliberately interrupted while still running:
+  each SQLite case rebuilt the full schema. Its output, including a pytest
+  temporary-directory teardown `KeyError` after interruption, was retained; it
+  is not counted as a completed test run.
+- With one schema per dialect and per-case row cleanup, the complete final
+  selection passed: **22 passed** in 50.37 s. Setup took 24.61 s for SQLite and
+  21.57 s for PostgreSQL; subsequent reported setup costs were at most 0.16 s.
+  This is test-preparation evidence, not an application-performance improvement.
+- The concurrency case uses two real sessions and a barrier, not mocked writes.
+  The incarnation case rotates the authority epoch to simulate restore; the
+  actual backup-restore workflow is not rerun or claimed by this selection.
+- Ruff check/format and targeted Pyright for `config_edits.py` passed.
+  No full suite, schema gate, frontend build or browser suite was repeated.
+
+`config_edits.claim` is deliberately not a completed HTTP/client migration: it
+has no production caller yet. The next increment must integrate it with coherent
+configuration read/receipt bases and the API, then migrate client conflict
+recovery. M9 remains the only active milestone.

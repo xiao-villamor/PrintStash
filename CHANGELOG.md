@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Persist vault configuration edit versions separately from operational bookkeeping,
-  including changes made by legacy writers. The conditional HTTP/client rollout
+  including changes made by legacy writers, and add the atomic editing-claim
+  operation with current administrator/session checks. The HTTP/client rollout
   remains in progress; existing clients keep their current write contract.
 
 - Save compound configuration changes in one transaction so a failed final write
