@@ -1052,7 +1052,13 @@ describe("SettingsPanel", () => {
     it("publishes acknowledged backup policy to shared configuration", async () => {
       const app = renderSettings({
         at: "/settings?section=backup",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, backup_retention_days: 15 }) },
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            backup_retention_days: 15,
+          }),
+        },
       });
       await screen.findByText("No backups found.");
       await userEvent.clear(screen.getByLabelText("Retention (days)"));
@@ -1186,12 +1192,13 @@ describe("SettingsPanel", () => {
         routes: {
           "PUT /api/v1/config": (_url, init) => {
             update = JSON.parse(String(init?.body));
-            return json(VAULT_CONFIG);
+            return json({ ...VAULT_CONFIG, edit_version: 2, backup_retention_days: 14 });
           },
         },
       });
 
       const input = await screen.findByLabelText("Retention (days)");
+      await waitFor(() => expect(input).toBeEnabled());
       await user.clear(input);
       await user.type(input, "14");
       await user.click(screen.getByRole("button", { name: "Save retention" }));
@@ -1200,6 +1207,10 @@ describe("SettingsPanel", () => {
         expect(requestsWithMethod("PUT").some((call) => call.url.endsWith("/config"))).toBe(true),
       );
       expect(update).toEqual({ backup_retention_days: 14 });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save retention" })).toBeEnabled(),
+      );
+      expect(input).toHaveValue(14);
     });
 
     it.each([
@@ -1860,12 +1871,149 @@ describe("SettingsPanel", () => {
     expect(screen.queryByRole("heading", { name: "Similar models" })).toBeNull();
   });
 
+  describe("retention configuration editing", () => {
+    it("keeps retention editing unavailable to members", async () => {
+      const app = renderSettings({ at: "/settings?section=trash", auth: memberSession() });
+      const input = await screen.findByLabelText("Days");
+      expect(input).toBeDisabled();
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").some((request) => request.url === "/api/v1/models/trash"),
+        ).toBe(true),
+      );
+      expect(
+        app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/config"),
+      ).toHaveLength(0);
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+    it("retries a failed trash configuration read", async () => {
+      let reads = 0;
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json({ detail: "unavailable" }, 503) : json(VAULT_CONFIG),
+        },
+      });
+      const input = await screen.findByLabelText("Days");
+      expect(input).toBeDisabled();
+      await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(input).toBeEnabled());
+      expect(reads).toBe(2);
+    });
+    it.each([
+      { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
+      { section: "trash", label: "Days", field: "trash_retention_days" },
+    ])(
+      "$section: keeps a retention draft across configuration refresh",
+      async ({ section, label, field }) => {
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: `/settings?section=${section}`,
+          routes: {
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return json({ detail: "edit_conflict" }, 412);
+            },
+          },
+        });
+        const input = await screen.findByLabelText(label);
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.clear(input);
+        await userEvent.type(input, "14");
+        await act(async () => {
+          app.client.setQueryData(queryKeys.vaultConfig, {
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            [field]: 9,
+          });
+        });
+        expect(input).toHaveValue(14);
+        await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+        await screen.findByRole("button", { name: "Review latest version" });
+        expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+      },
+    );
+    it.each([
+      { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
+      { section: "trash", label: "Days", field: "trash_retention_days" },
+    ])(
+      "$section: reviews a retention conflict before saving revised days",
+      async ({ section, label, field }) => {
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: `/settings?section=${section}`,
+          routes: {
+            "GET /api/v1/config": () =>
+              json({ ...VAULT_CONFIG, edit_version: ++reads, [field]: reads === 1 ? 30 : 9 }),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, 412)
+                : json({ ...VAULT_CONFIG, edit_version: 3, [field]: 18 });
+            },
+          },
+        });
+        const input = await screen.findByLabelText(label);
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.clear(input);
+        await userEvent.type(input, "14");
+        await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+        await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+        const review = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(review).getByText("9")).toBeVisible();
+        await userEvent.clear(input);
+        await userEvent.type(input, "18");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Save retention" })).toBeEnabled(),
+        );
+        expect(writes).toHaveLength(2);
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toEqual({ [field]: 18 });
+        expect(input).toHaveValue(18);
+      },
+    );
+    it("refreshes trash without replacing retention input", async () => {
+      const app = renderSettings({ at: "/settings?section=trash" });
+      const input = await screen.findByLabelText("Days");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.clear(input);
+      await userEvent.type(input, "14");
+      const reads = app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config").length;
+      await userEvent.click(screen.getByTitle("Refresh trash"));
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/models/trash"),
+        ).toHaveLength(2),
+      );
+      expect(input).toHaveValue(14);
+      expect(app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config")).toHaveLength(
+        reads,
+      );
+    });
+    it("rejects an empty trash retention draft", async () => {
+      const app = renderSettings({ at: "/settings?section=trash" });
+      const input = await screen.findByLabelText("Days");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.clear(input);
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+  });
+
   describe("trash retention", () => {
     it("saves the retention window", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, trash_retention_days: 7 }) },
+        routes: {
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, trash_retention_days: 7 }),
+        },
       });
       const days = await screen.findByLabelText("Days");
       await user.clear(days);

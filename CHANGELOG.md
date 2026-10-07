@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve backup and trash retention drafts across refreshes. Detect concurrent
+  edits and require an explicit review before retrying with revised days; retry
+  failed configuration loads without losing input.
+
 - Detect conflicting changes to currency, automatic known-good marking and model
   image quality. Keep the selected preference for explicit review, protect against
   stale retries, and retire pending review when the session ends.

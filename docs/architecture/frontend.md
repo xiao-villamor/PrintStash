@@ -65,9 +65,12 @@ and initial provider snapshot. Refetch cannot mix new untouched fields into an
 existing draft. Explicit revised save merges deliberate overrides onto reviewed
 current values; newer credentials typed during save retain their local intent.
 `settings-preferences.ts` now owns immediate auto-mark, currency and thumbnail
-width intents. Its pending selection survives conflict; authorized review permits
-explicit retry or adoption. Settings backup and trash forms still use the additive
-legacy path. The optional client
+width intents, plus backup/trash retention. Retention keeps a text/base pair from
+the first edit; refreshing Trash does not read or overwrite configuration. Its
+pending intent survives conflict; authorized review permits explicit revised save
+or adoption. The revised retention value is validated before submission. Members
+cannot edit retention, and an unavailable configuration read has explicit retry.
+Compound backup policy still uses the additive legacy path. The optional client
 base must become required when their M9 cutover is complete; this is not yet
 application-wide conflict protection.
 

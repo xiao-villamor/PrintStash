@@ -822,3 +822,49 @@ can make configuration preconditions mandatory. M9 remains active.
 
 The strengthened known-good assertion waits for the accepted command to reenable
 the toggle, then checks its value: **1 passed in 5.18 s**.
+
+
+## Settings retention draft ownership (M9 increment)
+
+Backup and trash retention keep a local text/base pair from the first edit and
+reuse the scalar Settings configuration command/review owner. Trash listing no
+longer fetches or copies configuration. Explicit revised save uses the currently
+edited valid retention value against the authorized reviewed base.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| RT1 | keeps a retention draft across configuration refresh | Edge | First edit v1; config refetch v2 | Typed days retained; PUT still v1 | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::keeps a retention draft across configuration refresh` |
+| RT2 | reviews a retention conflict before saving revised days | Error | 412; fresh v2; operator revises days | No blind retry; explicit new value with v2 | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::reviews a retention conflict before saving revised days` |
+| RT3 | refreshes trash without replacing retention input | Edge | Local days edited; Refresh trash | Draft retained; no duplicate configuration GET | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::refreshes trash without replacing retention input` |
+| RT4 | publishes acknowledged backup policy to shared configuration | Happy | Server normalizes retention | Shared DTO and field show accepted value | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::publishes acknowledged backup policy to shared configuration` |
+| RT5 | saves the retention window | Happy | Admin submits valid trash days | Conditional write accepted | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::saves the retention window` |
+| RT6 | rejects an empty trash retention draft | Edge | Cleared days field | Save disabled; no coercion to zero | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::rejects an empty trash retention draft` |
+| RT7 | keeps retention editing unavailable to members | Error | Member opens Trash | No private configuration read; no retention write | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::keeps retention editing unavailable to members` |
+| RT8 | retries a failed trash configuration read | Error | Initial configuration GET 503 | Explicit retry enables retention editor | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::retries a failed trash configuration read` |
+
+| RT9 | expired GC preview is non-destructive without an independent backup | Happy | Real backend; retention saved before preview | Safe GC flow completes after retention save | Playwright | ✅ `tests/e2e-real/settings.spec.ts::expired GC preview is non-destructive without an independent backup` |
+
+Focused validation: initial regression selection **6 failed** before implementation;
+retention/GC consumers **18 passed in 12.52 s**. The added permission/recovery
+selection found **1 passed, 1 failed** (missing retry); after the fix the combined
+selection was **20 passed in 13.90 s**, 165 unrelated cases deselected. Typecheck
+identified two stale references and an unsupported test query option, all corrected.
+Lint then identified a displaced client directive; restoring it to the first line
+resolved the error. Types, lint, format (769 files) and production build passed;
+existing large-chunk warnings remain.
+No full suite was run for this increment.
+
+The selected real-backend browser flow passed **1/1 in 54.6 s**, including isolated
+server startup (test body **15.3 s**). It exercises retention save and the existing
+non-destructive GC preview. Concurrent-edit behavior is asserted in the component
+regressions above, not inferred from this browser test.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| RT10 | saves backup retention from the backup section | Happy | Admin submits 14 days | Accepted server value shown after save | Frontend unit | ✅ `src/components/__tests__/settings-panel.test.tsx::saves backup retention from the backup section` |
+
+The affected existing scalar-preference, backup-retention and Trash-list consumers
+passed **28 tests in 16.54 s** (157 unrelated cases deselected). The backup save
+fixture now returns an advancing edit receipt and asserts the accepted field.
+This increment does not migrate compound backup policy, Trash/GC list ownership,
+or the remaining M9 surfaces. M9 remains active.

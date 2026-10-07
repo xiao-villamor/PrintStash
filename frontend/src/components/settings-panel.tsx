@@ -1,5 +1,9 @@
 "use client";
 
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
+
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
 import { knownUiText } from "@/lib/locale";
@@ -122,12 +126,10 @@ import {
   getHealthDetails,
   getActiveGcPlan,
   getLatestRelease,
-  getVaultConfig,
   listTrash,
   purgeModel,
   restoreModel,
   restartPrintStash,
-  updateVaultConfig,
 } from "@/lib/api";
 import type {
   BackupMeta,
@@ -181,10 +183,10 @@ import type {
   PrinterRole,
   StorageCleanupStatus,
   StorageHealthRead,
-  StorageOperations,
   HealthResponse,
   TrashPurgeRead,
   TrashedModelRead,
+  VaultConfigRead,
   UserUpdate,
 } from "@/types";
 
@@ -274,13 +276,11 @@ type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
  * What the trash panel is busy with: the id of the single model being purged, or a
  * label for one of the bulk retention actions.
  */
-type TrashOperation = number | "expired" | "settings" | "gc";
+type TrashOperation = number | "expired" | "gc";
 
 /** Only a per-model purge carries an id; the bulk actions carry their label instead. */
 function isModelPurge(operation: TrashOperation | null): operation is number {
-  return (
-    operation !== null && operation !== "expired" && operation !== "settings" && operation !== "gc"
-  );
+  return operation !== null && operation !== "expired" && operation !== "gc";
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
@@ -317,6 +317,29 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
+interface RetentionDraft {
+  text: string;
+  base: EditingBase;
+}
+function parseTrashRetentionDays(value: string): number | null {
+  if (!/^(?:-1|\d+)$/.test(value)) return null;
+  const days = Number(value);
+  return Number.isSafeInteger(days) ? days : null;
+}
+function preferenceLabel(intent: PreferenceIntent): string {
+  switch (intent.kind) {
+    case "auto-mark":
+      return uiText("Auto-mark known good on successful print");
+    case "currency":
+      return uiText("Display currency");
+    case "thumbnail-width":
+      return uiText("Model image quality");
+    case "backup-retention":
+      return uiText("settings.backupRetentionTitle");
+    case "trash-retention":
+      return uiText("Trash retention");
+  }
+}
 function parseBackupRetentionDays(value: string): number | null {
   if (!/^\d+$/.test(value)) return null;
   const days = Number(value);
@@ -590,9 +613,10 @@ export function SettingsPanel() {
   );
   const [gcDigestConfirmation, setGcDigestConfirmation] = useState("");
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
-  const [trashRetentionDays, setTrashRetentionDays] = useState(30);
+  const [trashRetentionDraft, setTrashRetentionDraft] = useState<RetentionDraft | null>(null);
   const remoteConfig = useVaultConfig({
-    enabled: !!user?.is_superuser && ["design", "previews", "backup"].includes(activeSection),
+    enabled:
+      !!user?.is_superuser && ["design", "previews", "backup", "trash"].includes(activeSection),
     retry: false,
   });
   const configCommand = useVaultConfigCommand();
@@ -620,8 +644,15 @@ export function SettingsPanel() {
   const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
-  const [trashStorageTier, setTrashStorageTier] = useState("verified");
-  const [trashOperations, setTrashOperations] = useState<StorageOperations>();
+  const trashRetentionText =
+    trashRetentionDraft?.text ?? String(remoteConfigData?.trash_retention_days ?? 30);
+  const parsedTrashRetentionDays = parseTrashRetentionDays(trashRetentionText);
+  const trashRetentionDays =
+    parsedTrashRetentionDays ?? remoteConfigData?.trash_retention_days ?? 30;
+  const trashStorageTier = remoteConfigData?.storage_tier ?? "unguarded";
+  const trashOperations = remoteConfigData?.storage_operations;
+  const trashRetentionBusy =
+    preferenceReview.phase === "saving" && preferenceReview.intent.kind === "trash-retention";
   const backupCommand = useBackupCommand();
   const backupConnectionCommand = useStorageConnectionCommand();
   const [backingUp, setBackingUp] = useState(false);
@@ -648,11 +679,12 @@ export function SettingsPanel() {
     localBackupRead.isError || s3BackupRead.isError || remoteBackupRead.isError;
   const backupConfigUnavailable = !remoteConfigData || remoteConfig.isError;
   // Only deliberate edits live in these drafts; refreshed DTOs stay in Query.
-  const [backupRetentionDraft, setBackupRetentionDays] = useState<string | null>(null);
+  const [backupRetentionDraft, setBackupRetentionDays] = useState<RetentionDraft | null>(null);
   const backupRetentionDays =
-    backupRetentionDraft ?? String(remoteConfigData?.backup_retention_days ?? 30);
+    backupRetentionDraft?.text ?? String(remoteConfigData?.backup_retention_days ?? 30);
   const parsedBackupRetentionDays = parseBackupRetentionDays(backupRetentionDays);
-  const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
+  const backupRetentionBusy =
+    preferenceReview.phase === "saving" && preferenceReview.intent.kind === "backup-retention";
   const [backupConnectionDrafts, setBackupConnectionDrafts] = useState<
     Record<
       number,
@@ -717,6 +749,7 @@ export function SettingsPanel() {
       setAdoptS3Target(null);
       setAdoptRemoteTarget(null);
       setBackupRetentionDays(null);
+      setTrashRetentionDraft(null);
       setAutomaticBackupsEnabled(null);
       setAutomaticBackupTimeUtc(null);
       setManualLocalBackupEnabled(null);
@@ -779,22 +812,18 @@ export function SettingsPanel() {
     }
     setTrashLoading(true);
     try {
-      const [items, cfg, activePlan] = await Promise.all([
+      const [items, activePlan] = await Promise.all([
         listTrash(),
-        getVaultConfig(),
         user.is_superuser ? getActiveGcPlan() : Promise.resolve(null),
       ]);
       setTrashItems(items);
-      setTrashRetentionDays(cfg.trash_retention_days ?? 30);
-      setTrashStorageTier(cfg.storage_tier ?? "unguarded");
-      setTrashOperations(cfg.storage_operations);
       setGcPlan(activePlan);
     } catch (e) {
       toast.error(e);
     } finally {
       setTrashLoading(false);
     }
-  }, [user, setTrashRetentionDays]);
+  }, [user]);
 
   useEffect(() => {
     if (activeSection === "trash") {
@@ -868,11 +897,47 @@ export function SettingsPanel() {
     }
   }
 
+  function settleRetention(intent: PreferenceIntent, receipt: VaultConfigRead) {
+    if (intent.kind !== "backup-retention" && intent.kind !== "trash-retention") return;
+    const setter =
+      intent.kind === "backup-retention" ? setBackupRetentionDays : setTrashRetentionDraft;
+    setter((current) =>
+      !current || current.text === intent.draft
+        ? null
+        : { ...current, base: captureEditingBase(receipt) },
+    );
+  }
+  function adoptPreference() {
+    const intent = preferenceCommand.intent;
+    if (intent?.kind === "backup-retention") setBackupRetentionDays(null);
+    if (intent?.kind === "trash-retention") setTrashRetentionDraft(null);
+    preferenceCommand.adopt();
+  }
   async function recoverPreference(action: "review" | "retry") {
     const session = getSessionVersion();
     try {
       if (action === "review") await preferenceCommand.review();
-      else await preferenceCommand.retry();
+      else {
+        let intent = preferenceCommand.intent;
+        if (!intent) return;
+        if (intent.kind === "backup-retention") {
+          if (parsedBackupRetentionDays === null) return;
+          intent = {
+            kind: "backup-retention",
+            value: parsedBackupRetentionDays,
+            draft: backupRetentionDays,
+          };
+        } else if (intent.kind === "trash-retention") {
+          if (parsedTrashRetentionDays === null) return;
+          intent = {
+            kind: "trash-retention",
+            value: parsedTrashRetentionDays,
+            draft: trashRetentionText,
+          };
+        }
+        const receipt = await preferenceCommand.retry(intent);
+        if (accountCurrent(session)) settleRetention(intent, receipt);
+      }
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     }
@@ -998,23 +1063,30 @@ export function SettingsPanel() {
   }
 
   async function saveBackupRetention() {
-    if (parsedBackupRetentionDays === null || backupConfigUnavailable || configCommand.isPending)
+    if (
+      parsedBackupRetentionDays === null ||
+      !remoteConfigData ||
+      backupConfigUnavailable ||
+      configCommand.isPending ||
+      preferenceCommand.blocked
+    )
       return;
     const session = getSessionVersion();
-    const sent = backupRetentionDraft;
-    setBackupRetentionBusy(true);
+    const intent: PreferenceIntent = {
+      kind: "backup-retention",
+      value: parsedBackupRetentionDays,
+      draft: backupRetentionDays,
+    };
     try {
-      await configCommand.mutateAsync({
-        session,
-        payload: { backup_retention_days: parsedBackupRetentionDays },
-      });
+      const receipt = await preferenceCommand.run(
+        intent,
+        backupRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
+      );
       if (!accountCurrent(session)) return;
-      setBackupRetentionDays((current) => (current === sent ? null : current));
+      settleRetention(intent, receipt);
       toast.success(t("settings.backupRetentionSaved"));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
-    } finally {
-      if (accountCurrent(session)) setBackupRetentionBusy(false);
     }
   }
 
@@ -1527,15 +1599,31 @@ export function SettingsPanel() {
   }
 
   async function saveTrashRetention() {
-    setTrashBusy("settings");
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      parsedTrashRetentionDays === null ||
+      preferenceCommand.blocked ||
+      configCommand.isPending
+    )
+      return;
+    const session = getSessionVersion();
+    const intent: PreferenceIntent = {
+      kind: "trash-retention",
+      value: parsedTrashRetentionDays,
+      draft: trashRetentionText,
+    };
     try {
-      await updateVaultConfig({ trash_retention_days: Math.max(-1, trashRetentionDays) });
+      const receipt = await preferenceCommand.run(
+        intent,
+        trashRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
+      );
+      if (!accountCurrent(session)) return;
+      settleRetention(intent, receipt);
       toast.success(uiText("Trash retention updated."));
-      await loadTrash();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setTrashBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -1989,15 +2077,7 @@ export function SettingsPanel() {
                         : "library.saveUnconfirmed",
                     )}
                   </p>
-                  <p>
-                    {uiText(
-                      preferenceReview.intent.kind === "currency"
-                        ? "Display currency"
-                        : preferenceReview.intent.kind === "auto-mark"
-                          ? "Auto-mark known good on successful print"
-                          : "Model image quality",
-                    )}
-                  </p>
+                  <p>{preferenceLabel(preferenceReview.intent)}</p>
                   <Button
                     variant="outline"
                     disabled={preferenceReview.phase === "loading"}
@@ -2017,12 +2097,18 @@ export function SettingsPanel() {
                         <Button
                           variant="outline"
                           disabled={remoteConfig.isError}
-                          onClick={preferenceCommand.adopt}
+                          onClick={adoptPreference}
                         >
                           {uiText("library.useLatest")}
                         </Button>
                         <Button
-                          disabled={remoteConfig.isError}
+                          disabled={
+                            remoteConfig.isError ||
+                            (preferenceReview.intent.kind === "backup-retention" &&
+                              parsedBackupRetentionDays === null) ||
+                            (preferenceReview.intent.kind === "trash-retention" &&
+                              parsedTrashRetentionDays === null)
+                          }
                           onClick={() => void recoverPreference("retry")}
                         >
                           {uiText("library.retryDraft")}
@@ -3129,7 +3215,9 @@ export function SettingsPanel() {
                         !user?.is_superuser ||
                         backupRetentionBusy ||
                         backupConfigUnavailable ||
-                        parsedBackupRetentionDays === null
+                        parsedBackupRetentionDays === null ||
+                        preferenceCommand.blocked ||
+                        configCommand.isPending
                       }
                       className={BTN_PRIMARY}
                     >
@@ -3153,7 +3241,14 @@ export function SettingsPanel() {
                         disabled={
                           !user?.is_superuser || backupRetentionBusy || backupConfigUnavailable
                         }
-                        onChange={(event) => setBackupRetentionDays(event.target.value)}
+                        onChange={(event) => {
+                          const text = event.target.value;
+                          if (remoteConfigData)
+                            setBackupRetentionDays((previous) => ({
+                              text,
+                              base: previous?.base ?? captureEditingBase(remoteConfigData),
+                            }));
+                        }}
                         aria-invalid={parsedBackupRetentionDays === null}
                         aria-describedby={
                           parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
@@ -4269,6 +4364,14 @@ export function SettingsPanel() {
 
             {activeSection === "trash" && (
               <div className="space-y-6 animate-panel-in">
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
                 <SettingsCard
                   icon={Trash2}
                   title={uiText("Trash retention")}
@@ -4295,20 +4398,39 @@ export function SettingsPanel() {
                       <input
                         type="number"
                         min={-1}
-                        value={trashRetentionDays}
-                        onChange={(event) => setTrashRetentionDays(Number(event.target.value))}
-                        disabled={!user || trashBusy === "settings"}
+                        value={trashRetentionText}
+                        onChange={(event) => {
+                          const text = event.target.value;
+                          if (remoteConfigData)
+                            setTrashRetentionDraft((previous) => ({
+                              text,
+                              base: previous?.base ?? captureEditingBase(remoteConfigData),
+                            }));
+                        }}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          trashRetentionBusy
+                        }
                         className={INPUT}
                       />
                     </label>
                     <button
                       type="button"
                       onClick={saveTrashRetention}
-                      disabled={!user || trashBusy === "settings"}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        preferenceCommand.blocked ||
+                        configCommand.isPending ||
+                        parsedTrashRetentionDays === null
+                      }
                       className={BTN_PRIMARY}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      {trashBusy === "settings" ? uiText("Saving") : uiText("Save retention")}
+                      {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
                     </button>
                     <button
                       type="button"
@@ -4316,6 +4438,7 @@ export function SettingsPanel() {
                       disabled={
                         !user?.is_superuser ||
                         trashBusy === "gc" ||
+                        parsedTrashRetentionDays === null ||
                         trashRetentionDays < 0 ||
                         (gcPlan !== null &&
                           ["preview", "quarantined", "finalizing"].includes(gcPlan.state))

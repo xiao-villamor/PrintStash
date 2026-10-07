@@ -1,4 +1,4 @@
-/** Immediate configuration preferences own one pending intent and explicit conflict review. */
+/** Scalar Settings configuration edits own one pending intent and explicit conflict review. */
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { captureEditingBase } from "@/lib/api/editing";
@@ -13,6 +13,7 @@ import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 export type PreferenceIntent =
   | { kind: "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
+  | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
   | { kind: "thumbnail-width"; value: NonNullable<VaultConfigUpdate["model_thumbnail_width"]> };
 type PendingPreference = { intent: PreferenceIntent; base: EditingBase };
 type PreferenceReview =
@@ -31,6 +32,10 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
       return { auto_mark_known_good: intent.value };
     case "currency":
       return { currency: intent.value };
+    case "backup-retention":
+      return { backup_retention_days: intent.value };
+    case "trash-retention":
+      return { trash_retention_days: intent.value };
     case "thumbnail-width":
       return { model_thumbnail_width: intent.value };
   }
@@ -41,6 +46,10 @@ export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceInt
       return snapshot.auto_mark_known_good;
     case "currency":
       return snapshot.currency;
+    case "backup-retention":
+      return snapshot.backup_retention_days;
+    case "trash-retention":
+      return snapshot.trash_retention_days;
     case "thumbnail-width":
       return snapshot.model_thumbnail_width;
   }
@@ -122,9 +131,11 @@ export function useSettingsPreferenceCommand() {
       return submit(intent, base);
     },
     review,
-    async retry() {
+    async retry(revised: PreferenceIntent | undefined = undefined) {
       if (state.phase !== "ready") throw new Error("Preference review is required");
-      return submit(state.intent, state.snapshot);
+      if (revised && revised.kind !== state.intent.kind)
+        throw new Error("Reviewed preference changed kind");
+      return submit(revised ?? state.intent, state.snapshot);
     },
     adopt() {
       assertCurrent();
