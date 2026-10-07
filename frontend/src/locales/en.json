@@ -4287,5 +4287,7 @@
   "Select at least one printer, or choose All printers.": "Select at least one printer, or choose All printers.",
   "Current channel": "Current channel",
   "Requested": "Requested",
-  "Current": "Current"
+  "Current": "Current",
+  "Page unavailable": "Page unavailable",
+  "Reload page": "Reload page"
 }

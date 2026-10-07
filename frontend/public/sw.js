@@ -1,6 +1,14 @@
 /* global self, caches */
-const CACHE = "printstash-shell-v5";
+const CACHE = "printstash-shell-v6";
 const BOOTSTRAP = ["/theme-bootstrap.js", "/locale-shell.js"];
+const PUBLIC_FILES = [
+  "/logo.svg",
+  "/logo-dark.svg",
+  "/logo.png",
+  "/images/printers/generic-fdm.png",
+  "/manifest.en.webmanifest",
+  "/manifest.es.webmanifest",
+];
 const SHELL = [
   "/",
   "/offline.html",
@@ -59,14 +67,22 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (
     request.method !== "GET" ||
+    request.headers.has("Authorization") ||
     url.origin !== self.location.origin ||
     url.pathname.startsWith("/api/")
   )
     return;
 
   const navigation = request.mode === "navigate";
-  const key = navigation ? "/" : request;
   const immutable = url.pathname.startsWith("/assets/");
+  if (
+    !navigation &&
+    !immutable &&
+    !SHELL.includes(url.pathname) &&
+    !PUBLIC_FILES.includes(url.pathname)
+  )
+    return;
+  const key = navigation ? "/" : request;
   const network = fetch(request);
   event.waitUntil(
     network.then((response) => remember(key, response, immutable)).catch(() => undefined),

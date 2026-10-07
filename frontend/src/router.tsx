@@ -3,6 +3,8 @@ import { createBrowserRouter } from "react-router-dom";
 import { Suspense } from "react";
 import { lazyImport } from "@/lib/lazy-component";
 
+import { RouteError } from "@/components/route-error";
+
 import RootLayout from "@/root-layout";
 import HomePage from "@/pages/home";
 
@@ -44,6 +46,7 @@ export const router = createBrowserRouter([
   // RootLayout so it bypasses auth/setup gating and the app chrome.
   {
     path: "share/:token",
+    errorElement: <RouteError />,
     element: (
       <RouteChunk>
         <SharePage />
@@ -52,6 +55,7 @@ export const router = createBrowserRouter([
   },
   {
     element: <RootLayout />,
+    errorElement: <RouteError />,
     children: [
       {
         path: "search",

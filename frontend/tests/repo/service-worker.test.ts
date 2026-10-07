@@ -31,7 +31,7 @@ function worker({
     },
     caches: {
       open,
-      keys: async () => ["printstash-shell-v4", "printstash-shell-v5", "unrelated"],
+      keys: async () => ["printstash-shell-v5", "printstash-shell-v6", "unrelated"],
       delete: async (key: string) => {
         deletions.push(key);
       },
@@ -41,11 +41,11 @@ function worker({
     Response,
     Promise,
   });
-  const invoke = (type: string, path = "/theme-bootstrap.js") => {
+  const invoke = (type: string, path = "/theme-bootstrap.js", headers: HeadersInit = {}) => {
     const lifetimes: Promise<unknown>[] = [];
     let response: Promise<Response> | undefined;
     handlers.get(type)!({
-      request: new Request(`https://printstash.test${path}`),
+      request: new Request(`https://printstash.test${path}`, { headers }),
       waitUntil: (promise) => {
         lifetimes.push(promise);
       },
@@ -68,6 +68,44 @@ const cache = () => ({
 });
 
 describe("bootstrap service worker", () => {
+  it.each(["/private-export", "/api/v1/auth/me", "/api/v1/files/1/thumbnail"])(
+    "leaves non-shell reads to the browser: %s",
+    async (path) => {
+      const stored = cache();
+      const { response, done } = worker({
+        open: async () => stored,
+        network: async () => new Response("private bytes"),
+      }).invoke("fetch", path);
+
+      await done();
+
+      expect(response).toBeUndefined();
+      expect(stored.put).not.toHaveBeenCalled();
+    },
+  );
+  it("leaves authenticated static requests to the browser", async () => {
+    const stored = cache();
+    const { response, done } = worker({
+      open: async () => stored,
+      network: async () => new Response("authorized bytes"),
+    }).invoke("fetch", "/assets/private.js", { Authorization: "Bearer test-token" });
+
+    await done();
+
+    expect(response).toBeUndefined();
+    expect(stored.put).not.toHaveBeenCalled();
+  });
+  it("delivers bootstrap when cache storage rejects", async () => {
+    const { response, done } = worker({
+      open: async () => {
+        throw new Error("cache unavailable");
+      },
+      network: async () => new Response("network bootstrap"),
+    }).invoke("fetch");
+
+    expect(await (await response!).text()).toBe("network bootstrap");
+    await done();
+  });
   it.each(["/theme-bootstrap.js", "/locale-shell.js", "/assets/index-hashed.js"])(
     "delivers %s without waiting for Cache Storage",
     async (path) => {
@@ -100,7 +138,7 @@ describe("bootstrap service worker", () => {
       },
     }).invoke("fetch");
     expect(await (await response!).text()).toBe("offline bootstrap");
-    expect(open).toHaveBeenCalledWith("printstash-shell-v5");
+    expect(open).toHaveBeenCalledWith("printstash-shell-v6");
     await done();
   });
   it("does not rewrite an already cached hashed build asset", async () => {
@@ -126,6 +164,6 @@ describe("bootstrap service worker", () => {
   it("updates the shell without deleting unrelated caches", async () => {
     const runtime = worker({ open: async () => cache(), network: async () => new Response() });
     await runtime.invoke("activate").done();
-    expect(runtime.deletions).toEqual(["printstash-shell-v4"]);
+    expect(runtime.deletions).toEqual(["printstash-shell-v5"]);
   });
 });

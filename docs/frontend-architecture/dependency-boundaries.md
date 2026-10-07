@@ -56,11 +56,13 @@ changes are needed.
   internals remain free to compose one another. Shared DTOs cannot depend on
   application implementation.
 
-The manifest has **15 public modules**: auth/entry, setup/entry, work/queries,
-printers/queries, and library/{authority,batch-edits,browse,model-detail,multipart,
-mutations,navigation-state,navigation,reading-position,thumbnails,url}. A new file
-is private by default; extending the manifest is an explicit API decision, not
-an exemption based on directory placement.
+The explicit `FEATURE_PUBLIC_MODULES` manifest in the checker is authoritative.
+A new file is private by default; extending it is an API decision, not an exemption
+based on directory placement. The M10 review adds printer `settings-edit` (captured
+conditional command/review state), `settings-review` (the shared review UI consumed
+by list/detail forms), and Library `builds` (Build query/command owner consumed by
+the Build route). Their exported contracts already serve external consumers;
+registering them preserves the boundary without introducing forwarding barrels.
 
 There is exactly one migration exception: `src/lib/api/request.ts` may import
 `queryClient` and `invalidateQueriesForPath` from `src/lib/query-client.ts` for

@@ -1,4 +1,4 @@
-/** Obsolete lazy chunks recover once; repeated failures surface and successful imports clear the recovery latch. */
+/** Obsolete lazy chunks recover once; repeated failures surface and unrelated successful imports cannot reset the recovery budget. */
 import { Suspense } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,12 +44,18 @@ describe("lazy chunk recovery", () => {
     expect(render(Component)).toContain("missing chunk");
     expect(reload).not.toHaveBeenCalled();
   });
-  it("clears the recovery latch after a successful deferred import", async () => {
+  it("keeps recovery bounded across successful imports", async () => {
     flags.set("chunk-reload", "1");
-    const Component = lazyImport(async () => ({ default: () => <span>usable form</span> }));
-    render(Component);
-    await vi.waitFor(() => expect(flags.has("chunk-reload")).toBe(false));
-    expect(render(Component)).toContain("usable form");
+    const Successful = lazyImport(async () => ({ default: () => <span>usable form</span> }));
+    render(Successful);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(render(Successful)).toContain("usable form");
+    const Failed = lazyImport(() => Promise.reject(new Error("missing later chunk")));
+
+    render(Failed);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(render(Failed)).toContain("missing later chunk");
     expect(reload).not.toHaveBeenCalled();
   });
 

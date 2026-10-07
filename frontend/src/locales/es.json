@@ -4287,5 +4287,7 @@
   "Select at least one printer, or choose All printers.": "Selecciona al menos una impresora o elige Todas las impresoras.",
   "Current channel": "Canal actual",
   "Requested": "Solicitado",
-  "Current": "Actual"
+  "Current": "Actual",
+  "Page unavailable": "Página no disponible",
+  "Reload page": "Recargar página"
 }

@@ -155,6 +155,21 @@ test.describe("production PWA cache contracts", () => {
     });
   }
 
+  test("delivers bootstrap when cache storage rejects", async ({ page, context }) => {
+    await openControlledApplication(page);
+    const worker = context.serviceWorkers()[0];
+    await worker.evaluate(() => {
+      caches.open = async () => {
+        throw new DOMException("Storage unavailable", "SecurityError");
+      };
+    });
+
+    const response = await page.goto("/settings");
+
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+  });
+
   test("delivers the production bootstrap offline", async ({ page, context }) => {
     await openControlledApplication(page);
     await expectNoPrivateCacheEntries(page);
@@ -170,5 +185,32 @@ test.describe("production PWA cache contracts", () => {
     } finally {
       await context.setOffline(false);
     }
+  });
+});
+
+test.describe("production route recovery", () => {
+  test.use({ serviceWorkers: "block" });
+
+  test("recovers a persistently missing route through explicit reload", async ({
+    page,
+    context,
+  }) => {
+    let documents = 0;
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents += 1;
+    });
+    await context.route(/\/assets\/settings-[^/]+\.js$/, (route) =>
+      route.fulfill({ status: 404, body: "Missing deployed chunk" }),
+    );
+
+    await page.goto("/settings");
+
+    await expect(page.getByRole("heading", { name: "Page unavailable" })).toBeVisible();
+    expect(documents).toBe(2);
+    await expect(page.getByRole("button", { name: "Reload page" })).toBeVisible();
+    await context.unroute(/\/assets\/settings-[^/]+\.js$/);
+    await page.getByRole("button", { name: "Reload page" }).click();
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    expect(documents).toBe(3);
   });
 });

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep missing-route recovery bounded even when other chunks load successfully.
+  Show a localized reload action when a route remains unavailable. Restrict the
+  offline worker cache to public static resources and exclude bearer requests.
+
 - Detect competing notification channel and global-switch edits. Keep drafts for
   explicit review after conflicts or uncertain saves; revised saves preserve
   untouched fields. Adopting a replacement clears old credential input. Prevent

@@ -605,3 +605,14 @@ stops before download/preparation after an uncertain or conflicting settings sav
 requires explicit review/adoption, and never retries a gesture automatically.
 Review snapshots remain local to the active editor. See the [Search matrix](../frontend-m8-search-edit-validation.md)
 and the [earlier M8 qualification](../frontend-m8-validation.md).
+
+### Static delivery recovery (M10 checkpoint)
+
+The service worker owns navigation shell and explicit public static paths only;
+API and Authorization-bearing requests never enter its cache. Shell version v6
+retires the prior broader cache. Network bootstrap delivery does not await cache
+writes and continues when Cache Storage rejects. Deferred imports get at most one
+automatic reload per tab session; an unrelated successful import cannot reset
+that budget. An eager RouteError uses the existing UI primitives and localized
+reload/back actions when a route still cannot load. No server rendering/runtime
+or routing-framework change is required. Evidence: `docs/frontend-m10-validation.md`.

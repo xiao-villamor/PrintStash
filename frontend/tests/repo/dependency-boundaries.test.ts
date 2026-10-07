@@ -66,6 +66,20 @@ describe("inspectDependencies", () => {
   });
 
   it.each([
+    "src/features/printers/settings-edit.ts",
+    "src/features/printers/settings-review.tsx",
+    "src/features/library/builds.ts",
+  ])("accepts published editing and Build interfaces: %s", (target) => {
+    const result = edge(
+      "src/components/consumer.tsx",
+      target,
+      `import { value } from "@/${target.slice(4).replace(/\.tsx?$/, "")}";`,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it.each([
     { label: "relative", specifier: "./leaf", target: "src/leaf.ts" },
     { label: "alias", specifier: "@/leaf", target: "src/leaf.ts" },
     { label: "directory index", specifier: "./leaf", target: "src/leaf/index.ts" },
