@@ -6,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { ApiError } from "@/lib/errors";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, withSessionRequest } from "@/lib/session-transport";
 import { subscribeEvents } from "@/lib/events";
@@ -217,10 +218,14 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
       session === initialSession && initialPrinter?.id === id ? initialPrinter : undefined,
     initialDataUpdatedAt: 0,
   });
-  const printer = enabled ? (detail.data ?? null) : null;
-  const jobs = useQuery({ ...printerJobsOptions(id), enabled });
-  const files = useQuery({ ...printerFilesOptions(id), enabled });
-  const canAdmin = enabled && Boolean(printer?.access.can_admin);
+  const accessDenied =
+    detail.error instanceof ApiError &&
+    (detail.error.status === 403 || detail.error.status === 404);
+  const allowed = enabled && !accessDenied;
+  const printer = allowed ? (detail.data ?? null) : null;
+  const jobs = useQuery({ ...printerJobsOptions(id), enabled: allowed });
+  const files = useQuery({ ...printerFilesOptions(id), enabled: allowed });
+  const canAdmin = allowed && Boolean(printer?.access.can_admin);
   const diagnostics = useQuery({ ...printerDiagnosticsOptions(id), enabled: canAdmin });
   const canConfigure = canAdmin && printer?.provider === "moonraker";
   const config = useQuery({ ...printerConfigOptions(id), enabled: canConfigure });
@@ -231,6 +236,10 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
     [client],
   );
   const refreshAll = useCallback(async () => {
+    if (accessDenied) {
+      await refresh(printerKeys.detail(id));
+      return;
+    }
     await Promise.all(
       [
         printerKeys.detail(id),
@@ -240,27 +249,18 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
         printerKeys.config(id),
       ].map(refresh),
     );
-  }, [id, refresh]);
+  }, [accessDenied, id, refresh]);
   useEffect(() => {
     if (!enabled) return;
     return subscribeEvents((event) => {
       if (event.type === "resync") void refreshAll();
     });
   }, [enabled, refreshAll]);
-  const publishPrinter = useCallback(
-    (updated: PrinterRead) =>
-      withSessionRequest(async (request) => {
-        if (updated.id !== id) throw new Error("printer_identity_mismatch");
-        await client.cancelQueries({ queryKey: printerKeys.detail(id), exact: true });
-        request.assertCurrent();
-        client.setQueryData(printerKeys.detail(id), updated);
-      }),
-    [client, id],
-  );
   return {
     printer,
-    jobs: enabled ? (jobs.data ?? []) : [],
-    files: enabled ? (files.data ?? []) : [],
+    accessDenied,
+    jobs: allowed ? (jobs.data ?? []) : [],
+    files: allowed ? (files.data ?? []) : [],
     diagnostics: canAdmin ? (diagnostics.data ?? null) : null,
     config: canConfigure ? (config.data ?? null) : null,
     checkingDiagnostics: diagnostics.isFetching,
@@ -275,7 +275,6 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
       ].find((query) => query.error)?.error ?? null,
     refresh,
     refreshAll,
-    publishPrinter,
   };
 }
 

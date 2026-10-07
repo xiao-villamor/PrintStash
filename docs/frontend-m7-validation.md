@@ -1,9 +1,9 @@
 # M7 — asynchronous workflow qualification
 
-> Closure correction (2026-10-07): reopened. The results below remain historical
-> evidence for implemented behaviors, but do not prove complete plan acceptance.
-> See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
-> competing-edit contracts and corrected execution order.
+> Closure correction (2026-10-07): the missing printer-settings contract is now
+> implemented and qualified below. Earlier async evidence is preserved separately.
+> M7 is locally accepted; final delivery and required CI remain open. See the
+> [M5–M8 reassessment](frontend-milestone-reassessment.md) for the remaining M8 gaps.
 
 
 Status: locally closed after M6 acceptance e1746a46. Final delivery and CI remain open. This pass reconciles preserved M7
@@ -206,3 +206,97 @@ these existing limits are disclosed, without unsupported performance claims.
 M7 acceptance follows completed M0–M6. All M7 acceptance rows above have named
 coverage and current qualification. M8 is next; no M8 implementation belongs to
 this closure. No full-suite coverage, final CI or performance improvement is claimed.
+
+## Reopened printer settings contract
+
+The settings aggregate must reject stale edits independently of live telemetry.
+The backend now compares a captured settings version atomically; both first-party
+editors retain their draft, review authorized current settings and explicitly resubmit.
+Legacy clients remain additive-compatible; their writes invalidate captured bases.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| PE1 | rejects a competing settings edit | Error | Two edits share a base | Second PATCH returns 412; first name remains | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_rejects_a_competing_settings_edit` |
+| PE2 | requires the advertised precondition | Error | conditional-v1 without If-Match | 428; name unchanged | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_requires_the_advertised_precondition` |
+| PE3 | rejects malformed editing bases | Error | Wrong entity, epoch, version, contract | Refused without changing settings | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_rejects_malformed_editing_bases` |
+| PE4 | invalidates a base after a legacy edit | Edge | Unconditional PATCH then old conditional PATCH | Legacy accepted; stale edit rejected | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_invalidates_a_base_after_an_external_settings_write[legacy-api]` |
+| PE5 | preserves the base during telemetry updates | Edge | Status/error/timestamp changes | Settings save still accepted | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_preserves_the_base_during_telemetry_updates` |
+| PE6 | invalidates a base after an external settings write | Edge | Direct persisted settings change | Stale PATCH rejected | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_invalidates_a_base_after_an_external_settings_write[direct-writer]` |
+| PE7 | rejects a prior database history | Error | Epoch rotated with unchanged settings version | Stale PATCH rejected | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_rejects_a_prior_database_history` |
+| PE8 | rolls back an invalid settings edit | Error | Provider configuration invalid | Neither settings nor version consumed | Integration | ✅ `backend/tests/integration/api/v1/printers/test_editing.py::test_rolls_back_an_invalid_settings_edit` |
+| PE9 | rechecks revoked editor authority | Error | Account or printer permission changed after initial read | No write committed | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_revoked_administrator_authority_rejects_the_edit` |
+| PE10 | preserves existing rows across schema upgrade | Edge | Database at prior migration | Settings retained; fresh and upgraded triggers agree | Integration | ✅ `backend/tests/integration/db/migrations/test_printer_edit_version.py::test_upgrade_preserves_existing_printer_settings` |
+| PE11 | serializes simultaneous settings edits on PostgreSQL | Edge | Concurrent writers use one base | Exactly one commit accepted | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_only_one_editor_can_commit_from_a_shared_base` |
+| PE12 | preserves a conflicted printer draft for review | Error | Competing save | Draft retained; explicit review/revised save | Frontend unit / Playwright | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::preserves a conflicted printer draft for an explicit revised save` |
+| PE13 | retires a printer draft with its session | Edge | Session changes during save/review | Old result cannot publish | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::ignores a settings acknowledgement from a retired session` |
+| PE14 | reviews an uncertain printer save | Error | Accepted write loses its response | Read before next save; no automatic overwrite | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::requires review after an uncertain printer save` |
+| PE15 | preserves browse invalidation across downgrade | Edge | Remove settings version then update printer | Existing catalog revision still advances | Integration | ✅ `backend/tests/integration/db/migrations/test_printer_edit_version.py::test_round_trip_preserves_existing_settings` |
+| PE16 | retains a claim after a transaction rollback | Edge | Claim and flush then rollback | Original version remains usable | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_rollback_preserves_an_unused_editing_base` |
+| PE17 | accepts a current conditional settings edit | Happy | Current authorized base | New settings committed with advancing version | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_a_current_administrator_can_commit_an_explicit_edit` |
+| PE18 | accepts an explicit legacy settings command | Edge | No contract headers | Write accepted and base advanced | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_explicit_legacy_commands_can_save_without_a_base` |
+| PE19 | renders migration SQL without connecting | Edge | SQLite/PostgreSQL offline render | Column and trigger DDL emitted | Integration | ✅ `backend/tests/integration/db/migrations/test_printer_edit_version.py::test_renders_the_upgrade_without_a_database_connection` |
+| PE20 | sends the captured printer editing headers | Happy | Draft predates a background refetch | Original base on PATCH; advancing receipt required | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::sends the original settings base after a background refetch` |
+| PE21 | rejects an invalid printer acknowledgement | Error | Wrong identity, epoch or non-advancing version | No confirmed success; explicit review required | Frontend unit | ✅ `frontend/src/lib/api/__tests__/printers.test.ts::rejects an acknowledgement with $label` |
+| PE22 | adopts authorized current settings | Edge | Conflicted draft including local credential | Explicit adoption resets fields and clears secret without PATCH | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::adopts reviewed values without publishing the credential draft` |
+| PE23 | refuses revised credentials after a provider change | Error | Reviewed provider differs from draft | Revised save disabled until explicit adoption | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::requires adoption when the reviewed connection uses another provider` |
+| PE24 | retires an inaccessible editor after denied review | Error | GET review returns 403 | Editor removed; explicit read retry; no write | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::retires the inaccessible printer editor after review is denied` |
+| PE25 | reviews a competing quick model edit | Error | Card editor receives 412 | Accessible review inside model dialog; explicit retry | Frontend unit | ✅ `frontend/src/components/__tests__/printers-list.test.tsx::reviews a competing quick model edit inside its dialog` |
+| PE26 | rejects a second competing edit after review | Error | Another editor wins after review GET | Revised PATCH still conditional; draft retained | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::rejects a second conflict after reviewing current printer settings` |
+| PE27 | preserves a newer cached printer after a delayed acknowledgement | Edge | Cache observes newer version while PATCH pending | Older receipt cannot replace newer server state | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::preserves a newer printer already observed while a save was pending` |
+| PE28 | completes printer conflict recovery against the backend | Happy | Two browser forms edit one printer | Conflict shown; explicit revised save preserves other fields after reload | Playwright real | ✅ `frontend/tests/e2e-real/printers.spec.ts::two printer editors resolve a conflict without replacing untouched settings` |
+| PE29 | validates the revised settings draft | Error | Empty required name after review | Browser validity blocks another PATCH | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::validates the revised settings draft before sending it` |
+| PE30 | rechecks a revoked printer grant | Error | Admin grant removed after actor/row lookup | No settings or version committed | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_rechecks_a_revoked_printer_grant` |
+| PE31 | refuses settings edits on a trashed printer | Error | Legacy command targets deleted row | No settings change | Integration | ✅ `backend/tests/integration/modules/printing/test_printer_edits.py::test_refuses_a_legacy_edit_on_a_trashed_printer` |
+| PE32 | retires an in-flight settings review | Edge | Session changes while authorized GET is pending | Late values cannot populate the replacement session | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::retires an in-flight printer settings review with its session` |
+| PE33 | retires a printer view after access is revoked | Error | Loaded detail later returns 403/404 | Controls removed; live connection disposed | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::retires a loaded printer view after a %s denial` |
+| PE34 | recovers a denied printer after explicit retry | Happy | Permission restored after denied detail | Fresh authorized detail and a new live connection become available | Frontend unit | ✅ `frontend/src/components/__tests__/printer-detail.test.tsx::recovers a denied printer after explicit retry` |
+
+
+### Printer-settings qualification results
+
+- Backend CRUD, conditional API and printer RBAC selection: **80 passed** (16.05s).
+- Atomic owner on SQLite/PostgreSQL: original **20 passed** within the initial
+  38-pass combined run; the added grant-revocation/deleted-row selection added
+  **4 passed** (75.65s). The original combined run also had two migration fixture
+  errors, corrected before the schema gate below.
+- Migration upgrade/downgrade/offline render, model-versus-chain, migration
+  conventions and database parity: **165 passed** (326.71s). A downgrade
+  regression first proved that recreating the table dropped existing browse
+  triggers; native column removal now preserves them. The initial PostgreSQL
+  fixture used enum values instead of persisted enum names; corrected.
+- OpenAPI snapshot: **1 passed** (8.14s). Configured Pyright and the new contract
+  module/schema check: zero errors. An additional forced check of legacy router
+  and model files outside configured scope reported 41 errors; that exploratory
+  check is not green and has no independently measured baseline here.
+- Printer detail, card editor and API tests: **135 passed** (28.72s). The later
+  lost-response adoption/session-retirement extension: **2 passed** (6.65s).
+  Detail plus feature query owner after permission-denial handling: **80 passed**
+  (16.46s). Explicit authorized recovery after denial: **1 passed** (4.50s). Denial cases first failed with stale controls visible; assertions wait
+  for Query's scheduled observer notification, not merely request settlement.
+- Mock-browser printer flows: **3 passed** (34.8s). Real-backend two-editor flow:
+  **1 passed** (15.2s body, 1.2m with setup). Its initial failure was an overly
+  exact label lookup after persistence; the accessible textbox-role lookup passed.
+- Frontend formatting, lint, app/workspace type checks and production build
+  passed before the final denial increment; final static results are recorded
+  below. The build retained its existing large-chunk warning. Scoped backend
+  Ruff and formatting passed.
+
+These are separate focused invocations, not one uninterrupted all-green suite.
+Earlier intermediate failures included missing localization keys and an e2e
+suite nesting violation; the corrected affected 103-case run passed. No broad
+coverage gate, final PR CI, latency or memory improvement is claimed. Credentials
+remain component-local, outside Query/MutationCache; permission denial hides
+retained private reads and retires the live connection, while session retirement
+clears the private cache. A transient read failure does not revoke access.
+
+Removed mechanisms: unconditional first-party printer settings updates, the
+unused `publishPrinter` callback, post-commit receipt refresh, and quick-editor
+saves outside the shared settings command. Legacy third-party writes remain
+explicitly unprotected; they advance the settings base and invalidate stale
+conditional clients. Versions are monotonic, not necessarily consecutive.
+Rollback requires reverting the UI and conditional-client requirement together;
+retain the additive database column/contract during a mixed-client rollout.
+
+Final post-denial static gate: formatting **772 files**, lint with warnings denied,
+application plus both workspace type checks, and production build **passed**
+(4.20s build; large-chunk warning retained). `git diff --check` passed.

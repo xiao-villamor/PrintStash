@@ -678,6 +678,304 @@ describe("PrinterDetailPage", () => {
       );
     });
 
+    it("preserves a conflicted printer draft for an explicit revised save", async () => {
+      const user = userEvent.setup();
+      const base = {
+        ...aPrinter({ id: 4, name: "Voron" }),
+        edit_epoch: "a".repeat(32),
+        edit_version: 1,
+      };
+      const latest = {
+        ...base,
+        name: "Other operator",
+        notes: "Keep these notes",
+        edit_version: 2,
+      };
+      const app = renderPrinter({
+        printer: base,
+        routes: {
+          "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      await openSettings(user);
+      await user.clear(screen.getByLabelText("Name"));
+      await user.type(screen.getByLabelText("Name"), "My draft");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      const review = await screen.findByRole("button", { name: "Review current settings" });
+      expect(screen.getByLabelText("Name")).toHaveValue("My draft");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      app.route({ "GET /api/v1/printers/4": json(latest) });
+      await user.click(review);
+      expect(
+        await within(screen.getByRole("status", { name: "Current printer settings" })).findByText(
+          "Other operator",
+        ),
+      ).toBeVisible();
+      expect(screen.getByLabelText("Name")).toHaveValue("My draft");
+      app.route({
+        "PATCH /api/v1/printers/4": json({ ...latest, name: "My draft", edit_version: 3 }),
+      });
+      await user.click(screen.getByRole("button", { name: "Save revised changes" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[1].body)).toEqual({ name: "My draft" });
+      expect(await screen.findByRole("heading", { name: "My draft" })).toBeVisible();
+    });
+
+    it("requires review after an uncertain printer save", async () => {
+      const user = userEvent.setup();
+      const base = {
+        ...aPrinter({ id: 4, name: "Voron" }),
+        edit_epoch: "a".repeat(32),
+        edit_version: 1,
+      };
+      const app = renderPrinter({
+        printer: base,
+        routes: {
+          "PATCH /api/v1/printers/4": () => Promise.reject(new TypeError("Connection lost")),
+        },
+      });
+      await openSettings(user);
+      await user.clear(screen.getByLabelText("Name"));
+      await user.type(screen.getByLabelText("Name"), "Possibly saved");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      expect(await screen.findByRole("button", { name: "Review current settings" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(screen.getByLabelText("Name")).toHaveValue("Possibly saved");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      app.route({
+        "GET /api/v1/printers/4": json(
+          aPrinter({ id: 4, name: "Possibly saved", edit_version: 2 }),
+        ),
+      });
+      await user.click(screen.getByRole("button", { name: "Review current settings" }));
+      await user.click(await screen.findByRole("button", { name: "Use current values" }));
+      expect(screen.getByLabelText("Name")).toHaveValue("Possibly saved");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("sends the original settings base after a background refetch", async () => {
+      const user = userEvent.setup();
+      const base = aPrinter({ id: 4, name: "Voron" });
+      const sent: Headers[] = [];
+      const app = renderPrinter({
+        printer: base,
+        routes: {
+          "PATCH /api/v1/printers/4": (_url, init) => {
+            sent.push(new Headers(init?.headers));
+            return json({ detail: "edit_conflict" }, 412);
+          },
+        },
+      });
+      await openSettings(user);
+      await user.type(screen.getByLabelText("Name"), " draft");
+      app.route({
+        "GET /api/v1/printers/4": json({ ...base, edit_version: 7, name: "Other editor" }),
+      });
+      await act(async () =>
+        queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
+      );
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("button", { name: "Review current settings" });
+      expect(sent[0]?.get("If-Match")).toBe(`"printer-4-e${base.edit_epoch}-v1"`);
+      expect(sent[0]?.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+      expect(screen.getByLabelText("Name")).toHaveValue("Voron draft");
+    });
+
+    it("adopts reviewed values without publishing the credential draft", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.type(screen.getByPlaceholderText("Unchanged"), "draft-only-credential");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("button", { name: "Review current settings" });
+      expect(
+        JSON.stringify(
+          queryClient
+            .getQueryCache()
+            .getAll()
+            .map((query) => query.state.data),
+        ),
+      ).not.toContain("draft-only-credential");
+      expect(
+        JSON.stringify(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .map((mutation) => mutation.state.variables),
+        ),
+      ).not.toContain("draft-only-credential");
+      app.route({
+        "GET /api/v1/printers/4": json(
+          aPrinter({ id: 4, name: "Reviewed printer", edit_version: 2 }),
+        ),
+      });
+      await user.click(screen.getByRole("button", { name: "Review current settings" }));
+      await user.click(await screen.findByRole("button", { name: "Use current values" }));
+      expect(screen.getByLabelText("Name")).toHaveValue("Reviewed printer");
+      expect(screen.getByPlaceholderText("Unchanged")).toHaveValue("");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("requires adoption when the reviewed connection uses another provider", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.type(screen.getByPlaceholderText("Unchanged"), "draft-only-credential");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      app.route({
+        "GET /api/v1/printers/4": json(
+          aPrinter({
+            id: 4,
+            provider: "octoprint",
+            edit_version: 2,
+            octoprint_url: "http://other.invalid",
+          }),
+        ),
+      });
+      await user.click(await screen.findByRole("button", { name: "Review current settings" }));
+      expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+      expect(screen.getByPlaceholderText("Unchanged")).toHaveValue("draft-only-credential");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Use current values" }));
+      expect(screen.getByPlaceholderText("Unchanged")).toHaveValue("");
+      expect(screen.getByDisplayValue("http://other.invalid")).toBeVisible();
+    });
+
+    it("retires the inaccessible printer editor after review is denied", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      app.route({ "GET /api/v1/printers/4": json({ detail: "printer_permission_denied" }, 403) });
+      await user.click(await screen.findByRole("button", { name: "Review current settings" }));
+      await waitFor(() => expect(screen.queryByLabelText("Name")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: "Save revised changes" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("rejects a second conflict after reviewing current printer settings", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.type(screen.getByLabelText("Name"), " draft");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      app.route({ "GET /api/v1/printers/4": json(aPrinter({ id: 4, edit_version: 2 })) });
+      await user.click(await screen.findByRole("button", { name: "Review current settings" }));
+      await user.click(await screen.findByRole("button", { name: "Save revised changes" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+      expect(screen.getByLabelText("Name")).toHaveValue("Voron draft");
+      expect(
+        screen.queryByRole("button", { name: "Save revised changes" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    });
+
+    it("validates the revised settings draft before sending it", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      app.route({ "GET /api/v1/printers/4": json(aPrinter({ id: 4, edit_version: 2 })) });
+      await user.click(await screen.findByRole("button", { name: "Review current settings" }));
+      await user.clear(screen.getByLabelText("Name"));
+      await user.click(await screen.findByRole("button", { name: "Save revised changes" }));
+      expect(screen.getByLabelText("Name")).toBeInvalid();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("ignores a settings acknowledgement from a retired session", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderPrinter({ routes: { "PATCH /api/v1/printers/4": () => pending.promise } });
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+      act(() => retirePrivateSessionScope());
+      await act(async () =>
+        pending.resolve(json(aPrinter({ id: 4, name: "Old session receipt", edit_version: 2 }))),
+      );
+      expect(
+        screen.queryByRole("heading", { name: "Old session receipt" }),
+      ).not.toBeInTheDocument();
+      expect(
+        JSON.stringify(
+          queryClient
+            .getQueryCache()
+            .getAll()
+            .map((query) => query.state.data),
+        ),
+      ).not.toContain("Old session receipt");
+    });
+
+    it("retires an in-flight printer settings review with its session", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderPrinter({
+        routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
+      });
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      let reads = 0;
+      app.route({
+        "GET /api/v1/printers/4": () => {
+          reads += 1;
+          return reads === 1 ? pending.promise : json({ detail: "printer_permission_denied" }, 403);
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Review current settings" }));
+      await waitFor(() => expect(reads).toBe(1));
+      act(() => retirePrivateSessionScope());
+      await act(async () =>
+        pending.resolve(json(aPrinter({ id: 4, name: "Retired review", edit_version: 2 }))),
+      );
+      expect(screen.queryByText("Retired review")).not.toBeInTheDocument();
+      expect(
+        JSON.stringify(
+          queryClient
+            .getQueryCache()
+            .getAll()
+            .map((query) => query.state.data),
+        ),
+      ).not.toContain("Retired review");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("preserves a newer printer already observed while a save was pending", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderPrinter({ routes: { "PATCH /api/v1/printers/4": () => pending.promise } });
+      await openSettings(user);
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+      act(() =>
+        queryClient.setQueryData(
+          ["printers", 4],
+          aPrinter({ id: 4, name: "Newest printer", edit_version: 3 }),
+        ),
+      );
+      await act(async () =>
+        pending.resolve(json(aPrinter({ id: 4, name: "Older receipt", edit_version: 2 }))),
+      );
+      expect(screen.getByRole("heading", { name: "Newest printer" })).toBeVisible();
+      expect(queryClient.getQueryData(["printers", 4])).toMatchObject({
+        name: "Newest printer",
+        edit_version: 3,
+      });
+    });
+
     it("names the credential the provider actually uses", async () => {
       // "API key" on a Bambu printer is the wrong thing to go looking for; it
       // wants the LAN access code printed on the machine.
@@ -946,6 +1244,41 @@ describe("PrinterDetailPage HTTP ownership", () => {
       expect(app.requestsWithMethod("GET").filter((call) => call.url.includes(path))).toHaveLength(
         1,
       );
+  });
+
+  it.each([403, 404])("retires a loaded printer view after a %s denial", async (status) => {
+    const app = renderPrinter();
+    await screen.findByRole("heading", { name: "Voron" });
+    await waitFor(() => expect(FakeSocket.latest?.onmessage).not.toBeNull());
+    const socket = FakeSocket.latest;
+    app.route({ "GET /api/v1/printers/4": json({ detail: "printer_permission_denied" }, status) });
+    await act(async () =>
+      queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Voron" })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+    expect(socket?.close).toHaveBeenCalled();
+    expect(socket?.onmessage).toBeNull();
+  });
+
+  it("recovers a denied printer after explicit retry", async () => {
+    const app = renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4": json({ detail: "printer_permission_denied" }, 403),
+      },
+    });
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    app.route({ "GET /api/v1/printers/4": json(aPrinter({ id: 4, name: "Authorized again" })) });
+    const ticketsBeforeRetry = app.requestsWithMethod("POST").length;
+    await userEvent.setup().click(retry);
+    expect(await screen.findByRole("heading", { name: "Authorized again" })).toBeVisible();
+    await waitFor(() =>
+      expect(app.requestsWithMethod("POST")).toHaveLength(ticketsBeforeRetry + 1),
+    );
+    await waitFor(() => expect(FakeSocket.latest?.onmessage).not.toBeNull());
   });
 
   it("preserves settings drafts during revalidation", async () => {

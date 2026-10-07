@@ -12,7 +12,7 @@ export function requireEditingBase(base: EditingBase): void {
 }
 
 export function editHeaders(
-  kind: "model" | "multipart" | "document",
+  kind: "model" | "multipart" | "document" | "printer",
   id: number,
   base: EditingBase,
 ) {

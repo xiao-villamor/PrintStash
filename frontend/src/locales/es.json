@@ -4248,5 +4248,16 @@
   "settings.storageReadFailed": "No se pudo leer la configuración de almacenamiento. Reinténtalo antes de modificarla.",
   "settings.storageRetry": "Reintentar configuración de almacenamiento",
   "settings.storageReviewChanged": "La configuración de almacenamiento cambió durante la revisión. Descarta el borrador y revisa los valores actuales antes de confirmar de nuevo.",
-  "settings.storageDiscardDraft": "Descartar borrador de almacenamiento"
+  "settings.storageDiscardDraft": "Descartar borrador de almacenamiento",
+  "Printer settings changed elsewhere. Review the current values before saving.": "Los ajustes de la impresora han cambiado. Revisa los valores actuales antes de guardar.",
+  "The printer save could not be confirmed. Review the current values before trying again.": "No se ha podido confirmar el guardado. Revisa los valores actuales antes de volver a intentarlo.",
+  "Address": "Dirección",
+  "Adopt the current connection before editing its settings": "Usa la conexión actual antes de editar sus ajustes",
+  "Review current settings": "Revisar ajustes actuales",
+  "Use current values": "Usar valores actuales",
+  "Save revised changes": "Guardar cambios revisados",
+  "Current printer settings": "Ajustes actuales de la impresora",
+  "Stored credential": "Credencial guardada",
+  "Configured": "Configurada",
+  "Not configured": "Sin configurar"
 }

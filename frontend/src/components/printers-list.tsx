@@ -1,5 +1,8 @@
 "use client";
 
+import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
+import { PrinterSettingsReview } from "@/features/printers/settings-review";
+
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -7,7 +10,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
 import { PrinterRead, type PrinterCreate, type PrinterStatus } from "@/types";
-import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
+import { createPrinter, deletePrinter } from "@/lib/api";
 import { usePrinterDashboard, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -537,44 +540,7 @@ function PrinterModelBadge({ printer, canEdit }: { printer: PrinterRead; canEdit
   useUiLocale();
   const [editing, setEditing] = useState(false);
   const displayModel = printer.model_name || printer.detected_model;
-  const [selected, setSelected] = useState(() =>
-    displayModel && PRINTER_MODEL_OPTIONS.includes(displayModel)
-      ? displayModel
-      : displayModel
-        ? OTHER_MODEL_OPTION
-        : "",
-  );
-  const [customValue, setCustomValue] = useState(
-    displayModel && !PRINTER_MODEL_OPTIONS.includes(displayModel) ? displayModel : "",
-  );
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    const modelName = selected === OTHER_MODEL_OPTION ? customValue.trim() : selected;
-    setSaving(true);
-    try {
-      await updatePrinter(printer.id, { model_name: modelName });
-      setEditing(false);
-    } catch (err) {
-      toast.error(err);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (editing) {
-    return (
-      <PrinterModelPicker
-        selected={selected}
-        customValue={customValue}
-        saving={saving}
-        onSelectedChange={setSelected}
-        onCustomValueChange={setCustomValue}
-        onClose={() => setEditing(false)}
-        onSave={save}
-      />
-    );
-  }
+  if (editing) return <PrinterModelEditor printer={printer} onClose={() => setEditing(false)} />;
 
   return (
     <button
@@ -599,10 +565,90 @@ const MODEL_BRANDS = [
   ...Array.from(new Set(PRINTER_MODEL_OPTIONS.map((model) => model.split(" ")[0]))),
 ];
 
+function PrinterModelEditor({
+  printer: initialPrinter,
+  onClose,
+}: {
+  printer: PrinterRead;
+  onClose: () => void;
+}) {
+  const [printer, setPrinter] = useState(initialPrinter);
+  const command = usePrinterSettingsCommand(printer.id);
+  const displayModel = printer.model_name || printer.detected_model;
+  const [selected, setSelected] = useState(() =>
+    displayModel && PRINTER_MODEL_OPTIONS.includes(displayModel)
+      ? displayModel
+      : displayModel
+        ? OTHER_MODEL_OPTION
+        : "",
+  );
+  const [customValue, setCustomValue] = useState(
+    displayModel && !PRINTER_MODEL_OPTIONS.includes(displayModel) ? displayModel : "",
+  );
+  const saving = command.busy;
+
+  async function save(revised = false) {
+    const modelName = selected === OTHER_MODEL_OPTION ? customValue.trim() : selected;
+    if (!modelName) return;
+    try {
+      await command.save(printer, { model_name: modelName }, revised);
+      onClose();
+    } catch (err) {
+      if (!(err instanceof Error && err.name === "AbortError")) toast.error(err);
+    }
+  }
+
+  return (
+    <div>
+      <PrinterModelPicker
+        selected={selected}
+        customValue={customValue}
+        saving={saving}
+        blocked={command.blocked}
+        onSelectedChange={setSelected}
+        onCustomValueChange={setCustomValue}
+        onClose={onClose}
+        onSave={() => {
+          void save();
+        }}
+      >
+        <PrinterSettingsReview
+          canSave={Boolean(selected && (selected !== OTHER_MODEL_OPTION || customValue.trim()))}
+          state={command.state}
+          original={printer}
+          onReview={() => {
+            void command.review().catch((err) => {
+              if (!(err instanceof Error && err.name === "AbortError")) toast.error(err);
+            });
+          }}
+          onAdopt={() => {
+            const latest = command.adopt();
+            setPrinter(latest);
+            const model = latest.model_name || latest.detected_model;
+            setSelected(
+              model && PRINTER_MODEL_OPTIONS.includes(model)
+                ? model
+                : model
+                  ? OTHER_MODEL_OPTION
+                  : "",
+            );
+            setCustomValue(model && !PRINTER_MODEL_OPTIONS.includes(model) ? model : "");
+          }}
+          onSave={() => {
+            void save(true);
+          }}
+        />
+      </PrinterModelPicker>
+    </div>
+  );
+}
+
 function PrinterModelPicker({
   selected,
   customValue,
   saving,
+  blocked,
+  children,
   onSelectedChange,
   onCustomValueChange,
   onClose,
@@ -611,6 +657,8 @@ function PrinterModelPicker({
   selected: string;
   customValue: string;
   saving: boolean;
+  blocked: boolean;
+  children: React.ReactNode;
   onSelectedChange: (model: string) => void;
   onCustomValueChange: (value: string) => void;
   onClose: () => void;
@@ -640,6 +688,7 @@ function PrinterModelPicker({
             <span className="sr-only">{uiText("Search printer models")}</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
+              disabled={saving}
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -707,6 +756,7 @@ function PrinterModelPicker({
         <div className="border-t border-border bg-background pt-4">
           <label className="flex items-center gap-3">
             <input
+              disabled={saving}
               type="radio"
               checked={selected === OTHER_MODEL_OPTION}
               onChange={() => onSelectedChange(OTHER_MODEL_OPTION)}
@@ -716,6 +766,7 @@ function PrinterModelPicker({
               {uiText("Custom model")}
             </span>
             <input
+              disabled={saving}
               value={customValue}
               onFocus={() => onSelectedChange(OTHER_MODEL_OPTION)}
               onChange={(event) => {
@@ -730,11 +781,17 @@ function PrinterModelPicker({
             <Button type="button" variant="outline" onClick={onClose}>
               {uiText("Cancel")}
             </Button>
-            <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>
+            <Button
+              type="button"
+              loading={saving}
+              disabled={!canSave || saving || blocked}
+              onClick={onSave}
+            >
               {uiText("Save model")}
             </Button>
           </div>
         </div>
+        {children}
       </Modal>
     </Localized>
   );

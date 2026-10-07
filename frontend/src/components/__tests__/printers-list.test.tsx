@@ -21,6 +21,7 @@
  * nameable, or the fleet view shows an unlabelled machine forever.
  */
 
+import { anEditingBase } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -110,10 +111,18 @@ function renderPrintersPage(seed: { printers?: PrinterRead[]; dashboard?: Dashbo
 
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   return {
+    ...anEditingBase(),
+    provider_material_sync_enabled: true,
+    operator_release_required: false,
     id: 1,
     name: "Voron 2.4",
     provider: "moonraker",
     moonraker_url: "http://10.0.0.1:7125",
+    has_bambu_access_code: false,
+    has_prusalink_password: false,
+    has_prusalink_api_key: false,
+    has_elegoo_centauri_access_code: false,
+    has_octoprint_api_key: false,
     has_api_key: false,
     access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
     capabilities: {
@@ -345,6 +354,56 @@ describe("PrinterCard", () => {
     expect(patched.url).toBe("/api/v1/printers/1");
     const payload: PrinterUpdate = JSON.parse(patched.body);
     expect(payload).toEqual({ model_name: "Voron 2.4" });
+  });
+
+  it("reviews a competing quick model edit inside its dialog", async () => {
+    const user = userEvent.setup();
+    const original = makePrinter();
+    let latest = makePrinter({ model_name: "Other model", edit_version: 2 });
+    let patches = 0;
+    const headers: Headers[] = [];
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (init?.method === "PATCH") {
+        headers.push(new Headers(init.headers));
+        patches += 1;
+        if (patches === 1)
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "edit_conflict" }), { status: 412 }),
+          );
+        latest = { ...latest, model_name: "Homebrew CoreXY", edit_version: 3 };
+        return Promise.resolve(printerResponse(latest));
+      }
+      const value = url.endsWith("/dashboard")
+        ? EMPTY_DASHBOARD
+        : url.endsWith("/printers")
+          ? [latest]
+          : latest;
+      return Promise.resolve(
+        new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } }),
+      );
+    });
+    renderPrintersPage({ printers: [original] });
+    await user.click(screen.getByText("Set model"));
+    const dialog = screen.getByRole("dialog", { name: "Select printer model" });
+    await user.type(within(dialog).getByPlaceholderText("Enter model name"), "Homebrew CoreXY");
+    await user.click(within(dialog).getByRole("button", { name: "Save model" }));
+    await user.click(
+      await within(dialog).findByRole("button", { name: "Review current settings" }),
+    );
+    expect(await within(dialog).findByText("Other model")).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Save model" })).toBeDisabled();
+    expect(within(dialog).getByPlaceholderText("Enter model name")).toHaveValue("Homebrew CoreXY");
+    expect(patches).toBe(1);
+    await user.click(within(dialog).getByRole("button", { name: "Save revised changes" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Select printer model" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByText("Homebrew CoreXY")).toBeVisible();
+    expect(headers[0]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v1"`);
+    expect(headers[1]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v2"`);
   });
 
   it("falls back to a custom text field for a model not in the list", async () => {

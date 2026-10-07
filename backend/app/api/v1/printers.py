@@ -18,6 +18,7 @@ from fastapi import (
 from printstash_core.printers import ProviderError, ProviderRegistry
 from sqlmodel import Session, select
 
+from app.api.edit_preconditions import edit_precondition
 from app.bootstrap.dependencies import get_hub, get_hub_from_ws
 from app.core.http import get_or_404
 from app.core.logging import get_logger
@@ -41,7 +42,7 @@ from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id, verify_access_token
-from app.modules.printing import dispatch, materials
+from app.modules.printing import dispatch, materials, printer_edits
 from app.modules.printing.printer_files import (
     list_printer_files,
     sync_printer_files,
@@ -58,6 +59,7 @@ from app.modules.printing.printer_provider import (
 )
 from app.modules.printing.unattributed import ensure_unattributed_artifact
 from app.modules.storage.storage_backend.runtime import get_backend
+from app.schemas.editing import EditPrecondition
 from app.schemas.materials import ManualMaterialStateUpdate, PrinterMaterialStateRead
 from app.schemas.printers import (
     HomeAxes,
@@ -183,6 +185,8 @@ def _to_read(p: Printer, role: PrinterRole = PrinterRole.ADMIN) -> PrinterRead:
     return PrinterRead(
         id=p.id,  # type: ignore[arg-type]
         name=p.name,
+        edit_version=p.edit_version,
+        edit_epoch=p.edit_epoch,
         provider=p.provider,
         moonraker_url=p.moonraker_url if can_admin else "",
         has_api_key=bool(p.api_key) if can_admin else False,
@@ -641,6 +645,7 @@ async def create_printer(
 async def update_printer(
     printer_id: int,
     payload: PrinterUpdate,
+    precondition: EditPrecondition = Depends(edit_precondition),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
     hub: PrinterHub = Depends(get_hub),
@@ -650,6 +655,8 @@ async def update_printer(
     )
     _require_superuser_for_connection_update(payload, current_user)
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    printer_edits.claim(session, current_user, p, precondition)
+    _require_superuser_for_connection_update(payload, current_user)
     if payload.provider is not None:
         p.provider = payload.provider
     if payload.name is not None:
@@ -702,10 +709,13 @@ async def update_printer(
     p.detected_model = detect_printer_model(p)
     p.updated_at = utcnow()
     session.add(p)
-    session.commit()
+    session.flush()
     session.refresh(p)
+    # Capture this write while its lock is held, before another editor can save.
+    receipt = _to_read(p)
+    session.commit()
     await hub.restart_printer(printer_id)
-    return _to_read(p)
+    return receipt
 
 
 @router.delete(
@@ -1393,7 +1403,7 @@ async def printer_ws(
         payload = verify_access_token(token)
         try:
             user_id = int(payload["sub"]) if payload and payload.get("sub") else None
-        except (TypeError, ValueError, KeyError):
+        except TypeError, ValueError, KeyError:
             user_id = None
     user = get_user_by_id(session, user_id) if user_id is not None else None
     p = session.get(Printer, printer_id)

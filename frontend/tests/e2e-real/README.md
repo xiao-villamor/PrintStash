@@ -176,3 +176,6 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 
 - `storage/storage-provider.spec.ts`: the WebDAV lifecycle includes a competing
   configuration edit, retained credential draft and explicit conditional retry.
+
+- `printers.spec.ts`: two settings editors detect a stale save, retain the losing
+  draft and explicitly save revised changes without replacing untouched settings.

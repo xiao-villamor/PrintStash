@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M6 retain local acceptance. M7/M8 closure reopened after a requirements reassessment; M7 is active. M9 work is preserved pending those dependencies. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M7 retain local acceptance, including the reopened M7 printer-settings correction. M8 is active for the remaining Profiles/Search conditional-edit contracts. M9 work is preserved pending M8. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -192,13 +192,13 @@ real paged detail return, and removal of ignored navigation APIs are qualified.
 M6 is locally closed with its [startup/assets acceptance](../frontend-m6-validation.md)
 and [200-observation comparison](../frontend-m6-performance.md). Asset leases,
 progressive restoration and Shift selection after append are qualified.
-M7 async ownership and recovery work has [qualified evidence](../frontend-m7-validation.md),
-but complete closure is reopened for the missing printer-settings conflict contract.
+M7 async ownership, recovery and printer-settings conflicts now have
+[qualified evidence](../frontend-m7-validation.md) and local acceptance.
 M8's [qualified Library work](../frontend-m8-validation.md) remains implemented,
 but Profiles and Search settings still lack the required competing-edit contracts.
 The [reassessment](../frontend-milestone-reassessment.md) records the exact source
-contradictions and required regression rows. M7 is the only active target; M8 and
-preserved M9 work wait for their prerequisite closures. A disclosed limitation is
+contradictions and required regression rows. M8 is the only active target;
+preserved M9 work waits for that prerequisite closure. A disclosed limitation is
 not a waiver of an explicit requirement.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an

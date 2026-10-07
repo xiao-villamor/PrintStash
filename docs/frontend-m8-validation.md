@@ -3,7 +3,8 @@
 > Closure correction (2026-10-07): reopened. The results below remain historical
 > evidence for implemented behaviors, but do not prove complete plan acceptance.
 > See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
-> competing-edit contracts and corrected execution order.
+> competing-edit contracts and corrected execution order. M7 has since satisfied
+> its reopened contract; M8 is now active. The closure text below is historical.
 
 
 Status: locally closed after M7 acceptance c4b43c25. Scope: Model/Multipart detail,

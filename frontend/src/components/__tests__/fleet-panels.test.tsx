@@ -16,6 +16,7 @@
  * printer permanently out of rotation with the UI showing it as available.
  */
 
+import { anEditingBase } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -85,10 +86,18 @@ const maintenanceDeps: FleetMaintenanceDeps = {
 
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   return {
+    ...anEditingBase(),
+    provider_material_sync_enabled: true,
+    operator_release_required: false,
     id: 1,
     name: "Voron 2.4",
     provider: "moonraker",
     moonraker_url: "http://10.0.0.1:7125",
+    has_bambu_access_code: false,
+    has_prusalink_password: false,
+    has_prusalink_api_key: false,
+    has_elegoo_centauri_access_code: false,
+    has_octoprint_api_key: false,
     has_api_key: false,
     access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
     capabilities: {

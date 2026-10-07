@@ -16,6 +16,7 @@ from app.db.models import (
     PrintJobState,
     RoutingStrategy,
 )
+from app.schemas.editing import EditingBase
 
 
 def validate_remote_filename_value(value: Optional[str]) -> Optional[str]:
@@ -223,7 +224,7 @@ class PrinterUpdate(BaseModel):
     operator_release_required: Optional[bool] = None
 
 
-class PrinterRead(BaseModel):
+class PrinterRead(EditingBase):
     id: int
     name: str
     provider: PrinterProvider

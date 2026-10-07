@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Detect competing printer settings and quick model edits without treating live
+  telemetry as an edit. Preserve drafts for explicit review after conflicts or
+  uncertain saves; retire the editor and live connection when access is denied.
+
 - Protect backup schedule and local-destination drafts with conditional config
   saves. Preserve confirmed destination updates after partial failure and submit
   only deliberately changed destination fields. First-party configuration writes

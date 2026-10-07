@@ -4248,5 +4248,16 @@
   "settings.storageReadFailed": "Storage configuration could not be read. Retry before making changes.",
   "settings.storageRetry": "Retry storage configuration",
   "settings.storageReviewChanged": "Storage configuration changed during review. Discard the draft and review the latest values before confirming again.",
-  "settings.storageDiscardDraft": "Discard storage draft"
+  "settings.storageDiscardDraft": "Discard storage draft",
+  "Printer settings changed elsewhere. Review the current values before saving.": "Printer settings changed elsewhere. Review the current values before saving.",
+  "The printer save could not be confirmed. Review the current values before trying again.": "The printer save could not be confirmed. Review the current values before trying again.",
+  "Address": "Address",
+  "Adopt the current connection before editing its settings": "Adopt the current connection before editing its settings",
+  "Review current settings": "Review current settings",
+  "Use current values": "Use current values",
+  "Save revised changes": "Save revised changes",
+  "Current printer settings": "Current printer settings",
+  "Stored credential": "Stored credential",
+  "Configured": "Configured",
+  "Not configured": "Not configured"
 }

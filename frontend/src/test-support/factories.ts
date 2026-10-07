@@ -102,10 +102,18 @@ export function printerCapabilities(override?: Partial<PrinterCapabilities>): Pr
 /** A reachable Moonraker printer the caller may fully operate. */
 export function aPrinter(override?: Partial<PrinterRead>): PrinterRead {
   return {
+    ...anEditingBase(),
     id: 1,
     name: "Voron",
     provider: "moonraker",
     moonraker_url: "http://printer.invalid:7125",
+    provider_material_sync_enabled: true,
+    operator_release_required: false,
+    has_bambu_access_code: false,
+    has_prusalink_password: false,
+    has_prusalink_api_key: false,
+    has_elegoo_centauri_access_code: false,
+    has_octoprint_api_key: false,
     has_api_key: false,
     capabilities: printerCapabilities(),
     access: printerAccess(),

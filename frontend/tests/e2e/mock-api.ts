@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { aVaultConfig } from "../../src/test-support/factories";
-import type { VaultConfigUpdate } from "../../src/types";
+import { aVaultConfig, aPrinter } from "../../src/test-support/factories";
+import type { VaultConfigUpdate, PrinterUpdate } from "../../src/types";
 import { aCaption } from "../../src/test-support/captions";
 import { searchPreferences, searchStatus } from "../../src/test-support/search";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -127,7 +127,11 @@ const model = {
   ],
 };
 
-const printer = {
+const initialPrinter = aPrinter({
+  edit_epoch: "a".repeat(32),
+  edit_version: 1,
+  provider_material_sync_enabled: true,
+  operator_release_required: false,
   id: 3,
   name: "ender",
   provider: "moonraker",
@@ -169,7 +173,8 @@ const printer = {
   last_error: null,
   created_at: "2026-05-31T18:51:39.627384",
   updated_at: now,
-};
+});
+let printer = { ...initialPrinter };
 
 const filamentProfiles = [
   {
@@ -444,6 +449,7 @@ function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting"
 }
 
 export function resetMockApiState(): void {
+  printer = { ...initialPrinter };
   configuration = aVaultConfig({ storage_tier: "unguarded" });
   state.externalLibrariesEnabled = false;
   state.ingestJobQueued = false;
@@ -1589,7 +1595,32 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/printers/3") {
     if (req.method === "PATCH") {
-      drainRequest(req, () => sendJson(res, { ...printer, name: "Workshop printer" }));
+      let body = "";
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const expected = `"printer-${printer.id}-e${printer.edit_epoch}-v${printer.edit_version}"`;
+        if (req.headers["x-printstash-edit-contract"] && !req.headers["if-match"]) {
+          sendJson(res, { detail: "edit_precondition_required" }, 428);
+          return;
+        }
+        if (req.headers["if-match"] && req.headers["if-match"] !== expected) {
+          sendJson(res, { detail: "edit_conflict" }, 412);
+          return;
+        }
+        const update: PrinterUpdate = JSON.parse(body);
+        if (update.name !== undefined) printer.name = update.name;
+        if (update.model_name !== undefined) printer.model_name = update.model_name || null;
+        if (update.group !== undefined) printer.group = update.group || null;
+        if (update.notes !== undefined) printer.notes = update.notes;
+        if (update.provider_material_sync_enabled !== undefined)
+          printer.provider_material_sync_enabled = update.provider_material_sync_enabled;
+        if (update.operator_release_required !== undefined)
+          printer.operator_release_required = update.operator_release_required;
+        printer.edit_version += 1;
+        sendJson(res, printer);
+      });
       return;
     }
     sendJson(res, printer);

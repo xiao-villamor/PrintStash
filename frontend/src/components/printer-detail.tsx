@@ -1,5 +1,8 @@
 "use client";
 
+import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
+import { PrinterSettingsReview } from "@/features/printers/settings-review";
+
 import {
   currentLocale,
   knownUiText,
@@ -28,7 +31,6 @@ import {
   pausePrinter,
   resumePrinter,
   setPrinterTemperature,
-  updatePrinter,
 } from "@/lib/api";
 import {
   printerKeys,
@@ -168,6 +170,7 @@ function PrinterDetailView({
   const { refresh, refreshAll } = resources;
   const {
     printer,
+    accessDenied,
     jobs,
     files: printerFiles,
     diagnostics,
@@ -233,7 +236,7 @@ function PrinterDetailView({
     }
 
     async function connect() {
-      if (disposed || !isLoggedIn()) return;
+      if (disposed || accessDenied || !isLoggedIn()) return;
       const version = generation;
       const ticket = new AbortController();
       controller = ticket;
@@ -303,7 +306,7 @@ function PrinterDetailView({
       stopAuth();
       retire();
     };
-  }, [printerId, loadJobs, refreshAll]);
+  }, [accessDenied, printerId, loadJobs, refreshAll]);
 
   async function control(action: "pause" | "resume" | "cancel", fn: () => Promise<void>) {
     if (!auth.isAuthenticated) {
@@ -1091,7 +1094,6 @@ function PrinterDetailView({
               printer={printer}
               canEdit={printer.access.can_admin}
               key={printer.id}
-              onSaved={resources.publishPrinter}
             />
           )}
 
@@ -1439,18 +1441,20 @@ function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObjec
 }
 
 function PrinterSettings({
-  printer,
+  printer: initialPrinter,
   canEdit,
-  onSaved,
 }: {
   printer: PrinterRead;
   canEdit: boolean;
-  onSaved: (printer: PrinterRead) => void | Promise<void>;
 }) {
   useUiLocale();
+  const [printer, setPrinter] = useState(initialPrinter);
+  const command = usePrinterSettingsCommand(printer.id);
   const active = useRef(true);
+  const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
     active.current = true;
+
     return () => {
       active.current = false;
     };
@@ -1465,12 +1469,12 @@ function PrinterSettings({
   const [mainboardId, setMainboardId] = useState(printer.elegoo_centauri_mainboard_id ?? "");
   const [secret, setSecret] = useState("");
   const [providerMaterialSync, setProviderMaterialSync] = useState(
-    printer.provider_material_sync_enabled ?? true,
+    printer.provider_material_sync_enabled,
   );
   const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(
-    printer.operator_release_required ?? false,
+    printer.operator_release_required,
   );
-  const [saving, setSaving] = useState(false);
+  const saving = command.busy;
   const [error, setError] = useState<string | null>(null);
 
   const secretLabel =
@@ -1486,63 +1490,77 @@ function PrinterSettings({
             ? "API key"
             : "Moonraker API key";
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canEdit || saving) return;
+  function adopt(snapshot: PrinterRead) {
+    setPrinter(snapshot);
+    setName(snapshot.name);
+    setModelName(snapshot.model_name ?? "");
+    setGroup(snapshot.group ?? "");
+    setNotes(snapshot.notes ?? "");
+    setAddress(providerAddress(snapshot));
+    setSerial(snapshot.bambu_serial ?? "");
+    setUsername(snapshot.prusalink_username ?? "");
+    setMainboardId(snapshot.elegoo_centauri_mainboard_id ?? "");
+    setProviderMaterialSync(snapshot.provider_material_sync_enabled);
+    setOperatorReleaseRequired(snapshot.operator_release_required);
+    setSecret("");
+    setError(null);
+  }
+
+  async function save(e?: React.FormEvent, revised = false) {
+    e?.preventDefault();
+    if (!canEdit || saving || (!revised && command.blocked)) return;
+    if (form.current && !form.current.reportValidity()) return;
     const session = getSessionVersion();
     const current = () => active.current && session === getSessionVersion();
-    setSaving(true);
     setError(null);
-    const payload: PrinterUpdate = {
-      name: name.trim(),
-      model_name: modelName,
-      group,
-      notes,
-      provider_material_sync_enabled: providerMaterialSync,
-      operator_release_required: operatorReleaseRequired,
-    };
+    const payload: PrinterUpdate = {};
+    if (name.trim() !== printer.name) payload.name = name.trim();
+    if (modelName !== (printer.model_name ?? "")) payload.model_name = modelName;
+    if (group !== (printer.group ?? "")) payload.group = group;
+    if (notes !== (printer.notes ?? "")) payload.notes = notes;
+    if (providerMaterialSync !== printer.provider_material_sync_enabled)
+      payload.provider_material_sync_enabled = providerMaterialSync;
+    if (operatorReleaseRequired !== printer.operator_release_required)
+      payload.operator_release_required = operatorReleaseRequired;
     if (printer.provider === "moonraker") {
-      payload.moonraker_url = address;
+      if (address !== providerAddress(printer)) payload.moonraker_url = address;
       if (secret) payload.api_key = secret;
     } else if (printer.provider === "bambu_lan") {
-      payload.bambu_host = address;
-      payload.bambu_serial = serial;
+      if (address !== providerAddress(printer)) payload.bambu_host = address;
+      if (serial !== (printer.bambu_serial ?? "")) payload.bambu_serial = serial;
       if (secret) payload.bambu_access_code = secret;
     } else if (printer.provider === "prusalink") {
-      payload.prusalink_url = address;
-      payload.prusalink_username = username;
+      if (address !== providerAddress(printer)) payload.prusalink_url = address;
+      if (username !== (printer.prusalink_username ?? "")) payload.prusalink_username = username;
       if (secret) {
         if (printer.prusalink_auth_mode === "api_key") payload.prusalink_api_key = secret;
         else payload.prusalink_password = secret;
       }
     } else if (printer.provider === "elegoo_centauri") {
-      payload.elegoo_centauri_host = address;
-      payload.elegoo_centauri_mainboard_id = mainboardId;
+      if (address !== providerAddress(printer)) payload.elegoo_centauri_host = address;
+      if (mainboardId !== (printer.elegoo_centauri_mainboard_id ?? ""))
+        payload.elegoo_centauri_mainboard_id = mainboardId;
       if (secret) payload.elegoo_centauri_access_code = secret;
     } else if (printer.provider === "octoprint") {
-      payload.octoprint_url = address;
+      if (address !== providerAddress(printer)) payload.octoprint_url = address;
       if (secret) payload.octoprint_api_key = secret;
     }
     try {
-      const updated = await updatePrinter(printer.id, payload);
+      const updated = await command.save(printer, payload, revised);
       if (!current()) return;
-      await onSaved(updated);
-      if (!current()) return;
-      setSecret("");
+      adopt(updated);
       toast.success(uiText("Printer settings saved"));
     } catch (err) {
       if (!current()) return;
       const message = err instanceof Error ? err.message : "Could not save printer settings";
       setError(message);
       toast.error(err);
-    } finally {
-      if (current()) setSaving(false);
     }
   }
 
   return (
     <Localized>
-      <form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
+      <form ref={form} onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
@@ -1555,7 +1573,12 @@ function PrinterSettings({
               </p>
             </div>
           </div>
-          <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
+          <Button
+            type="submit"
+            size="sm"
+            loading={saving}
+            disabled={!canEdit || command.blocked || !name.trim()}
+          >
             {uiText("Save changes")}
           </Button>
         </div>
@@ -1566,7 +1589,7 @@ function PrinterSettings({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <SettingsField
@@ -1579,7 +1602,7 @@ function PrinterSettings({
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder={printer.detected_model ?? uiText("Auto-detected")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
               <datalist id="printer-model-options">
                 {PRINTER_MODEL_OPTIONS.map((model) => (
@@ -1592,7 +1615,7 @@ function PrinterSettings({
                 value={group}
                 onChange={(e) => setGroup(e.target.value)}
                 placeholder={uiText("Workshop")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <SettingsField label={uiText("Notes")}>
@@ -1600,7 +1623,7 @@ function PrinterSettings({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={4}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </SettingsField>
@@ -1625,7 +1648,7 @@ function PrinterSettings({
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 required
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             {printer.provider === "bambu_lan" && (
@@ -1634,7 +1657,7 @@ function PrinterSettings({
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   required
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                 />
               </SettingsField>
             )}
@@ -1644,7 +1667,7 @@ function PrinterSettings({
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                 />
               </SettingsField>
             )}
@@ -1659,7 +1682,7 @@ function PrinterSettings({
                   <Input
                     value={mainboardId}
                     onChange={(e) => setMainboardId(e.target.value)}
-                    disabled={!canEdit}
+                    disabled={!canEdit || saving}
                   />
                 </SettingsField>
               )}
@@ -1669,7 +1692,7 @@ function PrinterSettings({
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder={uiText("Unchanged")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
@@ -1677,7 +1700,7 @@ function PrinterSettings({
                 type="checkbox"
                 checked={providerMaterialSync}
                 onChange={(event) => setProviderMaterialSync(event.target.checked)}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="mt-0.5 h-4 w-4"
               />
               <span>
@@ -1696,7 +1719,7 @@ function PrinterSettings({
                 type="checkbox"
                 checked={operatorReleaseRequired}
                 onChange={(event) => setOperatorReleaseRequired(event.target.checked)}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="mt-0.5 h-4 w-4"
               />
               <span>
@@ -1720,6 +1743,20 @@ function PrinterSettings({
             )}
           </div>
         </div>
+        <PrinterSettingsReview
+          canSave={Boolean(name.trim())}
+          state={command.state}
+          original={printer}
+          onReview={() => {
+            void command.review().catch((err) => {
+              if (active.current) setError(userMessage(err));
+            });
+          }}
+          onAdopt={() => adopt(command.adopt())}
+          onSave={() => {
+            void save(undefined, true);
+          }}
+        />
       </form>
     </Localized>
   );

@@ -1,6 +1,6 @@
 # M5–M8 closure reassessment
 
-2026-10-07. Source checkpoint: `c74b9aef`. This is a requirements-to-source
+2026-10-07. Original source checkpoint: `c74b9aef`. This is a requirements-to-source
 reassessment, not a new test run or a full reread of every frontend file.
 
 The previous M7/M8 closure statements were too broad. Their focused suites prove
@@ -13,10 +13,10 @@ does not authorize dropping that requirement.
 | --- | --- | --- |
 | M5 | Plan row; closure and linked matrices; current bounded/session-scoped `features/library/navigation-state.ts` and restoration owner | Existing local acceptance retained. No contradictory requirement found in this reassessment; no new browser run claimed. |
 | M6 | Plan row; asset/decoded-image/selection matrix; measured comparison; current four-download/400-idle/32MiB lease limits | Existing local acceptance retained for its stated scenarios. Unmeasured CPU/GPU/mobile/load scenarios remain disclosed and do not become measured by this review. |
-| M7 | Async closure, owner ledger and named reconnect/offline/visibility/printer-switch cases; current printer settings write path | Async ownership work remains implemented. Full closure reopened: printer settings still lack competing-edit detection required by the cross-cutting form contract. |
+| M7 | Async closure, owner ledger and named reconnect/offline/visibility/printer-switch cases; current printer settings write path | Async ownership work remains implemented. The reopened printer settings gap is now corrected and qualified in the [M7 matrix](frontend-m7-validation.md); local acceptance restored. |
 | M8 | Plan row, closure record, Profiles/Search owners and their frontend/backend update paths | Reopened. Profile and Search settings writes remain unversioned. Draft preservation alone does not satisfy conflict detection or lost-response review. |
 
-## Confirmed gaps
+## Gaps at the original checkpoint
 
 - Printer settings: `components/printer-detail.tsx` calls
   `lib/api/printers.ts::updatePrinter` without a captured edit precondition.
@@ -32,14 +32,15 @@ does not authorize dropping that requirement.
   delegates an unconditional update. The M8 record already admitted this missing
   protocol while incorrectly declaring the milestone closed.
 
-These are source-confirmed contract gaps. No new concurrent-editor reproduction
-has run during this reassessment; implementation must begin with those regressions.
+These were source-confirmed contract gaps at the checkpoint. The subsequent M7
+increment reproduced and corrected printer conflicts; its matrix records current
+frontend/backend/browser evidence. Profiles and Search remain open.
 
 ## Required regression matrix before corrections
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|----------------------|----------|----------------------|-----------------------------|------|--------|
-| C1 | rejects a competing printer settings edit | Error | Two editors use the same settings base | Second write refused; retained draft and authorized review | Integration / Playwright | ❌ missing |
+| C1 | rejects a competing printer settings edit | Error | Two editors use the same settings base | Second write refused; retained draft and authorized review | Integration / Playwright | ✅ [M7 PE1–PE34](frontend-m7-validation.md#reopened-printer-settings-contract) |
 | C2 | rejects a competing filament profile edit | Error | Two editors use the same local preset base | No last-writer overwrite; explicit revised save | Integration / Playwright | ❌ missing |
 | C3 | rejects a competing printer profile edit | Error | Two editors use the same preset base | No last-writer overwrite; explicit revised save | Integration / Playwright | ❌ missing |
 | C4 | reviews a competing Search settings edit | Error | Two settings forms use the same base | Full settings PUT cannot overwrite unnoticed | Integration / Playwright | ❌ missing |
@@ -49,8 +50,8 @@ retirement, failed/uncertain responses and background writers before closure.
 
 ## Corrected execution order
 
-M7 is the active reopened milestone. M8 waits for its M7 dependency, with its own
-confirmed gaps retained. M9 work is preserved and awaits M7/M8 completion; M10/M11
-remain pending. Existing commits are not discarded. The unfinished M9 root tests
-remain uncommitted and must not be included in an earlier milestone's acceptance.
-No complete suite was run to answer this status question.
+M7 is locally accepted after the competing-edit correction and its focused
+qualification. M8 is the active reopened milestone, in order: Filament Profiles,
+Printer Profiles, then Search configuration. M9 awaits M8; its reviewed-root
+contract is already preserved in `6050a375` and is not counted as M7 acceptance.
+M10/M11 remain pending. Final delivery and required CI are still open.

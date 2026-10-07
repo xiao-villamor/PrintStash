@@ -32,6 +32,26 @@ that only forwards `useQuery`. Extract mutation coordination when list/detail
 consumers need the same confirmed result. Keep a one-off endpoint or presentational
 component simple.
 
+### Implemented printer settings contract (M7)
+
+`features/printers/queries.ts` owns the HTTP resources; live telemetry remains a
+separate projection. `settings-edit.ts` owns the captured settings base, conditional
+command, explicit authorized review and receipt publication for both detail and
+card editors. Local fields and credentials stay in the component. A background
+read cannot rebase the draft. Conflict or an uncertain response blocks another
+write until review; revised save sends deliberate changes, and adoption explicitly
+replaces the draft. A provider/auth-mode change requires adoption before credentials
+can be submitted. Native form validation also applies to revised save.
+
+`modules/printing/printer_edits.py` atomically claims the settings version and
+rechecks current authority in the same transaction. The database contract tracks
+settings writes, including legacy writers, independently of telemetry. A receipt
+is captured while the write lock is held, before commit and hub reconnection.
+The client never replaces an already-observed newer receipt or a different
+history. Secret payloads do not enter Query/MutationCache. A denied or missing
+printer read retires controls and the socket; explicit retry can restore an
+authorized view. Session changes retire drafts, requests and private caches.
+
 ### Implemented administration source seam (M9 increment)
 
 `lib/queries/settings-library-sources.ts` owns the source catalog and exact

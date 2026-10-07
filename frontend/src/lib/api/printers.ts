@@ -1,3 +1,5 @@
+import { editHeaders, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
 import { withSessionRequest } from "@/lib/session-transport";
 import {
   getJson,
@@ -58,8 +60,20 @@ export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
   return sendJson<PrinterRead>("/api/v1/printers", "POST", payload);
 }
 
-export function updatePrinter(id: number, payload: PrinterUpdate): Promise<PrinterRead> {
-  return sendJson<PrinterRead>(`/api/v1/printers/${id}`, "PATCH", payload);
+export async function updatePrinter(
+  id: number,
+  payload: PrinterUpdate,
+  options: { base: EditingBase; signal?: AbortSignal },
+): Promise<PrinterRead> {
+  const saved = await requestApi<PrinterRead>(`/api/v1/printers/${id}`, {
+    method: "PATCH",
+    headers: { ...jsonHeaders(), ...editHeaders("printer", id, options.base) },
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("printer_identity_mismatch");
+  return saved;
 }
 
 export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {

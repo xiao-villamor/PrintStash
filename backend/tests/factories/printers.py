@@ -92,6 +92,7 @@ def printer_config(
     the credential list in two places.
     """
     fields = dict(_PROVIDER_FIELDS[provider]) if credentials else {}
+    fields["edit_version"] = 1
     fields.update(overrides)
     return Printer(
         name=name or f"Printer {nth('printer')}",

@@ -48,14 +48,14 @@ import {
   updatePrinterPermission,
 } from "@/lib/api/printers";
 import { queryClient } from "@/lib/query-client";
-import { aPrinter } from "@/test-support/factories";
+import { aPrinter, anEditingBase } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { aPrinterPermission } from "@/test-support/permissions";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
-const PRINTER = { id: 3, name: "Ender", provider: "moonraker" };
+const PRINTER = { ...anEditingBase(), id: 3, name: "Ender", provider: "moonraker" };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
@@ -119,12 +119,25 @@ describe("createPrinter", () => {
 
 describe("updatePrinter", () => {
   it("PATCHes only what changed", async () => {
-    respondWith(PRINTER);
+    respondWith({ ...PRINTER, edit_version: PRINTER.edit_version + 1 });
 
-    await updatePrinter(3, { name: "Ender 3 V2" });
+    await updatePrinter(3, { name: "Ender 3 V2" }, { base: PRINTER });
 
     expectRequest("/api/v1/printers/3", "PATCH");
     expect(lastBody()).toEqual({ name: "Ender 3 V2" });
+  });
+  it.each([
+    { label: "old version", saved: { ...PRINTER } },
+    {
+      label: "different history",
+      saved: { ...PRINTER, edit_version: 2, edit_epoch: "b".repeat(32) },
+    },
+    { label: "different printer", saved: { ...PRINTER, id: 99, edit_version: 2 } },
+  ])("rejects an acknowledgement with $label", async ({ saved }) => {
+    respondWith(saved);
+    await expect(updatePrinter(3, { name: "Edit" }, { base: PRINTER })).rejects.toThrow(
+      saved.id === 3 ? "Invalid editing acknowledgement" : "printer_identity_mismatch",
+    );
   });
 });
 
