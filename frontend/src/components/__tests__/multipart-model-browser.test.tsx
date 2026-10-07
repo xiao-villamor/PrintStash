@@ -5,12 +5,13 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { multipartDetailOptions } from "@/features/library/multipart";
 import { clearLogin } from "@/lib/auth-store";
 import { queryKeys } from "@/lib/query-client";
 import { MultipartModelCard, MultipartModelDetailPage } from "@/components/multipart-model-browser";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { aCollectionNode } from "@/test-support/factories";
-import { json, renderApp } from "@/test-support/render";
+import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { CollectionRead, MultipartModelRead } from "@/types";
 
 function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead {
@@ -478,7 +479,7 @@ describe("MultipartModelDetailPage", () => {
 
   it("edits tags only from the multipart edit page", async () => {
     const user = userEvent.setup();
-    const saved = aMultipart({ tags: ["Fantasy", "Display"] });
+    const saved = aMultipart({ tags: ["Fantasy", "Display"], edit_version: 2 });
     const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
       routePath: "/multipart-models/:id",
@@ -542,7 +543,7 @@ describe("MultipartModelDetailPage", () => {
       routePath: "/multipart-models/:id",
       routes: {
         "GET /api/v1/multipart-models/7": json(detail),
-        "PUT /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json({ ...detail, edit_version: 2 }),
       },
     });
 
@@ -726,7 +727,7 @@ describe("MultipartModelDetailPage", () => {
       routePath: "/multipart-models/:id",
       routes: {
         "GET /api/v1/multipart-models/7": json(detail),
-        "PUT /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json({ ...detail, edit_version: 2 }),
       },
     });
 
@@ -778,6 +779,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart();
     const saved = {
       ...detail,
+      edit_version: 2,
       collection: collection.path,
       collection_id: collection.id,
       collection_label: "Parts",
@@ -811,6 +813,7 @@ describe("MultipartModelDetailPage", () => {
     const coverImageUrl = "https://images.example.test/desk-organiser.webp";
     const saved = {
       ...detail,
+      edit_version: 2,
       cover_image_url: coverImageUrl,
       cover_thumbnail_url: coverImageUrl,
     };
@@ -838,6 +841,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart();
     const uploaded = {
       ...detail,
+      edit_version: 2,
       cover_image_uploaded: true,
       cover_thumbnail_url: "/api/v1/multipart-models/7/cover/content?v=cover.webp",
     };
@@ -1038,7 +1042,7 @@ describe("MultipartModelDetailPage", () => {
       routePath: "/multipart-models/:id",
       routes: {
         "GET /api/v1/multipart-models/7": json(detail),
-        "PUT /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json({ ...detail, edit_version: 2 }),
       },
     });
 
@@ -1118,7 +1122,7 @@ describe("MultipartModelDetailPage", () => {
       routePath: "/multipart-models/:id",
       routes: {
         "GET /api/v1/multipart-models/7": json(detail),
-        "PUT /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json({ ...detail, edit_version: 2 }),
       },
     });
 
@@ -1508,4 +1512,527 @@ describe("MultipartModelCard editing", () => {
       edit_version: 9,
     });
   });
+});
+
+describe("Multipart auxiliary tag recovery", () => {
+  function renderCard(routes: RouteTable = {}) {
+    return renderApp(<MultipartModelCard item={aMultipart()} />, {
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "PUT /api/v1/multipart-models/7/tags": json({ detail: "edit_conflict" }, 412),
+        "GET /api/v1/multipart-models/7": json(aMultipart({ edit_version: 7, tags: ["Remote"] })),
+        ...routes,
+      },
+    });
+  }
+
+  async function submitCardDraft(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "Add tags to Desk organiser" }));
+    await user.type(await screen.findByLabelText("Tags to add"), "Local{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+  }
+
+  it.each([
+    { label: "conflicting", answer: () => json({ detail: "edit_conflict" }, 412) },
+    { label: "malformed acknowledgement", answer: () => json(aMultipart({ edit_version: 1 })) },
+    { label: "unconfirmed", answer: () => json({ detail: "unavailable" }, 503) },
+    { label: "disconnected", answer: () => Promise.reject(new TypeError("Network failed")) },
+  ])("retains Multipart tags after a $label write", async ({ answer }) => {
+    const user = userEvent.setup();
+    const view = renderCard({ "PUT /api/v1/multipart-models/7/tags": answer });
+    await submitCardDraft(user);
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeEnabled();
+    expect(screen.getByTitle("Remove Local")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("retries Multipart tags against the reviewed version", async () => {
+    const user = userEvent.setup();
+    const view = renderCard();
+    await submitCardDraft(user);
+    const versions: (string | null)[] = [];
+    view.route({
+      "PUT /api/v1/multipart-models/7/tags": (_url, init) => {
+        versions.push(new Headers(init?.headers).get("If-Match"));
+        return json(aMultipart({ edit_version: 8, tags: ["Local"] }));
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByRole("region", { name: "Latest saved version" })).toHaveTextContent(
+      "Remote",
+    );
+    await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(versions).toEqual(['"multipart-7-v7"']);
+    expect(JSON.parse(view.requestsWithMethod("PUT")[1].body)).toEqual({ tags: ["Local"] });
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
+      tags: ["Local"],
+      edit_version: 8,
+    });
+  });
+
+  it("adopts current tags without another write", async () => {
+    const user = userEvent.setup();
+    const view = renderCard();
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(await screen.findByRole("button", { name: "Use latest version" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
+      tags: ["Remote"],
+      edit_version: 7,
+    });
+  });
+
+  it("retains tag selection after failed review", async () => {
+    const user = userEvent.setup();
+    const view = renderCard({
+      "GET /api/v1/multipart-models/7": json({ detail: "Unavailable" }, 503),
+    });
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await screen.findByText("Unavailable");
+    expect(screen.getByTitle("Remove Local")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save my draft against this version" })).toBeNull();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it.each([403, 404])("hides tag selection after review returns %s", async (status) => {
+    const user = userEvent.setup();
+    const view = renderCard({
+      "GET /api/v1/multipart-models/7": json({ detail: "Denied" }, status),
+    });
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.queryByTitle("Remove Local")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save tags" })).toBeNull();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("disables tag retry after edit permission loss", async () => {
+    const user = userEvent.setup();
+    const view = renderCard({
+      "GET /api/v1/multipart-models/7": json(
+        aMultipart({ edit_version: 7, tags: ["Remote"], effective_role: "view" }),
+      ),
+    });
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("region", { name: "Latest saved version" })).toHaveTextContent(
+      "Remote",
+    );
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("requires another review after a second tag conflict", async () => {
+    const user = userEvent.setup();
+    const view = renderCard();
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Latest saved version" })).toBeNull(),
+    );
+    expect(screen.getByTitle("Remove Local")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(2);
+  });
+
+  it("retires a tag review when its editor is cancelled", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    renderCard({
+      "GET /api/v1/multipart-models/7": (_url, init) => {
+        signal = init?.signal;
+        return held.promise;
+      },
+    });
+    await submitCardDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Add tags to Desk organiser" }));
+    await screen.findByRole("button", { name: "Save tags" });
+    await act(async () =>
+      held.resolve(json(aMultipart({ edit_version: 7, tags: ["Retired private tag"] }))),
+    );
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByText("Retired private tag")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Latest saved version" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save tags" })).toBeEnabled();
+  });
+
+  it("suppresses a tag acknowledgement after session retirement", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    const view = renderCard({ "PUT /api/v1/multipart-models/7/tags": () => held.promise });
+    await submitCardDraft(user);
+    act(() => clearLogin());
+    const replacement = aMultipart({ edit_version: 3, tags: ["Replacement session"] });
+    view.client.setQueryData(queryKeys.multipartModel(7), replacement);
+    await act(async () =>
+      held.resolve(json(aMultipart({ edit_version: 8, tags: ["Retired private tag"] }))),
+    );
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toEqual(replacement);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("preserves the composition base after reviewed tag confirmation", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), aMultipart()]],
+      routes: {
+        "PUT /api/v1/multipart-models/7/tags": json({ detail: "edit_conflict" }, 412),
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({ name: "Remote name", tags: ["Remote"], edit_version: 7 }),
+        ),
+        "PUT /api/v1/multipart-models/7": (_url, init) => {
+          versions.push(new Headers(init?.headers).get("If-Match"));
+          return json({ detail: "edit_conflict" }, 412);
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Unsaved composition");
+    await user.click(screen.getByRole("button", { name: "Add tags" }));
+    await user.type(await screen.findByLabelText("Tags to add"), "Local{Enter}");
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+    view.route({
+      "PUT /api/v1/multipart-models/7/tags": json(
+        aMultipart({ name: "Remote name", tags: ["Local"], edit_version: 8 }),
+      ),
+    });
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Unsaved composition");
+    expect(screen.getByText("Local")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    expect(versions).toEqual(['"multipart-7-v1"']);
+  });
+});
+
+describe("Multipart auxiliary cover recovery", () => {
+  function renderCover(routes: RouteTable = {}, detail = aMultipart()) {
+    return renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      seed: [[queryKeys.multipartModel(7), detail]],
+      routes: {
+        "PUT /api/v1/multipart-models/7/cover": json({ detail: "edit_conflict" }, 412),
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({ edit_version: 7, name: "Remote composition" }),
+        ),
+        ...routes,
+      },
+    });
+  }
+  async function uploadDraft(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.clear(screen.getByRole("textbox", { name: "Name" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Local composition");
+    const input = document.querySelector<HTMLInputElement>(
+      'input[type="file"][accept="image/png,image/jpeg,image/webp"]',
+    );
+    if (!input) throw new Error("Cover input unavailable");
+    const file = new File(["chosen cover bytes"], "local.png", { type: "image/png" });
+    await user.upload(input, file);
+    return file;
+  }
+
+  it("retains the selected Multipart cover for reviewed retry", async () => {
+    const user = userEvent.setup();
+    const view = renderCover();
+    const file = await uploadDraft(user);
+    const sent: { version: string | null; file: FormDataEntryValue | null }[] = [];
+    view.route({
+      "PUT /api/v1/multipart-models/7/cover": (_url, init) => {
+        if (!(init?.body instanceof FormData)) throw new Error("Expected image upload");
+        sent.push({
+          version: new Headers(init.headers).get("If-Match"),
+          file: init.body.get("file"),
+        });
+        return json(
+          aMultipart({
+            edit_version: 8,
+            cover_image_uploaded: true,
+            cover_thumbnail_url: "/latest.webp",
+          }),
+        );
+      },
+    });
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(sent).toEqual([{ version: '"multipart-7-v7"', file }]);
+    expect(view.requestsWithMethod("PUT").every((request) => request.url.endsWith("/cover"))).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    { label: "server failure", answer: () => json({ detail: "Unavailable" }, 503) },
+    { label: "lost response", answer: () => Promise.reject(new TypeError("Disconnected")) },
+  ])("reviews uncertain Multipart cover deletion after $label", async ({ answer }) => {
+    const user = userEvent.setup();
+    const view = renderCover(
+      { "DELETE /api/v1/multipart-models/7/cover": answer },
+      aMultipart({ cover_image_uploaded: true, cover_thumbnail_url: "/old.webp" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Remove uploaded cover" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove uploaded cover" })).toBeDisabled();
+    expect(view.requestsWithMethod("DELETE")).toHaveLength(1);
+    view.route({
+      "DELETE /api/v1/multipart-models/7/cover": json(aMultipart({ edit_version: 8 })),
+    });
+    await user.click(screen.getByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(view.requestsWithMethod("DELETE")).toHaveLength(2);
+    expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "Remove uploaded cover" })).toBeNull();
+  });
+
+  it("adopts the current cover without replacing composition input", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderCover({
+      "GET /api/v1/multipart-models/7": json(
+        aMultipart({
+          name: "Remote composition",
+          edit_version: 7,
+          cover_image_uploaded: true,
+          cover_thumbnail_url: "/remote.webp",
+        }),
+      ),
+      "PUT /api/v1/multipart-models/7": (_url, init) => {
+        versions.push(new Headers(init?.headers).get("If-Match"));
+        return json({ detail: "edit_conflict" }, 412);
+      },
+    });
+    await uploadDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(await screen.findByRole("button", { name: "Use latest version" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Local composition");
+    expect(screen.getByText("Uploaded from your computer")).toBeVisible();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    expect(versions).toEqual(['"multipart-7-v1"']);
+  });
+
+  it("preserves composition recovery after a rejected cover", async () => {
+    const user = userEvent.setup();
+    const view = renderCover({
+      "PUT /api/v1/multipart-models/7/cover": json({ detail: "Invalid image" }, 422),
+      "PUT /api/v1/multipart-models/7": json({ detail: "edit_conflict" }, 412),
+    });
+    await uploadDraft(user);
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    view.route({
+      "PUT /api/v1/multipart-models/7": json(
+        aMultipart({ name: "Local composition", edit_version: 8 }),
+      ),
+    });
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(view.requestsWithMethod("PUT").map((request) => request.url)).toEqual([
+      "/api/v1/multipart-models/7/cover",
+      "/api/v1/multipart-models/7",
+      "/api/v1/multipart-models/7",
+    ]);
+    expect(screen.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+  });
+
+  it("retains cover intent when review fails", async () => {
+    const user = userEvent.setup();
+    const view = renderCover({
+      "GET /api/v1/multipart-models/7": json({ detail: "Unavailable" }, 503),
+    });
+    await uploadDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByText("Couldn't load this multipart model. Try again.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save my draft against this version" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Local composition");
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it.each([403, 404])("hides Multipart content after review returns %s", async (status) => {
+    const user = userEvent.setup();
+    renderCover({ "GET /api/v1/multipart-models/7": json({ detail: "Denied" }, status) });
+    await uploadDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+    expect(screen.queryByDisplayValue("Local composition")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Local composition" })).toBeNull();
+  });
+
+  it("blocks cover retry after losing write permission", async () => {
+    const user = userEvent.setup();
+    renderCover({
+      "GET /api/v1/multipart-models/7": json(
+        aMultipart({ edit_version: 7, effective_role: "view" }),
+      ),
+    });
+    await uploadDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    ).toBeDisabled();
+  });
+
+  it("suppresses competing cover submissions", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    const view = renderCover({ "PUT /api/v1/multipart-models/7/cover": () => held.promise });
+    await uploadDraft(user);
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Upload image" })).toBeDisabled();
+    await user.upload(
+      screen.getByLabelText("Upload image", { selector: "input" }),
+      new File(["second"], "second.png", { type: "image/png" }),
+    );
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+    await act(async () =>
+      held.resolve(json(aMultipart({ edit_version: 2, cover_image_uploaded: true }))),
+    );
+    expect(await screen.findByText("Uploaded from your computer")).toBeVisible();
+  });
+
+  it("retires a cancelled Multipart review", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    renderCover({
+      "GET /api/v1/multipart-models/7": (_url, init) => {
+        signal = init?.signal;
+        return held.promise;
+      },
+    });
+    await uploadDraft(user);
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
+    await act(async () =>
+      held.resolve(json(aMultipart({ name: "Late private name", edit_version: 7 }))),
+    );
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Desk organiser");
+  });
+
+  it("preserves the composition base after reviewed cover confirmation", async () => {
+    const user = userEvent.setup();
+    const versions: (string | null)[] = [];
+    const view = renderCover({
+      "PUT /api/v1/multipart-models/7": (_url, init) => {
+        versions.push(new Headers(init?.headers).get("If-Match"));
+        return json({ detail: "edit_conflict" }, 412);
+      },
+    });
+    await uploadDraft(user);
+    view.route({
+      "PUT /api/v1/multipart-models/7/cover": json(
+        aMultipart({
+          name: "Remote composition",
+          edit_version: 8,
+          cover_image_uploaded: true,
+          cover_thumbnail_url: "/latest.webp",
+        }),
+      ),
+    });
+    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("Uploaded from your computer")).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Local composition");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    expect(versions).toEqual(['"multipart-7-v1"']);
+  });
+});
+
+describe("Multipart auxiliary read races", () => {
+  it.each(["tags", "cover"] as const)(
+    "preserves confirmed %s against an older GET",
+    async (kind) => {
+      const user = userEvent.setup();
+      const held = Promise.withResolvers<Response>();
+      let signal: AbortSignal | null | undefined;
+      const saved = aMultipart({
+        edit_version: 2,
+        tags: ["Confirmed"],
+        cover_image_uploaded: true,
+      });
+      const view = renderApp(
+        kind === "tags" ? <MultipartModelCard item={aMultipart()} /> : <MultipartModelDetailPage />,
+        {
+          at: "/multipart-models/7",
+          routePath: "/multipart-models/:id",
+          seed: [[queryKeys.multipartModel(7), aMultipart()]],
+          routes: {
+            "GET /api/v1/multipart-models/7": (_url, init) => {
+              signal = init?.signal;
+              return held.promise;
+            },
+            "PUT /api/v1/multipart-models/7/tags": json(saved),
+            "PUT /api/v1/multipart-models/7/cover": json(saved),
+          },
+        },
+      );
+      const reading = view.client
+        .fetchQuery({ ...multipartDetailOptions(7), staleTime: 0 })
+        .catch(() => undefined);
+      await waitFor(() => expect(signal).toBeDefined());
+      if (kind === "tags") {
+        await user.click(screen.getByRole("button", { name: "Add tags to Desk organiser" }));
+        await user.type(await screen.findByLabelText("Tags to add"), "Confirmed{Enter}");
+        await user.click(screen.getByRole("button", { name: "Save tags" }));
+      } else {
+        await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+        const input = screen.getByLabelText("Upload image", { selector: "input" });
+        await user.upload(input, new File(["cover"], "cover.png", { type: "image/png" }));
+        await screen.findByText("Uploaded from your computer");
+      }
+      await waitFor(() =>
+        expect(view.client.getQueryData(queryKeys.multipartModel(7))).toEqual(saved),
+      );
+      await act(async () => {
+        held.resolve(json(aMultipart()));
+        await reading;
+      });
+      expect(signal?.aborted).toBe(true);
+      expect(view.client.getQueryData(queryKeys.multipartModel(7))).toEqual(saved);
+    },
+  );
 });

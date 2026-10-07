@@ -38,10 +38,13 @@ export function useMultipartPublication(id: number) {
     [session],
   );
   const publish = useCallback(
-    async (next: MultipartModelRead | ((value: MultipartModelRead) => MultipartModelRead)) => {
-      if (!isCurrent()) return false;
+    async (
+      next: MultipartModelRead | ((value: MultipartModelRead) => MultipartModelRead),
+      signal?: AbortSignal,
+    ) => {
+      if (!isCurrent() || signal?.aborted) return false;
       await client.cancelQueries({ queryKey: queryKeys.multipartModel(id), exact: true });
-      if (!isCurrent()) return false;
+      if (!isCurrent() || signal?.aborted) return false;
       let accepted = false;
       client.setQueryData<MultipartModelRead>(queryKeys.multipartModel(id), (value) => {
         const candidate = next instanceof Function ? (value ? next(value) : undefined) : next;

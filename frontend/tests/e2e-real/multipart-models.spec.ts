@@ -1,4 +1,5 @@
 /** Multipart groupings link existing Models without taking ownership of their files. */
+import type { MultipartModelRead } from "../../src/types";
 import { openFilters, openLibraryTools } from "./util";
 import { test, expect } from "./helpers";
 import { createCollectionViaVault, modelCard, uploadModel } from "./util";
@@ -217,5 +218,123 @@ test.describe("multipart models", () => {
     await label.locator("xpath=following-sibling::button[@title='Delete collection']").click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(label).toHaveCount(0);
+  });
+});
+
+test.describe("Multipart auxiliary editing", () => {
+  test("recovers auxiliary conflicts without rebasing the composition draft", async ({ page }) => {
+    const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
+    const name = `e2e-multipart-review-${Date.now()}`;
+    const created = await page.request.post(`${api}/api/v1/multipart-models`, {
+      data: { name, description: null, collection_id: null },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const initial: MultipartModelRead = await created.json();
+    const path = `/api/v1/multipart-models/${initial.id}`;
+    try {
+      // ── Open a composition draft, then race a second editor's tag write ──
+      await page.goto(`/multipart-models/${initial.id}`);
+      await page.getByRole("button", { name: "Edit multipart set" }).click();
+      await page.getByRole("textbox", { name: "Name", exact: true }).fill("My unsaved composition");
+      await page.getByRole("button", { name: "Add tags" }).click();
+      // The dialog label reflects the composition draft's title at opening.
+      const tagDialog = page.getByRole("dialog");
+      await tagDialog.getByLabel("Tags to add").fill("Local review tag");
+      await tagDialog.getByRole("button", { name: "Create tag" }).click();
+      const competing = await page.request.put(`${api}${path}/tags`, {
+        headers: {
+          "If-Match": `"multipart-${initial.id}-v${initial.edit_version}"`,
+          "X-PrintStash-Edit-Contract": "conditional-v1",
+        },
+        data: { tags: ["Other editor tag"] },
+      });
+      expect(competing.ok(), await competing.text()).toBe(true);
+      const latest: MultipartModelRead = await competing.json();
+      const tagConflict = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `${path}/tags` &&
+          response.request().method() === "PUT",
+      );
+      await tagDialog.getByRole("button", { name: "Save tags" }).click();
+      expect((await tagConflict).status()).toBe(412);
+      await expect(tagDialog.getByRole("button", { name: "Save tags" })).toBeDisabled();
+      await tagDialog.getByRole("button", { name: "Review latest version" }).click();
+      await expect(tagDialog.getByRole("region", { name: "Latest saved version" })).toContainText(
+        "Other editor tag",
+      );
+      const tagConfirmed = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `${path}/tags` &&
+          response.request().method() === "PUT",
+      );
+      await tagDialog.getByRole("button", { name: "Save my draft against this version" }).click();
+      const tagReceipt = await tagConfirmed;
+      expect(tagReceipt.ok()).toBe(true);
+      expect(await tagReceipt.request().headerValue("If-Match")).toBe(
+        `"multipart-${initial.id}-v${latest.edit_version}"`,
+      );
+      await expect(tagDialog).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+        "My unsaved composition",
+      );
+
+      // ── The old composition base also requires explicit cover review ──
+      const coverConflict = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `${path}/cover` &&
+          response.request().method() === "PUT",
+      );
+      await page.getByLabel("Upload image", { exact: true }).setInputFiles({
+        name: "reviewed-cover.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGOM6rn0nwEPYMInOXwUAADOOgLHyCTqtwAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+      expect((await coverConflict).status()).toBe(412);
+      await page.getByRole("button", { name: "Review latest version" }).click();
+      const coverConfirmed = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `${path}/cover` &&
+          response.request().method() === "PUT",
+      );
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Save my draft against this version" })
+        .click();
+      const coverReceipt = await coverConfirmed;
+      expect(coverReceipt.ok()).toBe(true);
+      const tagged: MultipartModelRead = await tagReceipt.json();
+      expect(await coverReceipt.request().headerValue("If-Match")).toBe(
+        `"multipart-${initial.id}-v${tagged.edit_version}"`,
+      );
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(page.getByText("Uploaded from your computer")).toBeVisible();
+
+      // ── Auxiliary confirmation never silently rebases the composition ──
+      const compositionConflict = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === path && response.request().method() === "PUT",
+      );
+      await page.getByRole("button", { name: "Save changes" }).click();
+      const rejected = await compositionConflict;
+      expect(rejected.status()).toBe(412);
+      expect(await rejected.request().headerValue("If-Match")).toBe(
+        `"multipart-${initial.id}-v${initial.edit_version}"`,
+      );
+      await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
+        "My unsaved composition",
+      );
+      const persisted: MultipartModelRead = await (await page.request.get(`${api}${path}`)).json();
+      expect(persisted.name).toBe(name);
+      expect(persisted.tags).toEqual(["Local review tag"]);
+      expect(persisted.cover_image_uploaded).toBe(true);
+      await page.reload();
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    } finally {
+      const removed = await page.request.delete(`${api}${path}`);
+      expect(removed.ok(), await removed.text()).toBe(true);
+    }
   });
 });

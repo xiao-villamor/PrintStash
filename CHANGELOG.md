@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve Multipart tag selections and chosen cover images after conflicts or
+  uncertain saves. Review the current version before retrying, retain unrelated
+  composition drafts, and reject invalid editing acknowledgements.
+
 - Protect Model Source edits and private cover changes against concurrent writes.
   Keep field drafts and selected files after conflicts or uncertain responses,
   require explicit review before retrying, and share one Source read across its

@@ -1,6 +1,7 @@
 import {
   type GetJsonOptions,
   getJson,
+  handleResponse,
   requestApi,
   authHeaders,
   jsonHeaders,
@@ -8,6 +9,7 @@ import {
   sendAction,
   sendJson,
 } from "@/lib/api/request";
+import type { SessionRequest } from "@/lib/session-transport";
 import type {
   MultipartModelCandidate,
   MultipartModelCreate,
@@ -67,17 +69,35 @@ function editHeaders(id: number, version: number) {
   };
 }
 
+/** A successful status alone cannot confirm which aggregate/version was saved. */
+function editingReceipt(id: number, baseVersion: number) {
+  return async (response: Response, session: SessionRequest): Promise<MultipartModelRead> => {
+    const saved = await handleResponse<MultipartModelRead>(response, session);
+    if (
+      saved?.id !== id ||
+      !Number.isSafeInteger(saved.edit_version) ||
+      saved.edit_version <= baseVersion
+    )
+      throw new Error("Invalid Multipart acknowledgement");
+    return saved;
+  };
+}
+
 /** Save metadata and the complete composition in one transaction. */
 export function saveMultipartModel(
   id: number,
   payload: MultipartPartsWrite,
   version: number,
 ): Promise<MultipartModelRead> {
-  return requestApi<MultipartModelRead>(`/api/v1/multipart-models/${id}`, {
-    method: "PUT",
-    headers: { ...jsonHeaders(), ...editHeaders(id, version) },
-    body: JSON.stringify(payload),
-  });
+  return requestApi<MultipartModelRead>(
+    `/api/v1/multipart-models/${id}`,
+    {
+      method: "PUT",
+      headers: { ...jsonHeaders(), ...editHeaders(id, version) },
+      body: JSON.stringify(payload),
+    },
+    editingReceipt(id, version),
+  );
 }
 
 export function deleteMultipartModel(id: number): Promise<void> {
@@ -92,11 +112,15 @@ export async function uploadMultipartModelCover(
   const path = `/api/v1/multipart-models/${id}/cover`;
   const body = new FormData();
   body.append("file", file);
-  return requestApi<MultipartModelRead>(path, {
-    method: "PUT",
-    headers: { ...authHeaders(), ...editHeaders(id, version) },
-    body,
-  });
+  return requestApi<MultipartModelRead>(
+    path,
+    {
+      method: "PUT",
+      headers: { ...authHeaders(), ...editHeaders(id, version) },
+      body,
+    },
+    editingReceipt(id, version),
+  );
 }
 
 export async function deleteMultipartModelCover(
@@ -104,10 +128,14 @@ export async function deleteMultipartModelCover(
   version: number,
 ): Promise<MultipartModelRead> {
   const path = `/api/v1/multipart-models/${id}/cover`;
-  return requestApi<MultipartModelRead>(path, {
-    method: "DELETE",
-    headers: { ...authHeaders(), ...editHeaders(id, version) },
-  });
+  return requestApi<MultipartModelRead>(
+    path,
+    {
+      method: "DELETE",
+      headers: { ...authHeaders(), ...editHeaders(id, version) },
+    },
+    editingReceipt(id, version),
+  );
 }
 
 export function replaceMultipartModelTags(
@@ -115,11 +143,15 @@ export function replaceMultipartModelTags(
   tags: string[],
   version: number,
 ): Promise<MultipartModelRead> {
-  return requestApi<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, {
-    method: "PUT",
-    headers: { ...jsonHeaders(), ...editHeaders(id, version) },
-    body: JSON.stringify({ tags }),
-  });
+  return requestApi<MultipartModelRead>(
+    `/api/v1/multipart-models/${id}/tags`,
+    {
+      method: "PUT",
+      headers: { ...jsonHeaders(), ...editHeaders(id, version) },
+      body: JSON.stringify({ tags }),
+    },
+    editingReceipt(id, version),
+  );
 }
 
 export interface MultipartModelStarRead {

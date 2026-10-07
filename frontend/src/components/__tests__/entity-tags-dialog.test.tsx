@@ -33,7 +33,10 @@ describe("EntityTagsDialog", () => {
     await userEvent.type(screen.getByLabelText("Tags to add"), "Painted{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
-    expect(onSave).toHaveBeenCalledWith(["Existing", "Workshop", "Painted"]);
+    expect(onSave).toHaveBeenCalledWith(
+      ["Existing", "Workshop", "Painted"],
+      expect.any(AbortSignal),
+    );
   });
 
   it("freezes the tag command with the selection opened for editing", async () => {
@@ -54,7 +57,7 @@ describe("EntityTagsDialog", () => {
     await userEvent.type(screen.getByLabelText("Tags to add"), "My tag{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
-    expect(original).toHaveBeenCalledWith(["Original", "My tag"]);
+    expect(original).toHaveBeenCalledWith(["Original", "My tag"], expect.any(AbortSignal));
     expect(refreshed).not.toHaveBeenCalled();
   });
 

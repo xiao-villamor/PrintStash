@@ -100,7 +100,7 @@ uploads (legacy browser queue recovery and clearing across reloads, mesh-only so
 purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,
 status, compare) · public share links (view-only vs downloadable, revoke → 404) ·
-multipart sets (empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·
+multipart sets (real tag/cover conflict review without silently rebasing composition drafts, empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·
 RBAC (create user, search a nested collection and grant access without a whole-tree read, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management
 (promote/disable/reset password) · API keys · settings overview (system status

@@ -9,7 +9,7 @@ import { useLibraryStar } from "@/features/library/mutations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -36,6 +36,7 @@ import { CollectionPicker } from "@/components/collection-picker";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import type { TagsReview } from "@/components/entity-tags-editor";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
 import { useCollectionChildren, useCollectionLookup, useTags } from "@/lib/queries";
@@ -108,17 +109,28 @@ export function MultipartModelCard({
     }
   }
 
-  async function saveCardTags(nextTags: string[]) {
-    try {
-      if (!isCurrent()) throw new DOMException("Editor retired", "AbortError");
-      const saved = await replaceMultipartModelTags(item.id, nextTags, item.edit_version);
-      if (!(await publish(saved)) || !isCurrent()) return;
-      onDataChange?.();
-      toast.success(t("multipart.tagsSaved"));
-    } catch (cause) {
-      if (isCurrent()) toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
-      throw cause;
-    }
+  async function saveCardTags(
+    nextTags: string[],
+    signal: AbortSignal,
+    version = item.edit_version,
+  ) {
+    if (!isCurrent() || signal.aborted) throw new DOMException("Editor retired", "AbortError");
+    const saved = await replaceMultipartModelTags(item.id, nextTags, version);
+    if (!(await publish(saved, signal)) || !isCurrent()) return;
+    onDataChange?.();
+    toast.success(t("multipart.tagsSaved"));
+  }
+
+  async function reviewCardTags(signal: AbortSignal): Promise<TagsReview> {
+    const latest = await getMultipartModel(item.id, { signal });
+    return {
+      tags: latest.tags,
+      canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
+      save: (tags, commandSignal) => saveCardTags(tags, commandSignal, latest.edit_version),
+      adopt: async (commandSignal) => {
+        if (await publish(latest, commandSignal)) onDataChange?.();
+      },
+    };
   }
 
   return (
@@ -147,6 +159,7 @@ export function MultipartModelCard({
             canEdit
             help={t("multipart.tagsHelp")}
             onSave={saveCardTags}
+            reviewLatest={reviewCardTags}
             triggerMode="icon"
             triggerClassName="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
           />
@@ -914,6 +927,8 @@ export function MultipartModelDetailPage() {
   return <MultipartDetail key={params.id} id={Number(params.id)} />;
 }
 
+type CoverIntent = { kind: "upload"; file: File } | { kind: "remove" };
+
 function MultipartDetail({ id }: { id: number }) {
   useUiLocale();
   const { t } = useI18n();
@@ -932,6 +947,14 @@ function MultipartDetail({ id }: { id: number }) {
   const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
   const [reviewed, setReviewed] = useState<MultipartModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewDenied, setReviewDenied] = useState(false);
+  const [coverIntent, setCoverIntent] = useState<CoverIntent | null>(null);
+  const reviewRequest = useRef<AbortController | null>(null);
+  const writePending = useRef(false);
+  useEffect(() => () => reviewRequest.current?.abort(), []);
+  useEffect(() => {
+    if (!active) reviewRequest.current?.abort();
+  }, [active]);
   const [draft, setDraft] = useState<MultipartModelRead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
@@ -975,6 +998,10 @@ function MultipartDetail({ id }: { id: number }) {
     openPicker(-1);
   }
   function cancelEditing() {
+    if (writePending.current) return;
+    reviewRequest.current?.abort();
+    setReviewing(false);
+    setCoverIntent(null);
     setDraft(null);
     setSaveError(null);
     setEditProblem(null);
@@ -1085,10 +1112,11 @@ function MultipartDetail({ id }: { id: number }) {
   async function applySavedCover(saved: MultipartModelRead, baseVersion: number) {
     if (!(await publish(saved)) || !isCurrent()) return false;
     setDraft((current) =>
-      current && current.edit_version === baseVersion
+      current
         ? {
             ...current,
-            edit_version: saved.edit_version,
+            edit_version:
+              current.edit_version === baseVersion ? saved.edit_version : current.edit_version,
             cover_image_url: saved.cover_image_url,
             cover_image_uploaded: saved.cover_image_uploaded,
             cover_thumbnail_url: saved.cover_thumbnail_url,
@@ -1098,36 +1126,66 @@ function MultipartDetail({ id }: { id: number }) {
     refreshRelated();
     return true;
   }
-  async function uploadCover(file: File) {
-    if (!model || !canEdit || coverBusy || editProblem || !isCurrent()) return;
+  function editFailed(
+    cause: unknown,
+    fallback: "multipart.saveError" | "multipart.coverUploadError" | "multipart.coverRemoveError",
+  ) {
+    if (cause instanceof ApiError && cause.status === 412) {
+      setEditProblem("conflict");
+      setReviewed(null);
+    } else if (
+      !(cause instanceof ApiError) ||
+      cause.status === 0 ||
+      cause.status === 408 ||
+      cause.status >= 500
+    ) {
+      setEditProblem("unconfirmed");
+      setReviewed(null);
+    } else {
+      setCoverIntent(null);
+      setSaveError(multipartError(cause, t, fallback));
+    }
+  }
+  async function saveCover(command: CoverIntent, version: number) {
+    if (!model || !canEdit || writePending.current || !isCurrent()) return;
+    writePending.current = true;
     setCoverBusy(true);
+    setCoverIntent(command);
     setSaveError(null);
     try {
-      const saved = await uploadMultipartModelCover(model.id, file, model.edit_version);
-      if (await applySavedCover(saved, model.edit_version))
-        toast.success(t("multipart.coverUploaded"));
+      const saved =
+        command.kind === "upload"
+          ? await uploadMultipartModelCover(model.id, command.file, version)
+          : await deleteMultipartModelCover(model.id, version);
+      if (!(await applySavedCover(saved, version))) return;
+      setCoverIntent(null);
+      setReviewed(null);
+      setEditProblem(null);
+      toast.success(
+        t(command.kind === "upload" ? "multipart.coverUploaded" : "multipart.coverRemoved"),
+      );
     } catch (cause) {
-      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.coverUploadError"));
+      if (isCurrent())
+        editFailed(
+          cause,
+          command.kind === "upload" ? "multipart.coverUploadError" : "multipart.coverRemoveError",
+        );
     } finally {
+      writePending.current = false;
       if (isCurrent()) setCoverBusy(false);
     }
+  }
+  async function uploadCover(file: File) {
+    if (!model || editProblem) return;
+    await saveCover({ kind: "upload", file }, model.edit_version);
   }
   async function removeCover() {
-    if (!model || !canEdit || coverBusy || editProblem || !isCurrent()) return;
-    setCoverBusy(true);
-    setSaveError(null);
-    try {
-      const saved = await deleteMultipartModelCover(model.id, model.edit_version);
-      if (await applySavedCover(saved, model.edit_version))
-        toast.success(t("multipart.coverRemoved"));
-    } catch (cause) {
-      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.coverRemoveError"));
-    } finally {
-      if (isCurrent()) setCoverBusy(false);
-    }
+    if (!model || editProblem) return;
+    await saveCover({ kind: "remove" }, model.edit_version);
   }
   async function save(version = model?.edit_version) {
-    if (!model || !canEdit || busy || version === undefined || !isCurrent()) return;
+    if (!model || !canEdit || writePending.current || version === undefined || !isCurrent()) return;
+    writePending.current = true;
     const session = getSessionVersion();
     setBusy(true);
     setSaveError(null);
@@ -1163,59 +1221,83 @@ function MultipartDetail({ id }: { id: number }) {
       toast.success(t("multipart.saved"));
     } catch (cause) {
       if (!isCurrent() || session !== getSessionVersion()) return;
-      if (cause instanceof ApiError && cause.status === 412) {
-        setEditProblem("conflict");
-        setReviewed(null);
-      } else if (
-        !(cause instanceof ApiError) ||
-        cause.status === 0 ||
-        cause.status === 408 ||
-        cause.status >= 500
-      ) {
-        setEditProblem("unconfirmed");
-        setReviewed(null);
-      } else setSaveError(multipartError(cause, t, "multipart.saveError"));
+      editFailed(cause, "multipart.saveError");
     } finally {
+      writePending.current = false;
       if (isCurrent() && session === getSessionVersion()) setBusy(false);
     }
   }
   async function reviewLatest() {
-    const session = getSessionVersion();
+    if (writePending.current || reviewing || !isCurrent()) return;
+    const controller = new AbortController();
+    reviewRequest.current?.abort();
+    reviewRequest.current = controller;
+    setReviewed(null);
     setReviewing(true);
     try {
-      const latest = await getMultipartModel(id);
-      requireSessionVersion(session);
-      if (isCurrent()) setReviewed(latest);
+      const latest = await getMultipartModel(id, { signal: controller.signal });
+      if (!isCurrent() || controller.signal.aborted) return;
+      setReviewDenied(false);
+      setReviewed(latest);
     } catch (cause) {
-      if (isCurrent() && session === getSessionVersion())
-        setSaveError(multipartError(cause, t, "multipart.detailError"));
+      if (!isCurrent() || controller.signal.aborted) return;
+      if (cause instanceof ApiError && [401, 403, 404].includes(cause.status))
+        setReviewDenied(true);
+      else setSaveError(multipartError(cause, t, "multipart.detailError"));
     } finally {
-      if (isCurrent() && session === getSessionVersion()) setReviewing(false);
+      if (isCurrent() && !controller.signal.aborted) setReviewing(false);
     }
   }
   async function useReviewedVersion() {
-    if (!reviewed || !(await publish(reviewed)) || !isCurrent()) return;
-    setDraft(reviewed);
+    if (!reviewed || writePending.current || !(await publish(reviewed)) || !isCurrent()) return;
+    if (coverIntent) {
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              cover_image_url: reviewed.cover_image_url,
+              cover_image_uploaded: reviewed.cover_image_uploaded,
+              cover_thumbnail_url: reviewed.cover_thumbnail_url,
+            }
+          : current,
+      );
+    } else setDraft(reviewed);
+    setCoverIntent(null);
     setReviewed(null);
     setEditProblem(null);
     setSaveError(null);
   }
-  async function saveTags(nextTags: string[]) {
-    if (!model || !canEdit || !isCurrent()) throw new DOMException("Editor retired", "AbortError");
-    try {
-      const saved = await replaceMultipartModelTags(model.id, nextTags, model.edit_version);
-      if (!(await publish(saved)) || !isCurrent()) return;
-      setDraft((current) =>
-        current && current.edit_version === model.edit_version
-          ? { ...current, tags: saved.tags, edit_version: saved.edit_version }
-          : current,
-      );
-      refreshRelated();
-      toast.success(t("multipart.tagsSaved"));
-    } catch (cause) {
-      if (isCurrent()) toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
-      throw cause;
-    }
+  async function saveTags(nextTags: string[], signal: AbortSignal, version = model?.edit_version) {
+    if (!model || !canEdit || !isCurrent() || signal.aborted || version === undefined)
+      throw new DOMException("Editor retired", "AbortError");
+    const saved = await replaceMultipartModelTags(model.id, nextTags, version);
+    if (!(await publish(saved, signal)) || !isCurrent()) return;
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            tags: saved.tags,
+            // An auxiliary retry must not rebase unrelated composition edits.
+            edit_version:
+              current.edit_version === version ? saved.edit_version : current.edit_version,
+          }
+        : current,
+    );
+    refreshRelated();
+    toast.success(t("multipart.tagsSaved"));
+  }
+  async function reviewTags(signal: AbortSignal): Promise<TagsReview> {
+    const latest = await getMultipartModel(id, { signal });
+    return {
+      tags: latest.tags,
+      canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
+      save: (tags, commandSignal) => saveTags(tags, commandSignal, latest.edit_version),
+      adopt: async (commandSignal) => {
+        if (!(await publish(latest, commandSignal)) || !isCurrent()) return;
+        setDraft((current) => (current ? { ...current, tags: latest.tags } : current));
+        refreshRelated();
+      },
+    };
   }
   async function remove() {
     if (!model || !canEdit || busy || !isCurrent()) return;
@@ -1241,14 +1323,23 @@ function MultipartDetail({ id }: { id: number }) {
       </div>
     );
   const denied = error instanceof ApiError && [401, 403, 404].includes(error.status);
-  if (!active || !model || denied)
+  if (!active || !model || denied || reviewDenied)
     return (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
           title={
-            error ? multipartError(error, t, "multipart.detailError") : t("multipart.notFound")
+            reviewDenied
+              ? t("multipart.detailError")
+              : error
+                ? multipartError(error, t, "multipart.detailError")
+                : t("multipart.notFound")
           }
         />
+        {reviewDenied && (
+          <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
+            {uiText("Retry")}
+          </Button>
+        )}
       </div>
     );
   const requestedReturn = searchParams.get("return");
@@ -1282,7 +1373,7 @@ function MultipartDetail({ id }: { id: number }) {
       )}
       <Modal
         open={reviewed !== null}
-        onClose={() => setReviewed(null)}
+        onClose={() => !writePending.current && setReviewed(null)}
         title={uiText("library.latestVersion")}
       >
         {reviewed && (
@@ -1292,6 +1383,12 @@ function MultipartDetail({ id }: { id: number }) {
             <p className="text-sm">
               {reviewed.collection_label ?? t("multipart.vaultOnly")} · {reviewed.tags.join(", ")}
             </p>
+            {coverIntent && (
+              <div className="space-y-2">
+                <p className="text-sm">{t("multipart.coverImage")}</p>
+                <Cover src={reviewed.cover_thumbnail_url} alt={t("multipart.coverImage")} />
+              </div>
+            )}
             <ol className="space-y-2">
               {reviewed.parts.map((part) => (
                 <li key={part.id} className="text-sm">
@@ -1303,16 +1400,28 @@ function MultipartDetail({ id }: { id: number }) {
               ))}
             </ol>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" onClick={() => setReviewed(null)}>
+              <Button
+                variant="outline"
+                disabled={busy || coverBusy}
+                onClick={() => setReviewed(null)}
+              >
                 {uiText("library.keepDraft")}
               </Button>
-              <Button variant="outline" onClick={() => void useReviewedVersion()}>
+              <Button
+                variant="outline"
+                disabled={busy || coverBusy}
+                onClick={() => void useReviewedVersion()}
+              >
                 {uiText("library.useLatest")}
               </Button>
               <Button
-                loading={busy}
+                loading={busy || coverBusy}
                 disabled={reviewed.effective_role !== "edit" && reviewed.effective_role !== "admin"}
-                onClick={() => void save(reviewed.edit_version)}
+                onClick={() =>
+                  void (coverIntent
+                    ? saveCover(coverIntent, reviewed.edit_version)
+                    : save(reviewed.edit_version))
+                }
               >
                 {uiText("library.retryDraft")}
               </Button>
@@ -1371,7 +1480,7 @@ function MultipartDetail({ id }: { id: number }) {
               variant="outline"
               size="sm"
               onClick={cancelEditing}
-              disabled={busy}
+              disabled={busy || coverBusy}
               className="h-11 sm:h-9"
             >
               {t("multipart.cancel")}
@@ -1492,9 +1601,10 @@ function MultipartDetail({ id }: { id: number }) {
                     entityLabel={model.name}
                     tags={model.tags}
                     availableTags={availableTags}
-                    canEdit={canEdit}
+                    canEdit={canEdit && !busy && !coverBusy && !editProblem}
                     help={t("multipart.tagsHelp")}
                     onSave={saveTags}
+                    reviewLatest={reviewTags}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1568,7 +1678,7 @@ function MultipartDetail({ id }: { id: number }) {
                       variant="outline"
                       size="sm"
                       onClick={() => coverInput.current?.click()}
-                      disabled={!canEdit || coverBusy}
+                      disabled={!canEdit || busy || coverBusy || editProblem !== null}
                       loading={coverBusy}
                     >
                       <Upload className="h-4 w-4" />
@@ -1582,7 +1692,7 @@ function MultipartDetail({ id }: { id: number }) {
                         variant="ghost"
                         size="sm"
                         onClick={() => void removeCover()}
-                        disabled={!canEdit || coverBusy}
+                        disabled={!canEdit || busy || coverBusy || editProblem !== null}
                         aria-label={t("multipart.removeUploadedCover")}
                       >
                         <Trash2 className="h-4 w-4" /> {t("multipart.removeCover")}
@@ -1718,7 +1828,7 @@ function MultipartDetail({ id }: { id: number }) {
               type="button"
               onClick={() => void save()}
               loading={busy}
-              disabled={!canEdit || !model.name.trim() || editProblem !== null}
+              disabled={!canEdit || coverBusy || !model.name.trim() || editProblem !== null}
               className="h-11 sm:h-10"
             >
               {t("multipart.save")}

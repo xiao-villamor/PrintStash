@@ -273,6 +273,7 @@ test.describe("multipart models", () => {
         savedPayload = payload;
         detail = {
           ...detail,
+          edit_version: detail.edit_version + 1,
           name: payload.name,
           description: payload.description,
           collection_id: payload.collection_id,

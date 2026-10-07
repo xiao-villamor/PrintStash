@@ -180,6 +180,18 @@ returned cover metadata, while all bytes still use authenticated asset leases.
 The Source endpoint clients require a version; no transport cache or generic
 form/repository layer is added. See [the Source validation record](../library-provenance-editing-validation.md).
 
+
+Multipart detail publication stays in `features/library/multipart.ts`. Composition,
+tag and cover writes use conditional versions; their endpoint clients reject a
+receipt for another aggregate or a non-advancing version. The shared tag editor
+accepts an optional review capability, whose commands the Multipart caller binds
+to a fresh authorized snapshot. Cover recovery retains its File/delete intent in
+the existing detail review flow. Auxiliary confirmation updates only its owned
+fields in an open composition draft; it advances that draft's base only when the
+command used that same base. Reviewing an auxiliary edit never silently rebases
+unrelated input. Cancelled editor signals also fence receipt publication.
+See [Multipart qualification](../library-multipart-validation.md).
+
 Events are hints to obtain authorized state. Reconnect resync must recover missed
 notices; socket generation/disposal prevents late-ticket connections from reviving
 a dead subscription. Browser focus and offline recovery are part of the same

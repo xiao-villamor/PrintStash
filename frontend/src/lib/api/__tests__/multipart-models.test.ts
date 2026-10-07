@@ -17,7 +17,7 @@ import {
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { invalidateApiCache } from "@/lib/api/request";
-import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
+import { expectRequest, fetchMock, lastBody, respondWith, type WireValue } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
@@ -97,7 +97,7 @@ describe("multipart model wire contract", () => {
   });
 
   it("saves the complete multipart draft atomically", async () => {
-    respondWith({ id: 4, parts: [] });
+    respondWith({ id: 4, edit_version: 2, parts: [] });
     await saveMultipartModel(
       4,
       {
@@ -130,7 +130,7 @@ describe("multipart model wire contract", () => {
   });
 
   it("uploads a local image as the multipart cover", async () => {
-    respondWith({ id: 4, cover_image_uploaded: true });
+    respondWith({ id: 4, edit_version: 2, cover_image_uploaded: true });
     const image = new File(["cover"], "cover.png", { type: "image/png" });
 
     await uploadMultipartModelCover(4, image, 1);
@@ -143,7 +143,7 @@ describe("multipart model wire contract", () => {
   });
 
   it("removes the uploaded multipart cover", async () => {
-    respondWith({ id: 4, cover_image_uploaded: false });
+    respondWith({ id: 4, edit_version: 2, cover_image_uploaded: false });
 
     await deleteMultipartModelCover(4, 1);
 
@@ -185,7 +185,7 @@ describe("multipart model wire contract", () => {
   });
 
   it("replaces the grouping's own tags", async () => {
-    respondWith({ id: 4, tags: ["Display"] });
+    respondWith({ id: 4, edit_version: 2, tags: ["Display"] });
     await replaceMultipartModelTags(4, ["Display"], 1);
     expectRequest("/api/v1/multipart-models/4/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Display"] });
@@ -249,5 +249,44 @@ describe("reader cancellation", () => {
     controller.abort();
     await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
     expect(delivered).toMatchObject({ aborted: true });
+  });
+});
+
+describe.each([
+  {
+    label: "composition",
+    write: () =>
+      saveMultipartModel(
+        4,
+        {
+          name: "Draft",
+          description: null,
+          collection_id: null,
+          cover_model_id: null,
+          cover_image_url: null,
+          parts: [],
+        },
+        7,
+      ),
+  },
+  { label: "tags", write: () => replaceMultipartModelTags(4, ["Draft"], 7) },
+  {
+    label: "cover upload",
+    write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 7),
+  },
+  { label: "cover removal", write: () => deleteMultipartModelCover(4, 7) },
+])("Multipart $label acknowledgement", ({ write }) => {
+  it.each<{ label: string; value: WireValue }>([
+    { label: "another aggregate", value: { id: 5, edit_version: 8 } },
+    { label: "missing version", value: { id: 4 } },
+    { label: "unchanged version", value: { id: 4, edit_version: 7 } },
+    { label: "older version", value: { id: 4, edit_version: 6 } },
+    { label: "unsafe version", value: { id: 4, edit_version: Number.MAX_SAFE_INTEGER + 1 } },
+    { label: "fractional version", value: { id: 4, edit_version: 8.5 } },
+    { label: "string version", value: { id: 4, edit_version: "8" } },
+    { label: "null body", value: null },
+  ])("rejects $label instead of confirming the edit", async ({ value }) => {
+    respondWith(value);
+    await expect(write()).rejects.toThrow("Invalid Multipart acknowledgement");
   });
 });
