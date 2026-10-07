@@ -40,6 +40,16 @@ class ProvenanceCaptureSummaryRead(BaseModel):
     checked_at: datetime
 
 
+class ModelSourceCoverRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    provenance_source_id: int
+    content_type: Literal["image/webp"]
+    size_bytes: int
+    updated_at: datetime
+
+
 class ProvenanceSourceRead(BaseModel):
     id: int
     provider: str
@@ -51,19 +61,11 @@ class ProvenanceSourceRead(BaseModel):
     last_checked_at: datetime
     fields: list[ProvenanceFieldRead] = Field(default_factory=list)
     captures: list[ProvenanceCaptureSummaryRead] = Field(default_factory=list)
-
-
-class ModelSourceCoverRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    provenance_source_id: int
-    content_type: Literal["image/webp"]
-    size_bytes: int
-    updated_at: datetime
+    cover: ModelSourceCoverRead | None
 
 
 class ModelProvenanceRead(BaseModel):
+    edit_version: int = Field(gt=0)
     schema_version: Literal[2] = 2
     sources: list[ProvenanceSourceRead] = Field(default_factory=list)
 

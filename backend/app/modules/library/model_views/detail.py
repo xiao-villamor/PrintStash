@@ -9,6 +9,7 @@ from typing import cast as type_cast
 
 from sqlmodel import Session, col, select
 
+from app.core.errors import ErrorKind, OperationError
 from app.db.models import (
     CollectionRole,
     File,
@@ -17,6 +18,7 @@ from app.db.models import (
     Model,
     ModelProvenanceField,
     ModelProvenanceSource,
+    ModelSourceCover,
     ModelStar,
     PrintJob,
     PrintJobState,
@@ -32,6 +34,7 @@ from app.schemas.models import (
 )
 from app.schemas.provenance import (
     ModelProvenanceRead,
+    ModelSourceCoverRead,
     ProvenanceCaptureSummaryRead,
     ProvenanceFieldRead,
     ProvenanceSourceRead,
@@ -47,6 +50,20 @@ from .projections import _file_reads_with_revisions, collection_name_for, thumb_
 
 
 def provenance_detail(session: Session, model_id: int) -> ModelProvenanceRead:
+    """Bind editable source fields and cover metadata to one Model version."""
+    version_query = select(col(Model.edit_version)).where(col(Model.id) == model_id)
+    version = session.exec(version_query).one_or_none()
+    if version is None:
+        raise OperationError("model_not_found", kind=ErrorKind.NOT_FOUND)
+    sources = _provenance_sources(session, model_id)
+    # Scalar reads bypass an identity map populated before a concurrent writer.
+    # Never attach a newer editing base to values composed from the older one.
+    if session.exec(version_query).one_or_none() != version:
+        raise OperationError("edit_snapshot_changed", kind=ErrorKind.CONFLICT)
+    return ModelProvenanceRead(edit_version=version, sources=sources)
+
+
+def _provenance_sources(session: Session, model_id: int) -> list[ProvenanceSourceRead]:
     """Compose the safe provenance read model with fixed query count.
 
     Raw snapshots and actor identifiers deliberately stay inside persistence;
@@ -61,7 +78,7 @@ def provenance_detail(session: Session, model_id: int) -> ModelProvenanceRead:
     )
     source_ids = [source.id for source in sources if source.id is not None]
     if not source_ids:
-        return ModelProvenanceRead()
+        return []
     fields_by_source: dict[int, list[ProvenanceFieldRead]] = defaultdict(list)
     for field in session.exec(
         select(ModelProvenanceField)
@@ -107,23 +124,30 @@ def provenance_detail(session: Session, model_id: int) -> ModelProvenanceRead:
                 checked_at=capture.checked_at,
             )
         )
-    return ModelProvenanceRead(
-        sources=[
-            ProvenanceSourceRead(
-                id=source.id,  # type: ignore[arg-type]
-                provider=source.provider,
-                source_item_id=source.source_item_id,
-                canonical_url=source.canonical_url,
-                source_revision=source.source_revision,
-                tags=json.loads(source.tags_json),
-                first_captured_at=source.first_captured_at,
-                last_checked_at=source.last_checked_at,
-                fields=fields_by_source[source.id],  # type: ignore[index]
-                captures=captures_by_source[source.id],  # type: ignore[index]
+    covers = {
+        cover.provenance_source_id: ModelSourceCoverRead.model_validate(cover)
+        for cover in session.exec(
+            select(ModelSourceCover).where(
+                col(ModelSourceCover.provenance_source_id).in_(source_ids)
             )
-            for source in sources
-        ]
-    )
+        ).all()
+    }
+    return [
+        ProvenanceSourceRead(
+            id=source.id,  # type: ignore[arg-type]
+            provider=source.provider,
+            source_item_id=source.source_item_id,
+            canonical_url=source.canonical_url,
+            source_revision=source.source_revision,
+            tags=json.loads(source.tags_json),
+            first_captured_at=source.first_captured_at,
+            last_checked_at=source.last_checked_at,
+            fields=fields_by_source[source.id],  # type: ignore[index]
+            captures=captures_by_source[source.id],  # type: ignore[index]
+            cover=covers.get(source.id),
+        )
+        for source in sources
+    ]
 
 
 def detail(session: Session, model_id: int, user: User) -> ModelRead | None:

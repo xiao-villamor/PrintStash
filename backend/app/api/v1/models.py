@@ -904,11 +904,14 @@ def get_model(
 )
 def get_model_provenance(
     model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelProvenanceRead:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
-    return models_detail.provenance_detail(session, model_id)
+    result = models_detail.provenance_detail(session, model_id)
+    response.headers["ETag"] = etag(EditKind.MODEL, model_id, result.edit_version)
+    return result
 
 
 @router.patch(
@@ -954,9 +957,9 @@ def patch_model_provenance(
             actor_id=current_user.id,
         )
     session.commit()
-    session.refresh(model)
-    response.headers["ETag"] = etag(EditKind.MODEL, model_id, model.edit_version)
-    return models_detail.provenance_detail(session, model_id)
+    result = models_detail.provenance_detail(session, model_id)
+    response.headers["ETag"] = etag(EditKind.MODEL, model_id, result.edit_version)
+    return result
 
 
 def _provenance_source_or_404(

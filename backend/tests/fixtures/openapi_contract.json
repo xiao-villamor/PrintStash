@@ -10646,6 +10646,11 @@
       },
       "ModelProvenanceRead": {
         "properties": {
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "schema_version": {
             "const": 2,
             "default": 2,
@@ -10660,6 +10665,9 @@
             "type": "array"
           }
         },
+        "required": [
+          "edit_version"
+        ],
         "title": "ModelProvenanceRead",
         "type": "object"
       },
@@ -15593,6 +15601,16 @@
             "title": "Captures",
             "type": "array"
           },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelSourceCoverRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "fields": {
             "items": {
               "$ref": "#/components/schemas/ProvenanceFieldRead"
@@ -15653,7 +15671,8 @@
           "provider",
           "canonical_url",
           "first_captured_at",
-          "last_checked_at"
+          "last_checked_at",
+          "cover"
         ],
         "title": "ProvenanceSourceRead",
         "type": "object"

@@ -151,6 +151,106 @@ def _source_read(body: dict[str, Any], source_id: int) -> dict[str, Any]:
     return next(item for item in body["sources"] if item["id"] == source_id)
 
 
+class TestVersionedProvenance:
+    def test_returns_model_editing_base(self, client, auth_headers, model, source):
+        detail = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+        response = client.get(
+            f"/api/v1/models/{model.id}/provenance", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["edit_version"] == detail.json()["edit_version"]
+        assert response.headers["etag"] == detail.headers["etag"]
+
+    def test_returns_editing_base_without_sources(self, client, auth_headers, model):
+        response = client.get(
+            f"/api/v1/models/{model.id}/provenance", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["sources"] == []
+        assert response.json()["edit_version"] == model.edit_version
+        assert response.headers["etag"] == f'"model-{model.id}-v{model.edit_version}"'
+
+    def test_reports_absent_cover(self, client, auth_headers, model, source):
+        response = client.get(
+            f"/api/v1/models/{model.id}/provenance", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert _source_read(response.json(), source.id)["cover"] is None
+
+    def test_includes_only_private_cover_metadata(
+        self, client, auth_headers, model, source, uploaded_cover
+    ):
+        cover = client.get(uploaded_cover, headers=auth_headers)
+        response = client.get(
+            f"/api/v1/models/{model.id}/provenance", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        projected = _source_read(response.json(), source.id)["cover"]
+        assert projected == cover.json()
+        assert set(projected) == {
+            "id",
+            "provenance_source_id",
+            "content_type",
+            "size_bytes",
+            "updated_at",
+        }
+
+    def test_acknowledges_override_editing_version(
+        self, client, auth_headers, model, source
+    ):
+        first = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+        response = client.patch(
+            f"/api/v1/models/{model.id}/provenance/{source.id}",
+            headers={
+                **auth_headers,
+                "X-PrintStash-Edit-Contract": "conditional-v1",
+                "If-Match": first.headers["etag"],
+            },
+            json={"overrides": {"title": "My retained title"}},
+        )
+
+        assert response.status_code == 200, response.text
+        version = response.json()["edit_version"]
+        assert version > first.json()["edit_version"]
+        assert response.headers["etag"] == f'"model-{model.id}-v{version}"'
+        field = _source_read(response.json(), source.id)["fields"][0]
+        assert field["effective_value"] == "My retained title"
+
+    def test_rejects_changed_editing_snapshot(
+        self, client, auth_headers, model, source, db_session
+    ):
+        from sqlalchemy import event, text
+
+        changed = False
+        engine = db_session.get_bind()
+
+        def write_during_read(connection, _cursor, statement, _params, _context, _many):
+            nonlocal changed
+            if not changed and "FROM model_provenance_sources" in statement:
+                changed = True
+                connection.execute(
+                    text("UPDATE models SET name='Concurrent title' WHERE id=:id"),
+                    {"id": model.id},
+                )
+
+        event.listen(engine, "after_cursor_execute", write_during_read)
+        try:
+            response = client.get(
+                f"/api/v1/models/{model.id}/provenance", headers=auth_headers
+            )
+        finally:
+            event.remove(engine, "after_cursor_execute", write_during_read)
+
+        assert changed
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "edit_snapshot_changed"
+        assert "sources" not in response.json()
+
+
 class TestGetModelProvenance:
     def test_returns_the_source_it_captured_from(
         self,

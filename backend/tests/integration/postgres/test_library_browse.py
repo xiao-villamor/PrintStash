@@ -444,3 +444,57 @@ class TestBrowseThumbnails:
             with pytest.raises(OperationError, match="browse_refresh_required"):
                 thumbnail_items(reader, user, [model_id])
             assert race["committed"] is True
+
+
+class TestProvenanceSnapshot:
+    def test_reads_versioned_source(self, pg_library):
+        from app.modules.library.model_views.detail import provenance_detail
+        from tests.factories.provenance import build_cover, build_provenance_source
+
+        with Session(pg_library) as session:
+            model = build_model(session)
+            source = build_provenance_source(session, model)
+            cover = build_cover(session, source)
+            session.refresh(model)
+
+            result = provenance_detail(session, model.id)
+
+            assert result.edit_version == model.edit_version
+            assert [entry.id for entry in result.sources] == [source.id]
+            assert result.sources[0].cover is not None
+            assert result.sources[0].cover.id == cover.id
+
+    def test_rejects_concurrent_edit_during_composition(self, pg_library):
+        from sqlalchemy import event
+
+        from app.modules.library.model_views.detail import provenance_detail
+        from tests.factories.provenance import build_provenance_source
+
+        with Session(pg_library) as setup:
+            model = build_model(setup)
+            build_provenance_source(setup, model)
+            model_id = model.id
+        changed = False
+        with Session(pg_library) as reader:
+            connection = reader.connection()
+
+            def write_during_read(_conn, _cursor, statement, _params, _context, _many):
+                nonlocal changed
+                if not changed and "FROM model_provenance_sources" in statement:
+                    changed = True
+                    with Session(pg_library) as writer:
+                        writer.execute(
+                            text(
+                                "UPDATE models SET name='Concurrent title' WHERE id=:id"
+                            ),
+                            {"id": model_id},
+                        )
+                        writer.commit()
+
+            event.listen(connection, "after_cursor_execute", write_during_read)
+            try:
+                with pytest.raises(OperationError, match="edit_snapshot_changed"):
+                    provenance_detail(reader, model_id)
+            finally:
+                event.remove(connection, "after_cursor_execute", write_during_read)
+            assert changed

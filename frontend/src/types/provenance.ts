@@ -46,9 +46,11 @@ export interface ProvenanceSourceRead {
   last_checked_at: string;
   fields: ProvenanceFieldRead[];
   captures: ProvenanceCaptureSummaryRead[];
+  cover: ModelSourceCoverRead | null;
 }
 
 export interface ModelProvenanceRead {
+  edit_version: number;
   sources: ProvenanceSourceRead[];
 }
 

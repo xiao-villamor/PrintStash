@@ -48,14 +48,14 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("getModelProvenance", () => {
   it("GETs the explicit model provenance read contract", async () => {
-    fetchMock.mockResolvedValue(reply('{"sources":[]}'));
+    fetchMock.mockResolvedValue(reply('{"edit_version":1,"sources":[]}'));
 
-    await expect(getModelProvenance(41)).resolves.toEqual({ sources: [] });
+    await expect(getModelProvenance(41)).resolves.toEqual({ edit_version: 1, sources: [] });
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/models/41/provenance", expect.any(Object));
   });
 
   it("PATCHes only explicit overrides and clears at a provenance source", async () => {
-    fetchMock.mockResolvedValue(reply('{"sources":[]}'));
+    fetchMock.mockResolvedValue(reply('{"edit_version":1,"sources":[]}'));
     const payload: ModelProvenancePatch = {
       overrides: { title: "Bench" },
       clear_overrides: ["description"],

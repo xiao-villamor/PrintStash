@@ -52,6 +52,7 @@ const api: SourceTabApi = {
 };
 
 const provenance: ModelProvenanceRead = {
+  edit_version: 1,
   sources: [
     {
       id: 8,
@@ -63,6 +64,7 @@ const provenance: ModelProvenanceRead = {
       first_captured_at: "2026-08-24T00:00:00Z",
       last_checked_at: "2026-08-24T00:00:00Z",
       captures: [],
+      cover: null,
       fields: [
         {
           field_name: "title",
@@ -124,6 +126,7 @@ describe("SourceTab", () => {
     ["a control character smuggled into the path", `https://example.test/${NUL}trick`],
   ])("shows %s as text rather than as a link", async (_case, canonicalUrl) => {
     getProvenance.mockResolvedValue({
+      ...provenance,
       sources: [{ ...provenance.sources[0], canonical_url: canonicalUrl }],
     });
 
@@ -134,6 +137,7 @@ describe("SourceTab", () => {
 
   it("normalizes a safe canonical URL into its link", async () => {
     getProvenance.mockResolvedValue({
+      ...provenance,
       sources: [{ ...provenance.sources[0], canonical_url: "HTTPS://EXAMPLE.TEST/canonical" }],
     });
 
