@@ -640,3 +640,96 @@ class TestOutlinerQueryAuthority:
         )
         assert response.status_code == 422
         assert response.json() == {"detail": "outliner_use_collection_id"}
+
+
+class TestOutlinerEditingBase:
+    @pytest.mark.parametrize("kind", ["model", "multipart"])
+    @pytest.mark.parametrize("root", [True, False])
+    def test_returns_the_aggregate_editing_base(
+        self,
+        client,
+        auth_headers,
+        make_model,
+        make_multipart_model,
+        make_collection,
+        kind,
+        root,
+    ):
+        folder = None if root else make_collection("Versioned folder")
+        build = make_model if kind == "model" else make_multipart_model
+        row = build("Versioned leaf", collection=folder, edit_version=7)
+        params = {} if root else {"collection_id": folder.id}
+        items = _read(client, auth_headers, **params)["items"]
+        assert len(items) == 1
+        assert items[0]["kind"] == kind
+        assert items[0]["id"] == row.id
+        assert items[0]["name"] == row.name
+        assert items[0]["collection_id"] == (folder.id if folder else None)
+        assert items[0]["edit_version"] == 7
+
+    def test_preserves_versions_across_mixed_continuation(
+        self, client, auth_headers, make_model, make_multipart_model
+    ):
+        model = make_model("Same", edit_version=7)
+        multipart = make_multipart_model("Same", edit_version=9, id=model.id)
+        first = _read(client, auth_headers, limit=1)
+        second = _read(client, auth_headers, limit=1, cursor=first["next_cursor"])
+        assert [
+            (row["kind"], row["id"], row["edit_version"])
+            for row in first["items"] + second["items"]
+        ] == [("model", model.id, 7), ("multipart", multipart.id, 9)]
+        assert second["next_cursor"] is None
+
+    def test_distinguishes_unversioned_collection_search_matches(
+        self, client, auth_headers, make_model, make_multipart_model, make_collection
+    ):
+        folder = make_collection("Versioned folder")
+        make_model("Versioned model", collection=folder, edit_version=7)
+        make_multipart_model("Versioned set", collection=folder, edit_version=9)
+        rows = {
+            row["kind"]: row
+            for row in _read(client, auth_headers, SEARCH, q="Versioned")["items"]
+        }
+        assert rows["model"]["edit_version"] == 7
+        assert rows["multipart"]["edit_version"] == 9
+        assert "edit_version" not in rows["collection"]
+        assert rows["collection"]["id"] == folder.id
+
+    def test_reads_the_version_acknowledged_by_another_editor(
+        self, client, auth_headers, make_model, make_collection
+    ):
+        model = make_model("Original", edit_version=7)
+        folder = make_collection("Destination")
+        before = _read(client, auth_headers)["items"][0]
+        response = client.patch(
+            f"/api/v1/models/{model.id}",
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-v7"',
+                "X-PrintStash-Edit-Contract": "conditional-v1",
+            },
+            json={"name": "Renamed", "collection": folder.path},
+        )
+        assert response.status_code == 200, response.text
+        after = _read(client, auth_headers, collection_id=folder.id)["items"][0]
+        assert before["edit_version"] == 7
+        assert after["edit_version"] == response.json()["edit_version"] > 7
+        assert after["name"] == "Renamed"
+        assert after["collection"] == folder.path
+
+    def test_returns_editing_versions_from_the_legacy_outliner(
+        self, client, auth_headers, make_model
+    ):
+        model = make_model("Legacy projection", edit_version=13)
+        response = client.get("/api/v1/models/outliner", headers=auth_headers)
+        assert response.status_code == 200, response.text
+        assert [(row["id"], row["edit_version"]) for row in response.json()] == [
+            (model.id, 13)
+        ]
+
+    def test_requires_aggregate_versions_in_the_public_read_schema(self, client):
+        schemas = client.get("/openapi.json").json()["components"]["schemas"]
+        for name in ("OutlinerModelRead", "OutlinerModel", "OutlinerMultipart"):
+            assert "edit_version" in schemas[name]["required"]
+            assert schemas[name]["properties"]["edit_version"]["exclusiveMinimum"] == 0
+        assert "edit_version" not in schemas["OutlinerCollectionMatch"]["properties"]

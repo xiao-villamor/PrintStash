@@ -12585,6 +12585,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -12602,7 +12607,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "edit_version"
         ],
         "title": "OutlinerModel",
         "type": "object"
@@ -12642,6 +12648,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -12653,7 +12664,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "edit_version"
         ],
         "title": "OutlinerModelRead",
         "type": "object"
@@ -12693,6 +12705,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -12710,7 +12727,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "edit_version"
         ],
         "title": "OutlinerMultipart",
         "type": "object"

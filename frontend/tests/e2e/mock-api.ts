@@ -1047,8 +1047,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // The tree a level, a lookup or a search at a time. Every mock collection is
   // a top-level folder with nothing below it.
   if (url.pathname.startsWith("/api/v1/outliner/")) {
-    const leaves = modelList.map(({ id, name, collection, collection_id }) => ({
+    const leaves = modelList.map(({ id, name, edit_version, collection, collection_id }) => ({
       kind: "model",
+      edit_version,
       id,
       name,
       collection,
@@ -1341,7 +1342,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname === "/api/v1/models/outliner") {
     sendJson(
       res,
-      modelList.map(({ id, name, collection, collection_id }) => ({
+      modelList.map(({ id, name, edit_version, collection, collection_id }) => ({
+        edit_version,
         id,
         name,
         collection,

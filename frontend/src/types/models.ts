@@ -840,13 +840,17 @@ export interface ModelPageRead {
   total: number;
 }
 
-export interface OutlinerModelRead {
+export interface OutlinerItemRead {
   id: number;
   name: string;
   collection: string | null;
   collection_id: number | null;
   /** Names of the collection's visible ancestors, e.g. `Parts/Brackets`; null outside one. */
   collection_label: string | null;
+}
+
+export interface OutlinerModelRead extends OutlinerItemRead {
+  edit_version: number;
 }
 
 export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {

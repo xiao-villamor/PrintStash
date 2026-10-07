@@ -202,3 +202,25 @@ class TestOutlinerOnPostgres:
         assert [(row.id, row.collection_label) for row in page.items] == [
             (visible.id, "Granted")
         ]
+
+    def test_preserves_versioned_mixed_search(self, pg_session: Session) -> None:
+        from app.modules.library import outliner
+        from app.schemas.outliner import OutlinerQuery
+        from tests.factories import build_multipart_model
+
+        admin = build_user(pg_session, superuser=True)
+        folder = build_collection(pg_session, "Versioned folder")
+        model = build_model(
+            pg_session, "Versioned model", collection=folder, edit_version=7
+        )
+        multipart = build_multipart_model(
+            pg_session, "Versioned set", collection=folder, edit_version=9
+        )
+        page = outliner.search(pg_session, admin, OutlinerQuery(q="Versioned"))
+        rows = {row.kind.value: row.model_dump() for row in page.items}
+        assert rows["model"]["id"] == model.id
+        assert rows["model"]["edit_version"] == 7
+        assert rows["multipart"]["id"] == multipart.id
+        assert rows["multipart"]["edit_version"] == 9
+        assert rows["collection"]["id"] == folder.id
+        assert "edit_version" not in rows["collection"]

@@ -25,6 +25,7 @@ export function outlinerRoutes(
         ? []
         : multipart.map((set) => ({
             id: set.id,
+            edit_version: set.edit_version,
             name: set.name,
             collection: set.collection,
             collection_id: set.collection_id,

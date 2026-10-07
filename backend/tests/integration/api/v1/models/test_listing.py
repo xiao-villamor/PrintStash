@@ -22,7 +22,14 @@ from app.core.time import utcnow
 from app.db.models import CollectionRole, Model
 from tests.factories import build_model
 
-OUTLINER_FIELDS = {"id", "name", "collection", "collection_id", "collection_label"}
+OUTLINER_FIELDS = {
+    "id",
+    "name",
+    "edit_version",
+    "collection",
+    "collection_id",
+    "collection_label",
+}
 PRINTER_FILTERS = [
     pytest.param({"printer_id": 1}, id="printer_id"),
     pytest.param({"printer_presence": "any"}, id="printer_presence"),

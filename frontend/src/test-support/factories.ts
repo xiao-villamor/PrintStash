@@ -45,6 +45,7 @@ import type {
   ExternalLibrary,
   JobStatus,
   ModelListItem,
+  OutlinerModelRead,
   PrinterAccess,
   PrinterCapabilities,
   PrinterRead,
@@ -929,6 +930,19 @@ export function aModelProvenance(
         ],
       },
     ],
+    ...override,
+  };
+}
+
+/** Minimal versioned tree leaf; its location is explicit without rich Model hydration. */
+export function aOutlinerModel(override: Partial<OutlinerModelRead> = {}): OutlinerModelRead {
+  return {
+    id: 1,
+    edit_version: 1,
+    name: "Benchy",
+    collection: "parts",
+    collection_id: 1,
+    collection_label: "Parts",
     ...override,
   };
 }

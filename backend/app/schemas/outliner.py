@@ -5,7 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from app.schemas.models import CollectionNodeRead, ModelFilters, OutlinerModelRead
+from app.schemas.models import (
+    CollectionNodeRead,
+    ModelFilters,
+    OutlinerItemRead,
+    OutlinerModelRead,
+)
 
 
 class OutlinerView(str, Enum):
@@ -43,7 +48,7 @@ class OutlinerMultipart(OutlinerModelRead):
     kind: Literal[OutlinerKind.MULTIPART] = OutlinerKind.MULTIPART
 
 
-class OutlinerCollectionMatch(OutlinerModelRead):
+class OutlinerCollectionMatch(OutlinerItemRead):
     kind: Literal[OutlinerKind.COLLECTION] = OutlinerKind.COLLECTION
 
 

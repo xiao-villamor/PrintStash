@@ -1,4 +1,9 @@
-import type { CollectionNodeRead, ListModelsParams, OutlinerModelRead } from "./models";
+import type {
+  CollectionNodeRead,
+  ListModelsParams,
+  OutlinerItemRead,
+  OutlinerModelRead,
+} from "./models";
 
 export type OutlinerView = "organized" | "all" | "multipart" | "components";
 export type OutlinerFilters = Omit<
@@ -8,7 +13,7 @@ export type OutlinerFilters = Omit<
 export type OutlinerEntry =
   | (OutlinerModelRead & { kind: "model" })
   | (OutlinerModelRead & { kind: "multipart" });
-export type OutlinerMatch = OutlinerEntry | (OutlinerModelRead & { kind: "collection" });
+export type OutlinerMatch = OutlinerEntry | (OutlinerItemRead & { kind: "collection" });
 export interface OutlinerCollection extends CollectionNodeRead {
   direct_entry_count: number;
   subtree_entry_count: number;

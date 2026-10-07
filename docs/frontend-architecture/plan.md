@@ -178,7 +178,11 @@ M0 is qualified by the [exact-base checkpoint](baseline-measurement.md#m0-accept
 501 original unit/package tests, 17 production functional cases, 200 startup
 observations and bounded reproductions of the six failure families. M1 is qualified
 by the [transport closure record](../frontend-m1-closure-validation.md). M2
-prerequisites and acceptance are satisfied; M3 is the next closure target.
+prerequisites and acceptance are satisfied. M3 is locally closed with its
+[ordered-browse qualification](../frontend-m3-closure-validation.md); M4 is the
+active closure target. Source and Multipart auxiliary editing are qualified;
+conditional movement, restored editing-token identity and final M4 acceptance
+remain open.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own

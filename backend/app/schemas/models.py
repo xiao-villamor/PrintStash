@@ -298,13 +298,17 @@ class ModelPageRead(BaseModel):
     total: int
 
 
-class OutlinerModelRead(BaseModel):
+class OutlinerItemRead(BaseModel):
     id: int
     name: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
     # The collection's name path (``Parts/Brackets``); None outside a collection.
     collection_label: Optional[str] = None
+
+
+class OutlinerModelRead(OutlinerItemRead):
+    edit_version: int = Field(gt=0)
 
 
 class ModelFilters(BaseModel):

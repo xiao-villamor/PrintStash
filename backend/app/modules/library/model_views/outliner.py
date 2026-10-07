@@ -18,8 +18,12 @@ def entry_response(row, labels: dict[str, str]):
     )
     match OutlinerKind(row.kind):
         case OutlinerKind.MODEL:
-            return OutlinerModel.model_validate(fields)
+            return OutlinerModel.model_validate(
+                {**fields, "edit_version": row.edit_version}
+            )
         case OutlinerKind.MULTIPART:
-            return OutlinerMultipart.model_validate(fields)
+            return OutlinerMultipart.model_validate(
+                {**fields, "edit_version": row.edit_version}
+            )
         case OutlinerKind.COLLECTION:
             return OutlinerCollectionMatch.model_validate(fields)

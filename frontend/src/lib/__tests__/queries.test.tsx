@@ -63,7 +63,7 @@ import type {
   TagRead,
   VaultStatsRead,
 } from "@/types";
-import { aCollectionNode, aPrinter, aVaultConfig } from "@/test-support/factories";
+import { aOutlinerModel, aCollectionNode, aPrinter, aVaultConfig } from "@/test-support/factories";
 
 // The hooks are thin, but they encode two real contracts worth locking down:
 // (1) shared reads preserve their endpoint parameters and Query ownership, and
@@ -168,10 +168,6 @@ function makeListItem(id: number, name: string): ModelListItem {
     print_summary: null,
     starred: false,
   };
-}
-
-function makeOutlinerModel(id: number, name: string): OutlinerModelRead {
-  return { id, name, collection: null, collection_id: null, collection_label: null };
 }
 
 function emptyFacets(): ModelFacetsRead {
@@ -356,8 +352,24 @@ describe("usePrinters enabled gate", () => {
 
 describe("filter query continuity", () => {
   it("keeps outliner data mounted while changed filters refetch", async () => {
-    const firstModels = [makeOutlinerModel(1, "Drawer Housing")];
-    const filteredModels = [makeOutlinerModel(2, "PLA Bracket")];
+    const firstModels = [
+      aOutlinerModel({
+        id: 1,
+        name: "Drawer Housing",
+        collection: null,
+        collection_id: null,
+        collection_label: null,
+      }),
+    ];
+    const filteredModels = [
+      aOutlinerModel({
+        id: 2,
+        name: "PLA Bracket",
+        collection: null,
+        collection_id: null,
+        collection_label: null,
+      }),
+    ];
     let resolveFiltered!: (value: OutlinerModelRead[]) => void;
     stubs.listOutlinerModels.mockResolvedValueOnce(firstModels).mockImplementationOnce(
       () =>

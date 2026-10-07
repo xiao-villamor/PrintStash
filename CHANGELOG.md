@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Include aggregate editing versions in lightweight Model and Multipart tree
+  reads, keeping collection search matches distinct and reads bounded.
+
 - Preserve Multipart tag selections and chosen cover images after conflicts or
   uncertain saves. Review the current version before retrying, retain unrelated
   composition drafts, and reject invalid editing acknowledgements.

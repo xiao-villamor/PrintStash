@@ -181,6 +181,14 @@ The Source endpoint clients require a version; no transport cache or generic
 form/repository layer is added. See [the Source validation record](../library-provenance-editing-validation.md).
 
 
+Lightweight outliner Model/Multipart entries carry their stored editing version
+alongside name and location, including search and continuation pages. Collection
+search matches are a distinct unversioned case. A move must carry the version
+captured from its source gesture; fetching a current version just to authorize a
+stale move defeats conflict detection. The read contract is qualified in
+[the movement validation record](../library-move-validation.md); the remaining
+unconditional drop handler is still an explicit M4 migration gap.
+
 Multipart detail publication stays in `features/library/multipart.ts`. Composition,
 tag and cover writes use conditional versions; their endpoint clients reject a
 receipt for another aggregate or a non-advancing version. The shared tag editor

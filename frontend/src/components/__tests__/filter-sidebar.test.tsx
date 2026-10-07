@@ -13,7 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilterSidebar, type FilterSidebarProps } from "@/components/filter-sidebar";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
-import { aCollection, aCollectionNode, aPrinter, aTag } from "@/test-support/factories";
+import {
+  aOutlinerModel,
+  aCollection,
+  aCollectionNode,
+  aPrinter,
+  aTag,
+} from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import type { CollectionRead, MultipartModelListItem, OutlinerModelRead } from "@/types";
 
@@ -22,19 +28,6 @@ const TREE = [
   aCollection({ id: 2, name: "Brackets", path: "parts/brackets", parent_id: 1 }),
   aCollection({ id: 3, name: "Toys", path: "toys", parent_id: null }),
 ];
-
-function outlinerModel(over: Partial<OutlinerModelRead> = {}): OutlinerModelRead {
-  // The tree groups by `collection` *path*, not by id — a model with only an id
-  // is invisible to it, which is exactly the drift this fixture pins down.
-  return {
-    id: 1,
-    name: "Benchy",
-    collection: "parts",
-    collection_id: 1,
-    collection_label: "Parts",
-    ...over,
-  };
-}
 
 function multipartSet(over: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
   return {
@@ -330,7 +323,7 @@ describe("FilterSidebar", () => {
     it("uses the collection total when only part of a folder is loaded", async () => {
       renderSidebar({
         collections: [aCollection({ id: 1, name: "Archive", path: "archive", model_count: 501 })],
-        models: [outlinerModel({ collection: "archive", collection_id: 1 })],
+        models: [aOutlinerModel({ collection: "archive", collection_id: 1 })],
       });
 
       expect(await folderRow("Archive")).toHaveTextContent("Archive501");
@@ -367,15 +360,15 @@ describe("FilterSidebar", () => {
           aCollection({ id: 2, name: "Child", path: "parent/child", parent_id: 1, model_count: 2 }),
         ],
         models: [
-          outlinerModel({
+          aOutlinerModel({
             id: 1,
             name: "Other",
             collection: "parent",
             collection_id: 1,
             collection_label: "Parent",
           }),
-          outlinerModel({ id: 2, name: "Match", ...inChild }),
-          outlinerModel({ id: 3, name: "Another", ...inChild }),
+          aOutlinerModel({ id: 2, name: "Match", ...inChild }),
+          aOutlinerModel({ id: 3, name: "Another", ...inChild }),
         ],
       });
 
@@ -456,7 +449,7 @@ describe("FilterSidebar", () => {
 
     it("keeps a folder holding a matching model", async () => {
       const user = userEvent.setup();
-      renderSidebar({ models: [outlinerModel()] });
+      renderSidebar({ models: [aOutlinerModel()] });
 
       await filterBy(user, "benchy");
 
@@ -481,13 +474,13 @@ describe("FilterSidebar", () => {
     it("keeps the folder holding a filtered model", async () => {
       // A tag filter arrives with the model list already narrowed, so the tree
       // shows where those models actually live rather than the whole library.
-      renderSidebar({ selectedTags: ["functional"], models: [outlinerModel()] });
+      renderSidebar({ selectedTags: ["functional"], models: [aOutlinerModel()] });
 
       expect((await screen.findAllByText("Parts")).length).toBeGreaterThan(0);
     });
 
     it("drops a folder holding none of them", () => {
-      renderSidebar({ selectedTags: ["functional"], models: [outlinerModel()] });
+      renderSidebar({ selectedTags: ["functional"], models: [aOutlinerModel()] });
 
       expect(screen.queryByText("Toys")).toBeNull();
     });
@@ -679,7 +672,7 @@ describe("FilterSidebar", () => {
 
     it("remembers that the model group was collapsed", async () => {
       const user = userEvent.setup();
-      renderSidebar({ models: [outlinerModel({ id: 5, collection: null, collection_id: null })] });
+      renderSidebar({ models: [aOutlinerModel({ id: 5, collection: null, collection_id: null })] });
 
       await user.click((await screen.findAllByRole("button", { name: "Collapse" }))[0]);
 
@@ -700,7 +693,7 @@ describe("FilterSidebar", () => {
     });
 
     it("exposes only the supported library view controls", () => {
-      renderSidebar({ models: [outlinerModel()], multipartModels: [multipartSet()] });
+      renderSidebar({ models: [aOutlinerModel()], multipartModels: [multipartSet()] });
 
       expect(screen.getByRole("button", { name: "Everything" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Multipart sets only" })).toBeVisible();
@@ -710,7 +703,7 @@ describe("FilterSidebar", () => {
 
     it("shows referenced models in Everything", async () => {
       renderSidebar({
-        models: [outlinerModel({ collection: null, collection_id: null })],
+        models: [aOutlinerModel({ collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
         libraryView: "all",
       });
@@ -720,7 +713,7 @@ describe("FilterSidebar", () => {
 
     it("shows unrelated models in Everything", async () => {
       renderSidebar({
-        models: [outlinerModel({ id: 2, collection: null, collection_id: null })],
+        models: [aOutlinerModel({ id: 2, collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
         libraryView: "all",
       });
@@ -730,7 +723,7 @@ describe("FilterSidebar", () => {
 
     it("hides regular models in the multipart-only view", () => {
       renderSidebar({
-        models: [outlinerModel({ collection: null, collection_id: null })],
+        models: [aOutlinerModel({ collection: null, collection_id: null })],
         multipartModels: [multipartSet()],
         libraryView: "multipart",
       });
@@ -820,7 +813,7 @@ describe("FilterSidebar", () => {
 
 describe("outliner pages", () => {
   const models = Array.from({ length: 51 }, (_, i) =>
-    outlinerModel({ id: i + 1, name: `Part ${String(i).padStart(3, "0")}` }),
+    aOutlinerModel({ id: i + 1, name: `Part ${String(i).padStart(3, "0")}` }),
   );
 
   it("reuses pages of the opened branch after reopening", async () => {

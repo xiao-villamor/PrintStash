@@ -129,6 +129,7 @@ def _columns(entity, kind: OutlinerKind, *, counts_only: bool):
         entity.collection_id.label("collection_id"),
         literal(kind.value).label("kind"),
         func.lower(entity.name).label("sort_name"),
+        entity.edit_version.label("edit_version"),
     )
 
 
@@ -416,6 +417,7 @@ def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching
             col(Collection.id).label("collection_id"),
             literal(OutlinerKind.COLLECTION.value).label("kind"),
             func.lower(col(Collection.name)).label("sort_name"),
+            literal(None).label("edit_version"),
         ).where(
             col(Collection.id).in_(folder_ids),
             col(Collection.name).icontains(needle, autoescape=True),

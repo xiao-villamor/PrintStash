@@ -15,6 +15,7 @@ import {
   FROZEN_NOW,
   aMetadata,
   aModelListItem,
+  aOutlinerModel,
   aPrinter,
   aPrintJob,
   printerAccess,
@@ -390,5 +391,22 @@ describe("aMetadata", () => {
         },
       }),
     ).toThrow("Legacy volume must be finite");
+  });
+});
+
+describe("aOutlinerModel", () => {
+  it.each([1, 7])("builds a minimal outliner fixture at version %s", (edit_version) => {
+    const leaf = aOutlinerModel({ edit_version });
+    expect(leaf.edit_version).toBe(edit_version);
+    expect(leaf.collection).toBe("parts");
+    expect(leaf.collection_id).toBe(1);
+    expect(Object.keys(leaf).sort()).toEqual([
+      "collection",
+      "collection_id",
+      "collection_label",
+      "edit_version",
+      "id",
+      "name",
+    ]);
   });
 });
