@@ -4244,5 +4244,9 @@
   "Choose an available destination before uploading.": "Elige un destino disponible antes de subir.",
   "Could not load backup sources.": "No se pudieron cargar las fuentes de copia de seguridad.",
   "Some backup sources could not be loaded.": "No se pudieron cargar algunas fuentes de copia de seguridad.",
-  "Could not load backup settings.": "No se pudo cargar la configuración de copias de seguridad."
+  "Could not load backup settings.": "No se pudo cargar la configuración de copias de seguridad.",
+  "settings.storageReadFailed": "No se pudo leer la configuración de almacenamiento. Reinténtalo antes de modificarla.",
+  "settings.storageRetry": "Reintentar configuración de almacenamiento",
+  "settings.storageReviewChanged": "La configuración de almacenamiento cambió durante la revisión. Descarta el borrador y revisa los valores actuales antes de confirmar de nuevo.",
+  "settings.storageDiscardDraft": "Descartar borrador de almacenamiento"
 }

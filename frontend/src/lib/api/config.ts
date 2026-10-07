@@ -73,10 +73,15 @@ export function getHealthDetails<T>(): Promise<T> {
   return getJson<T>("/api/v1/health/details", { fresh: true });
 }
 
-export function enrollStorageRoot(role: StorageRootRole): Promise<StorageRootEnrollmentRead> {
-  return sendJson<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", "POST", {
-    role,
-    confirm: true,
+export function enrollStorageRoot(
+  role: StorageRootRole,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<StorageRootEnrollmentRead> {
+  return requestApi<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ role, confirm: true }),
+    signal: options.signal,
   });
 }
 

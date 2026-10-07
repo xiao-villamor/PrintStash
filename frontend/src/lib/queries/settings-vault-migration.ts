@@ -5,6 +5,7 @@ import * as api from "@/lib/api/vault-migration";
 import { useAuth } from "@/lib/auth-context";
 import { onAuthChange } from "@/lib/auth-store";
 import { ApiError } from "@/lib/errors";
+import { queryKeys } from "@/lib/query-client";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { backupCatalogKeys } from "./settings-backup-catalog";
 import type { BackupMeta } from "@/lib/api/backup";
@@ -159,6 +160,12 @@ export function useMigrationCommand() {
           );
       }
     }
+    async function refreshActiveConfiguration() {
+      assertCurrent();
+      await client.cancelQueries({ queryKey: queryKeys.vaultConfig, exact: true });
+      assertCurrent();
+      void client.invalidateQueries({ queryKey: queryKeys.vaultConfig, exact: true });
+    }
     async function publish(run: api.VaultMigrationRun) {
       assertCurrent();
       await client.cancelQueries({ queryKey: migrationKeys.all });
@@ -169,6 +176,11 @@ export function useMigrationCommand() {
         ...(previous ?? []).filter((row) => row.id !== run.id),
       ]);
       void client.invalidateQueries({ queryKey: migrationKeys.report(run.id) });
+      if (
+        (command.kind === "cutover" || command.kind === "recover") &&
+        ["active", "cleaned", "complete"].includes(run.state)
+      )
+        await refreshActiveConfiguration();
     }
     let dispatched = false;
     try {
@@ -191,6 +203,7 @@ export function useMigrationCommand() {
           client.setQueryData(migrationKeys.history, rows);
           for (const row of rows) client.setQueryData(migrationKeys.run(row.id), row);
           void client.invalidateQueries({ queryKey: ["vault-migrations", "report"] });
+          await refreshActiveConfiguration();
           return null;
         }
         case "download":

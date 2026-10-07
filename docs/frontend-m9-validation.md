@@ -325,3 +325,63 @@ during rendering. The affected entry/history tests and lint were rerun after tha
 correction. No backend implementation changed and no performance improvement is
 claimed. The active-storage configuration/inventory consumers still need their M9
 integration review; this increment does not close the milestone.
+
+
+## Current storage configuration ownership (M9 increment)
+
+The active-storage card still copies full configuration/provider responses and
+reloads them after writes. This increment reuses existing configuration/provider
+owners, keeps credential drafts local and preserves explicit root enrollment.
+The configuration endpoint has no conditional revision contract; detecting an
+observed background change does not claim atomic cross-client conflict protection.
+Root enrollment currently accepts a role, not a reviewed path. A frontend snapshot
+can reject a change already observed in its catalog; the backend contract limitation
+must remain explicit rather than claiming filesystem identity fencing.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| SC1 | cancels an abandoned storage configuration read | Edge | Pending config GET, view unmounts | Request signal aborted | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::cancels an abandoned storage configuration read` |
+| SC2 | exposes failed configuration reads with explicit recovery | Error | Config 503 | Error/retry visible; no enabled save with unknown config | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::exposes failed configuration reads with explicit recovery` |
+| SC3 | hides private storage configuration after denial | Error | Warm config then 403 | Private paths and save controls hidden | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::hides private storage configuration after denial` |
+| SC4 | publishes the normalized storage receipt to configuration observers | Happy | Successful normalized PUT | Shared configuration contains receipt; no redundant GET | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::publishes the normalized storage receipt to configuration observers` |
+| SC5 | retains a storage draft during background configuration refresh | Edge | Unsaved paths then GET refresh | Draft remains, changed base requires review | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::retains a storage draft during background configuration refresh` |
+| SC6 | preserves a newer credential draft after an older save finishes | Edge | Edit again while PUT pending | New secret draft remains unsaved | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::preserves a newer credential draft after an older save finishes` |
+| SC7 | retires root enrollment review with its session | Edge | Enrollment confirmation then logout | Confirmation disappears; no POST | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::retires root enrollment review with its session` |
+| SC8 | refuses enrollment after the reviewed root changes | Edge | Config projection changes root during confirmation | No enrollment POST | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::refuses enrollment after the reviewed root changes` |
+| SC9 | updates current storage after a confirmed migration cutover | Happy | Cutover receipt activates new destination | Existing config observer rereads active paths | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::updates current storage after a confirmed migration cutover` |
+| SC10 | keeps private configuration unreadable without an administrator | Error | No administrator session | No private config request or editable control | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::keeps private configuration unreadable without an administrator` |
+| SC11 | discards a conflicting storage draft before renewed review | Edge | Background configuration changed while editing | Explicit discard reveals current fields; subsequent save uses them | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::discards a conflicting storage draft before renewed review` |
+| SC12 | permits retry after refused root enrollment | Error | Enrollment rejected; next explicit attempt succeeds | Confirmation remains usable; successful receipt shown | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::permits retry after refused root enrollment` |
+| SC13 | hides storage after enrollment access is revoked | Error | Enrollment 403 followed by denied config read | Private location and review disappear | Frontend unit | ✅ `frontend/src/components/__tests__/storage-config-card.test.tsx::hides storage after enrollment access is revoked` |
+
+Validation: initial ownership selection reported 9 failures; 8 reproduced the old
+behavior and the newer-credential test first had an overly exact accessible label.
+After correcting that arrangement, it independently failed against the committed
+old card because the newer credential was replaced. The first implementation run
+had 63 passing/5 failing tests: loading-status timing, a lost field-validation
+message, two anonymous fixtures pretending an admin-only config endpoint was
+public, and that label arrangement. The validation message was preserved; the
+anonymous fixtures now assert the real private-read contract. The existing
+server-refusal and credential-omission assertions still pass.
+
+The cutover/current-storage integration failed before targeted configuration
+invalidation. Separate regressions covered retry after refused enrollment and
+hiding private locations after enrollment permission revocation. Final affected
+selection: **155 tests across 7 files passed in 17.10s**. The real migration scenario
+now additionally asserts the new data/thumbnail paths in the current-storage
+summary: **1/1 passed**, 47.0s scenario (1.5min invocation).
+
+App/UI/domain types and build passed (1.65s; existing large-chunk warning). Lint
+rejected a conditional empty-object spread; equivalent explicit construction passed.
+Full formatting caught the preceding migration increment's final entry-selection
+formatting change; it was corrected rather than suppressing the check. Final
+formatting covers 768 files. All failed invocations are retained. No performance
+claim is made from request-count assertions or smaller components.
+
+This is **frontend ownership qualification, not complete concurrent-edit
+qualification**. The approved plan requires an atomic backend precondition for
+editable aggregates. Configuration still has no such contract, and role-only root
+enrollment cannot prove the path reviewed by the client. These remain required M9
+work before milestone closure; frontend fingerprints are not a substitute. The
+inventory/cache consumers and remaining administration/entry workflows are also
+still open.

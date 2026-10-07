@@ -116,8 +116,7 @@ export function VaultMigrationPanel() {
   const [selection, setSelection] = useState<string | null | undefined>();
   const runId = selection === undefined ? (runs[0]?.id ?? null) : selection;
   // Capture the entry identity once; later history updates do not navigate the view.
-  if (enabled && selection === undefined && history.data)
-    setSelection(history.data[0]?.id ?? null);
+  if (enabled && selection === undefined && history.data) setSelection(history.data[0]?.id ?? null);
   const listed = runs.find((row) => row.id === runId);
   const command = useMigrationCommand();
   const detail = useQuery({

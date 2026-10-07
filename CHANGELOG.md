@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Share current-storage configuration with Settings and migration receipts, retain
+  newer credential drafts, expose failed reads with recovery, and retire private
+  storage views and root-enrollment confirmations when access is lost. Keep the
+  current location summary in sync with a confirmed migration cutover.
+
 - Give Vault migration reads and command receipts one owner, retain reviewed
   confirmation targets, cancel abandoned reads, surface catalog failures and stop
   status polling after read errors until explicit recovery. Preserve destination

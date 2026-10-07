@@ -67,6 +67,18 @@ uncertain replies trigger a status read, never an automatic replay. Credentials
 stay in the local form and active call. Backend digest/state/identity/audit/backup
 checks remain authoritative; these DTOs do not expose a comparable edit revision.
 
+### Current storage configuration (M9 frontend ownership increment)
+
+`StorageConfigCard` observes the existing configuration/provider owners and keeps
+only field overrides, reviewed root identity and local feedback. Configuration ACKs
+publish centrally; edits typed while a save is pending remain drafts. Migration
+activation/recovery invalidates the configuration projection after canceling older
+reads, so current-location summaries follow the accepted storage transition.
+`settings-storage-root.ts` scopes explicit enrollment to its view/session and checks
+the currently observed reviewed path. Atomic configuration edits and a backend
+reviewed-root precondition remain required before M9 closes; local fingerprints
+and path comparisons do not provide that protection.
+
 ## Proposed directory tree
 
 ```text
