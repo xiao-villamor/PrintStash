@@ -957,3 +957,12 @@ no production dialog behavior changed. Logs are retained locally under
 No full suite, coverage gate, browser server or build was run for this bounded
 contract regression. M9 remains open pending its reopened M7/M8 prerequisites
 and remaining administration work.
+
+
+## Provider accounts checkpoint after M8 acceptance
+
+M8 prerequisites are locally accepted at `ea144c7c`. Provider/device read ownership
+and command lifetime are implemented in the next bounded M9 increment. Focused
+validation: 26 tests passed; format, lint and types passed. The detailed matrix
+and remaining browser-name contract are in `frontend-m9-provider-validation.md`.
+M9 remains open; this checkpoint does not accept all administration workflows.

@@ -52,6 +52,21 @@ history. Secret payloads do not enter Query/MutationCache. A denied or missing
 printer read retires controls and the socket; explicit retry can restore an
 authorized view. Session changes retire drafts, requests and private caches.
 
+### Provider accounts and paired browsers (M9 partial increment)
+
+`lib/queries/settings-providers.ts` owns provider/device reads and their command
+lifetime. These reads use native cancellation and bypass the compatibility GET
+cache. Non-secret connection/device receipts update or invalidate Query; Cults
+credentials and temporary pairing codes stay outside Query and mutation history.
+The panel owns drafts, confirmations and the active OAuth navigation handoff.
+Session changes or disposal retire pending receipts. Transient read errors retain
+mounted drafts with disabled actions; authorization failures hide private rows.
+
+This is not yet a conditional browser-name editor. The backend currently accepts
+unconditional renames, and pairing can reuse a revoked row. A captured editing
+base, incarnation protection and explicit conflict review remain required before
+this workflow is accepted. Evidence: `docs/frontend-m9-provider-validation.md`.
+
 ### Implemented administration source seam (M9 increment)
 
 `lib/queries/settings-library-sources.ts` owns the source catalog and exact

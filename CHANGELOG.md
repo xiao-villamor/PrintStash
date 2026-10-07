@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Provider connections now distinguish loading and failed reads from disconnected
+  accounts. Leaving the panel cancels obsolete work; transient read failures keep
+  browser-name drafts, and failed disconnect/revoke confirmations show their error.
+
 - Detect competing Search settings edits in the advanced form and guided setup.
   Preserve drafts for explicit review, keep unrelated settings during revised
   saves, and stop setup before downloads when consent could not be confirmed.

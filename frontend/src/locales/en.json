@@ -4267,5 +4267,6 @@
   "Preset history changed. Use current values before starting another edit.": "Preset history changed. Use current values before starting another edit.",
   "aiSearch.historyChanged": "The database history changed. Adopt the current settings before starting a new edit.",
   "aiSearch.reviewEnabled": "Enabled",
-  "aiSearch.reviewDisabled": "Disabled"
+  "aiSearch.reviewDisabled": "Disabled",
+  "settings.providerConnections.loadFailed": "Provider accounts or paired browsers could not be loaded."
 }

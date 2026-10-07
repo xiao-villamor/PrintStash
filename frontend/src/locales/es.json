@@ -4267,5 +4267,6 @@
   "Preset history changed. Use current values before starting another edit.": "El historial del perfil ha cambiado. Usa los valores actuales antes de iniciar otra edición.",
   "aiSearch.historyChanged": "El historial de la base de datos ha cambiado. Usa la configuración actual antes de iniciar otra edición.",
   "aiSearch.reviewEnabled": "Activado",
-  "aiSearch.reviewDisabled": "Desactivado"
+  "aiSearch.reviewDisabled": "Desactivado",
+  "settings.providerConnections.loadFailed": "No se pudieron cargar las cuentas de proveedores o los navegadores vinculados."
 }
