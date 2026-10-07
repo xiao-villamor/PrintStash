@@ -282,12 +282,24 @@ function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: Tree
   const query = useOutlinerCollections({
     ...ctx.params,
     parent_id: parentId ?? undefined,
-    reveal_id: revealId(parentId, ctx.revealNodes),
   });
   const nodes = new Map<number, OutlinerCollection>();
   for (const page of query.data?.pages ?? []) {
     for (const node of page.items) nodes.set(node.id, node);
     if (page.revealed) nodes.set(page.revealed.id, page.revealed);
+  }
+  // Selection is independent of downloaded sibling pages. Only ask to reveal
+  // a location when it is absent from the level the user already has open.
+  const selectedId = revealId(parentId, ctx.revealNodes);
+  const needsReveal = selectedId !== undefined && !nodes.has(selectedId);
+  const reveal = useOutlinerCollections(
+    { ...ctx.params, parent_id: parentId ?? undefined, reveal_id: selectedId },
+    query.isSuccess && needsReveal,
+  );
+  if (needsReveal) {
+    for (const page of reveal.data?.pages ?? []) {
+      if (page.revealed) nodes.set(page.revealed.id, page.revealed);
+    }
   }
   return (
     <>
@@ -301,6 +313,13 @@ function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: Tree
         initial={query.data === undefined}
         label={uiText("Show more folders")}
       />
+      {needsReveal && reveal.isError && (
+        <PageControls
+          query={{ ...reveal, hasNextPage: false }}
+          initial={false}
+          label={uiText("Show more folders")}
+        />
+      )}
     </>
   );
 }
@@ -655,10 +674,7 @@ export function FilterSidebarContent({
       ? [...lookup.data.ancestors, lookup.data.collection]
       : [];
   const params: OutlinerParams = { ...outlinerFilters, view: libraryView };
-  const roots = useOutlinerCollections(
-    { ...params, reveal_id: revealId(null, revealNodes) },
-    outlinerQ === "",
-  );
+  const roots = useOutlinerCollections(params, outlinerQ === "");
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // A first visit starts at the top level: the tree loads a level only when
     // it is opened, and opening a large library whole is what #295 was.

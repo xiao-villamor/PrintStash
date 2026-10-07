@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep the collection tree visible when selecting folders, preserving open branches
+  and downloaded sibling pages without reloading them on every click.
+
 - Finish Settings cache and audit ownership: preserve pending edits during refresh,
   reject obsolete cache-policy changes, share audit reads, and retire commands
   when leaving a view or changing session.

@@ -735,7 +735,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setUploadOpen(true);
   }
 
-  const facetsLoading = tagsQuery.isLoading;
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
@@ -1959,7 +1958,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onPrinterPresenceChange={setSelectedPrinterPresence}
           onCreateCollection={handleOpenCreateCollection}
           canViewPrinters={canViewPrinters}
-          loading={facetsLoading || facetQuery.isLoading}
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}
@@ -2003,7 +2001,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onMoveCollection={handleMoveCollection}
           onDeleteCollection={handleDeleteCollection}
           canViewPrinters={canViewPrinters}
-          loading={facetsLoading || facetQuery.isLoading}
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}

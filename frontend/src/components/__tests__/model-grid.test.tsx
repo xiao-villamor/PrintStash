@@ -291,7 +291,9 @@ describe("ModelBrowser", () => {
   describe("library tools", () => {
     it("keeps advanced organization out of the initial toolbar", async () => {
       renderVault();
-      expect(await screen.findByRole("button", { name: "All Models" })).toBeVisible();
+      expect(
+        await within(screen.getByRole("main")).findByRole("button", { name: "All Models" }),
+      ).toBeVisible();
       expect(screen.queryByRole("region", { name: "Filters" })).toBeNull();
       expect(uploadButton()).toBeVisible();
       expect(screen.getByRole("button", { name: "Library tools" })).toHaveAttribute(
@@ -318,7 +320,7 @@ describe("ModelBrowser", () => {
     it("opens multipart creation from the mobile More menu", async () => {
       const user = userEvent.setup();
       renderVault();
-      await screen.findByRole("button", { name: "All Models" });
+      await within(screen.getByRole("main")).findByRole("button", { name: "All Models" });
       await user.click(screen.getByRole("button", { name: "More" }));
       await user.click(screen.getByRole("menuitem", { name: "New multipart set" }));
       expect(screen.getByRole("dialog", { name: "New multipart set" })).toBeVisible();
@@ -881,6 +883,21 @@ describe("ModelBrowser", () => {
           new URLSearchParams(call.url.split("?")[1] ?? "").get("collection") === collection,
       );
     }
+
+    it("shows the tree while initial filters load", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        collections: PARTS_TREE,
+        routes: { "GET /api/v1/models/facets": () => pending.promise },
+      });
+      const folder = await screen.findByRole("button", { name: /^Parts$/ });
+      expect(app.requests().some((request) => request.url.includes("/models/facets"))).toBe(true);
+
+      await act(async () => pending.resolve(json(EMPTY_FACETS)));
+      await waitFor(() => expect(app.client.isFetching()).toBe(0));
+
+      expect(folder).toBeInTheDocument();
+    });
 
     it("keeps one coherent folder result while the destination loads", async () => {
       const user = userEvent.setup();
@@ -3470,13 +3487,13 @@ describe("ModelBrowser", () => {
       // "printer_presence=none" means nothing to the person reading the chip.
       renderVault({ at: "/?printer_presence=none" });
 
-      expect(await screen.findByText("Vault only")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Vault only")).toBeInTheDocument();
     });
 
     it("names an on-a-printer filter in words", async () => {
       renderVault({ at: "/?printer_presence=any" });
 
-      expect(await screen.findByText("On a printer")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("On a printer")).toBeInTheDocument();
     });
 
     it("names a structured filter readably", async () => {

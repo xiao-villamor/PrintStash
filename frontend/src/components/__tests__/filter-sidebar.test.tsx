@@ -929,6 +929,49 @@ describe("outliner pages", () => {
     expect(app.requests().filter((r) => r.url.includes("/outliner/entries"))).toHaveLength(2);
   });
 
+  it("keeps an opened branch mounted when selecting its child", async () => {
+    const user = userEvent.setup();
+    const app = renderSidebar({ models });
+    await openFolder(user, "Parts");
+    const parent = await screen.findByRole("button", { name: "Parts" });
+    const child = await screen.findByRole("button", { name: "Brackets" });
+    const leaf = await screen.findByRole("button", { name: "Part 000" });
+
+    await user.click(child);
+    await waitFor(() => expect(app.client.isFetching()).toBe(0));
+
+    expect(parent).toBeInTheDocument();
+    expect(child).toBeInTheDocument();
+    expect(leaf).toBeInTheDocument();
+  });
+
+  it("retains downloaded sibling pages when changing selection", async () => {
+    const user = userEvent.setup();
+    const collections = Array.from({ length: 51 }, (_, index) =>
+      aCollection({
+        id: index + 1,
+        name: `Folder ${String(index).padStart(3, "0")}`,
+        path: `folder-${index}`,
+        parent_id: null,
+      }),
+    );
+    const app = renderSidebar({ collections });
+    await user.click(await screen.findByRole("button", { name: "Show more folders" }));
+    const last = await screen.findByRole("button", { name: "Folder 050" });
+    const first = screen.getByRole("button", { name: "Folder 000" });
+
+    await user.click(last);
+    await waitFor(() => expect(app.client.isFetching()).toBe(0));
+    await user.click(first);
+    await waitFor(() => expect(app.client.isFetching()).toBe(0));
+
+    expect(last).toBeInTheDocument();
+    expect(first).toBeInTheDocument();
+    expect(
+      app.requests().filter((request) => request.url.includes("/outliner/collections")),
+    ).toHaveLength(2);
+  });
+
   it("recovers a failed continuation without losing loaded rows", async () => {
     const user = userEvent.setup();
     const app = renderSidebar({ models });
@@ -954,6 +997,90 @@ describe("outliner pages", () => {
     app.route(outlinerRoutes(TREE, models));
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("Part 000")).toBeInTheDocument();
+  });
+
+  it("keeps downloaded folders visible during a location reveal", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSidebar({
+      selectedCollection: "toys",
+      routes: {
+        "GET /api/v1/outliner/collections": (url) => {
+          if (url.includes("reveal_id=")) return pending.promise;
+          return json({
+            items: [
+              {
+                ...aCollectionNode({ id: 1, name: "Parts", path: "parts" }),
+                direct_entry_count: 0,
+                subtree_entry_count: 0,
+                visible_child_count: 0,
+              },
+            ],
+            next_cursor: null,
+            parent_direct_entry_count: 0,
+            revealed: null,
+          });
+        },
+      },
+    });
+    const folder = await screen.findByRole("button", { name: "Parts" });
+    await waitFor(() =>
+      expect(app.requests().some((request) => request.url.includes("reveal_id=3"))).toBe(true),
+    );
+
+    expect(folder).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Toys" })).not.toBeInTheDocument();
+    await act(async () =>
+      pending.resolve(
+        json({
+          items: [],
+          next_cursor: null,
+          parent_direct_entry_count: 0,
+          revealed: {
+            ...aCollectionNode({ id: 3, name: "Toys", path: "toys" }),
+            direct_entry_count: 0,
+            subtree_entry_count: 0,
+            visible_child_count: 0,
+          },
+        }),
+      ),
+    );
+    await screen.findByRole("button", { name: "Toys" });
+    expect(folder).toBeInTheDocument();
+  });
+
+  it("recovers a failed location reveal without clearing downloaded folders", async () => {
+    const user = userEvent.setup();
+    const app = renderSidebar({
+      selectedCollection: "toys",
+      routes: {
+        "GET /api/v1/outliner/collections": (url) => {
+          if (url.includes("reveal_id=")) return json({ detail: "temporary" }, 503);
+          return json({
+            items: [
+              {
+                ...aCollectionNode({ id: 1, name: "Parts", path: "parts" }),
+                direct_entry_count: 0,
+                subtree_entry_count: 0,
+                visible_child_count: 0,
+              },
+            ],
+            next_cursor: null,
+            parent_direct_entry_count: 0,
+            revealed: null,
+          });
+        },
+      },
+    });
+    const folder = await screen.findByRole("button", { name: "Parts" });
+    await screen.findByText("Could not load this list.");
+    expect(folder).toBeInTheDocument();
+    app.route(outlinerRoutes(TREE));
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await screen.findByRole("button", { name: "Toys" });
+    expect(folder).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this list.")).not.toBeInTheDocument();
   });
 
   it("reveals a selected location beyond the first sibling page without walking previous pages", async () => {
