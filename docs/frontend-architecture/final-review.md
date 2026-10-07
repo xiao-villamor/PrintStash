@@ -796,3 +796,59 @@ median references hold. Baseline comparisons remain mixed: all distributed
 readiness medians regress, while all dense decoded-thumbnail groups improve.
 [Final measurements](../frontend-m11-performance.md#final-comparable-source-observation-4094518e)
 retain every sample group and separate target attainment from improvement.
+
+### Backend contract coverage closure
+
+The full backend measurement passed 20,193 ordinary cases and 686 resource
+contracts. Nine floor assertions passed; the per-module assertion found six
+uncovered contracts: unsupported dialect rejection in five editing installers
+and required connection / generated migration rendering in Library autogenerate.
+These are missing negative/output behaviors, not permission to lower floors.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C88 | rejects unsupported dialect during browser contract install | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_browser_edit_contracts_v1.py::TestInstall::test_rejects_unsupported_dialect` |
+| C89 | rejects unsupported dialect during browser contract uninstall | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_browser_edit_contracts_v1.py::TestUninstall::test_rejects_unsupported_dialect` |
+| C90 | rejects unsupported dialect during config contract install | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_config_edit_contracts_v1.py::TestInstall::test_rejects_unsupported_dialect` |
+| C91 | rejects unsupported dialect during config contract uninstall | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_config_edit_contracts_v1.py::TestUninstall::test_rejects_unsupported_dialect` |
+| C92 | rejects unsupported dialect during printer contract install | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_printer_edit_contracts_v1.py::TestInstall::test_rejects_unsupported_dialect` |
+| C93 | rejects unsupported dialect during printer contract uninstall | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_printer_edit_contracts_v1.py::TestUninstall::test_rejects_unsupported_dialect` |
+| C94 | rejects unsupported dialect during search contract install | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_search_edit_contracts_v1.py::TestInstall::test_rejects_unsupported_dialect` |
+| C95 | rejects unsupported dialect during search contract uninstall | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_search_edit_contracts_v1.py::TestUninstall::test_rejects_unsupported_dialect` |
+| C96 | rejects unsupported dialect during spoolman contract install | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_spoolman_edit_contracts_v1.py::TestInstall::test_rejects_unsupported_dialect` |
+| C97 | rejects unsupported dialect during spoolman contract uninstall | Error | MySQL mock connection | Explicit contract-specific ValueError; no DDL emitted | Unit | ✅ `tests/unit/db/test_spoolman_edit_contracts_v1.py::TestUninstall::test_rejects_unsupported_dialect` |
+| C98 | requires a live connection for Library autogeneration | Error | Offline autogenerate context | Explicit error; no generated operations | Unit | ✅ `tests/unit/db/test_library_contracts_autogen.py::TestCompareLibraryContracts::test_requires_a_live_connection` |
+| C99 | renders the versioned Library migration | Happy | Install or reversed uninstall operation | Executable contract call plus required import | Unit | ✅ `tests/unit/db/test_library_contracts_autogen.py::TestRenderLibraryContracts::test_renders_versioned_contract_call` |
+| C100 | renders offline browser contract installation | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_browser_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_installation` |
+| C101 | renders offline browser contract removal | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_browser_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_removal` |
+| C102 | renders offline config contract installation | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_config_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_installation` |
+| C103 | renders offline config contract removal | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_config_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_removal` |
+| C104 | renders offline printer contract installation | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_printer_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_installation` |
+| C105 | renders offline printer contract removal | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_printer_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_removal` |
+| C106 | renders offline search contract installation | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_search_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_installation` |
+| C107 | renders offline search contract removal | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_search_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_removal` |
+| C108 | renders offline spoolman contract installation | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_spoolman_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_installation` |
+| C109 | renders offline spoolman contract removal | Happy | SQLite/PostgreSQL offline migration context | Operator SQL contains the required version trigger or complete removal | Unit | ✅ `tests/unit/db/test_spoolman_edit_contracts_v1.py::TestOfflineRendering::test_renders_contract_removal` |
+| C110 | generates Library contracts only when absent | Edge | Empty schema or existing revision table | One versioned migration operation for absence; no duplicate for installed schema | Integration | ✅ `tests/integration/db/test_library_contracts_autogen.py::TestCompareLibraryContracts::test_generates_only_an_absent_contract` |
+
+The corrective selection passed 37 tests (one PostgreSQL case deliberately
+excluded from this SQLite/offline selection; its existing real contract is
+qualified in the 686-case resource run). All six affected modules measured 100%
+statements and branches. The unchanged module-floor assertion and branch-metadata
+assertion both passed against that scoped report (2 tests). Ruff passed.
+
+Qualification is intentionally composite: the full measurement passed all
+functional tests and nine other floor assertions; the formerly failing module
+floor now passes on the six affected modules. The historical full run remains
+failed and is not relabelled green. A full global coverage report was not rerun
+after this tests-only correction. No production module, floor, debt pin or
+migration was changed. The prior full report measured 94.52% combined coverage
+(61,809 statements / 17,010 branches); that figure belongs to the earlier source,
+not a new aggregate measurement. Source-covers' existing pin-improvement notice
+(83.67% versus 76.5%) remains future maintenance.
+
+The affected-file hygiene selection passed 48 cases (4,981 unrelated cases
+excluded). An initially overbroad hygiene run was stopped after 1,411 passing
+cases; it is not reported as a complete pass. All seven new test files passed
+Ruff formatting and lint. These corrections add 35 behavioral cases without
+changing production bytes; final required CI must qualify their delivery commit.
