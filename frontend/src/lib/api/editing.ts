@@ -20,7 +20,8 @@ export function editHeaders(
     | "filament-profile"
     | "printer-profile"
     | "browser-device"
-    | "notification-channel",
+    | "notification-channel"
+    | "storage-connection",
   id: number,
   base: EditingBase,
 ) {

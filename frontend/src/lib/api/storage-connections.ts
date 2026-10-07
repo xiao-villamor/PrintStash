@@ -1,3 +1,5 @@
+import { editHeaders, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
 import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import type {
   LibrarySourceKind,
@@ -51,17 +53,20 @@ export interface StorageConnectionUpdate {
   manual_backup_enabled?: boolean;
   automatic_backup_enabled?: boolean;
 }
-export function updateStorageConnection(
+export async function updateStorageConnection(
   id: number,
   body: StorageConnectionUpdate,
-  options: Pick<GetJsonOptions, "signal"> = {},
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<StorageConnection> {
-  return requestApi<StorageConnection>(`/api/v1/storage-connections/${id}`, {
+  const saved = await requestApi<StorageConnection>(`/api/v1/storage-connections/${id}`, {
     method: "PATCH",
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...editHeaders("storage-connection", id, options.base) },
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("Invalid storage connection acknowledgement");
+  return saved;
 }
 
 export function deleteStorageConnection(

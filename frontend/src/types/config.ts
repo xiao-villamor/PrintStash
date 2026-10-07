@@ -304,7 +304,7 @@ export type StorageConnectionPurpose = "library" | "backup" | "both";
 export type StorageConnectionConfigurationValue = string | number | boolean | null;
 export type StorageConnectionConfiguration = Record<string, StorageConnectionConfigurationValue>;
 
-export interface StorageConnection {
+export interface StorageConnection extends EditingBase {
   id: number;
   name: string;
   kind: Exclude<LibrarySourceKind, "mounted">;

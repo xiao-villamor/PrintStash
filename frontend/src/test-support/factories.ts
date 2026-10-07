@@ -236,6 +236,8 @@ export function storageUsage(override?: Partial<StorageUsageRead>): StorageUsage
 /** One enabled S3 location that may be reused by backup and library workflows. */
 export function aStorageConnection(override?: Partial<StorageConnection>): StorageConnection {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 1,
     name: "Workshop storage",
     kind: "s3",

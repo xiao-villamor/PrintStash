@@ -4,9 +4,9 @@ Status: active prerequisite to M9 closure. M10 static-delivery work at `8ec882b2
 is preserved, not counted as M10 acceptance; unfinished compatibility cleanup is
 shelved until M9 closes.
 
-Connection PATCH currently accepts any previously opened form and returns a fresh
-read after committing. There is no captured editing base, so credential/config or
-backup-policy edits can overwrite another administrator's changes. Add an
+Before this increment, connection PATCH accepted any previously opened form and
+read after committing. Credential/config and backup-policy edits could overwrite
+another administrator's changes. The implemented contract adds an
 independent version and incarnation identity, pair reads with database history,
 and atomically claim the version before validating/applying edits. Preserve
 credential omission, target-in-use restrictions and legacy external clients.
@@ -30,7 +30,7 @@ Rollback UI/header adoption together; retain additive schema and safety gates.
 | C9 | arbitrates independent connection writers | Edge | Concurrent sessions share base | Exactly one accepted edit | Integration SQLite/Postgres | ✅ `backend/tests/integration/modules/storage/test_connection_edits.py::test_arbitrates_independent_connection_writers` |
 | C10 | refuses retired connection authority | Error | Administrator revoked before claim | No committed edit/version | Integration SQLite/Postgres | ✅ `backend/tests/integration/modules/storage/test_connection_edits.py::test_refuses_retired_connection_authority` |
 | C11 | preserves connection data through migration | Edge | Existing encrypted data; upgrade/downgrade/upgrade | Data preserved; contract installed | Migration SQLite/Postgres | ✅ `backend/tests/integration/db/migrations/test_connection_edit_versions.py::test_preserves_connection_data_through_migration` |
-| C12 | reviews conflicting connection drafts | Error | Competing editor or uncertain response | Draft retained; explicit review/adoption/revised save | Frontend unit / Playwright real | ❌ missing |
+| C12 | reviews conflicting connection drafts | Error | Competing editor or uncertain response | Draft retained; explicit review/adoption/revised save | Frontend unit / Playwright real | ✅ C16–C22 below |
 
 ## Backend contract checkpoint
 
@@ -62,6 +62,51 @@ advance versions, but remain unprotected unless they supply preconditions.
   its temporary baseline migration finished and refused to run; rerunning after
   baseline completion generated the two expected columns. No deployed DB changed.
 
-C12 remains required: the first-party connection editor and backup-destination
-consumer do not yet submit conditional writes. Backend qualification alone is not
-acceptance of the workflow or M9. Full integration and final CI remain outstanding.
+The first-party cutover below completes this connection workflow locally. External
+Library sources and remaining settings reads are still required before M9 closes.
+Final integration and CI remain outstanding.
+
+## First-party cutover acceptance
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| C13 | sends the captured connection precondition | Happy | Edit from an authorized snapshot | Conditional headers and intentional fields reach PATCH | Frontend unit | ✅ `frontend/src/lib/api/__tests__/storage-connections.test.ts::pauses or resumes one saved profile` |
+| C14 | rejects an invalid connection receipt | Error | Wrong ID/history or non-advancing version | No success acknowledgement | Frontend unit | ✅ `frontend/src/lib/api/__tests__/storage-connections.test.ts::rejects an invalid connection receipt` |
+| C15 | preserves newer connection observations | Edge | Held ACK after newer read, replacement or removal | Canonical newer state remains | Frontend unit | ✅ `frontend/src/lib/queries/__tests__/settings-storage.test.tsx::preserves a newer/replacement/removed observation after a held acknowledgement` |
+| C16 | requires explicit connection review | Error | Conflict or lost response | Draft retained; ordinary save blocked; latest values displayed | Frontend unit | ✅ `frontend/src/components/__tests__/remote-storage-connections.test.tsx::reviews a connection before revising deliberate fields` |
+| C17 | saves a revised connection intent | Happy | Review then explicit revised save | New precondition; only deliberate edits overwrite | Frontend unit | ✅ `frontend/src/components/__tests__/remote-storage-connections.test.tsx::reviews a connection before revising deliberate fields` |
+| C18 | adopts the current connection | Edge | Preview ages or identity changes | Fresh authorized values replace draft; secrets cleared | Frontend unit | ✅ `frontend/src/components/__tests__/remote-storage-connections.test.tsx::adopts a fresh connection after a replaced preview` |
+| C19 | retires connection review authority | Error | Logout, disposal, missing or denied connection | No private preview or further write | Frontend unit | ✅ `frontend/src/components/__tests__/remote-storage-connections.test.tsx::retires an unavailable connection review; discards a held review on logout` |
+| C20 | retains a newer connection draft after acknowledgement | Edge | User types while save is pending | New text preserved against accepted base | Frontend unit | ✅ `frontend/src/components/__tests__/remote-storage-connections.test.tsx::preserves a newer connection draft after an earlier save` |
+| C21 | preserves acknowledged backup destinations | Error | Later destination conflicts | Earlier receipt retained; pending intent reviewed separately | Frontend unit | ✅ `frontend/src/components/__tests__/settings-panel.test.tsx::preserves confirmed destination receipts after partial failure` |
+| C22 | resolves a connection conflict in the browser | Happy | Two real editors | Conflict review precedes explicit revised save | Playwright real | ✅ `frontend/tests/e2e-real/storage-connections.spec.ts::resolves competing connection editors` |
+
+## Frontend qualification
+
+First-party updates now require a captured base and validate the receipt identity,
+history and advancing version. Both the editor and backup destination selections
+capture their own base. Failed/uncertain writes block ordinary saves until explicit
+review. Revised saves send deliberate fields only; adoption reads current values
+again and clears credential drafts. A replacement identity cannot be revised.
+Canonical publication preserves newer reads, replacement histories and removals.
+A newer form draft retains its text and advances to the confirmed base. Partial
+backup success removes each confirmed intent individually; reviewing a failed
+connection does not repeat the already-confirmed vault configuration transaction.
+The shared review UI is specific to connection settings; no generic form/repository
+layer or shared credential cache was added.
+
+Validation:
+- Transport red: four failed / 11 passed, 1.96 s (missing header; three invalid receipts).
+- Initial integration: 59 passed / one stale receipt fixture failed, 11.30 s.
+- Expanded integration: 66 passed / two failed, 16.78 s. These exposed an unchanged
+  provider discriminator being included as an edit; the form now omits that
+  non-editable field rather than weakening the intended-fields assertion.
+- Final transport/owner/panel: 70 passed, 19.14 s across three files.
+- Settings backup/policy/destination selection: 62 passed / 131 unrelated cases
+  deselected, 30.28 s. Existing partial-failure assertions now require explicit review.
+- Real browser: one passed, 5.5 s test / 46.8 s total, using isolated backend/Vite
+  ports 8472/3372. It proves two captured editors, conflict, draft retention,
+  review, revised save and preservation of the other administrator's purpose.
+- App/UI/domain typecheck and full frontend lint passed. Initial lint findings
+  were corrected (directive placement, omission syntax, exact error assertion).
+No performance gain or full-suite/remote-CI result is claimed by this checkpoint.

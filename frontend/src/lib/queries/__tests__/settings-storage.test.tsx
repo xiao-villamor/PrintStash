@@ -38,6 +38,7 @@ function Editor({ mode = "update", session: stamped }: { mode?: Mode; session?: 
               session,
               kind: mode,
               id: 1,
+              base: aStorageConnection(),
               payload: { name: "Gesture", secrets: { secret_key: "FakeOwnedStorageSecret" } },
             }
           : { session, kind: mode, id: 1 };
@@ -66,6 +67,7 @@ describe("Storage connection owner", () => {
       const saved = aStorageConnection({
         id: mode === "create" ? 2 : 1,
         name: "Server",
+        edit_version: 2,
         purpose: "backup",
         enabled: false,
       });
@@ -135,7 +137,7 @@ describe("Storage connection owner", () => {
     await act(async () =>
       response.resolve(
         status === 200
-          ? json(aStorageConnection({ name: "Saved" }))
+          ? json(aStorageConnection({ name: "Saved", edit_version: 2 }))
           : json({ detail: "unavailable" }, status),
       ),
     );
@@ -182,7 +184,9 @@ describe("Storage connection owner", () => {
     const app = renderApp(<Editor />, {
       routes: {
         ...readRoutes,
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ name: "Old" })),
+        "PATCH /api/v1/storage-connections/1": json(
+          aStorageConnection({ name: "Old", edit_version: 2 }),
+        ),
       },
     });
     await screen.findByText("Workshop storage/both/true");
@@ -226,7 +230,9 @@ describe("Storage publication after cancellation", () => {
     const app = renderApp(<Editor />, {
       routes: {
         ...readRoutes,
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ name: "Old" })),
+        "PATCH /api/v1/storage-connections/1": json(
+          aStorageConnection({ name: "Old", edit_version: 2 }),
+        ),
       },
     });
     await screen.findByText("Workshop storage/both/true");
@@ -258,4 +264,36 @@ describe("Storage publication after cancellation", () => {
     await act(async () => fresh.resolve(json([aStorageConnection({ name: "Current" })])));
     expect(await screen.findByText("Current/both/true")).toBeVisible();
   });
+});
+
+describe("Connection receipts racing canonical reads", () => {
+  it.each(["newer", "replacement", "removed"] as const)(
+    "preserves a %s observation after a held acknowledgement",
+    async (kind) => {
+      const response = Promise.withResolvers<Response>();
+      const app = renderApp(<Editor />, {
+        routes: { ...readRoutes, "PATCH /api/v1/storage-connections/1": () => response.promise },
+      });
+      await screen.findByText("Workshop storage/both/true");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await screen.findByText("Pending");
+      const observed =
+        kind === "removed"
+          ? []
+          : [
+              aStorageConnection({
+                name: "Current",
+                edit_version: kind === "newer" ? 3 : 1,
+                edit_epoch: kind === "replacement" ? "b".repeat(32) : "a".repeat(32),
+              }),
+            ];
+      act(() => app.client.setQueryData(["storage-connections"], observed));
+      await act(async () =>
+        response.resolve(json(aStorageConnection({ name: "Old receipt", edit_version: 2 }))),
+      );
+      await screen.findByText("Ready");
+      expect(app.client.getQueryData(["storage-connections"])).toEqual(observed);
+      expect(screen.queryByText("Old receipt/both/true")).not.toBeInTheDocument();
+    },
+  );
 });

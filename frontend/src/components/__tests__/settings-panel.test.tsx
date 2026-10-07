@@ -1083,7 +1083,11 @@ describe("SettingsPanel", () => {
         at: "/settings?section=backup",
         routes: {
           "GET /api/v1/storage-connections": json([connection]),
-          "PUT /api/v1/config": json({ ...VAULT_CONFIG, automatic_backups_enabled: true }),
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            automatic_backups_enabled: true,
+          }),
           "PATCH /api/v1/storage-connections/7": json({ detail: "unavailable" }, 503),
         },
       });
@@ -1097,7 +1101,7 @@ describe("SettingsPanel", () => {
         }),
       );
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeEnabled(),
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled(),
       );
       expect(screen.getByLabelText("Use Off-site archive for manual backups")).not.toBeChecked();
       expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual(connection);
@@ -1105,13 +1109,16 @@ describe("SettingsPanel", () => {
       app.route({
         "PATCH /api/v1/storage-connections/7": json({
           ...connection,
+          edit_version: 2,
           manual_backup_enabled: false,
         }),
       });
-      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
       await waitFor(() =>
         expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
           ...connection,
+          edit_version: 2,
           manual_backup_enabled: false,
         }),
       );
@@ -1252,7 +1259,7 @@ describe("SettingsPanel", () => {
           "PATCH /api/v1/storage-connections/7": (_url, init) => {
             const body = JSON.parse(String(init?.body));
             updates.push(body);
-            return json({ ...connection, ...body });
+            return json({ ...connection, ...body, edit_version: 2 });
           },
         },
       });
@@ -1294,7 +1301,11 @@ describe("SettingsPanel", () => {
         routes: {
           "GET /api/v1/storage-connections": json([backup, library]),
           "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2 }),
-          "PATCH /api/v1/storage-connections/7": json({ ...backup, manual_backup_enabled: false }),
+          "PATCH /api/v1/storage-connections/7": json({
+            ...backup,
+            manual_backup_enabled: false,
+            edit_version: 2,
+          }),
         },
       });
       await screen.findByText("No backups found.");
@@ -1303,6 +1314,7 @@ describe("SettingsPanel", () => {
       await waitFor(() =>
         expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
           ...backup,
+          edit_version: 2,
           manual_backup_enabled: false,
         }),
       );
@@ -1935,6 +1947,7 @@ describe("SettingsPanel", () => {
             },
             "PATCH /api/v1/storage-connections/7": json({
               ...connection,
+              edit_version: 2,
               automatic_backup_enabled: true,
             }),
           },
@@ -1999,7 +2012,11 @@ describe("SettingsPanel", () => {
         routes: {
           "GET /api/v1/storage-connections": json([first, second]),
           "PUT /api/v1/config": () => json({ ...VAULT_CONFIG, edit_version: ++version }),
-          "PATCH /api/v1/storage-connections/7": json({ ...first, automatic_backup_enabled: true }),
+          "PATCH /api/v1/storage-connections/7": json({
+            ...first,
+            automatic_backup_enabled: true,
+            edit_version: 2,
+          }),
           "PATCH /api/v1/storage-connections/8": json({ detail: "unavailable" }, 503),
         },
       });
@@ -2010,16 +2027,22 @@ describe("SettingsPanel", () => {
       await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeEnabled(),
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled(),
       );
       expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
         ...first,
+        edit_version: 2,
         automatic_backup_enabled: true,
       });
       app.route({
-        "PATCH /api/v1/storage-connections/8": json({ ...second, automatic_backup_enabled: true }),
+        "PATCH /api/v1/storage-connections/8": json({
+          ...second,
+          automatic_backup_enabled: true,
+          edit_version: 2,
+        }),
       });
-      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(3));
       expect(app.requestsWithMethod("PATCH").map((request) => request.url)).toEqual([
         "/api/v1/storage-connections/7",
@@ -2027,6 +2050,7 @@ describe("SettingsPanel", () => {
         "/api/v1/storage-connections/8",
       ]);
       expect(enabled).toBeChecked();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
     });
     it.each([403, 503])("%s: blocks policy retry after an unavailable review", async (status) => {
       let reads = 0;

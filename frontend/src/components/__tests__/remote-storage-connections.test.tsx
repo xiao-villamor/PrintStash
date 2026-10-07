@@ -162,7 +162,9 @@ describe("RemoteStorageConnections", () => {
       routes: {
         "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ purpose: "library" })),
+        "PATCH /api/v1/storage-connections/1": json(
+          aStorageConnection({ purpose: "library", edit_version: 2 }),
+        ),
       },
     });
     const usage = await screen.findByRole("combobox", { name: "Use Workshop storage for" });
@@ -205,7 +207,9 @@ describe("RemoteStorageConnections", () => {
       routes: {
         "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ enabled: false })),
+        "PATCH /api/v1/storage-connections/1": json(
+          aStorageConnection({ enabled: false, edit_version: 2 }),
+        ),
       },
     });
     await screen.findByText("Workshop storage");
@@ -316,7 +320,9 @@ describe("RemoteStorageConnections", () => {
       routes: {
         "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ name: "Renamed" })),
+        "PATCH /api/v1/storage-connections/1": json(
+          aStorageConnection({ name: "Renamed", edit_version: 2 }),
+        ),
       },
     });
     await user.click(await screen.findByRole("button", { name: "Edit" }));
@@ -335,7 +341,7 @@ describe("RemoteStorageConnections", () => {
       routes: {
         "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
-        "PATCH /api/v1/storage-connections/1": json(aStorageConnection()),
+        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ edit_version: 2 })),
       },
     });
     await user.click(await screen.findByRole("button", { name: "Edit" }));
@@ -456,7 +462,9 @@ describe("RemoteStorageConnections ownership recovery", () => {
     await userEvent.clear(name);
     await userEvent.type(name, "Newer draft");
     await userEvent.click(screen.getByRole("button", { name: "Backup replicas" }));
-    await act(async () => response.resolve(json(aStorageConnection({ name: "Saved old intent" }))));
+    await act(async () =>
+      response.resolve(json(aStorageConnection({ name: "Saved old intent", edit_version: 2 }))),
+    );
     expect(await screen.findByText("Saved old intent")).toBeVisible();
     expect(name).toHaveValue("Newer draft");
     expect(screen.getByRole("button", { name: "Backup replicas" })).toHaveAttribute(
@@ -465,7 +473,24 @@ describe("RemoteStorageConnections ownership recovery", () => {
     );
     expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toMatchObject({
       name: "Captured name",
-      purpose: "both",
+    });
+    let revisedHeaders: Headers | undefined;
+    app.route({
+      "PATCH /api/v1/storage-connections/1": (_url, init) => {
+        revisedHeaders = new Headers(init?.headers);
+        return json(
+          aStorageConnection({ name: "Newer draft", purpose: "backup", edit_version: 3 }),
+        );
+      },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+    expect(revisedHeaders?.get("If-Match")).toBe(
+      `"storage-connection-1-e${aStorageConnection().edit_epoch}-v2"`,
+    );
+    expect(JSON.parse(app.requestsWithMethod("PATCH")[1].body)).toMatchObject({
+      name: "Newer draft",
+      purpose: "backup",
     });
   });
   it("discards typed connection credentials on private retirement", async () => {
@@ -659,5 +684,175 @@ describe("RemoteStorageConnections authoritative lifetimes", () => {
     expect(name).toHaveValue("Kept removed draft");
     expect(name).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+});
+
+describe("Remote connection conditional editing", () => {
+  it.each([412, 503])(
+    "%s: reviews a connection before revising deliberate fields",
+    async (status) => {
+      const original = aStorageConnection();
+      const latest = aStorageConnection({
+        name: "Other administrator",
+        purpose: "backup",
+        edit_version: 2,
+      });
+      const writes: Headers[] = [];
+      let reads = 0;
+      const app = renderApp(<RemoteStorageConnections />, {
+        routes: {
+          "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+          "GET /api/v1/storage-connections": () => json([++reads === 1 ? original : latest]),
+          "PATCH /api/v1/storage-connections/1": (_url, init) => {
+            writes.push(new Headers(init?.headers));
+            return writes.length === 1
+              ? json({ detail: "edit_conflict" }, status)
+              : json({ ...latest, name: "My draft", edit_version: 3 });
+          },
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+      await userEvent.clear(screen.getByLabelText("Connection name"));
+      await userEvent.type(screen.getByLabelText("Connection name"), "My draft");
+      await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+      await screen.findByRole("button", { name: "Review current values" });
+      expect(screen.getByLabelText("Connection name")).toHaveValue("My draft");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      const preview = await screen.findByRole("region", { name: "Latest saved version" });
+      expect(within(preview).getByText("Other administrator")).toBeVisible();
+      await userEvent.click(screen.getByRole("button", { name: "Save revised changes" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save connection" })).toBeVisible(),
+      );
+      expect(writes.map((headers) => headers.get("If-Match"))).toEqual([
+        `"storage-connection-1-e${original.edit_epoch}-v1"`,
+        `"storage-connection-1-e${original.edit_epoch}-v2"`,
+      ]);
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[1].body)).toEqual({
+        name: "My draft",
+        configuration: {},
+        secrets: {},
+      });
+      expect(screen.getByRole("combobox", { name: "Use My draft for" })).toHaveValue("backup");
+    },
+  );
+  it("adopts a fresh connection after a replaced preview", async () => {
+    let reads = 0;
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": () =>
+          json([
+            aStorageConnection({
+              name:
+                ++reads === 1
+                  ? "Workshop storage"
+                  : reads === 2
+                    ? "Replacement preview"
+                    : "Current replacement",
+              edit_epoch: reads === 1 ? "a".repeat(32) : "b".repeat(32),
+            }),
+          ]),
+        "PATCH /api/v1/storage-connections/1": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeDraftOnlySecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    expect(await screen.findByText("Replacement preview")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Connection name")).toHaveValue("Current replacement"),
+    );
+    expect(screen.getByLabelText("Secret key")).toHaveValue("");
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+  it.each([403, 404])("%s: retires an unavailable connection review", async (status) => {
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeRetiredReviewSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    app.route({ "GET /api/v1/storage-connections": json({ detail: "unavailable" }, status) });
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Review current values" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("region", { name: "Latest saved version" })).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+});
+
+describe("Connection review lifetime", () => {
+  it("keeps a failed pause intent through review", async () => {
+    let reads = 0;
+    let writes = 0;
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": () =>
+          json([
+            aStorageConnection({
+              edit_version: ++reads,
+              name: reads === 1 ? "Workshop storage" : "Reviewed connection",
+            }),
+          ]),
+        "PATCH /api/v1/storage-connections/1": () =>
+          ++writes === 1
+            ? json({ detail: "edit_conflict" }, 412)
+            : json(
+                aStorageConnection({
+                  edit_version: 3,
+                  name: "Reviewed connection",
+                  enabled: false,
+                }),
+              ),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+    expect(await screen.findByRole("button", { name: "Resume" })).toBeVisible();
+    expect(app.requestsWithMethod("PATCH").map((request) => JSON.parse(request.body))).toEqual([
+      { enabled: false },
+      { enabled: false },
+    ]);
+  });
+  it("discards a held review on logout", async () => {
+    const held = Promise.withResolvers<Response>();
+    const app = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.type(screen.getByLabelText("Secret key"), "FakeReviewRetiredSecret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    app.route({ "GET /api/v1/storage-connections": () => held.promise });
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    act(() => clearLogin());
+    await act(async () =>
+      held.resolve(
+        json([aStorageConnection({ name: "Retired private preview", edit_version: 2 })]),
+      ),
+    );
+    expect(screen.queryByText("Retired private preview")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("FakeReviewRetiredSecret")).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
   });
 });

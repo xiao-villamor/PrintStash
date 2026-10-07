@@ -1,3 +1,5 @@
+import { captureEditingBase } from "@/lib/api/editing";
+import { StorageConnectionReview } from "@/components/storage-connection-review";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -38,7 +40,10 @@ import {
   providerFormError,
   splitProviderValues,
 } from "@/lib/storage-provider-form";
-import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
+import type {
+  StorageConnectionCreate,
+  StorageConnectionUpdate,
+} from "@/lib/api/storage-connections";
 import { toast } from "@/lib/toast";
 import { useI18n } from "@/lib/i18n";
 import { storageOperationMessage } from "@/lib/storage-operations";
@@ -227,6 +232,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   }
   function resetForm() {
     generation.current += 1;
+    command.discardReview();
     setEditing(null);
     setName("");
     setPurpose("library");
@@ -247,8 +253,32 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     const first = firstAvailable ?? choices[0];
     if (first) chooseProvider(first);
   }
-  async function addConnection() {
-    if (unavailable || editUnavailable || busy !== null || !canCreateConnection() || !selected)
+  function editingPayload(
+    body: StorageConnectionCreate,
+    original: StorageConnection,
+  ): StorageConnectionUpdate {
+    const payload: StorageConnectionUpdate = {
+      configuration: Object.fromEntries(
+        Object.entries(body.configuration).filter(
+          ([key, value]) =>
+            key !== "provider" && String(value ?? "") !== String(original.configuration[key] ?? ""),
+        ),
+      ),
+      secrets: body.secrets,
+    };
+    if (body.name !== original.name) payload.name = body.name;
+    if (body.purpose !== original.purpose) payload.purpose = body.purpose;
+    return payload;
+  }
+  async function addConnection(revised = false) {
+    if (
+      unavailable ||
+      editUnavailable ||
+      busy !== null ||
+      (!revised && command.blocked) ||
+      !canCreateConnection() ||
+      !selected
+    )
       return;
     const transport = selected.transport ?? selected.id;
     if (!isRemoteKind(transport)) return;
@@ -261,31 +291,31 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       ...splitProviderValues(selected, values, use),
     };
     try {
-      const receipt = await command.mutateAsync(
-        editing
-          ? {
-              session,
-              kind: "update",
-              id: editing.id,
-              payload: {
-                name: body.name,
-                purpose: body.purpose,
-                configuration: body.configuration,
-                secrets: body.secrets,
-              },
-            }
-          : { session, kind: "create", payload: body },
-      );
+      const receipt =
+        revised && editing
+          ? await command.saveRevised(editingPayload(body, editing))
+          : await command.mutateAsync(
+              editing
+                ? {
+                    session,
+                    kind: "update",
+                    id: editing.id,
+                    base: captureEditingBase(editing),
+                    payload: editingPayload(body, editing),
+                  }
+                : { session, kind: "create", payload: body },
+            );
       if (!current(session)) return;
       if (receipt.kind !== "saved") throw new Error("Expected a saved storage connection");
       if (generation.current === captured) resetForm();
+      else if (editing) setEditing(receipt.connection);
       toast.success(uiText("Remote storage connection saved."));
     } catch (error) {
       if (current(session)) toast.error(error);
     }
   }
   async function probe(connection: StorageConnection) {
-    if (unavailable || busy !== null) return;
+    if (unavailable || busy !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
       await command.mutateAsync({ session, kind: "probe", id: connection.id });
@@ -296,13 +326,14 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     }
   }
   async function toggle(connection: StorageConnection) {
-    if (unavailable || busy !== null) return;
+    if (unavailable || busy !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
       const receipt = await command.mutateAsync({
         session,
         kind: "update",
         id: connection.id,
+        base: captureEditingBase(connection),
         payload: { enabled: !connection.enabled },
       });
       if (!current(session)) return;
@@ -320,13 +351,14 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     connection: StorageConnection,
     nextPurpose: StorageConnectionPurpose,
   ) {
-    if (unavailable || busy !== null) return;
+    if (unavailable || busy !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
       const receipt = await command.mutateAsync({
         session,
         kind: "update",
         id: connection.id,
+        base: captureEditingBase(connection),
         payload: { purpose: nextPurpose },
       });
       if (!current(session)) return;
@@ -342,7 +374,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     }
   }
   async function remove(connection: StorageConnection) {
-    if (unavailable || busy !== null) return;
+    if (unavailable || busy !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
       await command.mutateAsync({ session, kind: "delete", id: connection.id });
@@ -376,6 +408,39 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         </header>
 
+        {!connectionsDenied && user?.is_superuser && (
+          <StorageConnectionReview
+            review={command.review}
+            busy={command.isPending}
+            onReview={() => {
+              const session = getSessionVersion();
+              void command.reviewLatest().catch((error) => {
+                if (current(session)) toast.error(error);
+              });
+            }}
+            onAdopt={() => {
+              const session = getSessionVersion();
+              void command
+                .adopt()
+                .then((row) => {
+                  if (current(session) && editing) edit(row);
+                })
+                .catch((error) => {
+                  if (current(session)) toast.error(error);
+                });
+            }}
+            onSave={() => {
+              if (editing && command.review.phase === "ready" && command.review.id === editing.id)
+                void addConnection(true);
+              else {
+                const session = getSessionVersion();
+                void command.saveRevised().catch((error) => {
+                  if (current(session)) toast.error(error);
+                });
+              }
+            }}
+          />
+        )}
         {connectionsFailed && connections.length > 0 && (
           <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
             <p>{i18n.t("storage.connectionsLoadFailed")}</p>
@@ -487,7 +552,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         className={SELECT}
                         aria-label={uiText("Use {value1} for", { value1: String(connection.name) })}
                         value={connection.purpose}
-                        disabled={unavailable || busy !== null}
+                        disabled={unavailable || busy !== null || command.blocked}
                         onChange={(event) => {
                           if (isPurpose(event.target.value)) {
                             void changePurpose(connection, event.target.value);
@@ -506,7 +571,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={unavailable || busy !== null}
+                        disabled={unavailable || busy !== null || command.blocked}
                         onClick={() => edit(connection)}
                       >
                         {uiText("Edit")}
@@ -525,7 +590,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={unavailable || busy !== null}
+                        disabled={unavailable || busy !== null || command.blocked}
                         onClick={() => void toggle(connection)}
                       >
                         {connection.enabled ? (
@@ -539,7 +604,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={unavailable || busy !== null}
+                        disabled={unavailable || busy !== null || command.blocked}
                         onClick={() => setRemoveTarget(connection)}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
@@ -761,6 +826,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 disabled={
                   unavailable ||
                   editUnavailable ||
+                  command.blocked ||
                   loading ||
                   catalogueFailed ||
                   busy !== null ||

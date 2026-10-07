@@ -1,5 +1,7 @@
 "use client";
 
+import { StorageConnectionReview } from "@/components/storage-connection-review";
+
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
@@ -687,13 +689,18 @@ export function SettingsPanel() {
   const [backupConnectionDrafts, setBackupConnectionDrafts] = useState<
     Record<
       number,
-      Partial<Pick<StorageConnection, "manual_backup_enabled" | "automatic_backup_enabled">>
+      {
+        base: EditingBase;
+        changes: Partial<
+          Pick<StorageConnection, "manual_backup_enabled" | "automatic_backup_enabled">
+        >;
+      }
     >
   >({});
   const backupConnections = !backupConnectionRead.isError
     ? (backupConnectionRead.data ?? [])
         .filter((connection) => connection.purpose === "backup" || connection.purpose === "both")
-        .map((connection) => ({ ...connection, ...backupConnectionDrafts[connection.id] }))
+        .map((connection) => ({ ...connection, ...backupConnectionDrafts[connection.id]?.changes }))
     : [];
   const backupPolicy = useBackupPolicyDraft(remoteConfigData);
   const automaticBackupsEnabled = backupPolicy.values?.automatic_backups_enabled ?? false;
@@ -1081,10 +1088,16 @@ export function SettingsPanel() {
     field: "manual_backup_enabled" | "automatic_backup_enabled",
     value: boolean,
   ) {
+    if (backupConnectionCommand.blocked) return;
+    const connection = backupConnectionRead.data?.find((row) => row.id === connectionId);
+    if (!connection) return;
     backupPolicy.begin();
     setBackupConnectionDrafts((current) => ({
       ...current,
-      [connectionId]: { ...current[connectionId], [field]: value },
+      [connectionId]: {
+        base: current[connectionId]?.base ?? captureEditingBase(connection),
+        changes: { ...current[connectionId]?.changes, [field]: value },
+      },
     }));
   }
 
@@ -1096,6 +1109,7 @@ export function SettingsPanel() {
       !backupConnectionRead.data ||
       backupPolicy.isPending ||
       backupConnectionCommand.isPending ||
+      backupConnectionCommand.blocked ||
       (!revised && backupPolicy.blocked) ||
       backupPolicyBusy
     )
@@ -1134,7 +1148,8 @@ export function SettingsPanel() {
           kind: "update",
           session,
           id: connection.id,
-          payload: changes,
+          base: changes.base,
+          payload: changes.changes,
         });
         if (!accountCurrent(session)) return;
         setBackupConnectionDrafts((current) => {
@@ -3168,6 +3183,48 @@ export function SettingsPanel() {
 
             {activeSection === "backup" && (
               <div className="space-y-6 animate-panel-in">
+                <StorageConnectionReview
+                  review={backupConnectionCommand.review}
+                  busy={backupConnectionCommand.isPending}
+                  onReview={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand.reviewLatest().catch((error) => {
+                      if (accountCurrent(session)) toast.error(error);
+                    });
+                  }}
+                  onAdopt={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand
+                      .adopt()
+                      .then((row) => {
+                        if (accountCurrent(session))
+                          setBackupConnectionDrafts((current) => {
+                            const next = { ...current };
+                            delete next[row.id];
+                            return next;
+                          });
+                      })
+                      .catch((error) => {
+                        if (accountCurrent(session)) toast.error(error);
+                      });
+                  }}
+                  onSave={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand
+                      .saveRevised()
+                      .then((receipt) => {
+                        if (accountCurrent(session) && receipt.kind === "saved")
+                          setBackupConnectionDrafts((current) => {
+                            const next = { ...current };
+                            delete next[receipt.connection.id];
+                            return next;
+                          });
+                      })
+                      .catch((error) => {
+                        if (accountCurrent(session)) toast.error(error);
+                      });
+                  }}
+                />
                 {backupPolicy.review.phase !== "idle" && (
                   <div role="alert" className="space-y-3 rounded border border-border p-4">
                     <p>
@@ -3229,6 +3286,7 @@ export function SettingsPanel() {
                         <Button
                           disabled={
                             backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
                             backupConnectionRead.isError ||
                             !backupConnectionRead.data
                           }
@@ -3321,6 +3379,7 @@ export function SettingsPanel() {
                       disabled={
                         !user?.is_superuser ||
                         backupPolicy.blocked ||
+                        backupConnectionCommand.blocked ||
                         backupPolicyBusy ||
                         backupsLoading ||
                         backupConfigUnavailable ||
@@ -3358,6 +3417,7 @@ export function SettingsPanel() {
                           disabled={
                             !user?.is_superuser ||
                             backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
                             backupsLoading ||
                             backupConfigUnavailable ||
                             backupConnectionRead.isError ||
@@ -3376,6 +3436,7 @@ export function SettingsPanel() {
                           disabled={
                             !user?.is_superuser ||
                             backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
                             !automaticBackupsEnabled ||
                             backupConfigUnavailable ||
                             backupsLoading
@@ -3411,6 +3472,7 @@ export function SettingsPanel() {
                               disabled={
                                 !user?.is_superuser ||
                                 backupPolicyBusy ||
+                                backupConnectionCommand.blocked ||
                                 backupsLoading ||
                                 backupConfigUnavailable ||
                                 backupConnectionRead.isError ||
@@ -3428,6 +3490,7 @@ export function SettingsPanel() {
                               disabled={
                                 !user?.is_superuser ||
                                 backupPolicyBusy ||
+                                backupConnectionCommand.blocked ||
                                 backupsLoading ||
                                 backupConfigUnavailable ||
                                 backupConnectionRead.isError ||
@@ -3468,6 +3531,7 @@ export function SettingsPanel() {
                                 disabled={
                                   !user?.is_superuser ||
                                   backupPolicyBusy ||
+                                  backupConnectionCommand.blocked ||
                                   backupsLoading ||
                                   backupConfigUnavailable ||
                                   backupConnectionRead.isError ||
@@ -3491,6 +3555,7 @@ export function SettingsPanel() {
                                 disabled={
                                   !user?.is_superuser ||
                                   backupPolicyBusy ||
+                                  backupConnectionCommand.blocked ||
                                   backupsLoading ||
                                   backupConfigUnavailable ||
                                   backupConnectionRead.isError ||

@@ -14,6 +14,8 @@ import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wi
 
 const connection = {
   id: 4,
+  edit_epoch: "a".repeat(32),
+  edit_version: 1,
   name: "TrueNAS MinIO",
   kind: "s3",
   purpose: "both",
@@ -82,18 +84,24 @@ describe("probeStorageConnection", () => {
 
 describe("updateStorageConnection", () => {
   it("pauses or resumes one saved profile", async () => {
-    respondWith({ ...connection, enabled: false });
+    respondWith({ ...connection, enabled: false, edit_version: 2 });
 
-    await updateStorageConnection(connection.id, { enabled: false });
+    await updateStorageConnection(connection.id, { enabled: false }, { base: connection });
+    expect(new Headers(lastCall().init?.headers).get("If-Match")).toBe(
+      `"storage-connection-4-e${connection.edit_epoch}-v1"`,
+    );
+    expect(new Headers(lastCall().init?.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
 
     expectRequest("/api/v1/storage-connections/4", "PATCH");
     expect(lastBody()).toEqual({ enabled: false });
   });
 
   it("changes the workflows allowed to reuse one profile", async () => {
-    respondWith({ ...connection, purpose: "library" });
+    respondWith({ ...connection, purpose: "library", edit_version: 2 });
 
-    await updateStorageConnection(connection.id, { purpose: "library" });
+    await updateStorageConnection(connection.id, { purpose: "library" }, { base: connection });
 
     expectRequest("/api/v1/storage-connections/4", "PATCH");
     expect(lastBody()).toEqual({ purpose: "library" });
@@ -102,20 +110,35 @@ describe("updateStorageConnection", () => {
   it("sends independent backup-selection fields", async () => {
     respondWith({
       ...connection,
+      edit_version: 2,
       manual_backup_enabled: false,
       automatic_backup_enabled: true,
     });
 
-    await updateStorageConnection(connection.id, {
-      manual_backup_enabled: false,
-      automatic_backup_enabled: true,
-    });
+    await updateStorageConnection(
+      connection.id,
+      {
+        manual_backup_enabled: false,
+        automatic_backup_enabled: true,
+      },
+      { base: connection },
+    );
 
     expectRequest("/api/v1/storage-connections/4", "PATCH");
     expect(lastBody()).toEqual({
       manual_backup_enabled: false,
       automatic_backup_enabled: true,
     });
+  });
+  it.each([
+    { label: "identity", patch: { id: 9, edit_version: 2 } },
+    { label: "history", patch: { edit_epoch: "b".repeat(32), edit_version: 2 } },
+    { label: "version", patch: { edit_version: 1 } },
+  ])("rejects an invalid connection receipt: $label", async ({ patch }) => {
+    respondWith({ ...connection, ...patch });
+    await expect(
+      updateStorageConnection(connection.id, { name: "Changed" }, { base: connection }),
+    ).rejects.toThrow(/Invalid .*acknowledgement/);
   });
 });
 
@@ -142,7 +165,7 @@ describe("storage connection caller cancellation", () => {
             signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
           }),
       );
-      const options = { signal: controller.signal };
+      const options = { signal: controller.signal, base: connection };
       const request =
         operation === "read"
           ? listStorageConnections(options)
