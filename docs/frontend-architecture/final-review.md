@@ -698,7 +698,7 @@ improvement. Final source CI qualification remains pending.
 
 ## Integrated source qualification: `8568aa8b`
 
-The final production source is `8568aa8be97b132dc9530fc17eef274486ad523d`.
+The preceding integrated production checkpoint is `8568aa8be97b132dc9530fc17eef274486ad523d`.
 [Required CI 37677725555](https://github.com/xiao-villamor/PrintStash/actions/runs/37677725555)
 passed all 17 jobs, including its aggregate PR gate. The local final correction
 selection passed 61 frontend and 58 backend architecture/config/cache cases.
@@ -742,3 +742,34 @@ medians and misses dense EN warm references. These three outcomes are separate.
 Residual generic download feedback, legacy typing/tooling debt, manual-review
 gaps and unmeasured GPU/real-provider behavior remain disclosed above and in
 the inventory/measurement reports.
+
+### Repeated-history scroll qualification
+
+Deep CI's mock browser suite passed on retry, but its first attempt of
+`keeps independent reading positions for repeated Library URLs` restored the
+second card at top 5592px instead of 228px after Forward. The unchanged browser
+scenario reproduced four failures in five attempts without retries. Deferring
+only nested Library scroll notifications reproduced two failures in two attempts.
+A passing retry was not accepted as qualification.
+
+Two lifecycle boundaries required correction. `ModelBrowser` now waits for its
+canonical URL before publishing a ready projection, so a replacement Router key
+cannot supersede an already interactive visit. `useLibraryReadingPosition` captures
+the actual departing containers during listener disposal; React can already have
+detached their refs, and the final scroll notification may not have arrived.
+The cleanup records numeric offsets without reading detached anchor geometry.
+Session and entry retirement still reject observations from obsolete identities.
+
+The new grid/list unit cases both failed against the preceding implementation.
+After correction, the four affected unit files passed 232 tests. The original
+browser flow and controlled notification race each passed three repetitions
+without retries (six total). The complete snapshot spec also passed all five cases
+without retries, including sign-out/access retirement and rapid route coherence.
+Lint, types, formatting and production build passed;
+the existing large-chunk warning remains. Extended CI and a new comparable startup
+measurement must qualify this later production source separately from `8568aa8b`.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C86 | keeps independent reading positions for repeated Library URLs | Edge | Same URL visited twice with distinct positions; normal or deferred nested scroll notifications before Back/Forward | Each history entry restores its own card position | Playwright | ✅ `tests/e2e/library-snapshot.spec.ts::keeps independent reading positions for repeated Library URLs` (normal/deferred variants) |
+| C87 | captures reading offsets when leaving before scroll notification | Edge | Grid/list offsets changed without a scroll event; navigation outside the scroll container | Returning restores actual container offsets rather than the earlier observation | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::captures %s offsets when leaving before scroll notification` |

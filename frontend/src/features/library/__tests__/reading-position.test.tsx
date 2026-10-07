@@ -61,6 +61,27 @@ describe("Library reading position", () => {
     expect(screen.getByRole("region", { name: "Rows" }).scrollTop).toBe(510);
   });
 
+  it.each(["grid", "list"] as const)(
+    "captures %s offsets when leaving before scroll notification",
+    (layout) => {
+      renderApp(
+        <>
+          <Link to="/detail">Other page</Link>
+          <Browser layout={layout} />
+        </>,
+      );
+      const main = screen.getByRole("main");
+      const list = screen.getByRole("region", { name: "Rows" });
+      main.scrollTop = 240;
+      list.scrollTop = 510;
+      // Navigation can retire the view before its queued scroll notification.
+      fireEvent.click(screen.getByRole("link", { name: "Other page" }));
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(screen.getByRole("main").scrollTop).toBe(240);
+      expect(screen.getByRole("region", { name: "Rows" }).scrollTop).toBe(510);
+    },
+  );
+
   it("rejects late scroll writes from a retired private view", () => {
     renderApp(<Browser />);
     const main = screen.getByRole("main");

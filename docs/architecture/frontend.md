@@ -398,6 +398,10 @@ positions, anchors and loaded-page counts. It clears on session/access retiremen
 it never stores entity responses. `reading-position` restores grid/list containers
 after the matching snapshot settles, requests no more than the recorded page
 counts after Query GC, and displays a reset notice if the anchor cannot be restored.
+Publish a ready Library visit only after canonical URL replacement has settled its
+Router identity. Capture actual container offsets when retiring the view, even if
+the final scroll notification has not arrived; retain the departing DOM containers
+rather than relying on refs that React may already have detached.
 Two visits to the same URL retain separate bookmarks. The displayed snapshot,
 including breadcrumbs and command targets, owns its origin while another route loads.
 

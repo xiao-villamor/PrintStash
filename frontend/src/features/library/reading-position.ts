@@ -156,10 +156,14 @@ export function useLibraryReadingPosition(
   }, [current, entry, layout, recovery, pagination]);
 
   const capturePosition = useCallback(
-    (captureAnchor: boolean, target: HTMLElement | null = null) => {
-      const main = mainRef.current;
+    (
+      captureAnchor: boolean,
+      target: HTMLElement | null = null,
+      departing?: { main: HTMLElement; list: HTMLDivElement | null },
+    ) => {
+      const main = departing ? departing.main : mainRef.current;
       if (!current || !entry || !main) return;
-      const list = listRef.current;
+      const list = departing ? departing.list : listRef.current;
       const previous = readLibraryPosition(entry, layout);
       const offsetChanged =
         previous?.main !== main.scrollTop || previous.list !== (list?.scrollTop ?? null);
@@ -288,6 +292,7 @@ export function useLibraryReadingPosition(
       recovery.status === "refreshing"
     )
       return;
+    const list = listRef.current;
     const capture = (event: Event) => {
       capturePosition(
         event.type === "click",
@@ -303,6 +308,9 @@ export function useLibraryReadingPosition(
     return () => {
       main.removeEventListener("scroll", capture, true);
       main.removeEventListener("click", capture, true);
+      // A history traversal can beat the last scroll event. Retain the actual
+      // departing containers: React may have detached their refs already.
+      capturePosition(false, null, { main, list });
     };
   }, [
     current,

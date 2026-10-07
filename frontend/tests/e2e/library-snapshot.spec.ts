@@ -343,65 +343,91 @@ test.describe("Library snapshots", () => {
     expect(await page.evaluate(() => window.__librarySnapshotViolations)).toEqual([]);
   });
 
-  test("keeps independent reading positions for repeated Library URLs", async ({ page }) => {
-    await snapshotApi(page);
-    const models = Array.from({ length: 40 }, (_, index) =>
-      aModelListItem({
-        id: 100 + index,
-        name: `History card ${index}`,
-        collection: "snapshot-a",
-        collection_id: 501,
-      }),
-    );
-    await page.route("**/api/v1/models/browse?**", (route) =>
-      route.fulfill({
-        json: {
-          items: models.map((model) => ({ kind: "model", model })),
-          total: models.length,
-          next_cursor: null,
-          browse_revision: "r1",
-          authorization_revision: "a1",
-        },
-      }),
-    );
-    await page.goto("/?c=snapshot-a&type=all&sort=date-desc");
-    const first = page.locator('main [data-library-entry="/models/110"]');
-    await first.scrollIntoViewIfNeeded();
-    const firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
-    const firstKey = await page.evaluate(() => history.state.key);
-    const href = page.url();
-    await page.route("**/api/v1/models/110", (route) =>
-      route.fulfill({
-        json: aModel({ id: 110, name: "History card 10", collection: "snapshot-a" }),
-      }),
-    );
-    await first.click();
-    await expect(page.getByRole("heading", { name: "History card 10", exact: true })).toBeVisible();
-    // The header's Library link pushes a new visit; detail Back would reuse the old visit.
-    await page.getByRole("link", { name: "PrintStash", exact: true }).click();
-    await expect(page).toHaveURL(href);
-    await expect(page.getByRole("heading", { name: "Snapshot A", exact: true })).toBeVisible();
-    const second = page.locator('main [data-library-entry="/models/130"]');
-    await second.scrollIntoViewIfNeeded();
-    const secondTop = await second.evaluate((node) => node.getBoundingClientRect().top);
-    const secondKey = await page.evaluate(() => history.state.key);
-    expect(secondKey).not.toBe(firstKey);
+  for (const deferScrollNotification of [false, true]) {
+    test(`keeps independent reading positions for repeated Library URLs${deferScrollNotification ? " before scroll notification" : ""}`, async ({
+      page,
+    }) => {
+      await snapshotApi(page);
+      const models = Array.from({ length: 40 }, (_, index) =>
+        aModelListItem({
+          id: 100 + index,
+          name: `History card ${index}`,
+          collection: "snapshot-a",
+          collection_id: 501,
+        }),
+      );
+      await page.route("**/api/v1/models/browse?**", (route) =>
+        route.fulfill({
+          json: {
+            items: models.map((model) => ({ kind: "model", model })),
+            total: models.length,
+            next_cursor: null,
+            browse_revision: "r1",
+            authorization_revision: "a1",
+          },
+        }),
+      );
+      await page.goto("/?c=snapshot-a&type=all&sort=date-desc");
+      const first = page.locator('main [data-library-entry="/models/110"]');
+      await first.scrollIntoViewIfNeeded();
+      const firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
+      const firstKey = await page.evaluate(() => history.state.key);
+      const href = page.url();
+      await page.route("**/api/v1/models/110", (route) =>
+        route.fulfill({
+          json: aModel({ id: 110, name: "History card 10", collection: "snapshot-a" }),
+        }),
+      );
+      await first.click();
+      await expect(
+        page.getByRole("heading", { name: "History card 10", exact: true }),
+      ).toBeVisible();
+      // The header's Library link pushes a new visit; detail Back would reuse the old visit.
+      await page.getByRole("link", { name: "PrintStash", exact: true }).click();
+      await expect(page).toHaveURL(href);
+      await expect(page.getByRole("heading", { name: "Snapshot A", exact: true })).toBeVisible();
+      const second = page.locator('main [data-library-entry="/models/130"]');
+      // History traversal can beat the next scroll notification. Hold only that
+      // notification until Back; the real browser still changes the viewport.
+      if (deferScrollNotification)
+        await page.evaluate(() => {
+          const main = document.querySelector("main");
+          const deferScroll = (event: Event) => {
+            if (event.target instanceof Element && main?.contains(event.target))
+              event.stopImmediatePropagation();
+          };
+          window.addEventListener("scroll", deferScroll, true);
+          window.addEventListener(
+            "popstate",
+            () => window.removeEventListener("scroll", deferScroll, true),
+            { once: true },
+          );
+        });
+      await second.scrollIntoViewIfNeeded();
+      const secondTop = await second.evaluate((node) => node.getBoundingClientRect().top);
+      const secondKey = await page.evaluate(() => history.state.key);
+      expect(secondKey).not.toBe(firstKey);
 
-    await page.goBack();
-    await expect(page.getByRole("heading", { name: "History card 10", exact: true })).toBeVisible();
-    await page.goBack();
-    await expect(page).toHaveURL(href);
-    expect(await page.evaluate(() => history.state.key)).toBe(firstKey);
-    await expect
-      .poll(() => first.evaluate((node) => node.getBoundingClientRect().top))
-      .toBeCloseTo(firstTop, 0);
-    await page.goForward();
-    await expect(page.getByRole("heading", { name: "History card 10", exact: true })).toBeVisible();
-    await page.goForward();
-    await expect(page).toHaveURL(href);
-    expect(await page.evaluate(() => history.state.key)).toBe(secondKey);
-    await expect
-      .poll(() => second.evaluate((node) => node.getBoundingClientRect().top))
-      .toBeCloseTo(secondTop, 0);
-  });
+      await page.goBack();
+      await expect(
+        page.getByRole("heading", { name: "History card 10", exact: true }),
+      ).toBeVisible();
+      await page.goBack();
+      await expect(page).toHaveURL(href);
+      expect(await page.evaluate(() => history.state.key)).toBe(firstKey);
+      await expect
+        .poll(() => first.evaluate((node) => node.getBoundingClientRect().top))
+        .toBeCloseTo(firstTop, 0);
+      await page.goForward();
+      await expect(
+        page.getByRole("heading", { name: "History card 10", exact: true }),
+      ).toBeVisible();
+      await page.goForward();
+      await expect(page).toHaveURL(href);
+      expect(await page.evaluate(() => history.state.key)).toBe(secondKey);
+      await expect
+        .poll(() => second.evaluate((node) => node.getBoundingClientRect().top))
+        .toBeCloseTo(secondTop, 0);
+    });
+  }
 });

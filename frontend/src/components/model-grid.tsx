@@ -927,7 +927,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
+  // Canonical replacement creates a Router key. Publish the visit only once
+  // that identity is settled, before the reader can establish its position.
   const projectionReady =
+    currentLocationHref === canonicalLibraryHref &&
     (selectedCollection === null || selectedCollectionRow !== null) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
