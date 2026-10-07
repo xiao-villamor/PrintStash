@@ -46,3 +46,47 @@ admin configuration for non-admins, catches errors to empty destinations and
 silently falls back from a selected missing destination. Reconcile these actual
 consumers before starting another M9 workflow. Existing accepted Model upload
 execution and transfer/Job ownership from M7 must remain intact.
+
+## First-folder workflow preflight (before tests)
+
+Inspect complete SetupFolder and GettingStarted composition plus folder lifecycle
+assertions. The next increment reuses canonical config/source commands, retaining
+only an accepted source identity for scan retry. Disposal stops undispatched next
+steps and local feedback; an already accepted scan remains owned by TaskCenter.
+Keep the exact submitted folder, no implicit enablement on selection, partial/empty
+scan recovery and no duplicate source on retry. Getter forms and initial onboarding
+navigation remain the next independent entry-route reconciliation after this seam.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| F1 | stops first-folder dispatch after disposal | Edge | Held config GET then unmount | Caller read aborted; no config/source/scan write or local callback | Frontend unit | ✅ setup-folder.test.tsx |
+| F2 | publishes a connected folder to source observers | Happy | POST full source DTO | Existing canonical observer shows exact new source | Frontend unit | ✅ setup-folder.test.tsx |
+| F3 | suppresses completion after leaving first-folder setup | Edge | Accepted scan then component disposal before terminal | Task still tracked with its localized title descriptor; no old onIndexed/onBusyChange callback | Frontend unit | ✅ setup-folder.test.tsx |
+| F4 | rejects first-folder commands from a retired session | Edge | Captured UI then identity change | No source/config writes under replacement credentials | Frontend unit | ✅ setup-folder.test.tsx |
+| F5 | preserves first-folder recovery contracts | Happy/Error | Existing create/refused/partial/empty/retry cases | One source, exact input, deliberate retry and correct counts | Frontend unit | ✅ getting-started.test.tsx |
+
+### First-folder qualification
+
+Four new regressions failed against the old implementation (4/4,4.63s): continuing
+writes after disposal, missing canonical publication, stale completion callback and
+commands from retired credentials. SetupFolder now explicitly reads shared config/
+source owners on submission, uses their concrete commands and retains only the
+accepted source identity for scan retry. No source/config write happens on folder
+selection. Typed create/scan receipts let this consumer use the same owner as Settings.
+The Job waiter accepts the existing localized TaskText contract, preserving the
+scan title while TaskCenter owns accepted work after disposal.
+
+Initial affected gate105/4files12.33s passed. The type gate then caught the waiter's
+old string-only title annotation; widened that annotation to its already-supported
+TaskText input and asserted the retained descriptor. Final gate222/6files20.10s
+passed: setup-folder,getting-started,settings-library-sources,external-libraries-panel,
+task-center and suite-hygiene. Full frontend/app/UI/domain types,lint and format764files
+passed. Original red/type outputs are retained with the final receipts.
+
+Real onboarding (`playwright.onboarding.config.ts`,grep `reaches its first Model entirely`)
+passed1/1:29.1s scenario,1.2m invocation,including first-account storage preparation,
+first upload and actual mounted-folder discovery. Dedicated ports3337/4337 and
+`/tmp/printstash-onboarding-4337` were used. No backend changes or performance claim.
+This closes only this bounded workflow; M9 remains active and Upload's source
+selection is next. Rollback the SetupFolder consumer and typed command receipts
+as one increment; preserve the existing source owner and M7 accepted-work execution.

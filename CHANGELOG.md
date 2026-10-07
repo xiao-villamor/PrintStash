@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Stop first-folder setup from dispatching later steps after navigation or a session
+  change, share its confirmed source with Settings, and retain accepted scans in
+  the task center.
+
 - Share Library source management reads and publish confirmed source changes
   without redundant refreshes. Keep failed reads recoverable, hide denied data,
   preserve newer drafts and exact-root confirmations, and retain accepted scan

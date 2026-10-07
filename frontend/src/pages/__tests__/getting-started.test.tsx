@@ -64,6 +64,7 @@ function renderGuide(routes: RouteTable = {}, auth = adminSession()) {
         }),
         "GET /api/v1/models/page": json({ items: [], total: 0, next_cursor: null }),
         "GET /api/v1/libraries/locations": json([]),
+        "GET /api/v1/libraries": json([]),
         "GET /api/v1/collections": json([]),
         "GET /api/v1/tags": json([]),
         "GET /api/v1/artifact-uploads/": json({
@@ -197,7 +198,7 @@ describe("Getting started", () => {
   it("preselects an accessible mounted folder without enabling sources", async () => {
     renderGuide({
       "GET /api/v1/libraries/locations": json(["/libraries/models"]),
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
       "GET /api/v1/libraries": json([]),
       "GET /api/v1/storage-connections": json([]),
     });
@@ -314,8 +315,8 @@ describe("Getting started", () => {
   it("connects a mounted folder in one submission", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-folder-connect" })]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
-      "PUT /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
+      "PUT /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-folder-connect", state: "queued" }),
     });
@@ -349,7 +350,7 @@ describe("Getting started", () => {
   it("retries a scan without creating another source", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-scan-retry" })]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ detail: "unavailable" }, 503),
     });
@@ -373,7 +374,7 @@ describe("Getting started", () => {
   });
   it("retains the folder draft after connection failure", async () => {
     renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json({ detail: "library_path_not_directory" }, 400),
     });
     await userEvent.click(
@@ -391,7 +392,7 @@ describe("Getting started", () => {
   it("explains an empty scan", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-empty-scan", model_id: null, file_id: null })]);
     renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-empty-scan", state: "queued" }),
     });
@@ -412,7 +413,7 @@ describe("Getting started", () => {
       aJob({ job_id: "guide-partial-scan", completion: "partial", failed: 1 }),
     ]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-partial-scan", state: "queued" }),
     });
@@ -433,7 +434,7 @@ describe("Getting started", () => {
   });
   it("stops connection when sources cannot be enabled", async () => {
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
       "PUT /api/v1/config": json({ detail: "unavailable" }, 503),
     });
     await userEvent.click(

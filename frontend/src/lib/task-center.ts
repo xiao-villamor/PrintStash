@@ -824,7 +824,7 @@ export function trackSimilarityRun(run: SimilarityRun): string {
 
 export function waitForImportJob(
   jobId: string,
-  title = "Import",
+  title: TaskText = "Import",
   timeoutMs = 15 * 60_000,
 ): Promise<JobStatus> {
   trackImportJob(jobId, title);

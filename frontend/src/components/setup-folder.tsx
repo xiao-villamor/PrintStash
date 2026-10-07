@@ -1,18 +1,17 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/lib/i18n";
+import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import {
-  createExternalLibrary,
-  getVaultConfig,
-  scanExternalLibrary,
-  updateVaultConfig,
-} from "@/lib/api";
+  librarySourcesOptions,
+  useLibrarySourceCommand,
+} from "@/lib/queries/settings-library-sources";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { userMessage } from "@/lib/errors";
-import { trackImportJob, waitForImportJob } from "@/lib/task-center";
 import { uiMessage } from "@/lib/locale";
-import type { ExternalLibrary } from "@/types";
 
 /** A first mounted source uses the same source and ingestion contracts as Settings. */
 export function SetupFolder({
@@ -27,11 +26,33 @@ export function SetupFolder({
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
-  const [source, setSource] = useState<ExternalLibrary | null>(null);
+  const [source, setSource] = useState<{ id: number; name: string } | null>(null);
+  const [session] = useState(getSessionVersion);
+  const live = useRef(true);
+  const pending = useRef(false);
+  const config = useQuery({ ...vaultConfigOptions(), enabled: false });
+  const sources = useQuery({ ...librarySourcesOptions(), enabled: false });
+  const configCommand = useVaultConfigCommand();
+  const sourceCommand = useLibrarySourceCommand();
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  function assertCurrent() {
+    requireSessionVersion(session);
+    if (!live.current) throw new DOMException("First-folder view was disposed", "AbortError");
+  }
+  function isCurrent() {
+    return live.current && session === getSessionVersion();
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [empty, setEmpty] = useState(false);
   async function connect() {
+    if (!isCurrent() || pending.current) return;
+    pending.current = true;
     setBusy(true);
     onBusyChange(true);
     setError("");
@@ -41,32 +62,53 @@ export function SetupFolder({
       // submit enables the feature and creates the user-confirmed source.
       let current = source;
       if (!current) {
-        const config = await getVaultConfig();
-        if (!config.external_libraries_enabled) {
-          await updateVaultConfig({ external_libraries_enabled: true });
+        const read = await config.refetch({ throwOnError: true });
+        assertCurrent();
+        if (!read.data) throw new Error("Configuration receipt is missing");
+        if (!read.data.external_libraries_enabled) {
+          await configCommand.mutateAsync({
+            session,
+            payload: { external_libraries_enabled: true },
+          });
+          assertCurrent();
         }
-        current = await createExternalLibrary({
-          name: name.trim(),
-          root_path: path.trim(),
-          scan_schedule: "0 * * * *",
-          watch_mode: "auto",
-          collection_mode: "mirror",
+        await sources.refetch({ throwOnError: true });
+        assertCurrent();
+        const created = await sourceCommand.mutateAsync({
+          kind: "create",
+          session,
+          payload: {
+            name: name.trim(),
+            root_path: path.trim(),
+            scan_schedule: "0 * * * *",
+            watch_mode: "auto",
+            collection_mode: "mirror",
+          },
         });
+        assertCurrent();
+        current = { id: created.id, name: created.name };
         setSource(current);
       }
-      const job = await scanExternalLibrary(current.id);
-      trackImportJob(job.job_id, uiMessage("Scan {value1}", { value1: current.name }));
-      const result = await waitForImportJob(job.job_id);
-      if (result.state !== "completed") throw new Error(result.error || "scan_failed");
+      const result = await sourceCommand.mutateAsync({
+        kind: "scan",
+        session,
+        id: current.id,
+        title: uiMessage("Scan {value1}", { value1: current.name }),
+      });
+      assertCurrent();
       const complete = result.completion !== "partial";
       const count = await onIndexed(complete);
+      assertCurrent();
       if (!complete) setError(t("setup.scanPartial"));
       setEmpty(count === 0);
     } catch (cause) {
-      setError(userMessage(cause));
+      if (isCurrent()) setError(userMessage(cause));
     } finally {
-      setBusy(false);
-      onBusyChange(false);
+      pending.current = false;
+      if (isCurrent()) {
+        setBusy(false);
+        onBusyChange(false);
+      }
     }
   }
   return (

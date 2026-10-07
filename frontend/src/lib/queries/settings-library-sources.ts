@@ -106,7 +106,19 @@ export function useLibrarySourceCommand(
       release();
     };
   }, []);
-  async function mutateAsync(command: LibrarySourceCommand): Promise<void> {
+  function mutateAsync(
+    command: Extract<LibrarySourceCommand, { kind: "create" | "update" | "enroll" }>,
+  ): Promise<ExternalLibrary>;
+  function mutateAsync(
+    command: Extract<LibrarySourceCommand, { kind: "scan" }>,
+  ): ReturnType<typeof waitForImportJob>;
+  function mutateAsync(command: Extract<LibrarySourceCommand, { kind: "delete" }>): Promise<void>;
+  function mutateAsync(
+    command: LibrarySourceCommand,
+  ): Promise<ExternalLibrary | Awaited<ReturnType<typeof waitForImportJob>> | void>;
+  async function mutateAsync(
+    command: LibrarySourceCommand,
+  ): Promise<ExternalLibrary | Awaited<ReturnType<typeof waitForImportJob>> | void> {
     if (!live.current) throw new DOMException("Library sources view was disposed", "AbortError");
     if (active.current) throw new Error("A library source command is already pending");
     requireSessionVersion(command.session);
@@ -206,7 +218,7 @@ export function useLibrarySourceCommand(
           assertCurrent();
           if (job.state !== "completed") throw new Error(job.error ?? "scan_failed");
           if (isCurrent()) setState({ status: "success" });
-          return;
+          return job;
         }
       }
       await cancelReads();
@@ -222,6 +234,7 @@ export function useLibrarySourceCommand(
         };
       });
       if (isCurrent()) setState({ status: "success" });
+      return row;
     } catch (error) {
       if (isCurrent()) setState({ status: "error", error });
       throw error;
