@@ -3,13 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
+from app.api.edit_preconditions import edit_precondition
 from app.core.ratelimit import rate_limit
 from app.core.security import require_auth, require_user
 from app.core.time import utcnow
 from app.db.models import BrowserDevice, CaptureProvider, ProviderConnection, User
 from app.db.session import get_session
+from app.modules.ingestion import browser_edits
 from app.modules.ingestion import provider_connections as service
 from app.modules.ingestion.capture_provider_connections import ProviderConnectionError
+from app.schemas.editing import EditPrecondition
 from app.schemas.provider_connections import (
     BrowserDevicePatch,
     BrowserDeviceRead,
@@ -29,6 +32,7 @@ _claim_limit = rate_limit(10, 60.0)
 def _device(row: BrowserDevice) -> BrowserDeviceRead:
     assert row.id is not None
     return BrowserDeviceRead(
+        **browser_edits.editing_base(row).model_dump(),
         id=row.id,
         name=row.name,
         created_at=row.created_at,
@@ -219,17 +223,14 @@ def rename_device(
     body: BrowserDevicePatch,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> BrowserDeviceRead:
-    row = session.exec(
-        select(BrowserDevice).where(
-            BrowserDevice.id == device_id, BrowserDevice.user_id == current_user.id
-        )
-    ).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="browser_device_not_found")
-    row.name = body.name
+    row = browser_edits.rename(
+        session, current_user, device_id, body.name, precondition
+    )
+    receipt = _device(row)
     session.commit()
-    return _device(row)
+    return receipt
 
 
 @pairing_router.delete(

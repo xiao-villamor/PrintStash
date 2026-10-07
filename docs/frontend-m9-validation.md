@@ -966,3 +966,8 @@ and command lifetime are implemented in the next bounded M9 increment. Focused
 validation: 26 tests passed; format, lint and types passed. The detailed matrix
 and remaining browser-name contract are in `frontend-m9-provider-validation.md`.
 M9 remains open; this checkpoint does not accept all administration workflows.
+
+The subsequent browser-name backend increment adds conditional-v1 support,
+monotonic versions and a pairing-incarnation editing history. Its API, migration
+and independent-session tests are recorded in the provider matrix. The frontend
+cutover remains required; M9 has not been closed.

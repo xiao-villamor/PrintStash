@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.editing import EditingBase
+
 
 class ProviderConnectionRead(BaseModel):
     provider: Literal["myminifactory", "cults"]
@@ -38,7 +40,7 @@ class BrowserDevicePatch(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
-class BrowserDeviceRead(BaseModel):
+class BrowserDeviceRead(EditingBase):
     id: int
     name: str
     created_at: datetime

@@ -62,10 +62,11 @@ The panel owns drafts, confirmations and the active OAuth navigation handoff.
 Session changes or disposal retire pending receipts. Transient read errors retain
 mounted drafts with disabled actions; authorization failures hide private rows.
 
-This is not yet a conditional browser-name editor. The backend currently accepts
-unconditional renames, and pairing can reuse a revoked row. A captured editing
-base, incarnation protection and explicit conflict review remain required before
-this workflow is accepted. Evidence: `docs/frontend-m9-provider-validation.md`.
+The backend now offers an additive conditional browser-name contract through
+`modules/ingestion/browser_edits.py`. Its version excludes last-use telemetry;
+its opaque history distinguishes replacement credentials and restored databases.
+Legacy renames remain compatible. The first-party editor still needs captured
+bases and explicit conflict review before this workflow is accepted. Evidence: `docs/frontend-m9-provider-validation.md`.
 
 ### Implemented administration source seam (M9 increment)
 

@@ -1,9 +1,10 @@
 """Actors, credentials, resource permissions, browser pairing and share grants."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     ForeignKey,
@@ -12,12 +13,14 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlmodel import Field
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, select
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
 
 from .base import SQLModel
+from .library import LibraryRevision
 from .types import CaptureProvider, CollectionRole, PrinterRole
 
 
@@ -195,6 +198,10 @@ class BrowserDevice(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    database_epoch: ClassVar[Mapped[str]]
     user_id: int = Field(
         sa_column=Column(
             Integer,
@@ -208,6 +215,11 @@ class BrowserDevice(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
     last_used_at: Optional[datetime] = Field(default=None)
     revoked_at: Optional[datetime] = Field(default=None, index=True)
+
+
+BrowserDevice.database_epoch = column_property(
+    select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+)
 
 
 class ShareLink(SQLModel, table=True):
