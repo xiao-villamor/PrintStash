@@ -71,7 +71,12 @@ export async function searchLibrary(
     mode: query.mode ?? "hybrid",
     limit: String(query.limit ?? 30),
   });
-  if (query.filters) params.set("filters", JSON.stringify(query.filters));
+  if (query.filters) {
+    // Saved views also carry Library navigation metadata. Search accepts only
+    // Model predicates; its query and sort have their own top-level parameters.
+    const { library_view: _view, sort: _sort, q: _query, ...filters } = query.filters;
+    params.set("filters", JSON.stringify(filters));
+  }
   if (query.sort) params.set("sort", query.sort);
   if (query.cursor) params.set("cursor", query.cursor);
   if (query.instant) params.set("instant", "true");

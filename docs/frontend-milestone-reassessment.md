@@ -48,7 +48,7 @@ frontend/backend/browser evidence. Profiles now have their [qualified correction
 The implementation matrices must also cover legacy compatibility, session
 retirement, failed/uncertain responses and background writers before closure.
 
-## Corrected execution order
+## Execution order at the reassessment checkpoint
 
 M7 is locally accepted after the competing-edit correction and its focused
 qualification. M8 is locally accepted: the earlier Library-surface evidence,
@@ -56,3 +56,5 @@ Profile correction and Search conditional-edit matrix now cover its reopened
 contracts. M9 is next; its reviewed-root contract is already preserved in
 `6050a375` and is not counted as M7/M8 acceptance.
 M10/M11 remain pending. Final delivery and required CI are still open.
+
+Subsequent status: M9 and M10 are locally accepted in their validation records. M11 is the active integration qualification; the chronological checkpoint above is retained as evidence of the reopened requirements.

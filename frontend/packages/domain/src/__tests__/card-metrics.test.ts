@@ -168,3 +168,38 @@ describe("optional card metrics persistence", () => {
     expect(readCardMetrics()).toEqual(external);
   });
 });
+
+describe("card metric environment boundaries", () => {
+  it.each([{ slot: 0 }, { slot: 1 }, { slot: 2 }])(
+    "rejects an unknown metric in slot $slot",
+    ({ slot }) => {
+      const stored = ["material", "slicer", "file_count"];
+      stored[slot] = "removed_metric";
+      localStorage.setItem(CARD_METRIC_STORAGE_KEY, JSON.stringify(stored));
+      expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+    },
+  );
+  it("reads default card metrics without a browser", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+    Reflect.deleteProperty(globalThis, "window");
+    try {
+      const value = readCardMetrics();
+      expect(value).toEqual(DEFAULT_CARD_METRICS);
+      value[0] = "material";
+      expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+    } finally {
+      Object.defineProperty(globalThis, "window", descriptor);
+    }
+  });
+  it("ignores card metric writes without a browser", () => {
+    const stored = localStorage.getItem(CARD_METRIC_STORAGE_KEY);
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+    Reflect.deleteProperty(globalThis, "window");
+    try {
+      expect(() => writeCardMetrics(["material", "slicer", "file_count"])).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, "window", descriptor);
+    }
+    expect(localStorage.getItem(CARD_METRIC_STORAGE_KEY)).toBe(stored);
+  });
+});

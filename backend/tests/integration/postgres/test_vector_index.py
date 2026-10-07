@@ -220,6 +220,11 @@ class TestPostgresVectorIndex:
         session.execute(
             text(f'GRANT SELECT, UPDATE ON ALL TABLES IN SCHEMA "{schema}" TO "{role}"')
         )
+        # An index-state write advances the shared browse revision. This role
+        # represents application DML authority, but still cannot install vector.
+        session.execute(
+            text(f'GRANT INSERT ON "{schema}".library_revision TO "{role}"')
+        )
         session.commit()
         try:
             session.execute(text(f'SET LOCAL ROLE "{role}"'))

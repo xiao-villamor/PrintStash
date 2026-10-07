@@ -39,7 +39,7 @@ test.describe("model detail route", () => {
 
     await expect(page.getByRole("button", { name: "Model actions" })).toBeVisible();
     await expect(page.getByText("Couldn’t load this model")).toHaveCount(0);
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
   });
 
   test("confirms an ambiguous Model save before retry", async ({ page }) => {
@@ -273,14 +273,14 @@ test.describe("model detail route", () => {
     await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
     const libraryUrl = page.url();
     await modelLink.click();
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
     await expect(loadingPreview).toHaveCount(0);
 
     await page.goBack();
     await expect(page).toHaveURL(libraryUrl);
     await modelLink.click();
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
 
     await expect(loadingPreview).toHaveCount(0);

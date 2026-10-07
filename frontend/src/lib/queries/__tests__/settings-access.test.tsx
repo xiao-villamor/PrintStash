@@ -20,6 +20,7 @@ function CollectionEditor() {
   const command = useCollectionAccessCommand();
   return (
     <>
+      {command.error && <p role="alert">{command.error.message}</p>}
       {query.data?.map((row) => (
         <p key={row.user_id}>
           {row.username}:{row.role}
@@ -60,6 +61,7 @@ function PrinterEditor() {
   const command = usePrinterAccessCommand();
   return (
     <>
+      {command.error && <p role="alert">{command.error.message}</p>}
       {query.data?.map((row) => (
         <p key={row.user_id}>
           {row.username}:{row.role}
@@ -147,6 +149,48 @@ describe.each(resources)(
       expect(app.client.getQueryData(key)).toEqual([]);
       expect(app.requestsWithMethod("GET")).toHaveLength(1);
       expect(app.requestsWithMethod("DELETE")).toHaveLength(1);
+    });
+    it.each([
+      { label: "grant", button: "Grant", method: "PUT", rows: [current] },
+      { label: "revocation", button: "Revoke", method: "DELETE", rows: [] },
+    ])("refreshes grants after an uncertain $label", async ({ button, method, rows }) => {
+      const app = renderEditor();
+      await screen.findByText(initial);
+      app.route({
+        [`${method} ${path}/2`]: () => {
+          throw new TypeError("Permission response lost");
+        },
+        [`GET ${path}`]: () => json(rows),
+      });
+      await userEvent.click(screen.getByRole("button", { name: button }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Permission response lost");
+      await waitFor(() => expect(app.client.getQueryData(key)).toEqual(rows));
+      expect(screen.queryByText(initial)).toBeNull();
+      expect(screen.queryAllByText("Current:admin")).toHaveLength(rows.length);
+      expect(app.requestsWithMethod(method)).toHaveLength(1);
+      expect(app.requestsWithMethod("GET")).toHaveLength(2);
+    });
+    it("keeps other grants in username order after acknowledgement", async () => {
+      const app = renderApp(<Editor />, {
+        routes: {
+          [`GET ${path}`]: () =>
+            json([
+              { ...base, user_id: 3, username: "Zulu" },
+              base,
+              { ...base, user_id: 4, username: "Alpha" },
+            ]),
+          [`PUT ${path}/2`]: () => json(acknowledged),
+        },
+      });
+      await screen.findByText(initial);
+      await userEvent.click(screen.getByRole("button", { name: "Grant" }));
+      await screen.findByText("Server:admin");
+      expect(screen.getAllByRole("paragraph").map((row) => row.textContent)).toEqual([
+        `Alpha:${base.role}`,
+        "Server:admin",
+        `Zulu:${base.role}`,
+      ]);
+      expect(app.requestsWithMethod("GET")).toHaveLength(1);
     });
     it("never dispatches a retired permission gesture", async () => {
       const app = renderEditor();

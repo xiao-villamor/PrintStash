@@ -267,6 +267,7 @@ class TestLibraryBrowse:
             user = build_user(session, superuser=True)
             model = factory(session)
             user_id, model_id = user.id, model.id
+            epoch = model.edit_epoch
         start = Barrier(2)
 
         def editor(name):
@@ -280,7 +281,7 @@ class TestLibraryBrowse:
                         user,
                         row,
                         EditPrecondition(
-                            if_match=f'"{kind}-{model_id}-v1"',
+                            if_match=f'"{kind}-{model_id}-e{epoch}-v1"',
                             contract="conditional-v1",
                         ),
                     )
@@ -304,6 +305,7 @@ class TestLibraryBrowse:
             user = build_user(setup, superuser=True)
             model = build_model(setup)
             user_id, model_id = user.id, model.id
+            epoch = model.edit_epoch
         with Session(pg_library) as session:
             actor = session.get(User, user_id)
             model = session.get(Model, model_id)
@@ -318,7 +320,7 @@ class TestLibraryBrowse:
                     session,
                     actor,
                     model,
-                    EditPrecondition(if_match=f'"model-{model_id}-v1"'),
+                    EditPrecondition(if_match=f'"model-{model_id}-e{epoch}-v1"'),
                 )
             session.rollback()
 

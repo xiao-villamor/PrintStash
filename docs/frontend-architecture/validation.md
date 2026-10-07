@@ -1,14 +1,11 @@
 # Behaviour coverage and validation plan
 
-Status: implementation qualification in progress. M2 rows 1–5 have reviewed
-assertions and qualified executions, consolidated in the
-[M2 closure record](../frontend-m2-closure-validation.md). M1 rows 28–31 are qualified in the
-[M1 closure record](../frontend-m1-closure-validation.md). M3 rows 6–19 are reconciled in the [M3 closure record](../frontend-m3-closure-validation.md), including the ordinary gate correction, PostgreSQL additions and deep-page budget. M4 rows20–27 are reconciled in the [M4 acceptance record](../frontend-m4-closure-validation.md). M5 rows32–36 are qualified in the [M5 navigation record](../frontend-m5-closure-validation.md). Other rows remain the
-original requirements pending reconciliation with their feature validation records;
-`❌ missing` means no accepted reference has yet been attached here, not that no
-test exists anywhere. This is not an assertion-by-assertion audit of the whole
-suite. Expand the matrix per feature before implementation, especially settings,
-provider forms, extension capture and viewers.
+Status: M0–M10 implementation acceptance is recorded in the linked milestone
+matrices. All 60 requirements below now have named coverage or a linked feature
+matrix; runtime qualification remains separate. M11 reconciles the final source,
+integrated CI, review ledger and measurements. This is not an assertion-by-assertion
+manual audit of every existing test. Detailed feature matrices record the expanded
+error, permission, concurrency and recovery cases.
 
 Use the exact repository columns and one observable behaviour per row. Existing
 coverage becomes `✅ <tier dir>/<file>::<test>` only after reading its assertions.
@@ -126,9 +123,9 @@ Security/data-integrity regression tests precede implementation. New capabilitie
 need a headline e2e flow. Do not lower floors, loosen fixtures, or add skips to
 make migration tests pass.
 
-## Documentation increment: actual validation
+## Historical planning-only validation
 
-This increment changes Markdown and the review ledger only. Product format/lint/
+The original planning increment changed Markdown and the review ledger only. This historical record does not describe the subsequent implementation PR. Product format/lint/
 type/unit/browser/build suites are not locally rerun to imply a refactor occurred.
 Documentation validation: new local link targets resolved, all 762 ledger paths exist
 without duplicates, all 57 matrix rows have the prescribed seven populated columns
@@ -145,5 +142,5 @@ new broken local link and does not reconstruct the missing decision.
 | --- | ---------------------------- | -------- | ----------------------- | -------------------------------- | ------------- | -------------------------------- |
 | D1  | changes production behaviour | Happy    | documentation-only diff | no production change to exercise | Frontend unit | ⏭️ N/A — planning artifacts only |
 
-No correctness, maintainability-runtime or performance improvement is claimed.
-The plan, accepted decisions and their validation requirements are the deliverable.
+No implementation or performance improvement was claimed by that planning increment.
+Current implementation evidence lives in the milestone records and final qualification report.

@@ -128,7 +128,7 @@ test.describe("Standalone similarity", () => {
         await expect(card).toBeVisible({ timeout: 60_000 });
         const href = await card.getAttribute("href");
         models.push({
-          id: Number(href!.split("/").at(-1)),
+          id: Number(new URL(href!, page.url()).pathname.split("/").at(-1)),
           name,
           hashes: [mesh, revision]
             .map((bytes) => createHash("sha256").update(bytes).digest("hex"))

@@ -19,6 +19,7 @@ import {
   validateInferenceModel,
 } from "@/lib/api/search";
 import { json } from "@/test-support/render";
+import { readSearchFilters } from "@/lib/search-filters";
 import { searchResponse, searchConfiguration } from "@/test-support/search";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -115,6 +116,33 @@ describe("Interactive search requests", () => {
     expect(await searchLibrary({ q: "bracket" })).toEqual(response);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it.each(["all", "multipart"] as const)(
+    "sends Model predicates without %s saved-view metadata",
+    async (libraryView) => {
+      fetcher.mockResolvedValue(json(searchResponse()));
+      const filters = {
+        ...readSearchFilters(
+          new URLSearchParams("tag=functional&printed=no&print_duration_max_s=10800"),
+        ),
+        library_view: libraryView,
+        q: "old bookmark text",
+        sort: "name-asc" as const,
+      };
+      await searchLibrary({ q: "bracket", sort: "date-desc", filters });
+      const url = new URL(String(fetcher.mock.calls[0][0]), "http://localhost");
+      expect(url.searchParams.get("q")).toBe("bracket");
+      expect(url.searchParams.get("sort")).toBe("date-desc");
+      const sent = JSON.parse(url.searchParams.get("filters")!);
+      expect(sent).toMatchObject({
+        tag: ["functional"],
+        printed: false,
+        print_duration_max_s: 10800,
+      });
+      expect(sent).not.toHaveProperty("library_view");
+      expect(sent).not.toHaveProperty("sort");
+      expect(sent).not.toHaveProperty("q");
+    },
+  );
   it("preserves server errors", async () => {
     fetcher.mockResolvedValue(json({ detail: "search_unavailable" }, 503));
     await expect(searchLibrary({ q: "bracket" })).rejects.toMatchObject({

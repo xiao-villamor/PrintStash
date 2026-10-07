@@ -214,8 +214,8 @@ test.describe("Multipart review layout", () => {
         true,
       );
       await expect(dialog.getByRole("button", { name: "Create multipart model" })).toBeInViewport();
-      await expect(dialog.getByTitle(candidate.model_a.name)).toHaveText(candidate.model_a.name);
-      await expect(dialog.getByTitle(candidate.model_b.name)).toHaveText(candidate.model_b.name);
+      await expect(dialog.getByTitle("A".repeat(128))).toHaveText("A".repeat(128));
+      await expect(dialog.getByTitle("B".repeat(128))).toHaveText("B".repeat(128));
       await dialog.screenshot({ path: testInfo.outputPath(`multipart-${width}.png`) });
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(dialog).toHaveCount(0);

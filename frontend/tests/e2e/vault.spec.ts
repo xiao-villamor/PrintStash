@@ -100,7 +100,7 @@ test.describe("vault route", () => {
     await expect(recovery.getByText("1 unconfirmed", { exact: true })).toBeVisible();
     await expect(recovery.getByRole("button", { name: "Undo confirmed changes" })).toHaveCount(0);
     await recovery.getByRole("link", { name: "Review bracket" }).click();
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(page.getByRole("heading", { name: "Current bracket", exact: true })).toBeVisible();
     expect(writes).toBe(1);
   });

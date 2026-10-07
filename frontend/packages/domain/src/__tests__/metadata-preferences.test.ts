@@ -182,3 +182,28 @@ describe("optional metadata preferences persistence", () => {
     expect(readMetadataPreferences()).toEqual(external);
   });
 });
+
+describe("metadata preference environment boundaries", () => {
+  it("reads default metadata without browser storage", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage")!;
+    Reflect.deleteProperty(globalThis, "localStorage");
+    try {
+      expect(readMetadataPreferences()).toEqual(DEFAULT_METADATA_PREFERENCES);
+    } finally {
+      Object.defineProperty(globalThis, "localStorage", descriptor);
+    }
+  });
+  it("ignores metadata writes without a browser", () => {
+    const stored = localStorage.getItem(METADATA_PREFERENCE_STORAGE_KEY);
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+    Reflect.deleteProperty(globalThis, "window");
+    try {
+      expect(() =>
+        writeMetadataPreferences({ ...DEFAULT_METADATA_PREFERENCES, material: false }),
+      ).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, "window", descriptor);
+    }
+    expect(localStorage.getItem(METADATA_PREFERENCE_STORAGE_KEY)).toBe(stored);
+  });
+});

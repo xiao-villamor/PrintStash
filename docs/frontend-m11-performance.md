@@ -35,7 +35,7 @@ All warm medians remain below 500ms, warm p95 below 800ms and fresh medians belo
 p95 regresses 356.7→401.2ms; dense Spanish fresh median rises 702→718.3ms and
 Spanish distributed fresh p95 rises 592.9→610.9ms. These are retained costs, not
 waived or described as universal improvement. Median readiness improves in seven
-of eight groups. The final review must assess these tails against request evidence.
+of eight groups. The slowest dense English warm sample (867.2ms) reports browse app time 688.2ms versus SQL time 39.1ms over 19 statements; outliner app time 120.3ms versus SQL time 9.1ms over eight statements. These server timings show that the tail includes substantial non-SQL server time. They cannot assign that time to a specific CPU or scheduler cause, or establish a frontend regression from readiness alone.
 
 ## Decoded visible thumbnails
 
@@ -81,5 +81,49 @@ these measurements cannot establish an improvement for those dimensions.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
-| P1 | records resources for a usable dense library | Happy | production build and real seeded API | decoded visible images; CPU/commit counters populated; all 90 Models reachable | Playwright measurement | ❌ execution pending |
-| P2 | retires measured Blob URLs on sign-out | Edge | mounted private thumbnails then real sign-out | zero retained encoded Blob URL bytes | Playwright measurement | ❌ execution pending |
+| P1 | records resources for a usable dense library | Happy | production build and real seeded API | decoded visible images; CPU/commit counters populated; all 90 Models reachable | Playwright measurement | ✅ `tests/performance/startup-resources.spec.ts` — 1 passed; both observations asserted |
+| P2 | retires measured Blob URLs on sign-out | Edge | mounted private thumbnails then real sign-out | zero retained encoded Blob URL bytes | Playwright measurement | ✅ `tests/performance/startup-resources.spec.ts` — 1 passed; both observations asserted |
+
+### Instrumented result on the reviewed application source
+
+Application revision `66ba9036`; corrected diagnostic test executed locally once
+successfully (8.5s test body, 1.6min including production setup). This separate run
+overlapped functional test work; its timings are diagnostic, not a comparable
+performance benchmark. The dense observer runs only against the dense corpus.
+
+| Observation | First page (24 Models) | Expanded (90 Models) | Signed out |
+|---|---:|---:|---:|
+| React root commits since document start | 26 | 123 | 129 |
+| Chromium cumulative script time (s) | 0.634 | 1.409 | 1.501 |
+| Chromium cumulative task time (s) | 1.167 | 3.371 | 3.690 |
+| JS heap used (bytes, no forced GC) | 10,121,132 | 19,814,308 | 23,196,872 |
+| Retained encoded Blob URLs | 4 | 33 | 0 |
+| Retained encoded Blob bytes | 482 | 4,012 | 0 |
+
+The unchanged document time origin confirms that logout retired the Blob URLs
+without hiding their lifetime behind a document reload. Heap size was not forced
+to collect and does not demonstrate a leak or memory reclamation. These tiny seed
+thumbnails do not model decoded-image/GPU memory for real collections. Root commit
+counts are not per-component render costs. Resource timing records request-start
+and response-wait intervals, but does not separate all browser scheduling causes.
+No before/after CPU, render-count or memory improvement is claimed.
+
+### CI application-source qualification
+
+Deep CI run `37653862125` also retained 200 successful readiness samples plus
+four warmups on application source `66ba9036`. Its two startup jobs failed later
+in the separate resource observer (logout locator in dense; dense-only count
+assertion applied to the distributed corpus). Those diagnostic-test corrections
+do not change the comparable observer or application. These CI-host numbers are
+not compared to the local baseline.
+
+| Corpus | Locale | Context | n | Ready median / p95 (ms) |
+|---|---|---|---:|---:|
+| dense | en | fresh | 20 | 338.30 / 438.40 |
+| dense | en | warm | 30 | 180.35 / 359.20 |
+| dense | es | fresh | 20 | 326.95 / 344.00 |
+| dense | es | warm | 30 | 188.80 / 220.20 |
+| distributed | en | fresh | 20 | 385.85 / 408.60 |
+| distributed | en | warm | 30 | 185.50 / 210.90 |
+| distributed | es | fresh | 20 | 379.95 / 397.10 |
+| distributed | es | warm | 30 | 189.55 / 223.50 |

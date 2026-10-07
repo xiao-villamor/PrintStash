@@ -68,7 +68,7 @@ test.describe("AI Search", () => {
     try {
       await uploadModel(page, name, { mesh: true, gcode: false });
       const href = await modelCard(page, name).getAttribute("href");
-      modelId = Number(href?.split("/").at(-1));
+      modelId = Number(new URL(href!, page.url()).pathname.split("/").at(-1));
       // Upload completion precedes the search projection Job. Wait for the
       // indexed Model before testing the one-shot suggestion request.
       await expect

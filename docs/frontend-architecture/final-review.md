@@ -15,7 +15,7 @@ This record adds exact-file inspection evidence to the historical ledger. It doe
 | `frontend/src/components/__tests__/spoolman-connect-card.test.tsx` | `c53553c26f321881a752b7aa9c9ab2059c269a499d052cd79fe33da84420157c` | Complete file. Spoolman draft hydration/conflict gap requires correction. |
 | `frontend/src/lib/api/__tests__/spoolman.test.ts` | `62ab8d9e4772ee3fff6274ef9e96199a23b18715e6c81d9c58bf001ecaa9c461` | Complete file. Spoolman draft hydration/conflict gap requires correction. |
 | `backend/app/api/v1/spoolman.py` | `c1d3d2c706c0b4e4e32874b091e21f9d0093bffcf3817fd9efe659e5ba55fcba` | Complete file. Spoolman draft hydration/conflict gap requires correction. |
-| `frontend/playwright.startup.config.ts` | `7496247f37c8833363b74577c1d886c321a88acfbeec6c4466d392b0fccd29a3` | Complete file. Production measurement observer and owned fixture/proxy lifecycle retained. |
+| `frontend/playwright.startup.config.ts` | `62d5343a18c7abc6a76f733ac3d8fb21ac8420a6db1e83f74bd028fc81d09266` | Complete file. Production measurement observer and owned fixture/proxy lifecycle retained. |
 | `frontend/tests/performance/library-startup.spec.ts` | `3f8862433e4627ebeeb0778ad4358efedc185554e823516d29de3e7bab73646f` | Complete file. Production measurement observer and owned fixture/proxy lifecycle retained. |
 | `frontend/tests/performance/scripts/start-backend.sh` | `fbfa49fc25a97868ac86edcd02bef3f557d9d8af8a00bdbfd644005d23df6212` | Complete file. Production measurement observer and owned fixture/proxy lifecycle retained. |
 | `frontend/tests/performance/scripts/start-frontend.sh` | `42eb7b8a51fb649ac7fe28e61d5c3b9f557339147291f0c19012b6b9df4cdd73` | Complete file. Production measurement observer and owned fixture/proxy lifecycle retained. |
@@ -104,7 +104,220 @@ The complete asset-owner read found `getCachedAssetUrl` has no production caller
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
-| I8 | reuses one protected download across leases | Edge | concurrent consumers | same usable URL; one fetch | Frontend unit | ❌ lease-suite qualification pending |
-| I9 | retains session and eviction contracts after compatibility removal | Error | old request, invalidation, byte/entry pressure | old bytes retired; active lease preserved | Frontend unit | ❌ existing asset behavior matrix requalification pending |
+| I8 | reuses one protected download across leases | Edge | concurrent consumers | same usable URL; one fetch | Frontend unit | ✅ `frontend/src/lib/__tests__/asset-cache.test.ts::collapses concurrent requests for the same path into one fetch` |
+| I9 | retains session and eviction contracts after compatibility removal | Error | old request, invalidation, byte/entry pressure | old bytes retired; active lease preserved | Frontend unit | ✅ [M6 asset matrix](../frontend-m6-validation.md), requalified by 34 asset-cache/hook cases in 6.45 s |
 
 The second complete instrumented app run reported 4,383 passing cases and five failures: one missing `describe` wrapper in the new resource observer (corrected), plus four UI waits in ModelGrid/FilterSidebar. Those four cases passed unchanged both in a regular focused run (18.06 s total) and in an instrumented focused run. They are recorded as suite-only timing failures, not claimed as fixed product defects. No global coverage result was emitted from either failed full run.
+
+## Current owner reconciliation
+
+The following complete reads check query ownership, cancellation, command acknowledgement, local drafts/secrets and session retirement. The settings owners keep feature-specific policies; they are not a universal command framework. Storage migration and accepted background work retain their existing backend authority.
+
+| Path | Inspected SHA-256 | Scope / result |
+|---|---|---|
+| `frontend/src/lib/queries/settings-access.ts` | `9aad4af21a38acc9370aa384a4e6f9bdf340a0a4aed49a934ba8e3c9c7e04b57` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-account.ts` | `9527186c879b2e99b2f6c2e145f00a6e9c70b33418f29252fc1b3e1966609445` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-backup-catalog.ts` | `6f7364f8db6ed69b5431d31396f1bbb67c54c2b88207fb6ce9c4f590c0c3fc6f` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-backup-policy.ts` | `0789ae43fe0519d600d676f900aac24f4f9f89e4a6809e599ae0c5575e675a1e` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-backup-runs.ts` | `c4499946ad1a22a1e46adad7aff1bea9560257728056d68d44e3076af4fd31b6` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-config.ts` | `5b722fb52ebe140f261621070aba10e75b6b6e678e2ed1ddd77c7640f6e45fe8` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-system.ts` | `729c04f4aebc354df9fdf86656c347480dc5b7cf8ba66a317037400cb6d7b727` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-storage-root.ts` | `52b2179337db799dc791f670f904d06183bcdb1cd944bb1fa8bb292e79aa951c` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-providers.ts` | `7d81477f0e497c9bfb0daf947cc1fd52204ca6fdae71159dee98071de85ccaa2` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-notifications.ts` | `e9bad2b910006d9542ae1122c7ae6fe47adbd213c64dda0bf13631146e54e3f6` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-storage.ts` | `27485f7428b36369a1d54849965f602424abec7ad34e21ac7f6e89b3056a3d07` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-library-sources.ts` | `08402997d9f5c39929a84fe8ffd29429b59cb6f59661432463deef985c2af802` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-trash.ts` | `8d6266c1326235b0631ba78a4e7c0089bc0ad3ae5c9b0e899d34f037256f2029` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-vault-migration.ts` | `2c57e0164a6e94598af71f30600a8e27dadd82608b23084d8b42e080e58890ff` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/queries/settings-spoolman.ts` | `976128ca13c422903ef2f786fc5897f136451a7aed54b8b954a101c53adf3a9e` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/editing.ts` | `926fb56fa7433ebb3442dc120ec728e7e7150363ed8072360adad54b8eb1cf5e` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/metadata.ts` | `fbf63fc49ce463ede8255cac7216d8305c8b028959dc60d8de44911ea0a8353a` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/saved-views.ts` | `cccb51b5dc55bc5366a320792f66f4a4f02ec2d384ef2293da6730874d7ac5cf` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/taxonomy.ts` | `5575beef3e227be64fa1992afa91c6558655742272657bdd2fa7551b9c613d7d` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/thumbnails.ts` | `b935c3f84c6367ab0521b6bc1d704f85d3911acd0add355bbf1e9a0523aa97e1` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/features/library/url.ts` | `8d18705f63a2f84cde30282ec110d918c6181c475fae1ee03170e8813f5b46ea` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/src/lib/api/editing.ts` | `a315228a365527ed5b3b1ab94d123dcac9059a994efa4d36aa57d31130449e49` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/vite.config.ts` | `aa3f363efd9faaec3847e0db7e5f10d8255590c844f6971abc435283fbcdb188` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `frontend/package.json` | `f5219cb8ec71c86de5f3ec5508d8e0519f14f41e8708b738cede514f051fd811` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+| `.github/workflows/deep-ci.yml` | `48c1d4472950cab1a67243f1db35e9e2cba5b126304fd477513dee221e735583` | Complete file. Ownership and integration contract reviewed against the final architecture and milestone matrices. |
+
+## Platform and contract leaf reconciliation
+
+The static deployment/test configuration and type/UI adapters below were read in full. `.mise.toml` and `components.json` retain historical Next.js scaffolding labels; these are disclosed tooling debt, not a production server runtime. The resource observer is test instrumentation, separate from comparable startup timing.
+
+| Path | Inspected SHA-256 | Scope / result |
+|---|---|---|
+| `.mise.toml` | `d07c42d052f536fc0095bf60e5cad8922f7b2945f6ecabcc95f25b9619d0c2ab` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `backend/unified/.dockerignore` | `f24fa66559874ffd84ab7b9a6d7c7b04218374161f6d13889cfb13490a59e4f2` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/.dockerignore` | `d006aee81388da2367a311eb2ebed098fbea0855ba213ab5622a547a2d1b866a` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/.nvmrc` | `68ca3fba3b7e864770cb61aeb306d4bd4354b68ab4dd38450860c5d823e42a53` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/components.json` | `821edc55799233bfdc9bd04c9db5fb0fab5822def9325c98a35bb69a4f2415d2` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `browser-extension/styles.d.ts` | `a1e11ea9c568f92e5ff3b72ce5f9a47575e0b3c390a8b318e71f413af9f1b1a8` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `browser-extension/tsconfig.json` | `90f35ac966f4bf4354106f1469ce86db512ff72cdd103c590c238878f2fbbbb4` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `browser-extension/.gitignore` | `a5d030531186aa85db775b22b1476b17ed52f61ccb9b96e166e5b75f90ecb221` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `browser-extension/.oxfmtrc.json` | `c0dae20afb1d2ab41fcddb3dad2a1334bb114e6906aa62b3b955a270486c2ac8` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `browser-extension/entrypoints/popup/main.ts` | `2f390e4743c9e0ea85bd3c1480a9a3d4c1d992ebc163b1efb3ea29f793d25fbc` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/spoolman-connect-card.tsx` | `3c9d88d066f0a7b7ec8ef1f342e429dccbd2f1db0c698496af246e6fa90a3782` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/tests/performance/startup-resources.spec.ts` | `6689e26eb16f1207f494fcc8463f3a7a5c41f7ceb1ea2e590302cf486c7993b5` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.ai-search.config.ts` | `cc9da5364a2b4b35ee43f19f80181082f9d9c3750239da827b862a3ed967f512` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.critical-backup.config.ts` | `9df70c0a879d956e7f3df158cb975a55cd83e64781c4f2c055939bb8ff67449c` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.environment-admin.config.ts` | `fb973588107692fa1fa41bc0eb70743053dbe8c4f598cd8ecd7551458fbe9b86` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.migration.config.ts` | `85078ce3bf996087376bef24534d7cbb1273e4c6a36d6a20dea4bdc280d96117` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.onboarding.config.ts` | `6366697a36d71e2f07e30702bc23d19f321459fab8b7ff80b112aa0f4634600a` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.performance.config.ts` | `6e095f35f83638dcd831396de40dfd87d271abb4227ee6685c0e6058dc1fe3c9` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/playwright.startup.config.ts` | `62d5343a18c7abc6a76f733ac3d8fb21ac8420a6db1e83f74bd028fc81d09266` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/badge.tsx` | `cbe95a1957a1237762b3bacaffee533c6d410357e46e7bf76bcfab9950420034` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/button.tsx` | `cf3ce22a50898b40133ab3ad21b5d0cd01ef15225a28e08f3e910994663067e2` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/card.tsx` | `e0fa924a222ddf3ac702d3e2fe9589323a2c9abb31697401824023fac922fe6b` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/checkbox.tsx` | `a20902473cf3f558fad4f6dc3b27d6bfe4dc68c584ed5f9a88471ace5fdccca0` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/drawer.tsx` | `78a9bee93bbd5f8f774b06e04e83b32a0bee353f215b6e7a039c35cb9bbbed70` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/dropdown-menu.tsx` | `ed7f14b944a37b5ff4a4a16fe0d7426c32bba47fb7fb352b2ddd5db2a68f3f19` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/empty-state.tsx` | `b93aaadddad57d916b40e0d4eb49cdf093db1def98e531d7758d9cedaaf40b7e` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/input.tsx` | `bcecc49b4c1b7905e49f1a2261a98eb0b2b479fbcdc1d9abec0796c067dae882` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/localized.tsx` | `77783ede5938648d0ab0f39779200325a3e5cd6e9490d27f251b7700bfb50883` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/page-container.tsx` | `edf9c9f01c451b7f0f28c6c525ea024ce326e7b5df0b0f2e6232bfdf19614a19` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/page-header.tsx` | `1ce2ae0b215b3050af01ab6e313d7a6d3c7415cbe0aafbfceb4362702cd6a6e3` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/separator.tsx` | `0a9347e50163a34aae7759a05d0e604219c0eca1adb3f41335658317421cef0b` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/skeleton.tsx` | `bcfea31b6ea70be082364e22481cd37ddf891ea4c971c508c0b2db9a40e9441f` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/components/ui/tabs.tsx` | `77a9d532fa1b3ae873277d30786aa52434315003e4f098b8bd4c40df8bf29b3b` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/notifications.ts` | `2c9b17472428126686c8ba54c9978cb00cf03e4b30048f60c20e32b788eb85a3` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/provider-connections.ts` | `5fc17194fa270e1879f3a973a76eb0890a8bf3f1b2deee323d9ea36fe25b0634` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/outliner.ts` | `335e5b0c3bab43814e41e39b6a5718f2fca5393488190bc8df1c07765868adad` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/provenance.ts` | `14a21cbc51ec303dff002fd7283b8862978a9e830b5e4de87641eb710e03386b` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/spoolman.ts` | `0cb466d8cae80d0266d1c7019c72d50afaaed115e3dd0c04aebaabfb7cdfb722` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+| `frontend/src/types/index.ts` | `9f0fa5188dd3f6d534ce5dcd4f758e9bbbe10afd92a6cdd7cc3e585eec67f70b` | Complete file. Static/platform or public contract ownership reviewed; no new competing remote-state owner. |
+
+## Deep browser integration corrections
+
+Deep CI reproduced a stale onboarding URL assertion: canonical Library navigation
+now includes `type=all&sort=date-desc`. Preserve the root-route and canonical-state
+assertions instead of requiring the old query-free URL. The new resource observer
+reached all 90 Models but used the retired sidebar sign-out control; it now uses
+the actual account menu and has a bounded action timeout. Its dense-only corpus
+is explicitly selected by the startup configuration.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| I10 | reaches its first Model entirely through browser controls | Happy | onboarding deferred/resumed | canonical Library URL and subsequent first Model workflow | Playwright real | ✅ `tests/e2e-real/onboarding/first-model.spec.ts` — normal + lost-response: 2 passed each |
+
+The same retired URL assertion existed in partial-backup recovery, the Nextcloud
+preset flow, Settings → Browse Models and AI Search → Clear Search. These now
+assert the canonical root state explicitly; no navigation behavior was changed.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| I11 | retries the exact failed copy from partial backup success | Error | failed backup destination | exact destination retried after canonical login | Playwright real | ✅ `tests/e2e-real/critical/remote-backup.spec.ts::retries the exact failed copy from partial backup success` |
+| I12 | edits a Nextcloud connection while preserving its linked target | Happy | existing connection with linked target | connection changes; linked target preserved | Playwright real | ✅ `tests/e2e-real/critical/remote-backup.spec.ts::edits a Nextcloud connection while preserving its linked target` |
+| I13 | background work leads a new user to a model's preview status | Happy | Work page | Browse Models opens canonical Library URL | Playwright | ✅ `tests/e2e/settings.spec.ts::background work leads a new user to a model's preview status` |
+| I14 | clears AI Search into the Library | Happy | populated Search | canonical root; empty search field | Playwright real | ✅ `tests/e2e-real/ai-search/search.spec.ts::submits semantic searches against a local index` — passed real suite |
+
+## Coverage audit additions
+
+Deep CI executed all app/domain/UI tests successfully. Its floor audit identified
+missing edge coverage in optional preference persistence and polling lifecycle
+contracts. The following behavior rows precede their additional assertions.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| C1 | rejects an unknown metric in any slot | Error | invalid stored first/second/third id | defaults returned | Frontend unit | ✅ `packages/domain/src/__tests__/card-metrics.test.ts` |
+| C2 | reads default card metrics without a browser | Edge | window absent | copied defaults; no exception | Frontend unit | ✅ `packages/domain/src/__tests__/card-metrics.test.ts` |
+| C3 | ignores card metric writes without a browser | Edge | window absent | existing stored choice unchanged | Frontend unit | ✅ `packages/domain/src/__tests__/card-metrics.test.ts` |
+| C4 | reads default metadata without browser storage | Edge | localStorage absent | defaults returned | Frontend unit | ✅ `packages/domain/src/__tests__/metadata-preferences.test.ts` |
+| C5 | ignores metadata writes without a browser | Edge | window absent | existing stored preferences unchanged | Frontend unit | ✅ `packages/domain/src/__tests__/metadata-preferences.test.ts` |
+| C6 | starts only one delayed polling chain | Edge | repeated start before interval | one request at deadline | Frontend unit | ✅ `src/lib/__tests__/completion-chained-polling.test.ts` |
+| C7 | forces polling until explicitly stopped | Edge | terminal result with force flag | another request; stop ends chain | Frontend unit | ✅ `src/lib/__tests__/completion-chained-polling.test.ts` |
+| C8 | stops when a result callback disposes its consumer | Edge | onResult stops poller | no later result or request | Frontend unit | ✅ `src/lib/__tests__/completion-chained-polling.test.ts` |
+| C9 | suppresses errors from retired polling work | Error | old rejected request after stop/restart | no stale error; new result delivered | Frontend unit | ✅ `src/lib/__tests__/completion-chained-polling.test.ts` |
+| C10 | reports an opaque polling rejection safely | Error | rejected non-Error value | stable generic Error; recovery continues | Frontend unit | ✅ `src/lib/__tests__/completion-chained-polling.test.ts` |
+
+| C11 | preserves modified Back-link gestures | Edge | modifier, middle click or new-tab target | native default preserved; current route unchanged | Frontend unit | ✅ `src/features/library/__tests__/navigation.test.tsx` |
+| C12 | respects a cancelled Back-link gesture | Edge | caller prevents click | no navigation | Frontend unit | ✅ `src/features/library/__tests__/navigation.test.tsx` |
+| C13 | follows an unknown-origin Back fallback | Happy | direct detail link | safe return view visible | Frontend unit | ✅ `src/features/library/__tests__/navigation.test.tsx` |
+
+Deep-CI browser failures also exposed old test clients parsing Model IDs from
+the entire href (now containing a return query), exact query-string comparisons,
+an incomplete mocked adoption receipt, an error collector installed after navigation
+and a Multipart test confusing 255-character Model names with 128-character part
+names. Corrections preserve the required assertions and update their inputs to the
+current contracts; the affected browser selections remain to be qualified.
+
+### Permission-command failure qualification
+
+M9 requires an uncertain permission write to recover the authoritative resource without retrying the write. The same contract applies to collection and printer permissions.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C14 | refreshes grants after an uncertain grant | Error | Server applies grant but PUT response is lost; collection/printer | Fresh grant displayed, error retained, one write | Frontend unit | ✅ `src/lib/queries/__tests__/settings-access.test.tsx` — both permission resources |
+| C15 | refreshes grants after an uncertain revocation | Error | Server removes grant but DELETE response is lost; collection/printer | Fresh empty permission list, error retained, one write | Frontend unit | ✅ `src/lib/queries/__tests__/settings-access.test.tsx` — both permission resources |
+| C16 | keeps other grants in username order after acknowledgement | Edge | Multiple existing grants; collection/printer | Updated grant rendered once in alphabetical order with other grants retained | Frontend unit | ✅ `src/lib/queries/__tests__/settings-access.test.tsx` — both permission resources |
+
+### Local qualification limits recorded during M11
+
+The selected mock-browser correction run passed **8 tests in 1.1min**, covering
+cached preview, mobile Pending Imports, live/AI search at two widths, S3 adoption,
+Work-to-Library navigation, long Multipart names and browser Back. Lint and app/UI/
+domain typechecks passed after the permission recovery cases were added; those
+16 permission cases passed under focused coverage. Navigation/poller selection:
+26 passed. Domain coverage: 97.20% statements, 93.91% branches.
+
+The local full-backend run was deliberately interrupted to avoid duplicating the
+ongoing Deep CI backend qualification while the local host exhausted available
+memory. It reported **9,370 passed, 1 failed**, not a passing full gate. The failure
+was `test_records_selected_load_cells[retry-eight-only]`: seven of eight selected
+artifacts became usable; one exceeded the 120s Job deadline. Natural drain finished.
+That diagnostic is retained, with no timeout change or production workaround.
+
+A concurrently started local frontend coverage run reported **4,376 passed,
+32 failed (13 files)** in 481.50s; the failures were timeouts or rendered waits.
+No coverage report was emitted. The host had 7.7GiB RAM and nearly its entire 2GiB
+swap in use. The prior CI run's complete unit suite was green, but this does not
+make the local failed run green: a bounded follow-up and final CI remain required.
+Two local AI-search invocations never reached a test (missing uv on PATH, then
+backend-startup timeout under that load); neither is a behavioral result.
+
+### Search transport regression discovered by real browser qualification
+
+`readSearchFilters` includes persisted view metadata, while `GET /search` accepts
+strict `ModelFilters`. Sending `library_view` causes HTTP 422
+`model_filters_invalid` for any filtered Search. Search owns its result-kind
+selection independently; Library mode must not become a search predicate. Project
+saved-view-only metadata out at the API boundary; retain every actual predicate.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C17 | sends Model predicates without saved-view metadata | Error | Filtered search from all/multipart saved view | Wire JSON contains print/tag predicates; query and sort remain top-level; no Library-only mode | Frontend unit | ✅ `src/lib/api/__tests__/search.test.ts::sends Model predicates without %s saved-view metadata` — red 2, green 2 |
+| C18 | persists editable filters without repeated parsing | Happy | Real filtered Search after NL interpretation | Matching Model remains visible; saved view reopens without another chat call | Playwright real | ✅ `tests/e2e-real/ai-search/nl-filters.spec.ts::persists editable filters without repeated parsing` — 1 passed, 29.4s |
+
+### PostgreSQL contract fixture reconciliation
+
+Deep CI resources reported 679 passed / 7 failed. Four edit tests still sent
+pre-epoch ETags, so they never exercised concurrent claims or revoked actors.
+The capacity upgrade test constructed a current ORM Model against an old schema.
+The vector degradation role lacked the INSERT required by the newly installed
+browse-revision trigger. The generation schema test downgraded a populated head
+through a historical, explicitly data-dropping cursor migration; its requirement
+is forward schema compatibility, which should start from the released fixture.
+No merged migration is edited and extension creation remains denied.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C19 | permits only one atomic editor | Edge | Model/Multipart/Document concurrent claims with current epoch | One persisted winner, one conflict | Integration PostgreSQL | ✅ `backend/tests/integration/postgres/test_library_browse.py::test_permits_only_one_atomic_editor` — seven-case selection passed |
+| C20 | rejects revoked actor | Error | Actor deactivated after authorized read; valid editing base | Permission denial, unchanged edit version | Integration PostgreSQL | ✅ `backend/tests/integration/postgres/test_library_browse.py::test_rejects_revoked_actor` — seven-case selection passed |
+| C21 | upgrade preserves Models | Edge | Model stored in pre-capacity released schema | Name survives upgrade to head | Integration PostgreSQL | ✅ `backend/tests/integration/postgres/test_capacity.py::test_upgrade_preserves_models` — seven-case selection passed |
+| C22 | degrades when pg extension cannot be created | Error | DML-capable application role without CREATE EXTENSION | Unavailable native index, NumPy results usable | Integration PostgreSQL | ✅ `backend/tests/integration/postgres/test_vector_index.py::test_degrades_when_pg_extension_cannot_be_created` — seven-case selection passed |
+| C23 | keeps migrated PostgreSQL schema in sync | Edge | Released schema advanced through generation migration | Head matches ORM; no phantom generation | Integration PostgreSQL | ✅ `backend/tests/integration/postgres/test_search_generations.py::test_keeps_the_migrated_postgres_schema_in_sync` — seven-case selection passed |
+
+Search client current-file reconciliation:
+
+| Path | Inspected SHA-256 | Scope / result |
+|---|---|---|
+| `frontend/src/lib/api/search.ts` | `cea8520d01de82bd6834d559bb348dae89b6ed0be12444b2d907d7c46963d120` | Complete file. URL/saved-view metadata is projected out of the strict Search request contract; actual predicates are retained. |
+| `frontend/src/lib/search-filters.ts` | `905546a7fe3a3c2f1c77ea393aa2e8465b67a9a4fd70a6cf2a4fdbe0334e36b3` | Complete file. URL/saved-view metadata is projected out of the strict Search request contract; actual predicates are retained. |
+| `frontend/src/features/library/filters.ts` | `ac4d9f27c208dd7990cdc3ad7bd9723ae56dd5e9fe1dfbcb5577abff5d6a20c1` | Complete file. URL/saved-view metadata is projected out of the strict Search request contract; actual predicates are retained. |
+
+The PostgreSQL correction selection passed **7 tests in 136.47s** against real
+containers. The 32 frontend cases that failed under local saturation passed
+unchanged in **37.20s with `--maxWorkers=2`** (13 files, 856 unrelated cases not
+selected). This is a bounded recheck, not a global coverage result. No assertion
+or timeout was loosened. The Search API regression and permission/hygiene selection
+passed **46 tests in 4.62s**; real NL-filter workflow passed in **29.4s**.

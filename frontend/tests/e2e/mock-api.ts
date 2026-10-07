@@ -2078,6 +2078,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       sendJson(res, {
         backup_id: "legacy-2025",
         source_ref: "s3-legacy-source",
+        provider_ref: "provider-legacy-s3",
+        created_at: "2025-01-01T00:00:00Z",
+        size_bytes: 4096,
+        file_count: 12,
+        storage_backend: "s3",
+        app_version: "0.12.1",
+        location: "s3",
+        namespace: "printstash-bucket/nexus3d-backups",
+        key: "nexus3d-backups/legacy-2025.tar.gz",
+        prefix: "nexus3d-backups/",
+        canonical: true,
+        precedence: 2,
         archive_sha256: "a".repeat(64),
       }),
     );

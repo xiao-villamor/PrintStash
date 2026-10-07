@@ -11,7 +11,7 @@ test.describe("caption draft concurrency", () => {
     await uploadGcodeModel(page, name);
     const target = await modelCard(page, name).getAttribute("href");
     if (!target) throw new Error("The uploaded Model requires its detail link");
-    const id = target.split("/").at(-1);
+    const id = new URL(target, page.url()).pathname.split("/").at(-1);
     const endpoint = `${API}/api/v1/subjects/model/${id}/caption`;
     const seeded = await page.request.patch(endpoint, {
       data: { action: "edit", text: "Original saved caption" },

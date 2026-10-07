@@ -131,7 +131,12 @@ test.describe("partial backup recovery", () => {
     await page.getByLabel("Username").fill("backup-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
     await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("type") === "all" &&
+        url.searchParams.get("sort") === "date-desc",
+    );
 
     const root = `blocked-replica-${Date.now()}`;
     const directory = resolve(dirname(fileURLToPath(import.meta.url)), "../.storage-data/webdav");
@@ -238,7 +243,12 @@ test.describe("shared provider connection forms", () => {
     await page.getByLabel("Username").fill("backup-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
     await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("type") === "all" &&
+        url.searchParams.get("sort") === "date-desc",
+    );
     const name = `Nextcloud forms ${Date.now()}`;
     const root = `form-${Date.now()}`;
     const endpoint = `http://127.0.0.1:${webdavPort}`;

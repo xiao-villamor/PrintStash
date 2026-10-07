@@ -54,3 +54,46 @@ describe("Library navigation", () => {
     expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", target);
   });
 });
+
+function BackProbe({ target, cancel = false }: { target?: string; cancel?: boolean }) {
+  const location = useLocation();
+  return (
+    <>
+      <LibraryBackLink
+        href="/?c=parts"
+        target={target}
+        onClick={cancel ? (event) => event.preventDefault() : undefined}
+      >
+        Back
+      </LibraryBackLink>
+      <output aria-label="Route">
+        {location.pathname}
+        {location.search}
+      </output>
+    </>
+  );
+}
+describe("Back-link gestures", () => {
+  it.each([
+    { label: "control", gesture: { ctrlKey: true }, target: undefined },
+    { label: "command", gesture: { metaKey: true }, target: undefined },
+    { label: "shift", gesture: { shiftKey: true }, target: undefined },
+    { label: "alt", gesture: { altKey: true }, target: undefined },
+    { label: "middle", gesture: { button: 1 }, target: undefined },
+    { label: "new tab", gesture: {}, target: "_blank" },
+  ])("preserves the native $label Back gesture", ({ gesture, target }) => {
+    renderApp(<BackProbe target={target} />, { at: "/models/1" });
+    expect(fireEvent.click(screen.getByRole("link", { name: "Back" }), gesture)).toBe(true);
+    expect(screen.getByLabelText("Route")).toHaveTextContent("/models/1");
+  });
+  it("respects a cancelled Back-link gesture", () => {
+    renderApp(<BackProbe cancel />, { at: "/models/1" });
+    expect(fireEvent.click(screen.getByRole("link", { name: "Back" }))).toBe(false);
+    expect(screen.getByLabelText("Route")).toHaveTextContent("/models/1");
+  });
+  it("follows an unknown-origin Back fallback", () => {
+    renderApp(<BackProbe />, { at: "/models/1" });
+    fireEvent.click(screen.getByRole("link", { name: "Back" }));
+    expect(screen.getByLabelText("Route")).toHaveTextContent("/?c=parts");
+  });
+});

@@ -321,7 +321,12 @@ test.describe("settings route", () => {
     await expect(page.getByRole("tab", { name: "All work types" })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Browse models" }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("type") === "all" &&
+        url.searchParams.get("sort") === "date-desc",
+    );
   });
 
   test("background work stops a selected preview job", async ({ page }) => {

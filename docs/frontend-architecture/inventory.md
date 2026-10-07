@@ -213,3 +213,48 @@ original overlay hashes. The later observer-only change to
 relative to this inventory snapshot, not a new path. Its exact source hash and
 read/run evidence live in [measurement qualification](baseline-measurement.md).
 The frozen inventory snapshot above is not silently relabelled as final M11 scope.
+
+## M11 final-source reconciliation
+
+Source snapshot: `66ba9036e32769c1cb06ba1e4fde9d5ce5df0ae4` (921 scoped paths).
+The historical columns and counts above remain immutable checkpoint evidence.
+The six `final_*` columns identify current presence, Git blob, SHA-256 of inspected
+working bytes, bounded review scope and evidence. Generated files, lock metadata
+and binary assets receive provenance credit only. No installed dependency or build
+output is counted as manually reviewed application source.
+
+| Final evidence category | Paths |
+|---|---:|
+| historical-targeted-read; complete-file-gap | 14 |
+| final-complete-read | 119 |
+| historical-complete-read; revision-reconciliation-required | 61 |
+| inventory-only; manual-file-gap | 299 |
+| feature-qualification-reference; scope-is-record-specific | 394 |
+| binary-or-generated-provenance-only | 9 |
+| excluded-or-generated-provenance-only | 25 |
+
+These categories are deliberately not a single “files reviewed” percentage. A
+feature test reference does not prove a complete read, and a historical full read
+does not certify changed bytes. The ledger exposes every remaining per-file gap.
+Architecture owner coverage is broader than complete-file review and is anchored
+to the contracts below.
+
+| Owner / integration boundary | Current evidence |
+|---|---|
+| Library routes, filtering, membership and pagination | M2/M3 closure records; server browse contract; canonical URL and revision-checked page owner |
+| Editing, source metadata, moves, bulk actions and builds | M4/M8 records; conditional edit base/receipt; explicit review and target reconciliation |
+| History, rendering and protected assets | M5/M6 records; bounded per-entry snapshots; leased Blob cache and viewport admission |
+| Authentication, transport, public shares | M1 record; session transport fences; real anonymous-share/private-navigation regression |
+| Events, uploads, Jobs, Inbox and printers | M7 record; event/telemetry lifetimes; durable Job owner versus local transfer owner |
+| Settings, accounts, sources, providers, backups and storage | M9 records; current settings-owner complete reads in final-review; Spoolman M11 correction |
+| Shared UI/domain packages | Recorded package full-read inventory, M10 consumer tests and enforced package export/dependency directions |
+| Extension connection, pairing and provider capture | M10 extension matrices, immutable capture operation and receipt cleanup; provider parser algorithms retain partial manual-review coverage |
+| Locale, PWA, build, deployment and browser configuration | M10 platform record, M11 EN/ES initial-render and production resource observations; current platform reads in final-review |
+| Tests and contributor/tooling conventions | Behavior matrices, repository hygiene/dependency tests, current frontend skill and architecture conventions |
+
+Remaining manual gaps include provider-specific parsing detail, some presentation
+leaves, test assertions and developer-only media tooling. They are not labeled
+complete from successful builds or tests. This work does not certify every existing
+test assertion, all browser engines, accessibility, live external providers, physical
+printers or decoded/GPU memory. Known historical Next.js scaffolder settings and
+`.mise.toml` labels are recorded tooling debt; actual delivery remains static Vite.

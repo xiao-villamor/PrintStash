@@ -219,7 +219,15 @@ for (const viewport of [
       await expect(page.getByRole("button", { name: "Search by image" })).toBeVisible();
       await input.fill("bracket");
       await input.press("Enter");
-      await expect(page).toHaveURL(/\/\?tag=functional&favorites=true&q=bracket$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("tag") === "functional" &&
+          url.searchParams.get("favorites") === "true" &&
+          url.searchParams.get("q") === "bracket" &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       expect(await input.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(120);
       expect(
         await input.evaluate((el) => {
@@ -256,12 +264,28 @@ for (const viewport of [
       );
       await page.goBack();
       await page.goBack();
-      await expect(page).toHaveURL(/\/\?tag=functional&favorites=true&q=bracket$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("tag") === "functional" &&
+          url.searchParams.get("favorites") === "true" &&
+          url.searchParams.get("q") === "bracket" &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
       await expect(input).toHaveValue("bracket");
       await expect(page.getByTitle("Remove Tag: functional")).toBeVisible();
       await page.getByRole("button", { name: "Clear search", exact: true }).click();
-      await expect(page).toHaveURL(/\/\?tag=functional&favorites=true$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("tag") === "functional" &&
+          url.searchParams.get("favorites") === "true" &&
+          !url.searchParams.has("q") &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       await expect(page.getByTitle("Remove Tag: functional")).toBeVisible();
       await page.getByRole("button", { name: "Toggle theme" }).click();
       await page.screenshot({

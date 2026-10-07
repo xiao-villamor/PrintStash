@@ -2,176 +2,51 @@
 
 ## Unreleased
 
-- Preserve Spoolman connection drafts during background status refreshes. Detect
-  competing edits and require explicit review before retrying; session changes
-  retire pending commands. Existing settings survive the additive version migration.
+- Keep Library view metadata out of AI Search filter requests, so filtered and saved searches remain usable.
 
-- Add conditional storage-connection edits with independent versions and identity
-  checks. Preserve credential omission and target-in-use restrictions; legacy
-  clients remain compatible while the first-party editor adopts the contract.
+- Offer Everything and Multipart Sets as the two Library views. Filter and order
+  mixed results on the server before pagination so later matching results remain
+  reachable. Reject stale continuation pages instead of mixing catalog revisions.
 
-- Keep missing-route recovery bounded even when other chunks load successfully.
-  Show a localized reload action when a route remains unavailable. Restrict the
-  offline worker cache to public static resources and exclude bearer requests.
+- Preserve each Library history entry's filters and reading position through
+  detail navigation. Bound restoration after cache eviction, explain missing
+  anchors, keep rapid folder transitions coherent and retire private snapshots
+  when the session or access changes.
 
-- Detect competing notification channel and global-switch edits. Keep drafts for
-  explicit review after conflicts or uncertain saves; revised saves preserve
-  untouched fields. Adopting a replacement clears old credential input. Prevent
-  an empty printer selection from accidentally subscribing to all printers.
+- Detect competing edits to Models, Multipart Sets, Documents, printer settings,
+  Profiles, Search, Vault settings, browser names, notifications, storage connections,
+  Library sources and Spoolman. Preserve drafts for explicit review after conflicts
+  or uncertain responses. Bind edits to database history so restored backups cannot
+  authorize obsolete drafts. Legacy clients retain unversioned compatibility.
 
-- Add conditional API edits for notification channels and the global switch.
-  Delivery telemetry leaves drafts valid; configuration changes and automatic
-  disabling invalidate stale versions. Legacy requests remain compatible during
-  the conditional API contract.
+- Keep confirmed changes authoritative during refetch and pagination races. Remove
+  the duplicate transport GET cache and transport-owned invalidation. Feature owners
+  coordinate reads, receipts and recovery; session changes retire private requests,
+  cached results, local secrets and pending confirmations.
 
-- Notification settings now show recoverable read errors instead of an invented
-  Off state or empty list. Preserve drafts through transient failures, prevent
-  changes during pending saves, and publish confirmed masked responses through
-  the shared query cache. Session changes retire pending commands and local input.
+- Retain protected thumbnail URLs while displayed, admit nearby images under a
+  four-download limit and cancel abandoned work. Bound idle encoded image data
+  without evicting mounted consumers. Preserve Shift selection after page append
+  and the reading position after removing a confirmed favorite.
 
-- Detect competing browser-name edits. Preserve drafts for explicit review before
-  retrying, and require adopting a replacement pairing before editing it. The API
-  supports conditional edits while retaining legacy callers; duplicate names now
-  return a conflict without changing the device.
+- Share Inbox and durable Job state across consumers. Preserve accepted uploads
+  and scans after their forms close, recover missed events and prevent disposed
+  printer subscriptions from reconnecting. Retire bulk transfers with their session.
 
-- Provider connections now distinguish loading and failed reads from disconnected
-  accounts. Leaving the panel cancels obsolete work; transient read failures keep
-  browser-name drafts, and failed disconnect/revoke confirmations show their error.
+- Give settings, storage migration, backup, source management, manufacturing and
+  ZIP review explicit loading, error and recovery states. Preserve unsaved input,
+  require the reviewed destination for destructive actions and avoid replaying
+  commands after an uncertain acknowledgement. Save compound Vault configuration
+  in one transaction; retain omitted credentials and independent edit counters.
 
-- Detect competing Search settings edits in the advanced form and guided setup.
-  Preserve drafts for explicit review, keep unrelated settings during revised
-  saves, and stop setup before downloads when consent could not be confirmed.
+- Bind browser-extension captures to the selected connection throughout download
+  and upload. Retire revoked credentials, cancelled pairing and obsolete callbacks;
+  clean up malformed upload receipts and unnecessary host permissions.
 
-- Detect competing filament and printer preset edits. Retain drafts for explicit
-  review after conflicts or uncertain saves, preserve untouched fields, and
-  prevent an older saved indicator from unlocking a pending row. Spoolman-linked
-  presets remain read-only; recreated presets cannot inherit an obsolete draft.
-
-- Detect competing printer settings and quick model edits without treating live
-  telemetry as an edit. Preserve drafts for explicit review after conflicts or
-  uncertain saves; retire the editor and live connection when access is denied.
-
-- Protect backup schedule and local-destination drafts with conditional config
-  saves. Preserve confirmed destination updates after partial failure and submit
-  only deliberately changed destination fields. First-party configuration writes
-  now require their captured editing base.
-
-- Preserve backup and trash retention drafts across refreshes. Detect concurrent
-  edits and require an explicit review before retrying with revised days; retry
-  failed configuration loads without losing input.
-
-- Detect conflicting changes to currency, automatic known-good marking and model
-  image quality. Keep the selected preference for explicit review, protect against
-  stale retries, and retire pending review when the session ends.
-
-- Keep storage configuration drafts coherent across background refreshes. Use
-  server edit versions for conflicts, require explicit review before revised save,
-  and retain newer credential input while an earlier save finishes.
-
-- Stop first-folder connection when source activation conflicts or cannot be
-  confirmed. Keep the folder draft for explicit review, avoid repeating an
-  activation confirmed by a fresh read, and retire local setup input on logout.
-
-- Detect competing configuration edits when enabling or disabling library sources.
-  Preserve the intended toggle through conflicts or uncertain responses and require
-  an authorized review before retry; retire review state when access is lost.
-
-- Protect SSO configuration drafts from competing edits. Keep local input after a
-  conflict or unconfirmed save, show the latest authorized values on review, and
-  require an explicit revised save. Late receipts cannot replace newer observed
-  configuration; client secrets stay outside shared caches.
-
-- Persist vault configuration edit versions separately from operational bookkeeping,
-  including changes made by legacy writers, and add the atomic editing-claim
-  operation with current administrator/session checks. Configuration GET returns
-  a matching editing base and ETag; conditional PUT rejects stale edits and returns
-  its own committed receipt. Client conflict recovery remains in progress; clients
-  without conditional headers retain explicit legacy compatibility.
-
-- Save compound configuration changes in one transaction so a failed final write
-  cannot leave earlier policy, schedule, currency or provider changes committed.
-
-- Share current-storage configuration with Settings and migration receipts, retain
-  newer credential drafts, expose failed reads with recovery, and retire private
-  storage views and root-enrollment confirmations when access is lost. Keep the
-  current location summary in sync with a confirmed migration cutover.
-
-- Give Vault migration reads and command receipts one owner, retain reviewed
-  confirmation targets, cancel abandoned reads, surface catalog failures and stop
-  status polling after read errors until explicit recovery. Preserve destination
-  defaults and the selected migration when refreshing history.
-
-- Fence backup confirmations to the reviewed source, keep accepted Jobs after
-  navigation, and publish backup/configuration receipts without stale read races.
-  Preserve acknowledged policy parts after a later connection fails and refresh
-  backup process views on return.
-
-- Preserve unsaved backup settings during catalog refresh, distinguish failed
-  source discovery from empty storage, cancel abandoned reads, and hide owned
-  backup details after access denial.
-
-- Keep an upload's selected source when it becomes unavailable and require an
-  explicit available destination before dispatch. Share source updates, recover
-  failed catalog reads, and avoid admin-only reads for member uploads.
-
-- Stop first-folder setup from dispatching later steps after navigation or a session
-  change, share its confirmed source with Settings, and retain accepted scans in
-  the task center.
-
-- Share Library source management reads and publish confirmed source changes
-  without redundant refreshes. Keep failed reads recoverable, hide denied data,
-  preserve newer drafts and exact-root confirmations, and retain accepted scan
-  Jobs after the settings view closes.
-
-- Keep manufacturing result drafts during background updates and require explicit
-  review after a concurrent confirmation. Reconcile confirmed Builds against late
-  reads, cancel abandoned reads, recover failed history/detail views, and reuse
-  canonical secondary catalogs. Hide cached profile/statistics data after access
-  denial while retaining recovery after transient failures.
-
-- Recover ZIP review after read failures, cancel abandoned manifest reads, and
-  retire selections and delayed receipts with their review/session. Reconcile
-  early-discovered archive Jobs into the original upload task so it reaches Ready
-  once, with its chosen destination and tags.
-
-- Keep accepted Model uploads running after their form closes, while binding the
-  entire bulk queue to its initiating session. Stop remaining files and stale
-  completion notifications when that session retires.
-
-- Keep protected thumbnail URLs alive while displayed, admit images near the
-  viewport under a four-download limit, and cancel abandoned work. Bound idle
-  encoded image data without evicting mounted consumers. Fix Shift range
-  selection after appending a Library page when React replays a state update.
-
-- Preserve each Library history entry's filters and reading position when returning
-  from Model or Multipart detail. Bound restoration after cache eviction, show a
-  clear reset for missing anchors, keep rapid folder transitions coherent, and
-  retire private snapshots when the session or access changes. Remove ignored
-  scroll options and no-op route refresh/prefetch methods from the navigation API.
-
-- Preserve the reading position when a confirmed Favorites removal takes its
-  card out of the current grid, including delayed rendering and queued scroll events.
-
-- Bind conditional Model, Multipart and Document edits to the database history
-  as well as the entity version. Restored backups cannot reauthorize old drafts
-  when a counter recurs; delayed old-history receipts cannot replace a restored
-  snapshot. Preserve explicit review and retry with the complete editing base.
-
-- Preserve the editing version when dragging Models from the grid, list or
-  paginated tree. Retain the destination after conflicts or uncertain moves,
-  and require explicit review before retrying with the current version.
-
-- Include aggregate editing versions in lightweight Model and Multipart tree
-  reads, keeping collection search matches distinct and reads bounded.
-
-- Preserve Multipart tag selections and chosen cover images after conflicts or
-  uncertain saves. Review the current version before retrying, retain unrelated
-  composition drafts, and reject invalid editing acknowledgements.
-
-- Protect Model Source edits and private cover changes against concurrent writes.
-  Keep field drafts and selected files after conflicts or uncertain responses,
-  require explicit review before retrying, and share one Source read across its
-  metadata and cover controls. Prevent delayed reads from replacing confirmed edits.
+- Keep route-chunk recovery bounded and localized, restrict the offline cache to
+  public static resources and recover online navigation when Cache Storage fails.
+  Retain React Router and the static Vite deployment; enforce app/package dependency
+  directions and remove obsolete navigation and invalidation compatibility APIs.
 
 - Load the Library route immediately and defer upload, tag, multipart creation
   and ZIP review forms until opened. Prioritize cards and the bounded tree,

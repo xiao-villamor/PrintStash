@@ -146,7 +146,12 @@ test.describe("Browser onboarding", () => {
         await page.getByLabel("Username").fill("first-owner");
         await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
         await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
-        await expect(page).toHaveURL(/\/$/);
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === "/" &&
+            url.searchParams.get("type") === "all" &&
+            url.searchParams.get("sort") === "date-desc",
+        );
         // This owner-only control appears after login confirmation completes.
         await page.getByRole("button", { name: "Resume the getting-started guide" }).click();
       }
@@ -206,7 +211,12 @@ test.describe("Browser onboarding", () => {
       await page.getByRole("button", { name: /Idioma:/ }).click();
       await page.getByRole("menuitemradio", { name: "English", exact: true }).click();
       await page.getByRole("button", { name: "I'll do this later" }).press("Enter");
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
       await expect(page).toHaveURL(/\/getting-started$/);
       await page.goto("/settings");
