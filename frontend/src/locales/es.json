@@ -4223,5 +4223,16 @@
   "library.moveUnavailable": "Este modelo ya no está disponible para ti.",
   "library.moveIntent": "Mover {name} a {destination}.",
   "library.moveReviewFailed": "No se ha podido cargar el modelo actual. Revísalo de nuevo antes de reintentar el movimiento.",
-  "library.moveLocation": "Ubicación actual: {location}"
+  "library.moveLocation": "Ubicación actual: {location}",
+  "Batch needs review": "El lote necesita revisión",
+  "Some changes could not be confirmed. Review the current models before making a new selection.": "No se han podido confirmar algunos cambios. Revisa los modelos actuales antes de hacer una nueva selección.",
+  "Undo result": "Resultado de deshacer",
+  "Undo confirmed changes": "Deshacer cambios confirmados",
+  "Discard remaining batch": "Descartar el resto del lote",
+  "{value1} confirmed": "{value1} confirmados",
+  "{value1} unconfirmed": "{value1} sin confirmar",
+  "{value1} not attempted": "{value1} sin intentar",
+  "Move to: {value1}": "Mover a: {value1}",
+  "Add tags: {value1}": "Añadir etiquetas: {value1}",
+  "Remove tags: {value1}": "Quitar etiquetas: {value1}"
 }

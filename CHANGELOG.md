@@ -253,6 +253,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Preserve confirmed Model batch results when a later request loses its response, with explicit review and conditional undo of acknowledged changes.
+
 - Bounded STL previews report whether all source triangles are represented independently from a complete source scan. Mesh processing now uses separate admission, loading, measurement and preview owners with validated geometry and fingerprint contracts.
 - Mesh workers reject unknown or malformed fingerprint result states before publication.
 - Capture and similarity commands keep the API event loop responsive through database writes, background-engine notification and response projection.

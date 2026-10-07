@@ -16,11 +16,54 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
-import { aModelListItem, aMultipartModel } from "../../src/test-support/factories";
+import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("vault route", () => {
+  test("reviews an interrupted batch in the browser", async ({ page }) => {
+    let writes = 0;
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [{ kind: "model", model: aModelListItem({ id: 1, name: "Review bracket" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/batch/tags", (route) => {
+      writes += 1;
+      return route.abort("failed");
+    });
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({ id: 1, name: "Current bracket", tags: ["functional"], edit_version: 9 }),
+      }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Review bracket" }).click();
+    await page.getByRole("button", { name: "Tag", exact: true }).click();
+    const editor = page.getByRole("dialog");
+    await editor.getByRole("combobox").first().fill("functional");
+    await editor.getByRole("combobox").first().press("Enter");
+
+    await editor.getByRole("button", { name: /Apply/ }).click();
+
+    const recovery = page.getByRole("dialog", { name: "Batch needs review" });
+    await expect(recovery.getByText("Add tags: functional", { exact: true })).toBeVisible();
+    await expect(recovery.getByText("1 unconfirmed", { exact: true })).toBeVisible();
+    await expect(recovery.getByRole("button", { name: "Undo confirmed changes" })).toHaveCount(0);
+    await recovery.getByRole("link", { name: "Review bracket" }).click();
+    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page.getByRole("heading", { name: "Current bracket", exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+  });
+
   test("refreshes a changed library deliberately", async ({ page }) => {
     const browseRequests: string[] = [];
     let changed = false;

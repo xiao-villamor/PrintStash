@@ -313,3 +313,19 @@ applies it to the mounted view only after the old card leaves the displayed
 snapshot. It does not scroll early when confirmation precedes rendering, and
 a queued event with unchanged offsets cannot discard the promotion. Native
 scroll bounds still apply. See [the mutation matrix](../library-mutations-validation.md).
+
+### Interrupted Library batches
+
+`features/library/batch-edits` owns selected editing bases, bounded requests and
+conditional undo. Its result separates acknowledged successes/rejections from an
+interrupted request's unknown identities and the remaining unattempted identities.
+A malformed receipt confirms none of that request; earlier valid receipts survive.
+Consumers must not turn unknown outcomes into successful or failed rows, discard
+prior confirmations, or authorize retry with a background read. Model batch undo
+uses only the exact acknowledged editing identities.
+
+`LibraryBatchRecovery` presents a transient command receipt and original intent,
+with links for explicit current-state review. Undo results remain separate so
+undoing confirmed changes never erases the original uncertainty. Session and view
+retirement suppress delayed feedback. This state is not an entity cache and does
+not participate in Query freshness. Collection commands remain a distinct contract.

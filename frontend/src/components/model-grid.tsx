@@ -1,5 +1,7 @@
 "use client";
 
+import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
+
 import { useLibraryReadingPosition } from "@/features/library/reading-position";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -7,6 +9,7 @@ import {
   moveLibraryModels,
   tagLibraryModels,
   type LibraryEditReceipt,
+  type LibraryBatchOutcome,
 } from "@/features/library/batch-edits";
 import { useSavedViews, type SavedViewCommand } from "@/features/library/saved-views";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
@@ -1164,6 +1167,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     Map<number, CollectionNodeRead>
   >(new Map());
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchRecovery, setBatchRecovery] = useState<{
+    entry: typeof entry;
+    receipt: LibraryBatchOutcome & { undo: (() => Promise<LibraryBatchOutcome>) | null };
+    intent: string[];
+    models: ModelListItem[];
+  } | null>(null);
+  const currentBatchRecovery =
+    batchRecovery?.entry === entry && entry.session === getSessionVersion() ? batchRecovery : null;
+  function reviewInterruptedBatch(
+    receipt: LibraryBatchOutcome & { undo: (() => Promise<LibraryBatchOutcome>) | null },
+    intent: string[],
+    models: ModelListItem[],
+  ) {
+    setBatchRecovery({ entry, receipt, intent, models });
+  }
   const [selectingAll, setSelectingAll] = useState(false);
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
@@ -1324,15 +1342,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const failureDetails: string[] = [];
     const session = getSessionVersion();
     try {
+      const selectedModels = selectedIdList.map((id) => {
+        const model = selectedModelSnapshot.current.get(id);
+        if (!model) throw new Error("selected_model_snapshot_missing");
+        return model;
+      });
       if (selectedIdList.length) {
-        modelReceipt = await moveLibraryModels(
-          selectedIdList.map((id) => {
-            const model = selectedModelSnapshot.current.get(id);
-            if (!model) throw new Error("selected_model_snapshot_missing");
-            return model;
-          }),
-          target,
-        );
+        modelReceipt = await moveLibraryModels(selectedModels, target);
         requireSessionVersion(session);
         const result = modelReceipt.result;
         succeeded += result.succeeded_count;
@@ -1345,6 +1361,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             }),
           ),
         );
+      }
+      if (modelReceipt?.completion.status === "interrupted") {
+        reviewInterruptedBatch(
+          modelReceipt,
+          [uiText("Move to: {value1}", { value1: target || uiText("None (root)") })],
+          selectedModels,
+        );
+        void refresh();
+        return;
       }
       for (const collection of selectedCollections) {
         requireSessionVersion(session);
@@ -1367,7 +1392,18 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         toast.undo(uiText("Moved {value1}", { value1: String(succeeded) }), async () => {
           try {
             requireSessionVersion(session);
-            const result = await modelReceipt?.undo();
+            const outcome = await modelReceipt?.undo();
+            requireSessionVersion(session);
+            if (outcome?.completion.status === "interrupted") {
+              reviewInterruptedBatch(
+                { ...outcome, undo: null },
+                [uiText("Undo result")],
+                selectedModels,
+              );
+              void refresh();
+              return;
+            }
+            const result = outcome?.result;
             for (const collection of movedCollections) {
               requireSessionVersion(session);
               await moveCollection(collection.id, collection.parent_id);
@@ -1465,25 +1501,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setBatchBusy(true);
     const session = getSessionVersion();
     try {
-      const receipt = await tagLibraryModels(
-        selectedIdList.map((id) => {
-          const model = selectedModelSnapshot.current.get(id);
-          if (!model) throw new Error("selected_model_snapshot_missing");
-          return model;
-        }),
-        add,
-        remove,
-      );
+      const selectedModels = selectedIdList.map((id) => {
+        const model = selectedModelSnapshot.current.get(id);
+        if (!model) throw new Error("selected_model_snapshot_missing");
+        return model;
+      });
+      const receipt = await tagLibraryModels(selectedModels, add, remove);
       requireSessionVersion(session);
+      if (receipt.completion.status === "interrupted") {
+        reviewInterruptedBatch(
+          receipt,
+          [
+            uiText("Add tags: {value1}", { value1: add.join(", ") }),
+            uiText("Remove tags: {value1}", { value1: remove.join(", ") }),
+          ],
+          selectedModels,
+        );
+        void refresh();
+        return;
+      }
       const result = receipt.result;
       if (result.succeeded_count)
         toast.undo(
           uiText("Tagged {value1}", { value1: String(result.succeeded_count) }),
           async () => {
             try {
-              const undone = await receipt.undo();
+              const outcome = await receipt.undo();
               requireSessionVersion(session);
               refresh();
+              if (outcome.completion.status === "interrupted") {
+                reviewInterruptedBatch(
+                  { ...outcome, undo: null },
+                  [uiText("Undo result")],
+                  selectedModels,
+                );
+                return;
+              }
+              const undone = outcome.result;
               if (undone.failed_count)
                 toast.warning(
                   uiText("{value1} skipped", { value1: String(undone.failed_count) }),
@@ -2900,12 +2954,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
         </main>
 
+        {currentBatchRecovery && (
+          <LibraryBatchRecovery
+            key={currentBatchRecovery.entry.key}
+            receipt={currentBatchRecovery.receipt}
+            intent={currentBatchRecovery.intent}
+            models={currentBatchRecovery.models}
+            onChanged={() => void refresh()}
+            onClose={() => {
+              setBatchRecovery(null);
+              clearSelection();
+            }}
+          />
+        )}
         {docView === "models" && (
           <BatchToolbar
             modelCount={selectedIds.size}
             selectedCollections={selectedCollections}
             tags={tags}
-            busy={batchBusy}
+            busy={batchBusy || currentBatchRecovery !== null}
             canMoveToRoot={!!user?.is_superuser}
             onMoveSelection={moveSelection}
             onRenameCollections={(names) =>

@@ -4223,5 +4223,16 @@
   "library.moveUnavailable": "This model is no longer available to you.",
   "library.moveIntent": "Move {name} to {destination}.",
   "library.moveReviewFailed": "Could not load the current model. Review it again before retrying the move.",
-  "library.moveLocation": "Current location: {location}"
+  "library.moveLocation": "Current location: {location}",
+  "Batch needs review": "Batch needs review",
+  "Some changes could not be confirmed. Review the current models before making a new selection.": "Some changes could not be confirmed. Review the current models before making a new selection.",
+  "Undo result": "Undo result",
+  "Undo confirmed changes": "Undo confirmed changes",
+  "Discard remaining batch": "Discard remaining batch",
+  "{value1} confirmed": "{value1} confirmed",
+  "{value1} unconfirmed": "{value1} unconfirmed",
+  "{value1} not attempted": "{value1} not attempted",
+  "Move to: {value1}": "Move to: {value1}",
+  "Add tags: {value1}": "Add tags: {value1}",
+  "Remove tags: {value1}": "Remove tags: {value1}"
 }

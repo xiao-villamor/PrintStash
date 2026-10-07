@@ -3336,6 +3336,37 @@ describe("ModelBrowser", () => {
   });
 
   describe("undoing a batch", () => {
+    it("retains an interrupted tag intent for explicit review", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderVault({
+        models: [aModelListItem({ id: 1, name: "Benchy" })],
+        tags: [aTag()],
+        routes: { "POST /api/v1/models/batch/tags": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: "Select" }));
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
+      await user.click(screen.getByRole("button", { name: "Tag" }));
+      const editor = await screen.findByRole("dialog");
+      await user.type(within(editor).getAllByRole("combobox")[0], "functional{Enter}");
+
+      await user.click(within(editor).getByRole("button", { name: /Apply/ }));
+
+      const recovery = await screen.findByRole("dialog", { name: "Batch needs review" });
+      expect(within(recovery).getByText("Add tags: functional")).toBeVisible();
+      expect(within(recovery).getByRole("link", { name: "Benchy" })).toHaveAttribute(
+        "href",
+        "/models/1",
+      );
+      expect(within(recovery).getByText("1 unconfirmed")).toBeVisible();
+      expect(
+        requestsWithMethod("POST").filter((request) => request.url.endsWith("/batch/tags")),
+      ).toHaveLength(1);
+      await user.click(within(recovery).getByRole("button", { name: "Discard remaining batch" }));
+      await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
+    });
+
     it("offers to undo a tag change", async () => {
       // Tagging fifty models is one click and fifty writes; without an undo the
       // only way back is fifty more.
@@ -3626,6 +3657,27 @@ describe("ModelBrowser", () => {
   });
 
   describe("undoing a move", () => {
+    it("retains an interrupted move destination for explicit review", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderVault({
+        collections: [aCollection({ id: 2, name: "Spares", path: "spares" })],
+        models: [aModelListItem({ id: 1, name: "Benchy", collection: "parts" })],
+        routes: { "POST /api/v1/models/batch/move": json({ detail: "unavailable" }, 503) },
+      });
+
+      await selectAndMove(user);
+
+      const recovery = await screen.findByRole("dialog", { name: "Batch needs review" });
+      expect(within(recovery).getByText("Move to: spares")).toBeVisible();
+      expect(within(recovery).getByRole("link", { name: "Benchy" })).toHaveAttribute(
+        "href",
+        "/models/1",
+      );
+      expect(
+        requestsWithMethod("POST").filter((request) => request.url.endsWith("/batch/move")),
+      ).toHaveLength(1);
+    });
+
     async function selectAndMove(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Benchy");
       await openLibraryTools();
