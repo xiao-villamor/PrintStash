@@ -28,6 +28,7 @@ import {
   useAdminUserCommand,
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
+import { savedPreference, useSettingsPreferenceCommand } from "@/lib/queries/settings-preferences";
 import { useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
@@ -598,18 +599,25 @@ export function SettingsPanel() {
   const configDenied =
     remoteConfig.isError && [401, 403, 404].includes(parseApiError(remoteConfig.error).status);
   const remoteConfigData = configDenied ? undefined : remoteConfig.data;
-  const [autoMarkChoice, setAutoMarkKnownGood] = useState<boolean | null>(null);
-  const autoMarkKnownGood = autoMarkChoice ?? remoteConfigData?.auto_mark_known_good ?? false;
-  const [autoMarkBusy, setAutoMarkBusy] = useState(false);
-  const [currencyChoice, setCurrency] = useState<string | null>(null);
-  const currency = currencyChoice ?? remoteConfigData?.currency ?? "";
-  const [currencyBusy, setCurrencyBusy] = useState(false);
+  const preferenceCommand = useSettingsPreferenceCommand();
+  const preferenceIntent = preferenceCommand.intent;
+  const preferenceReview = preferenceCommand.state;
+  const autoMarkKnownGood =
+    preferenceIntent?.kind === "auto-mark"
+      ? preferenceIntent.value
+      : (remoteConfigData?.auto_mark_known_good ?? false);
+  const currency =
+    preferenceIntent?.kind === "currency"
+      ? preferenceIntent.value
+      : (remoteConfigData?.currency ?? "");
   // Each reader falls back to its defaults when there is no `window`, so these are
   // safe as lazy initialisers on the server as well as in the browser.
   const [previewPreferences, setPreviewPreferences] = useState(readPreviewPreferences);
-  const [thumbnailChoice, setModelThumbnailWidth] = useState<number | null>(null);
-  const modelThumbnailWidth = thumbnailChoice ?? remoteConfigData?.model_thumbnail_width ?? 640;
-  const [previewBusy, setPreviewBusy] = useState<"quality" | "rebuild" | null>(null);
+  const modelThumbnailWidth =
+    preferenceIntent?.kind === "thumbnail-width"
+      ? preferenceIntent.value
+      : (remoteConfigData?.model_thumbnail_width ?? 640);
+  const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
   const [trashStorageTier, setTrashStorageTier] = useState("verified");
@@ -703,9 +711,6 @@ export function SettingsPanel() {
       setPrinterAccessUserId("");
       setAccessPrinterId("");
       setPrinterAccessRole("view");
-      setAutoMarkKnownGood(null);
-      setCurrency(null);
-      setModelThumbnailWidth(null);
       setRestoreTarget(null);
       setDeleteBackupTarget(null);
       setAdoptTarget(null);
@@ -863,49 +868,53 @@ export function SettingsPanel() {
     }
   }
 
+  async function recoverPreference(action: "review" | "retry") {
+    const session = getSessionVersion();
+    try {
+      if (action === "review") await preferenceCommand.review();
+      else await preferenceCommand.retry();
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
   async function saveAutoMarkKnownGood(next: boolean) {
-    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      configCommand.isPending ||
+      preferenceCommand.blocked
+    )
       return;
     const session = getSessionVersion();
-    setAutoMarkKnownGood(next);
-    setAutoMarkBusy(true);
     try {
-      await configCommand.mutateAsync({ session, payload: { auto_mark_known_good: next } });
-      if (!accountCurrent(session)) return;
-      setAutoMarkKnownGood(null);
-      toast.success(
-        next ? uiText("Auto-mark known good enabled.") : uiText("Auto-mark known good disabled."),
-      );
+      await preferenceCommand.run({ kind: "auto-mark", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(
+          next ? uiText("Auto-mark known good enabled.") : uiText("Auto-mark known good disabled."),
+        );
     } catch (error) {
-      if (accountCurrent(session)) {
-        setAutoMarkKnownGood(null);
-        toast.error(error);
-      }
-    } finally {
-      if (accountCurrent(session)) setAutoMarkBusy(false);
+      if (accountCurrent(session)) toast.error(error);
     }
   }
   async function saveCurrency(next: string) {
-    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      configCommand.isPending ||
+      preferenceCommand.blocked
+    )
       return;
     const session = getSessionVersion();
-    setCurrency(next);
-    setCurrencyBusy(true);
     try {
-      await configCommand.mutateAsync({ session, payload: { currency: next } });
-      if (!accountCurrent(session)) return;
-      setCurrency(null);
-      toast.success(uiText("Currency set to {value1}.", { value1: next }));
+      await preferenceCommand.run({ kind: "currency", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(uiText("Currency set to {value1}.", { value1: next }));
     } catch (error) {
-      if (accountCurrent(session)) {
-        setCurrency(null);
-        toast.error(error);
-      }
-    } finally {
-      if (accountCurrent(session)) setCurrencyBusy(false);
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   function savePreviewPreference(patch: Partial<PreviewPreferences>) {
     const next = { ...previewPreferences, ...patch };
     setPreviewPreferences(next);
@@ -914,26 +923,23 @@ export function SettingsPanel() {
   }
 
   async function saveModelThumbnailWidth(next: ModelThumbnailWidth) {
-    if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      configCommand.isPending ||
+      preferenceCommand.blocked
+    )
       return;
     const session = getSessionVersion();
-    setModelThumbnailWidth(next);
-    setPreviewBusy("quality");
     try {
-      await configCommand.mutateAsync({ session, payload: { model_thumbnail_width: next } });
-      if (!accountCurrent(session)) return;
-      setModelThumbnailWidth(null);
-      toast.success(uiText("Model image quality updated for new previews."));
+      await preferenceCommand.run({ kind: "thumbnail-width", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(uiText("Model image quality updated for new previews."));
     } catch (error) {
-      if (accountCurrent(session)) {
-        setModelThumbnailWidth(null);
-        toast.error(error);
-      }
-    } finally {
-      if (accountCurrent(session)) setPreviewBusy(null);
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function recreateModelImages() {
     setPreviewBusy("rebuild");
     try {
@@ -1968,6 +1974,65 @@ export function SettingsPanel() {
           </nav>
 
           <main className="min-w-0">
+            {user?.is_superuser &&
+              !configDenied &&
+              preferenceReview.phase !== "idle" &&
+              preferenceReview.phase !== "saving" && (
+                <div
+                  role="alert"
+                  className="mb-6 space-y-3 rounded-lg border border-border p-4 text-sm"
+                >
+                  <p>
+                    {uiText(
+                      preferenceReview.problem === "conflict"
+                        ? "library.editConflict"
+                        : "library.saveUnconfirmed",
+                    )}
+                  </p>
+                  <p>
+                    {uiText(
+                      preferenceReview.intent.kind === "currency"
+                        ? "Display currency"
+                        : preferenceReview.intent.kind === "auto-mark"
+                          ? "Auto-mark known good on successful print"
+                          : "Model image quality",
+                    )}
+                  </p>
+                  <Button
+                    variant="outline"
+                    disabled={preferenceReview.phase === "loading"}
+                    onClick={() => void recoverPreference("review")}
+                  >
+                    {uiText("library.reviewLatest")}
+                  </Button>
+                  {preferenceReview.phase === "ready" && (
+                    <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                      <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+                      <p>
+                        {String(
+                          savedPreference(preferenceReview.snapshot, preferenceReview.intent),
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          disabled={remoteConfig.isError}
+                          onClick={preferenceCommand.adopt}
+                        >
+                          {uiText("library.useLatest")}
+                        </Button>
+                        <Button
+                          disabled={remoteConfig.isError}
+                          onClick={() => void recoverPreference("retry")}
+                        >
+                          {uiText("library.retryDraft")}
+                        </Button>
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
+
             {releaseStatus?.update_available && releaseStatus.latest_version && (
               <div
                 role="status"
@@ -3866,7 +3931,7 @@ export function SettingsPanel() {
                         !user?.is_superuser ||
                         !remoteConfigData ||
                         remoteConfig.isError ||
-                        autoMarkBusy ||
+                        preferenceCommand.blocked ||
                         configCommand.isPending
                       }
                       onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
@@ -3903,7 +3968,7 @@ export function SettingsPanel() {
                         !user?.is_superuser ||
                         !remoteConfigData ||
                         remoteConfig.isError ||
-                        currencyBusy ||
+                        preferenceCommand.blocked ||
                         configCommand.isPending
                       }
                       className={`${INPUT} max-w-xs`}
@@ -4159,6 +4224,7 @@ export function SettingsPanel() {
                           !remoteConfigData ||
                           remoteConfig.isError ||
                           previewBusy !== null ||
+                          preferenceCommand.blocked ||
                           configCommand.isPending
                         }
                         className={INPUT}

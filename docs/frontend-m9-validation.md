@@ -772,3 +772,53 @@ Review shows sanitized provider fields and credential-presence indicators only.
 Settings remains the final configuration PUT consumer to migrate. Root enrollment
 still requires its separate server-side reviewed-root contract; this increment
 qualifies storage configuration editing, not that filesystem command or M9 closure.
+
+
+## Immediate Settings preferences (M9 increment)
+
+Auto-mark, currency and thumbnail width share one concrete configuration-command
+owner. It owns the pending preference, conditional base, authorized review and
+explicit revised save; the page owns labels and notices. This removes their
+competing choice/busy state pairs without generalizing backup or trash forms.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| SP1 | reviews a conflicting display currency before saving again | Error | v1 currency command receives 412; fresh v2 | Intended currency retained; explicit reviewed v2 save | Unit | ✅ |
+| SP2 | reads current preferences before retrying an uncertain save | Error | Currency PUT receives 503 | No automatic repeat; fresh review before action | Unit | ✅ |
+| SP3a | saves the display currency | Happy | Select currency | Correct configuration payload dispatched | Unit | ✅ |
+| SP3b | saves the model image width | Happy | Select image width | Correct configuration payload dispatched | Unit | ✅ |
+| SP3c | remembers the known-good choice | Happy | Toggle auto-mark | Accepted choice displayed; control reenabled | Unit | ✅ |
+| SP4a | puts the currency back when the server refuses | Auth | Currency write receives 403 | Previous value displayed | Unit | ✅ |
+| SP4b | puts the width back when the server refuses | Auth | Width write receives 403 | Previous value displayed | Unit | ✅ |
+| SP5 | retires a pending preference review on logout | Auth | Session changes during review GET | No retired review or subsequent PUT | Unit | ✅ |
+| SP6 | adopts a reviewed preference without another write | Happy | Operator chooses current server value | Current value displayed; no repeat PUT | Unit | ✅ |
+| SP7 | blocks preference retry after a failed review | Error/Auth | Review GET fails or is forbidden | No revised write | Unit | ✅ |
+| SP8 | change display currency persists | Integration | Browser selects currency through Settings | Accepted setting survives page reload | Real browser | ✅ |
+
+Validation:
+
+- Initial conflict regressions: **2 failed in 7.03 s**; first affected preference
+  selection passed **13 tests in 8.96 s**.
+- Expanded selection: **16 passed / 1 failed in 13.85 s**. Adoption passed alone
+  (**1 in 5.71 s**) but failed again in the same selection (**16 passed / 1 failed
+  in 14.80 s**). New tests now explicitly wait for the initial configuration read
+  to enable the select before interacting. The same affected selection passed
+  **17 tests in 13.45 s** after that readiness correction. Failure logs are retained;
+  this is not a claim that the entire test suite is free of flakes.
+- Normalized receipts/read recovery and known-good choice: **4 passed in 6.04 s**.
+- Existing real-browser currency persistence flow: **1 passed in 54.3 s** including
+  isolated backend setup. The browser test proves persistence; conflict, adoption,
+  denied review and session retirement are asserted in the component selection.
+- Typecheck initially identified an overly broad numeric thumbnail-width intent;
+  the owner now uses the public DTO's closed width type. App/package types, lint,
+  format (769 files), production build and diff checks passed. Existing large-chunk
+  build warnings remain. No full test suite was run.
+
+`settings-preferences.ts` owns only the three immediate preferences, their captured
+base and explicit recovery. The page's three choice/busy pairs are removed;
+thumbnail regeneration remains a separate operation. Backup retention/policy and
+trash retention still require their own draft-base migration before the client
+can make configuration preconditions mandatory. M9 remains active.
+
+The strengthened known-good assertion waits for the accepted command to reenable
+the toggle, then checks its value: **1 passed in 5.18 s**.

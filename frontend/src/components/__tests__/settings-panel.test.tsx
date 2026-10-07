@@ -2151,7 +2151,13 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({
         at: "/settings?section=design",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, auto_mark_known_good: true }) },
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            auto_mark_known_good: true,
+          }),
+        },
       });
 
       const toggle = await screen.findByRole("switch", {
@@ -2159,6 +2165,7 @@ describe("SettingsPanel", () => {
       });
       await waitFor(() => expect(toggle).toBeEnabled());
       await user.click(toggle);
+      await waitFor(() => expect(toggle).toBeEnabled());
 
       expect(toggle).toHaveAttribute("aria-checked", "true");
     });
@@ -2291,13 +2298,126 @@ describe("SettingsPanel", () => {
   });
 
   describe("display preferences", () => {
+    it.each([412, 503])(
+      "%s: reviews a conflicting display currency before saving again",
+      async (status) => {
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: "/settings?section=design",
+          routes: {
+            "GET /api/v1/config": () =>
+              json({
+                ...VAULT_CONFIG,
+                edit_version: ++reads,
+                currency: reads === 1 ? "USD" : "GBP",
+              }),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, status)
+                : json({ ...VAULT_CONFIG, edit_version: 3, currency: "EUR" });
+            },
+          },
+        });
+        const input = await screen.findByLabelText("Display currency");
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.selectOptions(input, "EUR");
+        const review = await screen.findByRole("button", { name: "Review latest version" });
+        expect(input).toHaveValue("EUR");
+        expect(input).toBeDisabled();
+        expect(writes).toHaveLength(1);
+        await userEvent.click(review);
+        const latest = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(latest).getByText("GBP")).toBeVisible();
+        expect(input).toHaveValue("EUR");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() => expect(input).toBeEnabled());
+        expect(input).toHaveValue("EUR");
+        expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          currency: "EUR",
+          edit_version: 3,
+        });
+      },
+    );
+    it("retires a pending preference review on logout", async () => {
+      let reads = 0;
+      const pending = Promise.withResolvers<Response>();
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () => (++reads === 1 ? json(VAULT_CONFIG) : pending.promise),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(json({ ...VAULT_CONFIG, edit_version: 2, currency: "GBP" }));
+      });
+      expect(
+        screen.queryByRole("region", { name: "Latest saved version" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it("adopts a reviewed preference without another write", async () => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () =>
+            json({ ...VAULT_CONFIG, edit_version: ++reads, currency: reads === 1 ? "USD" : "GBP" }),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(input).toHaveValue("GBP");
+      expect(input).toBeEnabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it.each([403, 503])("%s: blocks preference retry after a failed review", async (status) => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json(VAULT_CONFIG) : json({ detail: "unavailable" }, status),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() => expect(reads).toBe(2));
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
     it("saves the display currency", async () => {
       // Every cost in the app is rendered in it, so a wrong one misprices the
       // whole library at once.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=design",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, currency: "EUR" }) },
+        routes: {
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, currency: "EUR" }),
+        },
       });
 
       await user.selectOptions(await screen.findByLabelText("Display currency"), "EUR");
@@ -2330,7 +2450,13 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=previews",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, model_thumbnail_width: 1280 }) },
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            model_thumbnail_width: 1280,
+          }),
+        },
       });
 
       await user.selectOptions(await screen.findByLabelText("Model image quality"), "1280");
@@ -3065,7 +3191,7 @@ describe("Settings remote configuration recovery", () => {
   it("shows the acknowledged normalized currency instead of the sent choice", async () => {
     const app = renderSettings({
       at: "/settings?section=design",
-      routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, currency: "GBP" }) },
+      routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, currency: "GBP" }) },
     });
     const choice = await screen.findByLabelText("Display currency");
     await waitFor(() => expect(choice).toBeEnabled());

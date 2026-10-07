@@ -64,7 +64,10 @@ StorageConfigCard now replaces its JSON fingerprint with a captured editing base
 and initial provider snapshot. Refetch cannot mix new untouched fields into an
 existing draft. Explicit revised save merges deliberate overrides onto reviewed
 current values; newer credentials typed during save retain their local intent.
-Settings still uses the additive legacy path. The optional client
+`settings-preferences.ts` now owns immediate auto-mark, currency and thumbnail
+width intents. Its pending selection survives conflict; authorized review permits
+explicit retry or adoption. Settings backup and trash forms still use the additive
+legacy path. The optional client
 base must become required when their M9 cutover is complete; this is not yet
 application-wide conflict protection.
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Detect conflicting changes to currency, automatic known-good marking and model
+  image quality. Keep the selected preference for explicit review, protect against
+  stale retries, and retire pending review when the session ends.
+
 - Keep storage configuration drafts coherent across background refreshes. Use
   server edit versions for conflicts, require explicit review before revised save,
   and retain newer credential input while an earlier save finishes.
