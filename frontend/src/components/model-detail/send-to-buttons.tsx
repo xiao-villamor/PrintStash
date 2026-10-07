@@ -215,6 +215,7 @@ export function SendToButtons({
     if (!allowMismatch && targetPrinterIds.length > 0) {
       try {
         const report = await commands.checkFleetCompatibility(selectedFile, targetPrinterIds);
+        requireSessionVersion(session);
         setCompatibility(report);
         if (
           report.printers.some((row) => row.verdict === "mismatch") &&
@@ -224,6 +225,7 @@ export function SendToButtons({
           return;
         }
       } catch (e: any) {
+        if (session !== getSessionVersion()) return;
         setError(e.message || uiText("Compatibility check failed"));
         return;
       }
@@ -272,9 +274,10 @@ export function SendToButtons({
             : uiText("Added to fleet queue"),
         );
       } catch (e: any) {
+        if (session !== getSessionVersion()) return;
         setError(e.message || uiText("Queue failed"));
       } finally {
-        setSending(false);
+        if (session === getSessionVersion()) setSending(false);
       }
       return;
     }
@@ -328,6 +331,7 @@ export function SendToButtons({
         }),
       );
 
+      requireSessionVersion(session);
       const successes = results.filter((result) => result.status === "fulfilled");
       const failures = results
         .map((result, index) => ({ result, printer: selectedPrinters[index] }))
@@ -381,6 +385,7 @@ export function SendToButtons({
         );
       }
     } catch (e: any) {
+      if (session !== getSessionVersion()) return;
       const message = e.message || "Send failed";
       setError(message);
       updateTask(taskId, {
@@ -389,7 +394,7 @@ export function SendToButtons({
         progress: 100,
       });
     } finally {
-      setSending(false);
+      if (session === getSessionVersion()) setSending(false);
     }
   }
 

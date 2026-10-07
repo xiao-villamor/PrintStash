@@ -602,3 +602,96 @@ it was strengthened to require a second actual policy request after the cutover.
 | C79 | forbids cache draft replay across restored epochs | Error | Reviewed policy belongs to another epoch | Revised replay disabled; explicit adoption available | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::forbids cache draft replay across restored epochs` |
 
 Final cache review selection: **24 tests passed in 5.40s**. Final hygiene correction: **4 tests passed in 2.63s**. Formatting (799 files), frontend lint/types and Vite production build pass. Cache backend final selection: **15 passed in 8.91s**; scoped Ruff/Pyright pass. The build retains existing >500kB chunk warnings; no bundle-size improvement is claimed.
+
+### Final cross-flow session review
+
+The remaining SendToButtons preflight/settlement inspection identifies two unfenced
+boundaries: compatibility completion can advance to another request after a
+session change, and allSettled can still construct a printer-named failure after
+per-request retirement. This is an integration correction to the M1/M7 contract;
+it does not change accepted background-job ownership or delivery semantics.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C80 | retires send preflight with its session | Error | Compatibility response after logout | No print command issued under a replacement session | Frontend unit | ✅ `send-to-buttons.test.tsx::retires send preflight with its session` — 61-case final selection passed |
+| C81 | retires printer failure feedback with its session | Error | Pending printer send rejects after logout | No previous printer detail published | Frontend unit | ✅ `send-to-buttons.test.tsx::retires printer failure feedback with its session` — 61-case final selection passed |
+
+### Final adapter and administration owner inspection
+
+These reads distinguish presentation-only adapters, entry-local forms and command
+receipts from remote freshness owners. SearchFilterControls is keyed by q at its
+production caller; its local query draft therefore resets on navigation. Image
+input revokes its own Blob URL on replacement/disposal. Operational command
+readers use the named owners described above. Presentation color choices and
+legacy response normalization are retained, not treated as architecture defects.
+
+| Path | Inspected SHA-256 | Scope / result |
+|---|---|---|
+| `frontend/src/components/route-error.tsx` | `3ffcbdbaf343e2e46073650c2d3cdfc34b3aaeb55a7f32e9c2dd484924f93809` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/deferred-dialog.tsx` | `54da002267d1c7d27156f1e029b1c17b4a50369403b6093005632559377a176b` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-search-action.tsx` | `9f714667962d3dfb8168bf43be335cd3e5139129f668266b1d2c14e26d095ac3` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/search-settings-snapshot.tsx` | `78b23a0914fa87ce77e6147474f3d6e1e9c75f7d4ea569161968a4ef8cb225dd` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/library-batch-recovery.tsx` | `da3366e936eecb45984799518aa2602be62a697a28573d992ed3771963f1f84e` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-detail/source-url.ts` | `5a91d2aa57d2bfa3488591fa0115a21ded79cede600f950d015eb4fdd17a0be1` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-detail/presentation.ts` | `6fd0c739ac212e73a7c0d69a893f5165f6c3fd7f199c79c06663335d307a2ed3` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-detail/setting-row.tsx` | `94fbe72a285f27aa0bf11820bd3f0ad10675a1924be120688dcf0ebb6ee7ff2a` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-detail/viewer-toolbar.tsx` | `2b8a1bdfda722c2bb1d3109bd3f923b88edf16bc75d512909782fed3e17e7e23` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/model-detail/revision-compare.tsx` | `7312f772b3df6f4cb0622ee817a26fbd21ff08c8fb2270a1b79576e5f1b54ee7` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/print-job-reproducibility.tsx` | `0806cd7c1ce70a0f0a4f015058530062091b3f60152161e319b9f906f2acb4be` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/lib/print-job-reproducibility.ts` | `4364c202177c1e5ad5c7b9cff8d422d8876a510ae12c0e97f91a1462d7ad8e89` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/print-history-fields.tsx` | `02ef90b9a11af9a509b192d2ca7944cd54c86884d843dc08647cd98c714bc688` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/search-filter-controls.tsx` | `35d7b39e2320e4a97117ae79ae76748e086142ab70b77fc3f47feaa0659171a3` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/search-image-input.tsx` | `e7aa219a649b3152d038432fb1ddba2b9efc2da4cd5ae760afc0b659575a3bbf` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/components/search-preferences.tsx` | `01f3b303bd92d5f3872ae111f5585d08e4fbf994f3afcfe383d6436842e198d8` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/lib/queries/settings-maintenance.ts` | `69ebac6c5d4199dd216c4a450bcaef515a3c2c5050ed953ea22363f251229a2c` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/lib/queries/settings-artifact-cache.ts` | `beaeadf31b0a25a812f0bedafe809fe2d341b84c2ca463e87e1e0c5de30e64e2` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/lib/api/maintenance.ts` | `ed1d8d2cf1ee9f375f10abff13fe1d622802248fe02d3fed2da435297329aedf` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+| `frontend/src/lib/api/artifact-cache.ts` | `2ba4e8e35b65d47d77a0539630b89e17899dc3a263a962af60961997550080f4` | Complete file; ownership/lifetime and presentation contract inspected at 30a529d5. |
+
+A bounded residual remains in `PrintJobReproducibility.downloadArtifact`: its
+nonmutating download error feedback is not entry-scoped. The shared transport
+retires authenticated bytes across session changes, but a cancellation can still
+produce a generic error toast after leaving. Severity low; recommended follow-up
+is disposal-aware local feedback, not a new remote-state layer. No private-byte
+replay is established by this finding. This is recorded separately from the
+printer-named SendToButtons feedback contract above.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C82 | keeps configuration claims independent of runtime projection | Error | Cache uses atomic vault claim | No administration dependency cycle; persisted config read retains epoch/version | Repository + integration | ✅ `tests/repo/test_architecture.py` + config editing/cache integration — 58 passed |
+
+Required CI on `30a529d5` identified a new administration dependency cycle:
+artifact_cache_config → config_edits → runtime_config → artifact_cache_config.
+Its repository lane otherwise passed 6,100 checks. Move the effective editing
+snapshot projection to runtime_config, its existing owner, and keep config_edits
+limited to atomic claims/precondition parsing. The one HTTP caller changes its
+read import; no compatibility forwarder or cycle allowance is retained.
+
+### Maintenance command qualification after the coverage audit
+
+Deep CI on `30a529d5` passed all 4,453 app tests but reported the lib branch
+aggregate just below its unchanged 86% floor (rounded display: 86.00%).
+The command contract additionally requires retirement on actual session change
+and preservation of a newer policy observation while an older skip completes.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C83 | retires an audit command on session change | Error | Start pending; logout; delayed receipt | Request aborted; previous audit never repopulates private cache | Frontend unit | ✅ `maintenance-panel.test.tsx::retires an audit command on session change` — 61-case final selection passed |
+| C84 | retires a schedule command on session change | Error | Skip pending; logout; delayed receipt | Request aborted; schedule form hidden; previous policy never repopulates private cache | Frontend unit | ✅ `audit-schedule-panel.test.tsx::retires a schedule command on session change` — 61-case final selection passed |
+| C85 | preserves a newer schedule observed during a skip | Edge | Skip revision 2 arrives after catalog revision 3, with another mode present | Visible timezone remains revision 3; other mode preserved | Frontend unit | ✅ `audit-schedule-panel.test.tsx::preserves a newer schedule observed during a skip` — 61-case final selection passed |
+
+Final local integration selection: 61 frontend cases passed; lint, frontend
+types and formatting are rechecked after these tests. Architecture/config/cache
+backend selection: 58 passed; scoped Ruff passed. A wider explicit Pyright read
+of runtime_config also reported three pre-existing diagnostics at unchanged
+legacy lines 121 and 847 (SQLModel column typing and environment fallback
+conversion). These lines are outside the configured CI Pyright include set;
+no new diagnostic refers to the moved editing snapshot. They remain disclosed
+typing debt rather than being hidden by ignores or unrelated behavior changes.
+
+The final performance observation is recorded in
+[the measurement report](../frontend-m11-performance.md#final-comparable-observation-30a529d5):
+all eight readiness medians increased relative to the local baseline; dense EN
+warm exceeds both latency references. Visible dense thumbnail decoding remains
+faster in all four groups. These results do not establish universal performance
+improvement. Final source CI qualification remains pending.

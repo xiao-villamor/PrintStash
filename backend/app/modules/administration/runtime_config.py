@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import DEFAULT_JWT_SECRET, _overlay, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import File, SystemConfig, User
+from app.db.models import File, LibraryRevision, SystemConfig, User
 from app.modules.storage.storage_providers import (
     SFTPProviderConfig,
     StorageProviderConfig,
@@ -30,6 +30,7 @@ from app.modules.storage.storage_providers import (
     split_provider_config,
 )
 from app.runtime.maintenance import guarded_storage_configuration
+from app.schemas.editing import EditingBase
 
 from .config_repository import get_or_create
 
@@ -1229,3 +1230,32 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "*" * len(value)
     return value[:4] + "*" * (len(value) - 8) + value[-4:]
+
+
+def read_editing_snapshot(session: Session) -> tuple[EditingBase, dict]:
+    """Capture the persisted row and history epoch in one statement."""
+    from app.modules.derivatives.policy import SettingName
+
+    config, epoch = session.exec(
+        select(SystemConfig, LibraryRevision.epoch)
+        .select_from(LibraryRevision)
+        .outerjoin(SystemConfig, col(SystemConfig.id) == 1)
+        .where(col(LibraryRevision.id) == 1)
+        .execution_options(populate_existing=True)
+    ).one()
+    # The absent singleton has its initial version; first write creates it under
+    # the existing configuration lock before the atomic claim.
+    base = EditingBase(
+        edit_epoch=epoch,
+        edit_version=1 if config is None else config.vault_edit_version,
+    )
+    values = get_editing_config(config)
+    for name in SettingName:
+        override = getattr(config, name.value) if config is not None else None
+        values[name.value] = (
+            getattr(settings.frozen, name.value) if override is None else override
+        )
+    provider = sanitized_storage_provider(config)
+    if provider is not None:
+        values["storage_provider"], values["storage_provider_config"] = provider
+    return base, values

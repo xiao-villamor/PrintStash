@@ -7,11 +7,71 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { clearLogin } from "@/lib/auth-store";
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 import { anAuditPolicy } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
 describe("Audit schedules", () => {
+  it("retires a schedule command on session change", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderApp(<AuditSchedulePanel />, {
+      routes: {
+        "GET /api/v1/maintenance/audit-policies": json([
+          anAuditPolicy({ enabled: true, next_due_at: "2026-10-11T02:00:00Z" }),
+        ]),
+        "GET /api/v1/maintenance/audits": json([]),
+        "POST /api/v1/maintenance/audit-policies/quick/skip": (_url, init) => {
+          signal = init?.signal;
+          return pending.promise;
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /Skip/ }));
+    await act(async () => clearLogin());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(anAuditPolicy({ enabled: true, revision: 2 }))));
+    expect(view.client.getQueryData(["maintenance", "policies"])).toBeUndefined();
+    expect(screen.queryByRole("form", { name: "Quick check schedule" })).not.toBeInTheDocument();
+  });
+  it("preserves a newer schedule observed during a skip", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const full = anAuditPolicy({ mode: "full", enabled: true, timezone: "Europe/Rome" });
+    const latest = anAuditPolicy({
+      enabled: true,
+      revision: 3,
+      timezone: "Europe/Paris",
+      next_due_at: "2026-10-18T02:00:00Z",
+    });
+    const view = renderApp(<AuditSchedulePanel />, {
+      routes: {
+        "GET /api/v1/maintenance/audit-policies": json([
+          anAuditPolicy({ enabled: true, next_due_at: "2026-10-11T02:00:00Z" }),
+          full,
+        ]),
+        "GET /api/v1/maintenance/audits": json([]),
+        "POST /api/v1/maintenance/audit-policies/quick/skip": () => pending.promise,
+      },
+    });
+    const quick = await screen.findByRole("form", { name: "Quick check schedule" });
+    await userEvent.click(within(quick).getByRole("button", { name: /Skip/ }));
+    view.route({ "GET /api/v1/maintenance/audit-policies": json([latest, full]) });
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: ["maintenance", "policies"] });
+    });
+    await waitFor(() =>
+      expect(within(quick).getByLabelText("Time zone")).toHaveValue("Europe/Paris"),
+    );
+    await act(async () =>
+      pending.resolve(json(anAuditPolicy({ enabled: true, revision: 2, timezone: "UTC" }))),
+    );
+    await waitFor(() => expect(within(quick).getByRole("button", { name: /Skip/ })).toBeEnabled());
+    expect(within(quick).getByLabelText("Time zone")).toHaveValue("Europe/Paris");
+    expect(
+      within(screen.getByRole("form", { name: "Full check schedule" })).getByLabelText("Time zone"),
+    ).toHaveValue("Europe/Rome");
+  });
   it("recovers a schedule catalog failure without losing draft", async () => {
     const view = renderApp(<AuditSchedulePanel />, {
       routes: {

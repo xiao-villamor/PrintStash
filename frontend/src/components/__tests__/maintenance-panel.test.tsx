@@ -26,6 +26,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearLogin } from "@/lib/auth-store";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { VaultAuditFinding, VaultAuditRun } from "@/types";
@@ -140,6 +141,25 @@ describe("MaintenancePanel", () => {
     expect(signal?.aborted).toBe(true);
     await act(async () => pending.resolve(json(anAudit())));
     expect(view.client.getQueryData(["maintenance", "audits"])).toEqual([]);
+  });
+  it("retires an audit command on session change", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderPanel({
+      audit: null,
+      routes: {
+        "POST /api/v1/maintenance/audits": (_url, init) => {
+          signal = init?.signal;
+          return pending.promise;
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Run quick check" }));
+    await act(async () => clearLogin());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(anAudit())));
+    expect(view.client.getQueryData(["maintenance", "audits"])).toBeUndefined();
+    expect(screen.queryByText("Owned Artifact is missing")).not.toBeInTheDocument();
   });
   it("reports audit cancellation failure", async () => {
     renderPanel({

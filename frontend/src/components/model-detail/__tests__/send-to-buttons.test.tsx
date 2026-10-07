@@ -16,12 +16,13 @@
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
+import { clearLogin } from "@/lib/auth-store";
 import { storeLogin } from "@/lib/auth";
 import { aPrinter } from "@/test-support/factories";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
@@ -241,6 +242,34 @@ beforeEach(() => {
 });
 
 describe("SendToQueue", () => {
+  it("retires send preflight with its session", async () => {
+    const pending =
+      Promise.withResolvers<Awaited<ReturnType<SendToCommands["checkFleetCompatibility"]>>>();
+    checkFleetCompatibility.mockReturnValue(pending.promise);
+    const deliveries: number[] = [];
+    sendToPrinter.mockImplementation(async (id) => {
+      deliveries.push(id);
+      return queuedJob;
+    });
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
+    await act(async () => clearLogin());
+    await act(async () =>
+      pending.resolve({ file_id: 42, requirements: [], nozzle_diameter_mm: null, printers: [] }),
+    );
+    expect(deliveries).toEqual([]);
+  });
+  it("retires printer failure feedback with its session", async () => {
+    const pending = Promise.withResolvers<PrintJobRead>();
+    sendToPrinter.mockReturnValue(pending.promise);
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
+    await act(async () => clearLogin());
+    await act(async () => pending.reject(new Error("printer offline")));
+    expect(screen.queryByText(/Farm printer: printer offline/)).not.toBeInTheDocument();
+  });
   it("uses provider format capabilities for BGCODE actions", async () => {
     const textOnly = aPrinter({
       id: 8,

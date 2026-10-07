@@ -9,7 +9,6 @@ import re
 from sqlalchemy import update
 from sqlmodel import Session, col, select
 
-from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.db.models import LibraryRevision, SystemConfig, User
 from app.schemas.editing import EditContract, EditingBase, EditPrecondition
@@ -89,33 +88,3 @@ def expected_base(precondition: EditPrecondition) -> EditingBase | None:
     ):
         raise OperationError("edit_conflict", kind=ErrorKind.PRECONDITION_FAILED)
     return EditingBase(edit_epoch=matched[1], edit_version=int(matched[2]))
-
-
-def read(session: Session) -> tuple[EditingBase, dict]:
-    """Capture the persisted row and history epoch in one statement."""
-    from app.modules.administration import runtime_config
-    from app.modules.derivatives.policy import SettingName
-
-    config, epoch = session.exec(
-        select(SystemConfig, LibraryRevision.epoch)
-        .select_from(LibraryRevision)
-        .outerjoin(SystemConfig, col(SystemConfig.id) == 1)
-        .where(col(LibraryRevision.id) == 1)
-        .execution_options(populate_existing=True)
-    ).one()
-    # The absent singleton has its initial version; first write creates it under
-    # the existing configuration lock before the atomic claim.
-    base = EditingBase(
-        edit_epoch=epoch,
-        edit_version=1 if config is None else config.vault_edit_version,
-    )
-    values = runtime_config.get_editing_config(config)
-    for name in SettingName:
-        override = getattr(config, name.value) if config is not None else None
-        values[name.value] = (
-            getattr(settings.frozen, name.value) if override is None else override
-        )
-    provider = runtime_config.sanitized_storage_provider(config)
-    if provider is not None:
-        values["storage_provider"], values["storage_provider_config"] = provider
-    return base, values

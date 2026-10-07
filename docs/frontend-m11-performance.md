@@ -164,3 +164,52 @@ observations were EN warm 848.75/1385.50ms, EN fresh 1198.45/1583.20ms, ES warm
 baseline values. Distributed root has no visible Model thumbnails; its observer
 timestamps are not thumbnail measurements. Correctness, ownership and these
 performance observations remain separate claims.
+
+## Final comparable observation: `30a529d5`
+
+The final broad integration checkpoint (including Materials, artifact cache and
+maintenance ownership) retained 200 completed samples plus four warmups. Both
+corpora ran sequentially without other local suites or builds. Production source
+was fixed at `30a529d5`; dirty files during collection were review documentation
+and new regression tests. Environment and protocol match the local baseline:
+Chromium 148.0.7778.96, Node 24.19.0, nginx, real SQLite, active service worker,
+1440×900, 30 warm and 20 fresh authenticated contexts per locale/corpus.
+
+| Corpus | Locale | Context | n | Baseline median / p95 (ms) | Final checkpoint median / p95 (ms) |
+|---|---|---|---:|---:|---:|
+| dense | en | warm | 30 | 451.85 / 636.00 | 503.95 / 1055.90 |
+| dense | en | fresh | 20 | 788.00 / 1247.20 | 864.15 / 1346.80 |
+| dense | es | warm | 30 | 429.40 / 854.90 | 487.95 / 670.90 |
+| dense | es | fresh | 20 | 702.00 / 1158.30 | 856.50 / 1009.30 |
+| distributed | en | warm | 30 | 283.90 / 356.70 | 316.10 / 382.80 |
+| distributed | en | fresh | 20 | 573.45 / 1636.60 | 651.10 / 766.20 |
+| distributed | es | warm | 30 | 277.65 / 663.40 | 303.35 / 452.70 |
+| distributed | es | fresh | 20 | 559.70 / 592.90 | 561.35 / 609.50 |
+
+Every readiness median regresses in this checkpoint. Dense EN warm median/p95
+exceed the 500/800ms references; all fresh medians remain below 1000ms. The
+comparison therefore **does not establish faster startup or fulfillment of every
+latency target**. These costs remain visible alongside correctness improvements.
+The slowest dense EN warm sample is 1255.60ms: session validation occurs at
+811.30ms and browse starts at 856ms, then takes 307.50ms (server app 299.30ms,
+SQL 45.70ms / 19 statements). Much of the delay precedes browse. These phase
+measurements do not identify the cause or justify attributing it to host load.
+
+| Dense locale | Context | n | Decoded visible thumbnails median / p95 (ms) |
+|---|---|---:|---:|
+| en | warm | 30 | 971.55 / 1651.90 |
+| en | fresh | 20 | 1332.90 / 1744.00 |
+| es | warm | 30 | 928.85 / 1216.10 |
+| es | fresh | 20 | 1320.55 / 1400.10 |
+
+All dense observations decoded six visible images with stable attached sources.
+These upper bounds improve on the baseline thumbnail observations in all four
+groups. Distributed root has zero visible Model thumbnails and supplies no
+thumbnail-decoding result. CPU, renders and memory retain only the separately
+qualified diagnostic observations above; no before/after improvement is claimed.
+
+Subsequent integration corrections fence SendToButtons session continuations and
+move configuration snapshot reading out of the atomic-claims module to remove a
+dependency cycle. They do not change library startup, browse, thumbnails, route
+composition or its comparable observer. The measurements identify their actual
+source checkpoint rather than claiming to have run on a later commit.

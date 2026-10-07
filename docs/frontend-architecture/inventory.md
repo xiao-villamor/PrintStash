@@ -216,7 +216,7 @@ The frozen inventory snapshot above is not silently relabelled as final M11 scop
 
 ## M11 final-source reconciliation
 
-Source snapshot: `66ba9036e32769c1cb06ba1e4fde9d5ce5df0ae4` (921 scoped paths).
+Source snapshot: `30a529d5fe99091bf67070b50d6f7d858cc3e276` (927 scoped paths).
 The historical columns and counts above remain immutable checkpoint evidence.
 The six `final_*` columns identify current presence, Git blob, SHA-256 of inspected
 working bytes, bounded review scope and evidence. Generated files, lock metadata
@@ -226,10 +226,10 @@ output is counted as manually reviewed application source.
 | Final evidence category | Paths |
 |---|---:|
 | historical-targeted-read; complete-file-gap | 14 |
-| final-complete-read | 119 |
+| final-complete-read | 146 |
 | historical-complete-read; revision-reconciliation-required | 61 |
-| inventory-only; manual-file-gap | 299 |
-| feature-qualification-reference; scope-is-record-specific | 394 |
+| inventory-only; manual-file-gap | 285 |
+| feature-qualification-reference; scope-is-record-specific | 387 |
 | binary-or-generated-provenance-only | 9 |
 | excluded-or-generated-provenance-only | 25 |
 
@@ -246,7 +246,7 @@ to the contracts below.
 | History, rendering and protected assets | M5/M6 records; bounded per-entry snapshots; leased Blob cache and viewport admission |
 | Authentication, transport, public shares | M1 record; session transport fences; real anonymous-share/private-navigation regression |
 | Events, uploads, Jobs, Inbox and printers | M7 record; event/telemetry lifetimes; durable Job owner versus local transfer owner |
-| Settings, accounts, sources, providers, backups and storage | M9 records; current settings-owner complete reads in final-review; Spoolman M11 correction |
+| Settings, accounts, sources, providers, backups and storage | M9 records; current settings-owner complete reads in final-review; Spoolman, cache and maintenance final caller corrections |
 | Shared UI/domain packages | Recorded package full-read inventory, M10 consumer tests and enforced package export/dependency directions |
 | Extension connection, pairing and provider capture | M10 extension matrices, immutable capture operation and receipt cleanup; provider parser algorithms retain partial manual-review coverage |
 | Locale, PWA, build, deployment and browser configuration | M10 platform record, M11 EN/ES initial-render and production resource observations; current platform reads in final-review |

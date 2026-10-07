@@ -192,7 +192,7 @@ def get_config(
 
 
 def _configuration_response(session: Session, response: Response) -> VaultConfigRead:
-    base, cfg = config_edits.read(session)
+    base, cfg = runtime_config.read_editing_snapshot(session)
     backend = get_backend()
     cfg.update(
         storage_tier=backend.capabilities.tier.value,
