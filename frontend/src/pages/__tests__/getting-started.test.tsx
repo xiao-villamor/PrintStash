@@ -316,7 +316,9 @@ describe("Getting started", () => {
     setJobSource(async () => [aJob({ job_id: "guide-folder-connect" })]);
     const guide = renderGuide({
       "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
-      "PUT /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+      "PUT /api/v1/config": json(
+        aVaultConfig({ external_libraries_enabled: true, edit_version: 2 }),
+      ),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-folder-connect", state: "queued" }),
     });
@@ -443,8 +445,11 @@ describe("Getting started", () => {
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("We could not connect this folder");
+    expect(
+      await screen.findByText("We could not connect this folder. Check the path and try again."),
+    ).toBeVisible();
     expect(guide.requestsWithMethod("POST").some((r) => r.url === "/api/v1/libraries")).toBe(false);
-    expect(screen.getByRole("button", { name: "Connect and find models" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Connect and find models" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled();
   });
 });

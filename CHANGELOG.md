@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Stop first-folder connection when source activation conflicts or cannot be
+  confirmed. Keep the folder draft for explicit review, avoid repeating an
+  activation confirmed by a fresh read, and retire local setup input on logout.
+
 - Detect competing configuration edits when enabling or disabling library sources.
   Preserve the intended toggle through conflicts or uncertain responses and require
   an authorized review before retry; retire review state when access is lost.

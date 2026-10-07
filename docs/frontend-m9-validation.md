@@ -691,3 +691,41 @@ Validation:
 This completes the source-feature toggle's conditional client path. SetupFolder,
 StorageConfigCard and Settings (including direct trash retention) remain to
 migrate; the transport's optional base still marks that unfinished cutover.
+
+
+## First-folder conditional activation (M9 increment)
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| FF1 | enables sources against the read configuration base | Happy | Feature disabled; explicit folder submit | Exact conditional header before source creation | Unit | ✅ |
+| FF2 | blocks source creation until a conflicting activation is reviewed | Error | Activation receives 412 | Folder retained; no source POST until explicit reviewed retry | Unit | ✅ |
+| FF3 | blocks source creation until a conflicting activation is reviewed (503 case) | Error | Lost activation response; fresh read says enabled | No repeated activation; source creation follows explicit choice | Unit | ✅ |
+| FF4 | keeps a failed first-folder review blocked | Error | Review read fails or is forbidden | No revised action or source POST | Unit | ✅ |
+| FF5 | retires a first-folder review with its session | Auth | Logout during review read | Local paths/review removed; no later command | Unit | ✅ |
+| FF6 | reaches its first Model entirely through browser controls | Integration | Real setup, upload and mounted source | Conditional activation accepted and scanned Model visible | Real browser | ✅ |
+| FF7 | stops connection when sources cannot be enabled | Error | Getting-started parent receives activation 503 | Folder error shown; source creation stopped; explicit review required | Unit | ✅ |
+
+Validation:
+
+- First-folder regressions before the change: **7 failed / 3 passed in 9.28 s**.
+  Updated component selection: **10 passed in 4.53 s**. An assertion-only lint
+  correction was checked with the two activation cases: **2 passed in 3.20 s**.
+- Getting-started parent: **22 passed / 2 failed in 12.73 s**. A test-edit selector
+  used an incomplete exact error message; another still expected one alert after
+  the explicit review was added. The corrected affected cases passed **2 tests in
+  4.09 s**. The source-creation failure still permits ordinary correction/retry;
+  only uncertain configuration activation requires the review step.
+- Real onboarding: **2 passed in 1.2 minutes**, including the existing responsive
+  setup check and the browser-only first Model/folder lifecycle. The latter now
+  asserts a successful conditional configuration PUT before observing the scanned
+  Model. No extra full-browser suite was run.
+- Typecheck, corrected lint, format (768 files), build and diff checks passed.
+  The existing large-chunk build warning remains. No performance claim follows
+  from these test timings.
+
+SetupFolder now retains its name/path through activation conflicts, uses the
+explicitly reviewed configuration for retry, and avoids a duplicate enable write
+when a fresh review confirms activation already succeeded. Session retirement
+removes the local folder form and prevents delayed review completion from acting.
+StorageConfigCard and Settings remain the configuration-cutover consumers; their
+migration is required before removing the optional-base compatibility path.

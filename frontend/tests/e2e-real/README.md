@@ -170,3 +170,6 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 
 - `external-libraries.spec.ts`: conditional source activation detects a competing
   configuration edit and requires explicit review before the revised command.
+
+- `onboarding/first-model.spec.ts`: first-folder activation sends the reviewed
+  configuration precondition before source creation and scan.
