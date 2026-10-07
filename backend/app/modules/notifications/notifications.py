@@ -630,7 +630,10 @@ def serialize_channel(
                 out_config[key] = "********"
         else:
             out_config[key] = value
+    from app.modules.notifications.editing import channel_base
+
     return {
+        **channel_base(channel).model_dump(),
         "id": channel.id,
         "name": channel.name,
         "target": channel.target.value,
@@ -737,6 +740,7 @@ def update_channel(
     printer_ids: Optional[List[int]] = None,
     printer_ids_set: bool = False,
     enabled: Optional[bool] = None,
+    commit: bool = True,
 ) -> NotificationChannel:
     """Patch a channel. Empty/omitted secret config values are preserved.
 
@@ -788,7 +792,10 @@ def update_channel(
         channel.config_json = json.dumps(merged)
     channel.updated_at = utcnow()
     session.add(channel)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     session.refresh(channel)
     return channel
 

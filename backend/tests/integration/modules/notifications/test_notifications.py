@@ -1039,8 +1039,10 @@ class TestPruneDeliveries:
 
 
 class TestSerializeChannel:
-    def test_serialize_channel_handles_all_corrupt_json_fields(self):
-        ch = NotificationChannel(
+    def test_serialize_channel_handles_all_corrupt_json_fields(
+        self, make_notification_channel
+    ):
+        ch = make_notification_channel(
             name="x",
             target=NotificationTarget.WEBHOOK,
             config_json="not json",
@@ -1052,8 +1054,10 @@ class TestSerializeChannel:
         assert out["events"] == []
         assert out["printer_ids"] is None
 
-    def test_serialize_channel_returns_nonsecret_config_plainly(self):
-        ch = NotificationChannel(
+    def test_serialize_channel_returns_nonsecret_config_plainly(
+        self, make_notification_channel
+    ):
+        ch = make_notification_channel(
             name="x",
             target=NotificationTarget.NTFY,
             config_json=json.dumps({"topic": "my-topic", "token": "secret-tok"}),

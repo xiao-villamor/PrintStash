@@ -118,7 +118,7 @@ export function useNotificationCommands(
         current();
         client.setQueryData<NotificationsSettings>(
           notificationKeys.settings,
-          (before) => before && { ...before, enabled: receipt.enabled },
+          (before) => before && { ...before, ...receipt },
         );
         return receipt;
       }),

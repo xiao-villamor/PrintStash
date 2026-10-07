@@ -63,8 +63,9 @@ success. Transient settings errors retain the draft read-only until recovery.
 Commands keep credential-bearing arguments out of MutationCache, retire on session
 change or disposal, cancel obsolete settings reads, and publish confirmed masked
 receipts. Delivery history remains independent of a channel save. The form blocks
-changes while a command is pending. Conditional edits across multiple editors are
-still pending; these lifecycle guards do not provide a backend concurrency contract.
+changes while a command is pending. The backend now exposes independent conditional channel/master-switch contracts.
+The first-party client cutover and review UI are pending; lifecycle guards alone
+do not protect the current editor from concurrent writes.
 Evidence and remaining work: `docs/frontend-m9-notifications-validation.md`.
 
 ### Provider accounts and paired browsers (M9 partial increment)

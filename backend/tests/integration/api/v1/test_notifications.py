@@ -20,10 +20,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.url_safety import PinnedTarget
-from app.db.models import NotificationChannel, NotificationTarget
+from app.db.models import LibraryRevision, NotificationChannel, NotificationTarget
 from app.modules.notifications.notifications import _REQUIRED_CONFIG_FIELDS
 from tests.integration.conftest import UserHeaders
 
@@ -597,3 +597,270 @@ class TestListDeliveries:
         )
 
         assert response.status_code == 403, response.text
+
+
+@pytest.fixture(params=["channel", "settings"])
+def notification_edit_resource(request, client, auth_headers):
+    if request.param == "channel":
+        response = _create(client, auth_headers)
+        assert response.status_code == 201, response.text
+        row = response.json()
+        return (
+            f"/api/v1/notifications/channels/{row['id']}",
+            row,
+            f"notification-channel-{row['id']}",
+            "PATCH",
+        )
+    response = client.get("/api/v1/notifications", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    return "/api/v1/notifications", response.json(), "notification-settings", "PUT"
+
+
+def _notification_base(row, aggregate):
+    return {
+        "X-PrintStash-Edit-Contract": "conditional-v1",
+        "If-Match": f'"{aggregate}-e{row["edit_epoch"]}-v{row["edit_version"]}"',
+    }
+
+
+def _read_notification_resource(client, headers, aggregate):
+    body = client.get("/api/v1/notifications", headers=headers).json()
+    return (
+        body["channels"][0] if aggregate.startswith("notification-channel-") else body
+    )
+
+
+class TestNotificationEditing:
+    def test_publishes_an_editing_base(self, notification_edit_resource):
+        _, row, _, _ = notification_edit_resource
+        assert len(row["edit_epoch"]) == 32
+        assert row["edit_version"] > 0
+
+    def test_accepts_the_captured_notification_base(
+        self, client, auth_headers, notification_edit_resource
+    ):
+        url, row, aggregate, method = notification_edit_resource
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, **_notification_base(row, aggregate)},
+            json={"enabled": not row["enabled"]},
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["enabled"] is not row["enabled"]
+        assert result.json()["edit_version"] > row["edit_version"]
+        assert result.json()["edit_epoch"] == row["edit_epoch"]
+
+    def test_rejects_a_replayed_notification_base(
+        self, client, auth_headers, notification_edit_resource
+    ):
+        url, row, aggregate, method = notification_edit_resource
+        headers = {**auth_headers, **_notification_base(row, aggregate)}
+        accepted = client.request(
+            method, url, headers=headers, json={"enabled": not row["enabled"]}
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        rejected = client.request(
+            method, url, headers=headers, json={"enabled": row["enabled"]}
+        )
+
+        assert rejected.status_code == 412, rejected.text
+        assert (
+            _read_notification_resource(client, auth_headers, aggregate)["enabled"]
+            is not row["enabled"]
+        )
+        assert rejected.json()["detail"] == "edit_conflict"
+
+    def test_requires_the_opted_in_base(
+        self, client, auth_headers, notification_edit_resource
+    ):
+        url, row, _, method = notification_edit_resource
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+            json={"enabled": not row["enabled"]},
+        )
+        assert result.status_code == 428, result.text
+
+    def test_advances_legacy_notification_writes(
+        self, client, auth_headers, notification_edit_resource
+    ):
+        url, row, aggregate, method = notification_edit_resource
+        accepted = client.request(
+            method, url, headers=auth_headers, json={"enabled": not row["enabled"]}
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, **_notification_base(row, aggregate)},
+            json={"enabled": row["enabled"]},
+        )
+
+        assert result.status_code == 412, result.text
+
+    def test_ignores_delivery_telemetry_for_edits(
+        self, client, auth_headers, make_notification_channel, db_session
+    ):
+        channel = make_notification_channel(events=["print_completed"])
+        row = client.get("/api/v1/notifications/channels", headers=auth_headers).json()[
+            0
+        ]
+        channel.last_status = "sent"
+        channel.consecutive_failures = 2
+        db_session.add(channel)
+        db_session.commit()
+
+        result = client.patch(
+            f"/api/v1/notifications/channels/{channel.id}",
+            headers={
+                **auth_headers,
+                **_notification_base(row, f"notification-channel-{channel.id}"),
+            },
+            json={"name": "Edited"},
+        )
+
+        assert result.status_code == 200, result.text
+        assert result.json()["name"] == "Edited"
+
+    def test_detects_automatic_channel_disabling(
+        self, client, auth_headers, make_notification_channel, db_session
+    ):
+        channel = make_notification_channel(events=["print_completed"])
+        row = client.get("/api/v1/notifications/channels", headers=auth_headers).json()[
+            0
+        ]
+        channel.enabled = False
+        db_session.add(channel)
+        db_session.commit()
+
+        result = client.patch(
+            f"/api/v1/notifications/channels/{channel.id}",
+            headers={
+                **auth_headers,
+                **_notification_base(row, f"notification-channel-{channel.id}"),
+            },
+            json={"enabled": True},
+        )
+
+        assert result.status_code == 412, result.text
+
+    @pytest.mark.parametrize(
+        "tag",
+        [
+            '"wrong-e' + "a" * 32 + '-v1"',
+            'W/"value"',
+            '"notification-settings-e' + "a" * 32 + '-v999999999999999999999999"',
+        ],
+        ids=["wrong-aggregate", "weak", "overflow"],
+    )
+    def test_rejects_malformed_notification_preconditions(
+        self, client, auth_headers, notification_edit_resource, tag
+    ):
+        url, row, _, method = notification_edit_resource
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, "If-Match": tag},
+            json={"enabled": not row["enabled"]},
+        )
+        assert result.status_code == 412, result.text
+
+    def test_rejects_restored_database_history(
+        self, client, auth_headers, notification_edit_resource, db_session
+    ):
+        url, row, aggregate, method = notification_edit_resource
+        revision = db_session.exec(select(LibraryRevision)).one()
+        revision.epoch = "b" * 32
+        db_session.add(revision)
+        db_session.commit()
+
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, **_notification_base(row, aggregate)},
+            json={"enabled": not row["enabled"]},
+        )
+
+        assert result.status_code == 412, result.text
+
+    def test_rejects_a_recreated_channel_identity(
+        self, client, auth_headers, make_notification_channel, db_session
+    ):
+        original = make_notification_channel(events=["print_completed"])
+        channel_id = original.id
+        row = client.get("/api/v1/notifications/channels", headers=auth_headers).json()[
+            0
+        ]
+        db_session.delete(original)
+        db_session.commit()
+        replacement = make_notification_channel(
+            id=channel_id, events=["print_completed"]
+        )
+
+        result = client.patch(
+            f"/api/v1/notifications/channels/{replacement.id}",
+            headers={
+                **auth_headers,
+                **_notification_base(row, f"notification-channel-{channel_id}"),
+            },
+            json={"name": "Old draft"},
+        )
+
+        assert result.status_code == 412, result.text
+
+    def test_rolls_back_an_invalid_notification_save(
+        self, client, auth_headers, make_notification_channel
+    ):
+        channel = make_notification_channel(events=["print_completed"])
+        row = client.get("/api/v1/notifications/channels", headers=auth_headers).json()[
+            0
+        ]
+
+        result = client.patch(
+            f"/api/v1/notifications/channels/{channel.id}",
+            headers={
+                **auth_headers,
+                **_notification_base(row, f"notification-channel-{channel.id}"),
+            },
+            json={"config": {"url": "invalid"}},
+        )
+
+        assert result.status_code == 400, result.text
+        current = client.get(
+            "/api/v1/notifications/channels", headers=auth_headers
+        ).json()[0]
+        assert current["edit_version"] == row["edit_version"]
+        assert current["config"] == row["config"]
+
+    def test_isolates_notification_aggregate_versions(
+        self,
+        client,
+        auth_headers,
+        notification_edit_resource,
+        make_notification_channel,
+        make_system_config,
+        db_session,
+    ):
+        url, row, aggregate, method = notification_edit_resource
+        make_notification_channel(events=["print_completed"], name="Unrelated channel")
+        config = make_system_config(
+            currency="EUR", ai_search_settings_json='{"enabled":false}'
+        )
+        config.currency = "GBP"
+        config.ai_search_settings_json = '{"enabled":true}'
+        db_session.add(config)
+        db_session.commit()
+
+        result = client.request(
+            method,
+            url,
+            headers={**auth_headers, **_notification_base(row, aggregate)},
+            json={"enabled": not row["enabled"]},
+        )
+
+        assert result.status_code == 200, result.text
+        assert result.json()["enabled"] is not row["enabled"]

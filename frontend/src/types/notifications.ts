@@ -1,3 +1,5 @@
+import type { EditingBase } from "./editing";
+
 export type NotificationTarget = "webhook" | "discord" | "telegram" | "ntfy";
 
 export type NotificationEvent =
@@ -13,7 +15,7 @@ export type NotificationEvent =
   | "storage_repair_failed"
   | "vault_migration";
 
-export interface NotificationChannel {
+export interface NotificationChannel extends EditingBase {
   id: number;
   name: string;
   target: NotificationTarget;
@@ -32,8 +34,11 @@ export interface NotificationChannel {
   consecutive_failures: number;
 }
 
-export interface NotificationsSettings {
+export interface NotificationSwitch extends EditingBase {
   enabled: boolean;
+}
+
+export interface NotificationsSettings extends NotificationSwitch {
   channels: NotificationChannel[];
 }
 

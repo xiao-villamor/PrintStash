@@ -5,6 +5,7 @@ import type {
   NotificationChannelUpdate,
   NotificationDelivery,
   NotificationsSettings,
+  NotificationSwitch,
   NotificationTestResult,
 } from "@/types";
 
@@ -17,8 +18,8 @@ export function getNotificationsSettings(
 export function setNotificationsEnabled(
   enabled: boolean,
   options: GetJsonOptions = {},
-): Promise<{ enabled: boolean }> {
-  return requestApi<{ enabled: boolean }>("/api/v1/notifications", {
+): Promise<NotificationSwitch> {
+  return requestApi<NotificationSwitch>("/api/v1/notifications", {
     method: "PUT",
     headers: jsonHeaders(),
     body: JSON.stringify({ enabled }),

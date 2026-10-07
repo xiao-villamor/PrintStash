@@ -42,10 +42,13 @@ import type {
   PrinterRead,
 } from "@/types";
 
+const EDIT_BASE = { edit_epoch: "a".repeat(32), edit_version: 1 };
+
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aChannel(over: Partial<NotificationChannel> = {}): NotificationChannel {
   return {
+    ...EDIT_BASE,
     id: 3,
     name: "Workshop webhook",
     target: "webhook",
@@ -86,10 +89,10 @@ function stubDeps(over: Partial<NotificationsPanelDeps> = {}): NotificationsPane
   return {
     getNotificationsSettings: vi
       .fn<() => Promise<NotificationsSettings>>()
-      .mockResolvedValue({ enabled: true, channels: [aChannel()] }),
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] }),
     setNotificationsEnabled: vi
       .fn<(enabled: boolean) => Promise<NotificationsSettings>>()
-      .mockResolvedValue({ enabled: false, channels: [] }),
+      .mockResolvedValue({ ...EDIT_BASE, enabled: false, channels: [] }),
     createNotificationChannel: vi
       .fn<(body: NotificationChannelCreate) => Promise<NotificationChannel>>()
       .mockResolvedValue(aChannel()),
@@ -146,7 +149,7 @@ describe("NotificationsPanel", () => {
     const read = vi
       .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
       .mockRejectedValueOnce(new Error("unavailable"))
-      .mockResolvedValue({ enabled: true, channels: [aChannel()] });
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
     renderPanel({ getNotificationsSettings: read });
     expect(await screen.findByRole("alert")).toBeVisible();
     expect(screen.queryByText("No notification channels yet")).not.toBeInTheDocument();
@@ -243,7 +246,7 @@ describe("NotificationsPanel", () => {
 
     unmount();
     await act(async () => {
-      pending.resolve({ enabled: true, channels: [aChannel()] });
+      pending.resolve({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
       await pending.promise;
     });
 
@@ -281,7 +284,7 @@ describe("NotificationsPanel", () => {
     renderPanel({
       setNotificationsEnabled: vi
         .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
-        .mockResolvedValue({ enabled: true }),
+        .mockResolvedValue({ ...EDIT_BASE, enabled: true }),
     });
     const toggle = await screen.findByRole("checkbox");
 
@@ -306,9 +309,9 @@ describe("NotificationsPanel", () => {
   it("retains an editable draft after a transient settings error", async () => {
     const read = vi
       .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
-      .mockResolvedValueOnce({ enabled: true, channels: [aChannel()] })
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
       .mockRejectedValueOnce(new Error("unavailable"))
-      .mockResolvedValue({ enabled: true, channels: [aChannel()] });
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
     const { client } = renderPanel({ getNotificationsSettings: read });
     await userEvent.click(await screen.findByTitle("Edit channel"));
     const input = screen.getByPlaceholderText(/Living-room/);
@@ -353,7 +356,7 @@ describe("NotificationsPanel", () => {
     const pending = Promise.withResolvers<NotificationsSettings>();
     const read = vi
       .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
-      .mockResolvedValueOnce({ enabled: true, channels: [aChannel()] })
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
       .mockReturnValue(pending.promise);
     const { client } = renderPanel({
       getNotificationsSettings: read,
@@ -370,7 +373,7 @@ describe("NotificationsPanel", () => {
     expect(await screen.findByText("Confirmed name")).toBeVisible();
 
     await act(async () => {
-      pending.resolve({ enabled: true, channels: [aChannel()] });
+      pending.resolve({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
       await pending.promise;
     });
 
@@ -417,6 +420,23 @@ describe("NotificationsPanel", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
     expect(input).toHaveValue("Retained draft");
+  });
+
+  it("publishes the confirmed master editing base", async () => {
+    const receipt = { ...EDIT_BASE, edit_version: 2, enabled: false };
+    const { client } = renderPanel({
+      setNotificationsEnabled: vi
+        .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+        .mockResolvedValue(receipt),
+    });
+
+    await userEvent.click(await screen.findByRole("checkbox"));
+
+    await waitFor(() =>
+      expect(client.getQueryData<NotificationsSettings>(notificationKeys.settings)).toMatchObject(
+        receipt,
+      ),
+    );
   });
 
   describe("the master switch", () => {
@@ -490,9 +510,11 @@ describe("NotificationsPanel", () => {
       // "All printers" and "these two" are different grants; collapsing them is
       // how an alert arrives about a printer the operator never subscribed to.
       renderPanel({
-        getNotificationsSettings: vi
-          .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [aChannel({ printer_ids: [4, 5] })] }),
+        getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
+          enabled: true,
+          channels: [aChannel({ printer_ids: [4, 5] })],
+        }),
       });
 
       expect(await screen.findByText(/2 printer\(s\)/)).toBeInTheDocument();
@@ -502,7 +524,7 @@ describe("NotificationsPanel", () => {
       renderPanel({
         getNotificationsSettings: vi
           .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [] }),
+          .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [] }),
       });
 
       expect(await screen.findByText("No notification channels yet")).toBeInTheDocument();
@@ -513,6 +535,7 @@ describe("NotificationsPanel", () => {
       // away has been waiting on alerts that stopped days ago.
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ enabled: false, consecutive_failures: 5, last_error: "410" })],
         }),
@@ -524,6 +547,7 @@ describe("NotificationsPanel", () => {
     it("marks a channel the operator turned off as simply disabled", async () => {
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ enabled: false, consecutive_failures: 0 })],
         }),
@@ -541,6 +565,7 @@ describe("NotificationsPanel", () => {
     it("shows a channel whose last delivery failed", async () => {
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ last_status: "failed", last_error: "connection refused" })],
         }),
@@ -554,9 +579,11 @@ describe("NotificationsPanel", () => {
 
     it("shows a channel that has never delivered anything", async () => {
       renderPanel({
-        getNotificationsSettings: vi
-          .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [aChannel({ last_status: null })] }),
+        getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
+          enabled: true,
+          channels: [aChannel({ last_status: null })],
+        }),
         listNotificationDeliveries: vi
           .fn<(limit?: number) => Promise<NotificationDelivery[]>>()
           .mockResolvedValue([]),

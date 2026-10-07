@@ -201,6 +201,7 @@ export type {
   NotificationEvent,
   NotificationChannel,
   NotificationsSettings,
+  NotificationSwitch,
   NotificationChannelCreate,
   NotificationChannelUpdate,
   NotificationTestResult,

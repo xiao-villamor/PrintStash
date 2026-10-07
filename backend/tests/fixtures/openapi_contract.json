@@ -3383,6 +3383,123 @@
         "title": "ChannelCreate",
         "type": "object"
       },
+      "ChannelRead": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "config_flags": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Config Flags",
+            "type": "object"
+          },
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_delivered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivered At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "printer_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Ids"
+          },
+          "target": {
+            "$ref": "#/components/schemas/NotificationTarget"
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "id",
+          "name",
+          "target",
+          "enabled",
+          "config",
+          "config_flags",
+          "events",
+          "printer_ids",
+          "last_status",
+          "last_error",
+          "last_delivered_at",
+          "consecutive_failures"
+        ],
+        "title": "ChannelRead",
+        "type": "object"
+      },
       "ChannelUpdate": {
         "additionalProperties": false,
         "properties": {
@@ -11940,6 +12057,39 @@
         "title": "NotCalculatedVolumeRead",
         "type": "object"
       },
+      "NotificationSettingsRead": {
+        "properties": {
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelRead"
+            },
+            "title": "Channels",
+            "type": "array"
+          },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "enabled",
+          "channels"
+        ],
+        "title": "NotificationSettingsRead",
+        "type": "object"
+      },
       "NotificationTarget": {
         "description": "Where a notification is delivered.",
         "enum": [
@@ -11953,12 +12103,26 @@
       },
       "NotificationsSettings": {
         "properties": {
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "enabled": {
-            "default": false,
             "title": "Enabled",
             "type": "boolean"
           }
         },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "enabled"
+        ],
         "title": "NotificationsSettings",
         "type": "object"
       },
@@ -36833,9 +36997,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Settings Api V1 Notifications Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/NotificationSettingsRead"
                 }
               }
             },
@@ -36854,6 +37016,44 @@
       },
       "put": {
         "operationId": "update_settings_api_v1_notifications_put",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -36906,8 +37106,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/ChannelRead"
                   },
                   "title": "Response List Channels Api V1 Notifications Channels Get",
                   "type": "array"
@@ -36944,9 +37143,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Channel Api V1 Notifications Channels Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChannelRead"
                 }
               }
             },
@@ -37024,6 +37221,42 @@
               "title": "Channel Id",
               "type": "integer"
             }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
           }
         ],
         "requestBody": {
@@ -37041,9 +37274,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Channel Api V1 Notifications Channels  Channel Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChannelRead"
                 }
               }
             },

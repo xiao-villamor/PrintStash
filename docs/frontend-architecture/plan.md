@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M8 have local acceptance, including the reopened printer, Profile and Search editing corrections. M9 is next, with its existing work preserved. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M8 have local acceptance, including the reopened printer, Profile and Search editing corrections. M9 is active; notification conditional editing is the current workflow. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -199,7 +199,7 @@ and both the [Profile contract](../frontend-m8-profile-edit-validation.md) and
 [Search contract](../frontend-m8-search-edit-validation.md) now have local
 qualification. The [reassessment](../frontend-milestone-reassessment.md) records
 the original contradictions and their regression evidence. M8 is locally closed;
-M9 is the next active target. A disclosed limitation is not a waiver of an explicit
+M9 is the active target. A disclosed limitation is not a waiver of an explicit
 requirement.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an

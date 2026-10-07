@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add conditional API edits for notification channels and the global switch.
+  Delivery telemetry leaves drafts valid; configuration changes and automatic
+  disabling invalidate stale versions. Legacy requests remain compatible during
+  the first-party editor transition.
+
 - Notification settings now show recoverable read errors instead of an invented
   Off state or empty list. Preserve drafts through transient failures, prevent
   changes during pending saves, and publish confirmed masked responses through

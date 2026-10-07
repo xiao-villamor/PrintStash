@@ -946,12 +946,17 @@ def notifications_enabled(session: Session) -> bool:
     return False if config is None else bool(config.notifications_enabled)
 
 
-def set_notifications_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_notifications_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.notifications_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     session.refresh(config)
     return config
 
