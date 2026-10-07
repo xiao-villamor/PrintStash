@@ -23,6 +23,9 @@ from app.db import (
 from app.db import (
     search_edit_contracts_v1 as _search_edit_contracts_v1,  # noqa: F401, E402
 )
+from app.db import (
+    source_edit_contracts_v1 as _source_edit_contracts_v1,  # noqa: F401, E402
+)
 
 from .administration import (
     AuditLog as AuditLog,

@@ -21,6 +21,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -910,3 +911,157 @@ class TestToRead:
         # over a cosmetic field, locking the user out of the page that would let
         # them rescan and fix it.
         assert read.last_scan_summary is None
+
+
+@pytest.fixture
+def source_edit_resource(client, auth_headers, db_session, tmp_path):
+    _enable_feature(db_session)
+    row = build_external_library(
+        db_session, tmp_path / "edit-source", name="Editable source"
+    )
+    response = client.get("/api/v1/libraries", headers=auth_headers)
+    assert response.status_code == 200
+    return next(item for item in response.json() if item["id"] == row.id)
+
+
+def _source_base(row):
+    return {
+        "X-PrintStash-Edit-Contract": "conditional-v1",
+        "If-Match": f'"library-source-{row["id"]}-e{row["edit_epoch"]}-v{row["edit_version"]}"',
+    }
+
+
+class TestConditionalSourceEditing:
+    def test_publishes_a_source_editing_base(self, source_edit_resource):
+        assert len(source_edit_resource["edit_epoch"]) == 32
+        assert source_edit_resource["edit_version"] > 0
+
+    def test_accepts_a_captured_source_edit(
+        self, client, auth_headers, source_edit_resource
+    ):
+        row = source_edit_resource
+        response = client.patch(
+            f"/api/v1/libraries/{row['id']}",
+            headers={**auth_headers, **_source_base(row)},
+            json={"name": "Accepted"},
+        )
+        assert response.status_code == 200, response.text
+        saved = response.json()
+        assert saved["name"] == "Accepted"
+        assert saved["edit_epoch"] == row["edit_epoch"]
+        assert saved["edit_version"] > row["edit_version"]
+        assert response.headers["etag"] == _source_base(saved)["If-Match"]
+
+    def test_rejects_a_stale_source_edit(
+        self, client, auth_headers, source_edit_resource
+    ):
+        row = source_edit_resource
+        path = f"/api/v1/libraries/{row['id']}"
+        headers = {**auth_headers, **_source_base(row)}
+        assert (
+            client.patch(path, headers=headers, json={"name": "Winner"}).status_code
+            == 200
+        )
+        rejected = client.patch(path, headers=headers, json={"name": "Stale"})
+        assert rejected.status_code == 412, rejected.text
+        assert rejected.json()["detail"] == "edit_conflict"
+        assert (
+            client.get("/api/v1/libraries", headers=auth_headers).json()[0]["name"]
+            == "Winner"
+        )
+
+    @pytest.mark.parametrize(
+        "base", [None, "*", '"wrong-aggregate-e' + "a" * 32 + '-v1"']
+    )
+    def test_requires_the_opted_in_source_base(
+        self, client, auth_headers, source_edit_resource, base
+    ):
+        row = source_edit_resource
+        headers = {**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"}
+        if base is not None:
+            headers["If-Match"] = base
+        response = client.patch(
+            f"/api/v1/libraries/{row['id']}", headers=headers, json={"name": "Refused"}
+        )
+        assert response.status_code == (428 if base is None else 412)
+        assert (
+            client.get("/api/v1/libraries", headers=auth_headers).json()[0]["name"]
+            == row["name"]
+        )
+
+    def test_detects_a_legacy_source_write(
+        self, client, auth_headers, source_edit_resource
+    ):
+        row = source_edit_resource
+        path = f"/api/v1/libraries/{row['id']}"
+        assert (
+            client.patch(
+                path, headers=auth_headers, json={"name": "Legacy"}
+            ).status_code
+            == 200
+        )
+        response = client.patch(
+            path, headers={**auth_headers, **_source_base(row)}, json={"enabled": False}
+        )
+        assert response.status_code == 412
+
+    def test_preserves_the_source_base_on_invalid_input(
+        self, client, auth_headers, source_edit_resource
+    ):
+        row = source_edit_resource
+        headers = {**auth_headers, **_source_base(row)}
+        path = f"/api/v1/libraries/{row['id']}"
+        response = client.patch(
+            path, headers=headers, json={"scan_schedule": "invalid"}
+        )
+        assert response.status_code == 400
+        current = client.get("/api/v1/libraries", headers=auth_headers).json()[0]
+        assert _source_base(current) == _source_base(row)
+        assert (
+            client.patch(path, headers=headers, json={"name": "Valid"}).status_code
+            == 200
+        )
+
+    def test_ignores_scanner_telemetry_for_editing(
+        self, client, auth_headers, source_edit_resource, db_session
+    ):
+        row = source_edit_resource
+        current = db_session.get(ExternalLibrary, row["id"])
+        current.last_scanned_at = utcnow()
+        current.last_scan_summary = '{"added": 1}'
+        current.fs_kind = "network"
+        db_session.add(current)
+        db_session.commit()
+        response = client.patch(
+            f"/api/v1/libraries/{row['id']}",
+            headers={**auth_headers, **_source_base(row)},
+            json={"name": "Still valid"},
+        )
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("replacement", ["database", "row"])
+    def test_rejects_replaced_source_history(
+        self, client, auth_headers, source_edit_resource, db_session, replacement
+    ):
+        from uuid import uuid4
+
+        from app.db.models import LibraryRevision
+
+        row = source_edit_resource
+        if replacement == "database":
+            current = db_session.get(LibraryRevision, 1)
+            current.epoch = uuid4().hex
+        else:
+            current = db_session.get(ExternalLibrary, row["id"])
+            root = current.root_path
+            db_session.delete(current)
+            db_session.commit()
+            current = build_external_library(db_session, root, id=row["id"])
+        db_session.add(current)
+        db_session.commit()
+        response = client.patch(
+            f"/api/v1/libraries/{row['id']}",
+            headers={**auth_headers, **_source_base(row)},
+            json={"name": "Rejected"},
+        )
+        assert response.status_code == 412

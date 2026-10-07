@@ -21,7 +21,8 @@ export function editHeaders(
     | "printer-profile"
     | "browser-device"
     | "notification-channel"
-    | "storage-connection",
+    | "storage-connection"
+    | "library-source",
   id: number,
   base: EditingBase,
 ) {

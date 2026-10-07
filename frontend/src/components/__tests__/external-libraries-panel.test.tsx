@@ -21,7 +21,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,6 +62,8 @@ function aSummary(over: Partial<ExternalLibraryScanSummary> = {}): ExternalLibra
 
 function aVolume(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 7,
     name: "NAS models",
     root_path: "/mnt/nas/3d",
@@ -1174,4 +1176,133 @@ describe("ExternalLibrariesPanel", () => {
       expect(delivered).toMatchObject({ aborted: true });
     });
   });
+});
+
+describe("Source editing preconditions", () => {
+  it.each([412, 503])("%s: reviews a source intent before revising", async (status) => {
+    const original = aVolume();
+    const latest = aVolume({
+      name: "Other administrator",
+      scan_schedule: "0 0 * * *",
+      edit_version: 2,
+    });
+    let reads = 0;
+    const headers: Headers[] = [];
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": () => json([++reads === 1 ? original : latest]),
+        "PATCH /api/v1/libraries/7": (_url, init) => {
+          headers.push(new Headers(init?.headers));
+          return headers.length === 1
+            ? json({ detail: "edit_conflict" }, status)
+            : json({ ...latest, enabled: false, edit_version: 3 });
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    const preview = await screen.findByRole("region", { name: "Latest saved version" });
+    expect(within(preview).getByText("Other administrator")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Save revised changes" }));
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Scan schedule Other administrator")).toHaveValue("0 0 * * *");
+    expect(headers.map((value) => value.get("If-Match"))).toEqual([
+      `"library-source-7-e${original.edit_epoch}-v1"`,
+      `"library-source-7-e${original.edit_epoch}-v2"`,
+    ]);
+    expect(app.requestsWithMethod("PATCH").map((request) => JSON.parse(request.body))).toEqual([
+      { enabled: false },
+      { enabled: false },
+    ]);
+  });
+  it("adopts current source values after a replaced preview", async () => {
+    let reads = 0;
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": () =>
+          json([
+            aVolume({
+              name:
+                ++reads === 1
+                  ? "Original"
+                  : reads === 2
+                    ? "Replacement preview"
+                    : "Current replacement",
+              edit_epoch: reads === 1 ? "a".repeat(32) : "b".repeat(32),
+            }),
+          ]),
+        "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await screen.findByText("Replacement preview");
+    expect(screen.getByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+    await screen.findByText("Current replacement");
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeChecked();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+  it.each([403, 404])("%s: retires unavailable source review", async (status) => {
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": json([aVolume()]),
+        "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    app.route({ "GET /api/v1/libraries": json({ detail: "unavailable" }, status) });
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Review current values" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("NAS models")).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+});
+
+describe("Source review lifetime", () => {
+  it.each(["logout", "disposal"] as const)(
+    "discards a held source review on %s",
+    async (retirement) => {
+      const response = Promise.withResolvers<Response>();
+      const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/storage-connections": json([]),
+          "GET /api/v1/libraries": json([aVolume()]),
+          "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+      await screen.findByRole("button", { name: "Review current values" });
+      app.route({ "GET /api/v1/libraries": () => response.promise });
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      if (retirement === "logout") act(() => clearLogin());
+      else app.unmount();
+      await act(async () =>
+        response.resolve(json([aVolume({ name: "Retired source", edit_version: 2 })])),
+      );
+      expect(screen.queryByText("Retired source")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save revised changes" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    },
+  );
 });

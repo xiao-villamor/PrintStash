@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingReceipt } from "./editing";
 import {
   type GetJsonOptions,
   getJson,
@@ -30,17 +32,20 @@ export function createExternalLibrary(
   });
 }
 
-export function updateExternalLibrary(
+export async function updateExternalLibrary(
   id: number,
   body: ExternalLibraryUpdate,
-  options: Pick<GetJsonOptions, "signal"> = {},
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<ExternalLibrary> {
-  return requestApi<ExternalLibrary>(`/api/v1/libraries/${id}`, {
+  const saved = await requestApi<ExternalLibrary>(`/api/v1/libraries/${id}`, {
     method: "PATCH",
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...editHeaders("library-source", id, options.base) },
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("Invalid source editing acknowledgement");
+  return saved;
 }
 
 export function enrollExternalLibraryRoot(

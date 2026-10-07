@@ -217,11 +217,13 @@ function ScheduleControl({
   onChange,
   disabled,
   inputClass,
+  label,
 }: {
   value: string;
   onChange: (cron: string) => void;
   disabled?: boolean;
   inputClass: string;
+  label?: string;
 }) {
   useUiLocale();
   const isPreset = PRESET_CRONS.includes(value);
@@ -229,6 +231,7 @@ function ScheduleControl({
     <div className="flex flex-col gap-2">
       <select
         className={inputClass}
+        aria-label={label}
         value={isPreset ? value : CUSTOM_SENTINEL}
         disabled={disabled}
         onChange={(e) => {
@@ -352,7 +355,11 @@ function AdminLibrarySourcesPanel({
     storageReadDenied(parseApiError(sources.error)) ||
     storageReadDenied(parseApiError(command.error));
   const libraries =
-    allowed && !retired && !denied && sources.data?.kind === "enabled" ? sources.data.items : [];
+    allowed && !retired && !denied && sources.data?.kind === "enabled"
+      ? sources.data.items.map((row) =>
+          command.intent?.id === row.id ? { ...row, ...command.intent.payload } : row,
+        )
+      : [];
   const connections =
     allowed && !retired && !storageReadDenied(parseApiError(connectionRead.error))
       ? (connectionRead.data ?? [])
@@ -509,7 +516,7 @@ function AdminLibrarySourcesPanel({
     }
   }
   async function handleScan(lib: ExternalLibrary) {
-    if (!commandsAllowed || busyId !== null) return;
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
       await command.mutateAsync({
@@ -531,16 +538,22 @@ function AdminLibrarySourcesPanel({
     lib: ExternalLibrary,
     payload: import("@/types").ExternalLibraryUpdate,
   ) {
-    if (!commandsAllowed || busyId !== null) return;
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
     const session = getSessionVersion();
     try {
-      await command.mutateAsync({ session, kind: "update", id: lib.id, payload });
+      await command.mutateAsync({
+        session,
+        kind: "update",
+        id: lib.id,
+        base: captureEditingBase(lib),
+        payload,
+      });
     } catch (error) {
       if (current(session)) toast.error(error);
     }
   }
   async function handleEnroll(target: { source: ExternalLibrary; session: number }) {
-    if (!commandsAllowed || busyId !== null) return;
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
     try {
       await command.mutateAsync({
         session: target.session,
@@ -556,7 +569,7 @@ function AdminLibrarySourcesPanel({
     }
   }
   async function handleDelete(target: { source: ExternalLibrary; session: number }) {
-    if (!commandsAllowed || busyId !== null) return;
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
     try {
       await command.mutateAsync({ session: target.session, kind: "delete", id: target.source.id });
       if (!current(target.session)) return;
@@ -693,6 +706,82 @@ function AdminLibrarySourcesPanel({
             </Button>
           </div>
         )}
+        {enabled && !denied && command.review.phase !== "idle" && (
+          <section role="alert" className="space-y-3 rounded border border-border p-4">
+            <p>
+              {uiText(
+                command.review.phase === "retired"
+                  ? "storage.connectionUnavailable"
+                  : command.review.problem === "conflict"
+                    ? "library.editConflict"
+                    : "library.saveUnconfirmed",
+              )}
+            </p>
+            {command.intent?.payload.scan_schedule !== undefined && (
+              <p>
+                {uiText("Scan schedule")}: {describeSchedule(command.intent.payload.scan_schedule)}
+              </p>
+            )}
+            {command.intent?.payload.enabled !== undefined && (
+              <p>
+                {uiText("Auto-scan enabled")}:{" "}
+                {uiText(command.intent.payload.enabled ? "Enabled" : "Disabled")}
+              </p>
+            )}
+            {command.review.phase === "ready" && (
+              <section aria-label={uiText("library.latestVersion")}>
+                <p>{command.review.snapshot.name}</p>
+                <p>{command.review.snapshot.root_path}</p>
+                <p>{describeSchedule(command.review.snapshot.scan_schedule)}</p>
+                <p>{watchStatus(command.review.snapshot)}</p>
+                <p>{uiText(command.review.snapshot.enabled ? "Enabled" : "Disabled")}</p>
+              </section>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {command.review.phase !== "retired" && (
+                <Button
+                  variant="outline"
+                  disabled={busyId !== null || command.review.phase === "loading"}
+                  onClick={() => {
+                    const session = getSessionVersion();
+                    void command.reviewLatest().catch((error) => {
+                      if (current(session)) toast.error(error);
+                    });
+                  }}
+                >
+                  {uiText("Review current values")}
+                </Button>
+              )}
+              {command.review.phase === "ready" && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={busyId !== null}
+                    onClick={() => {
+                      const session = getSessionVersion();
+                      void command.adopt().catch((error) => {
+                        if (current(session)) toast.error(error);
+                      });
+                    }}
+                  >
+                    {uiText("Use current values")}
+                  </Button>
+                  <Button
+                    disabled={busyId !== null || !command.review.sameIdentity}
+                    onClick={() => {
+                      const session = getSessionVersion();
+                      void command.saveRevised().catch((error) => {
+                        if (current(session)) toast.error(error);
+                      });
+                    }}
+                  >
+                    {uiText("Save revised changes")}
+                  </Button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
         {enabled && (
           <div className="p-4 sm:p-5 space-y-5">
             {(sources.isError || sources.data?.kind === "disabled") && (
@@ -723,7 +812,7 @@ function AdminLibrarySourcesPanel({
             ) : (
               <ul className="space-y-3">
                 {libraries.map((lib) => {
-                  const busy = busyId === lib.id;
+                  const busy = busyId === lib.id || command.blocked;
                   const s = lib.last_scan_summary;
                   const binding = bindingStatus(lib);
                   const rootBound = lib.binding_state === "bound";
@@ -817,6 +906,7 @@ function AdminLibrarySourcesPanel({
                           {commandsAllowed && (
                             <div className="mt-2 grid gap-2 sm:grid-cols-2 max-w-md">
                               <ScheduleControl
+                                label={`${uiText("Scan schedule")} ${lib.name}`}
                                 value={lib.scan_schedule}
                                 disabled={busy}
                                 inputClass={`${INPUT} !py-1.5 text-xs`}
@@ -874,22 +964,28 @@ function AdminLibrarySourcesPanel({
                         <div className="flex flex-shrink-0 items-center gap-1.5 self-end sm:self-auto">
                           <button
                             type="button"
-                            disabled={!commandsAllowed || busyId !== null || !rootBound}
+                            disabled={
+                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                            }
                             onClick={() => handleScan(lib)}
                             title={
                               rootBound ? undefined : uiText("Verify the source before scanning.")
                             }
                             className={BTN_SECONDARY}
                           >
-                            <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
-                            {busy ? uiText("Scanning") : uiText("Scan now")}
+                            <RefreshCw
+                              className={`h-3.5 w-3.5 ${busyId === lib.id ? "animate-spin" : ""}`}
+                            />
+                            {busyId === lib.id ? uiText("Scanning") : uiText("Scan now")}
                           </button>
                           <button
                             type="button"
                             role="switch"
                             aria-checked={lib.enabled}
                             aria-label={uiText("Auto-scan enabled")}
-                            disabled={!commandsAllowed || busyId !== null || !rootBound}
+                            disabled={
+                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                            }
                             onClick={() => handleToggleEnabled(lib)}
                             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                               lib.enabled ? "bg-primary" : "bg-outline-variant"
@@ -903,7 +999,7 @@ function AdminLibrarySourcesPanel({
                           </button>
                           <button
                             type="button"
-                            disabled={!commandsAllowed || busyId !== null}
+                            disabled={!commandsAllowed || command.blocked || busyId !== null}
                             onClick={() =>
                               setDeleteTarget({
                                 source: lib,

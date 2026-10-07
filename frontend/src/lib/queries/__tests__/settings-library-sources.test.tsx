@@ -66,7 +66,13 @@ function Editor({
       <button
         onClick={() =>
           void command
-            .mutateAsync({ kind: "update", session: session(), id: 7, payload: { enabled: false } })
+            .mutateAsync({
+              kind: "update",
+              session: session(),
+              id: 7,
+              base: source,
+              payload: { enabled: false },
+            })
             .catch(() => {})
         }
       >
@@ -186,7 +192,10 @@ describe("useLibrarySourceCommand", () => {
   });
   it("publishes the returned update without another GET", async () => {
     const app = renderApp(<Editor />, {
-      routes: { ...reads, "PATCH /api/v1/libraries/7": json({ ...source, enabled: false }) },
+      routes: {
+        ...reads,
+        "PATCH /api/v1/libraries/7": json({ ...source, enabled: false, edit_version: 2 }),
+      },
     });
     await screen.findByText("Base:true:bound");
     await userEvent.click(screen.getByRole("button", { name: "Pause" }));
@@ -453,4 +462,40 @@ describe("useLibrarySourceCommand", () => {
     ).toHaveLength(1);
     expect(await screen.findByText(state === "failed" ? "Failed" : "Ready")).toBeVisible();
   });
+});
+
+describe("Source receipts racing canonical reads", () => {
+  it.each(["newer", "replacement", "removed"] as const)(
+    "preserves a %s source observation after a held acknowledgement",
+    async (kind) => {
+      const response = Promise.withResolvers<Response>();
+      const app = renderApp(<Editor />, {
+        routes: { ...reads, "PATCH /api/v1/libraries/7": () => response.promise },
+      });
+      await screen.findByText("Base:true:bound");
+      await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await screen.findByText("Pending");
+      const observed = {
+        kind: "enabled",
+        items:
+          kind === "removed"
+            ? []
+            : [
+                {
+                  ...source,
+                  name: "Current",
+                  edit_version: kind === "newer" ? 3 : 1,
+                  edit_epoch: kind === "replacement" ? "b".repeat(32) : source.edit_epoch,
+                },
+              ],
+      };
+      act(() => app.client.setQueryData(librarySourceKeys.all, observed));
+      await act(async () =>
+        response.resolve(json({ ...source, name: "Old receipt", edit_version: 2 })),
+      );
+      await screen.findByText("Ready");
+      expect(app.client.getQueryData(librarySourceKeys.all)).toEqual(observed);
+      expect(screen.queryByText("Old receipt:true:bound")).not.toBeInTheDocument();
+    },
+  );
 });

@@ -63,6 +63,8 @@ function respondWith(data: WireValue, status = 200) {
 
 const library = {
   id: 7,
+  edit_epoch: "a".repeat(32),
+  edit_version: 1,
   name: "nas-main",
   root_path: "/mnt/nas/models",
   enabled: true,
@@ -141,9 +143,9 @@ describe("createExternalLibrary", () => {
 
 describe("updateExternalLibrary", () => {
   it("PATCHes the addressed library with a partial body", async () => {
-    respondWith({ ...library, enabled: false });
+    respondWith({ ...library, enabled: false, edit_version: 2 });
 
-    const updated = await updateExternalLibrary(7, { enabled: false });
+    const updated = await updateExternalLibrary(7, { enabled: false }, { base: library });
 
     expect(updated.enabled).toBe(false);
     const { url, init } = lastCall();
@@ -253,7 +255,8 @@ describe("management caller cancellation", () => {
     },
     {
       label: "update",
-      call: (signal: AbortSignal) => updateExternalLibrary(7, { enabled: false }, { signal }),
+      call: (signal: AbortSignal) =>
+        updateExternalLibrary(7, { enabled: false }, { signal, base: library }),
     },
     {
       label: "enroll",
@@ -279,5 +282,28 @@ describe("management caller cancellation", () => {
     await expect(pending).resolves.toMatchObject({ name: "AbortError" });
     expect(delivered).toMatchObject({ aborted: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Source edit preconditions", () => {
+  it("sends the captured source base", async () => {
+    respondWith({ ...library, name: "Saved", edit_version: 2 });
+    await updateExternalLibrary(7, { name: "Saved" }, { base: library });
+    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe(
+      `"library-source-7-e${library.edit_epoch}-v1"`,
+    );
+    expect(new Headers(lastCall().init.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
+  });
+  it.each([
+    { label: "identity", change: { id: 8, edit_version: 2 } },
+    { label: "history", change: { edit_epoch: "b".repeat(32), edit_version: 2 } },
+    { label: "version", change: { edit_version: 1 } },
+  ])("rejects an invalid source receipt: $label", async ({ change }) => {
+    respondWith({ ...library, ...change });
+    await expect(updateExternalLibrary(7, { name: "Saved" }, { base: library })).rejects.toThrow(
+      /Invalid .*acknowledgement/,
+    );
   });
 });

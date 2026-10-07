@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { captureEditingBase } from "@/lib/api/editing";
 /** Library source reads and exact management gestures own their authoritative projection. */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
@@ -69,11 +71,23 @@ export function librarySourcesOptions(
 }
 export type LibrarySourceCommand = { session: number } & (
   | { kind: "create"; payload: ExternalLibraryCreate }
-  | { kind: "update"; id: number; payload: ExternalLibraryUpdate }
+  | { kind: "update"; id: number; base: EditingBase; payload: ExternalLibraryUpdate }
   | { kind: "enroll"; id: number; root: string }
   | { kind: "delete"; id: number }
   | { kind: "scan"; id: number; title: TaskText }
 );
+type SourceUpdate = Extract<LibrarySourceCommand, { kind: "update" }>;
+type SourceReview =
+  | { phase: "idle" }
+  | { phase: "retired" }
+  | { phase: "required" | "loading"; intent: SourceUpdate; problem: "conflict" | "unconfirmed" }
+  | {
+      phase: "ready";
+      intent: SourceUpdate;
+      problem: "conflict" | "unconfirmed";
+      snapshot: ExternalLibrary;
+      sameIdentity: boolean;
+    };
 type CommandState =
   | { status: "idle" | "success" }
   | { status: "pending"; id: number | "create" }
@@ -89,6 +103,15 @@ export function useLibrarySourceCommand(
   useLayoutEffect(() => {
     admin.current = !!user?.is_superuser && allowed;
   }, [user?.is_superuser, allowed]);
+  const [review, setReview] = useState<SourceReview>({ phase: "idle" });
+  const reviewRef = useRef(review);
+  function changeReview(next: SourceReview) {
+    reviewRef.current = next;
+    setReview(next);
+  }
+  function discardReview() {
+    changeReview({ phase: "idle" });
+  }
   const live = useRef(true);
   const active = useRef<AbortController | null>(null);
   const [state, setState] = useState<CommandState>({ status: "idle" });
@@ -97,6 +120,7 @@ export function useLibrarySourceCommand(
     const release = onAuthChange(() => {
       active.current?.abort();
       active.current = null;
+      changeReview({ phase: "retired" });
       setState({ status: "idle" });
     });
     return () => {
@@ -122,6 +146,7 @@ export function useLibrarySourceCommand(
     if (!live.current) throw new DOMException("Library sources view was disposed", "AbortError");
     if (active.current) throw new Error("A library source command is already pending");
     requireSessionVersion(command.session);
+    if (reviewRef.current.phase !== "idle") throw new Error("Source review is required");
     const controller = new AbortController();
     active.current = controller;
     setState({ status: "pending", id: command.kind === "create" ? "create" : command.id });
@@ -188,7 +213,7 @@ export function useLibrarySourceCommand(
           row = await api.create(command.payload, options);
           break;
         case "update":
-          row = await api.update(command.id, command.payload, options);
+          row = await api.update(command.id, command.payload, { ...options, base: command.base });
           break;
         case "enroll":
           row = await api.enroll(command.id, { confirm_root_path: command.root }, options);
@@ -229,21 +254,110 @@ export function useLibrarySourceCommand(
         return {
           ...previous,
           items: exists
-            ? previous.items.map((item) => (item.id === row.id ? row : item))
-            : [...previous.items, row],
+            ? previous.items.map((item) =>
+                item.id === row.id &&
+                !(command.kind === "update" && item.edit_epoch !== command.base.edit_epoch) &&
+                !(item.edit_epoch === row.edit_epoch && item.edit_version > row.edit_version)
+                  ? row
+                  : item,
+              )
+            : command.kind === "create"
+              ? [...previous.items, row]
+              : previous.items,
         };
       });
       if (isCurrent()) setState({ status: "success" });
+      discardReview();
       return row;
     } catch (error) {
+      if (isCurrent() && command.kind === "update") {
+        const status = parseApiError(error).status;
+        if ([401, 403, 404].includes(status)) {
+          changeReview({ phase: "retired" });
+        } else if (status === 412 || status === 428 || status === 0 || status >= 500) {
+          changeReview({
+            phase: "required",
+            intent: command,
+            problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+          });
+        }
+      }
       if (isCurrent()) setState({ status: "error", error });
       throw error;
     } finally {
       if (active.current === controller) active.current = null;
     }
   }
+  async function readCurrent(adopt: boolean) {
+    const previous = reviewRef.current;
+    if (previous.phase !== "required" && previous.phase !== "ready")
+      throw new Error("Source review is unavailable");
+    const intent = previous.intent;
+    if (!live.current || !admin.current || active.current)
+      throw new DOMException("Source editor unavailable", "AbortError");
+    requireSessionVersion(intent.session);
+    const session = intent.session;
+    const controller = new AbortController();
+    active.current = controller;
+    changeReview({ phase: "loading", intent, problem: previous.problem });
+    function current() {
+      requireSessionVersion(session);
+      controller.signal.throwIfAborted();
+      if (!admin.current) throw new ApiError(403, "forbidden", "forbidden");
+    }
+    try {
+      await client.cancelQueries({ queryKey: librarySourceKeys.all, exact: true });
+      current();
+      let rows: ExternalLibrary[];
+      if (adopt) {
+        const result = await client.fetchQuery({
+          ...librarySourcesOptions(api.list),
+          staleTime: 0,
+        });
+        if (result.kind === "disabled")
+          throw new ApiError(404, "feature_disabled", "feature_disabled");
+        rows = result.items;
+      } else rows = await api.list({ signal: controller.signal });
+      current();
+      const snapshot = rows.find((row) => row.id === intent.id);
+      if (!snapshot) throw new ApiError(404, "library_not_found", "library_not_found");
+      if (adopt) discardReview();
+      else
+        changeReview({
+          phase: "ready",
+          intent,
+          problem: previous.problem,
+          snapshot,
+          sameIdentity: snapshot.edit_epoch === intent.base.edit_epoch,
+        });
+      return snapshot;
+    } catch (error) {
+      if (live.current && intent.session === getSessionVersion() && !controller.signal.aborted) {
+        setState({ status: "error", error });
+        if ([401, 403, 404].includes(parseApiError(error).status)) {
+          changeReview({ phase: "retired" });
+        } else changeReview({ phase: "required", intent, problem: previous.problem });
+      }
+      throw error;
+    } finally {
+      if (active.current === controller) active.current = null;
+    }
+  }
+  function saveRevised() {
+    const current = reviewRef.current;
+    if (current.phase !== "ready" || !current.sameIdentity)
+      throw new Error("Source review is required");
+    changeReview({ phase: "idle" });
+    return mutateAsync({ ...current.intent, base: captureEditingBase(current.snapshot) });
+  }
   return {
     mutateAsync,
+    review,
+    intent: review.phase === "idle" || review.phase === "retired" ? null : review.intent,
+    blocked: review.phase !== "idle",
+    reviewLatest: () => readCurrent(false),
+    adopt: () => readCurrent(true),
+    saveRevised,
     clearError: () =>
       setState((previous) => (previous.status === "error" ? { status: "idle" } : previous)),
     busyId: state.status === "pending" ? state.id : null,

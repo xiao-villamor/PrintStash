@@ -90,6 +90,8 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
 
 function aLibrary(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 4,
     name: "NAS models",
     root_path: "/mnt/nas/models",

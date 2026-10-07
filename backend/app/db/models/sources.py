@@ -1,7 +1,8 @@
 """External libraries, scan checkpoints, discovery inventories and tombstones."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
+from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
@@ -10,11 +11,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlmodel import Field
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, select
 
 from app.core.time import utcnow
 
 from .base import SQLModel
+from .library import LibraryRevision
 from .types import (
     ExternalLibraryCollectionMode,
     ExternalLibraryScanStatus,
@@ -36,6 +39,11 @@ class ExternalLibrary(SQLModel, table=True):
     __tablename__ = "external_libraries"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    edit_identity: str = Field(default_factory=lambda: uuid4().hex, max_length=32)
+    database_epoch: ClassVar[Mapped[str]]
     name: str = Field(max_length=128)
     root_path: str = Field(max_length=1024)
     source_kind: LibrarySourceKind = Field(
@@ -213,3 +221,8 @@ class ExternalLibraryObservation(SQLModel, table=True):
         default=None, foreign_key="files.id", ondelete="CASCADE"
     )
     created_at: datetime = Field(default_factory=utcnow)
+
+
+ExternalLibrary.database_epoch = column_property(
+    select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+)

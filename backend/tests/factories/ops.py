@@ -195,6 +195,7 @@ def build_external_library(
     three are checked, so setting one by hand is a setup that looks right and
     does nothing.
     """
+    overrides.setdefault("edit_version", 1)
     if scanning:
         overrides.setdefault("scan_claim_token", f"claim-{nth('scan_claim')}")
         overrides.setdefault("scan_claim_expires_at", utcnow() + timedelta(minutes=30))

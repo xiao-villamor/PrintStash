@@ -559,6 +559,8 @@ export function anAuditPolicy(
 /** A mounted, read-only source with its root verified. */
 export function anExternalLibrary(override?: Partial<ExternalLibrary>): ExternalLibrary {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 1,
     name: "My models",
     root_path: "/libraries/models",

@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import Optional
 
 from croniter import croniter
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 import app.modules.sources.root_binding as source_root_binding
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_superuser
@@ -36,6 +37,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.modules.administration import runtime_config
+from app.modules.sources import edits as source_edits
 from app.modules.sources import external_library
 from app.modules.storage.filesystem import detect_fs_kind
 from app.modules.storage.storage_paths import (
@@ -46,6 +48,7 @@ from app.modules.storage.storage_paths import (
 )
 from app.modules.work import ActiveJobExists, nudge
 from app.modules.work import service as work_service
+from app.schemas.editing import EditingBase, EditPrecondition
 from app.schemas.jobs import JobAccepted
 
 router = APIRouter(prefix="/libraries", tags=["external-libraries"])
@@ -57,7 +60,7 @@ def require_feature(session: Session = Depends(get_session)) -> None:
         raise HTTPException(status_code=404, detail="feature_disabled")
 
 
-class LibraryRead(BaseModel):
+class LibraryRead(EditingBase):
     id: int
     name: str
     root_path: str
@@ -180,7 +183,7 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
     if lib.last_scan_summary:
         try:
             summary = json.loads(lib.last_scan_summary)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             summary = None
     if lib.source_kind == LibrarySourceKind.MOUNTED:
         binding_state, binding_reason = source_root_binding.root_binding_state(lib)
@@ -196,6 +199,7 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
         )
     )
     return LibraryRead(
+        **source_edits.source_base(lib).model_dump(),
         id=lib.id,  # type: ignore[arg-type]
         name=lib.name,
         root_path=lib.root_path,
@@ -247,7 +251,7 @@ def discover_locations(session: Session = Depends(get_session)) -> list[str]:
     summary="List external (NAS) libraries",
 )
 def list_libraries(session: Session = Depends(get_session)) -> list[LibraryRead]:
-    libs = session.exec(select(ExternalLibrary).order_by(ExternalLibrary.id)).all()
+    libs = session.exec(select(ExternalLibrary).order_by(col(ExternalLibrary.id))).all()
     return [_to_read(lib) for lib in libs]
 
 
@@ -352,9 +356,13 @@ def update_library(
     library_id: int,
     body: LibraryUpdate,
     request: Request,
+    response: Response,
     session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> LibraryRead:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    source_edits.claim_source(session, actor, lib, precondition)
     if body.root_path is not None:
         canonical_root = str(Path(body.root_path).expanduser().resolve(strict=False))
         if canonical_root != lib.root_path:
@@ -379,10 +387,15 @@ def update_library(
         lib.target_collection_id = body.target_collection_id
     lib.updated_at = utcnow()
     session.add(lib)
-    session.commit()
+    session.flush()
     session.refresh(lib)
+    receipt = _to_read(lib)
+    session.commit()
+    response.headers["ETag"] = (
+        f'"library-source-{library_id}-e{receipt.edit_epoch}-v{receipt.edit_version}"'
+    )
     _schedule_watcher_refresh(request)
-    return _to_read(lib)
+    return receipt
 
 
 @router.post(

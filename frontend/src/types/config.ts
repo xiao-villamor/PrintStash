@@ -339,7 +339,7 @@ export interface ExternalLibraryScanSummary {
   aborted: boolean;
 }
 
-export interface ExternalLibrary {
+export interface ExternalLibrary extends EditingBase {
   id: number;
   name: string;
   root_path: string;
