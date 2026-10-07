@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M8 have local acceptance, including the reopened printer, Profile and Search editing corrections. M9 is active; notification conditional editing is the current workflow. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M8 have local acceptance, including the reopened printer, Profile and Search editing corrections. M9 is active; provider/browser and notification workflows have local acceptance. Remaining administration contracts and settings reads are next. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.

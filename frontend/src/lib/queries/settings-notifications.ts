@@ -1,10 +1,12 @@
+import type { EditingBase } from "@/types/editing";
+import { captureEditingBase } from "@/lib/api/editing";
 /** Notification settings own masked server receipts; secret drafts never enter mutation history. */
 import { useEffect, useRef } from "react";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import * as notificationApi from "@/lib/api/notifications";
 import { onAuthChange } from "@/lib/auth-store";
 import { requireSessionVersion } from "@/lib/session-transport";
-import { parseApiError } from "@/lib/errors";
+import { ApiError, parseApiError } from "@/lib/errors";
 import type {
   NotificationChannelCreate,
   NotificationChannelUpdate,
@@ -86,6 +88,7 @@ export function useNotificationCommands(
   async function publish(
     session: number,
     operation: (signal: AbortSignal) => Promise<NotificationsSettings["channels"][number]>,
+    base?: EditingBase,
   ) {
     return run(session, async (signal, current) => {
       const receipt = await operation(signal);
@@ -98,8 +101,19 @@ export function useNotificationCommands(
           before && {
             ...before,
             channels: before.channels.some((channel) => channel.id === receipt.id)
-              ? before.channels.map((channel) => (channel.id === receipt.id ? receipt : channel))
-              : [...before.channels, receipt],
+              ? before.channels.map((channel) =>
+                  channel.id === receipt.id &&
+                  !(base && channel.edit_epoch !== base.edit_epoch) &&
+                  !(
+                    channel.edit_epoch === receipt.edit_epoch &&
+                    channel.edit_version > receipt.edit_version
+                  )
+                    ? receipt
+                    : channel,
+                )
+              : base
+                ? before.channels
+                : [...before.channels, receipt],
           },
       );
       return receipt;
@@ -108,19 +122,58 @@ export function useNotificationCommands(
   return {
     create: (body: NotificationChannelCreate, session: number) =>
       publish(session, (signal) => api.createNotificationChannel(body, { signal })),
-    update: (id: number, body: NotificationChannelUpdate, session: number) =>
-      publish(session, (signal) => api.updateNotificationChannel(id, body, { signal })),
-    enable: (enabled: boolean, session: number) =>
+    update: (id: number, body: NotificationChannelUpdate, base: EditingBase, session: number) =>
+      publish(session, (signal) => api.updateNotificationChannel(id, body, { base, signal }), base),
+    enable: (enabled: boolean, base: EditingBase, session: number) =>
       run(session, async (signal, current) => {
-        const receipt = await api.setNotificationsEnabled(enabled, { signal });
+        const receipt = await api.setNotificationsEnabled(enabled, { base, signal });
         current();
         await client.cancelQueries({ queryKey: notificationKeys.settings });
         current();
-        client.setQueryData<NotificationsSettings>(
-          notificationKeys.settings,
-          (before) => before && { ...before, ...receipt },
+        client.setQueryData<NotificationsSettings>(notificationKeys.settings, (before) =>
+          before &&
+          before.edit_epoch === base.edit_epoch &&
+          before.edit_version <= receipt.edit_version
+            ? { ...before, ...captureEditingBase(receipt), enabled: receipt.enabled }
+            : before,
         );
         return receipt;
+      }),
+    review: (session: number, channelId?: number) =>
+      run(session, async (signal, current) => {
+        const snapshot = await api.getNotificationsSettings({ signal });
+        current();
+        if (
+          channelId !== undefined &&
+          !snapshot.channels.some((channel) => channel.id === channelId)
+        )
+          throw new ApiError(
+            404,
+            "notification_channel_not_found",
+            "notification_channel_not_found",
+          );
+        return snapshot;
+      }),
+    adopt: (session: number, channelId?: number) =>
+      run(session, async (_signal, current) => {
+        // The preview may have aged while the operator compared it. Adoption
+        // reads through the canonical Query owner instead of installing that
+        // preview over a newer observation (including a restored history).
+        const snapshot = await client.fetchQuery({
+          ...notificationSettingsOptions(api),
+          staleTime: 0,
+        });
+        current();
+        if (
+          channelId !== undefined &&
+          !snapshot.channels.some((channel) => channel.id === channelId)
+        )
+          throw new ApiError(
+            404,
+            "notification_channel_not_found",
+            "notification_channel_not_found",
+          );
+        return snapshot;
       }),
     remove: (id: number, session: number) =>
       run(session, async (signal, current) => {

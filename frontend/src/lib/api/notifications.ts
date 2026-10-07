@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingBase, requireEditingReceipt } from "@/lib/api/editing";
 import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import type {
   NotificationChannel,
@@ -15,16 +17,23 @@ export function getNotificationsSettings(
   return getJson<NotificationsSettings>("/api/v1/notifications", { ...options, fresh: true });
 }
 
-export function setNotificationsEnabled(
+export async function setNotificationsEnabled(
   enabled: boolean,
-  options: GetJsonOptions = {},
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<NotificationSwitch> {
-  return requestApi<NotificationSwitch>("/api/v1/notifications", {
+  requireEditingBase(options.base);
+  const saved = await requestApi<NotificationSwitch>("/api/v1/notifications", {
     method: "PUT",
-    headers: jsonHeaders(),
+    headers: {
+      ...jsonHeaders(),
+      "If-Match": `"notification-settings-e${options.base.edit_epoch}-v${options.base.edit_version}"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    },
     body: JSON.stringify({ enabled }),
     signal: options.signal,
   });
+  requireEditingReceipt(saved, options.base);
+  return saved;
 }
 
 export function createNotificationChannel(
@@ -39,17 +48,20 @@ export function createNotificationChannel(
   });
 }
 
-export function updateNotificationChannel(
+export async function updateNotificationChannel(
   id: number,
   body: NotificationChannelUpdate,
-  options: GetJsonOptions = {},
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<NotificationChannel> {
-  return requestApi<NotificationChannel>(`/api/v1/notifications/channels/${id}`, {
+  const saved = await requestApi<NotificationChannel>(`/api/v1/notifications/channels/${id}`, {
     method: "PATCH",
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...editHeaders("notification-channel", id, options.base) },
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("notification_identity_mismatch");
+  return saved;
 }
 
 export function deleteNotificationChannel(id: number, options: GetJsonOptions = {}): Promise<void> {

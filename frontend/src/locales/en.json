@@ -4279,5 +4279,13 @@
   "Loading delivery history…": "Loading delivery history…",
   "Printer choices could not be loaded.": "Printer choices could not be loaded.",
   "Retry printer choices": "Retry printer choices",
-  "Loading printer choices…": "Loading printer choices…"
+  "Loading printer choices…": "Loading printer choices…",
+  "Review the current notification setting before trying again.": "Review the current notification setting before trying again.",
+  "Review the current channel before saving again.": "Review the current channel before saving again.",
+  "The database history changed. Use current values before trying again.": "The database history changed. Use current values before trying again.",
+  "The channel was replaced. Use current values before editing it.": "The channel was replaced. Use current values before editing it.",
+  "Select at least one printer, or choose All printers.": "Select at least one printer, or choose All printers.",
+  "Current channel": "Current channel",
+  "Requested": "Requested",
+  "Current": "Current"
 }

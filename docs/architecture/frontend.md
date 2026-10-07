@@ -52,7 +52,7 @@ history. Secret payloads do not enter Query/MutationCache. A denied or missing
 printer read retires controls and the socket; explicit retry can restore an
 authorized view. Session changes retire drafts, requests and private caches.
 
-### Notification settings (M9 partial increment)
+### Notification settings
 
 `lib/queries/settings-notifications.ts` owns masked channel settings and the bounded
 recent-delivery query. Printer choices reuse `printersOptions` and its existing
@@ -63,9 +63,15 @@ success. Transient settings errors retain the draft read-only until recovery.
 Commands keep credential-bearing arguments out of MutationCache, retire on session
 change or disposal, cancel obsolete settings reads, and publish confirmed masked
 receipts. Delivery history remains independent of a channel save. The form blocks
-changes while a command is pending. The backend now exposes independent conditional channel/master-switch contracts.
-The first-party client cutover and review UI are pending; lifecycle guards alone
-do not protect the current editor from concurrent writes.
+changes while a command is pending. Channel and master-switch writes require
+independent captured editing bases. Background reads never rebase a draft;
+revised saves send only deliberate field changes after explicit authorized review.
+Conflicts or uncertain acknowledgements block ordinary retries. Replacement
+channel/database histories require adoption and retire old credential input.
+Adoption reads through the canonical query owner, keeping expired review previews
+from replacing newer observations. Receipt publication preserves newer observed
+versions, replacement histories and confirmed absence. Legacy external API writes
+remain compatible and advance versions but do not themselves detect conflicts.
 Evidence and remaining work: `docs/frontend-m9-notifications-validation.md`.
 
 ### Provider accounts and paired browsers (M9 partial increment)

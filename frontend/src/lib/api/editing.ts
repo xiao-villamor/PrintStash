@@ -19,7 +19,8 @@ export function editHeaders(
     | "printer"
     | "filament-profile"
     | "printer-profile"
-    | "browser-device",
+    | "browser-device"
+    | "notification-channel",
   id: number,
   base: EditingBase,
 ) {

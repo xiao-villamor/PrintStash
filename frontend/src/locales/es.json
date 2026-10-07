@@ -4279,5 +4279,13 @@
   "Loading delivery history…": "Cargando el historial de notificaciones…",
   "Printer choices could not be loaded.": "No se ha podido cargar la lista de impresoras.",
   "Retry printer choices": "Reintentar la lista de impresoras",
-  "Loading printer choices…": "Cargando la lista de impresoras…"
+  "Loading printer choices…": "Cargando la lista de impresoras…",
+  "Review the current notification setting before trying again.": "Revisa el ajuste actual de notificaciones antes de volver a intentarlo.",
+  "Review the current channel before saving again.": "Revisa el canal actual antes de volver a guardar.",
+  "The database history changed. Use current values before trying again.": "El historial de la base de datos ha cambiado. Usa los valores actuales antes de volver a intentarlo.",
+  "The channel was replaced. Use current values before editing it.": "El canal ha sido reemplazado. Usa los valores actuales antes de editarlo.",
+  "Select at least one printer, or choose All printers.": "Selecciona al menos una impresora o elige Todas las impresoras.",
+  "Current channel": "Canal actual",
+  "Requested": "Solicitado",
+  "Current": "Actual"
 }

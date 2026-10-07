@@ -1,8 +1,10 @@
 # M9 notifications workflow
 
-Status: active, after provider/browser acceptance at `35ec1ea4`. M9 remains open.
+Status: notification workflow locally accepted, including conditional first-party
+edits and real-browser conflict recovery. M9 remains open for the remaining
+administration workflows; final integration and remote CI are not complete.
 
-## Inspection and diagnosis
+## Initial inspection and diagnosis (before `7489d206`)
 
 Read `components/notifications-panel.tsx`, its complete test mirror,
 `lib/api/notifications.ts`, its transport tests, `types/notifications.ts`, backend
@@ -53,7 +55,7 @@ query owner and transport together; keep backend authorization and secret maskin
 | N12b | reports a test the server could not deliver | Error | Delivery rejected | Failure reported with server reason | Frontend unit | ✅ existing test passed |
 | N13 | retains an editable draft after a transient settings error | Error | Existing draft then 503 | Input retained read-only; retry restores actions | Frontend unit | ✅ passed |
 | N15 | keeps raw credentials outside shared caches | Edge | Secret supplied while command pending | No MutationCache entry; only masked receipt in Query | Frontend unit | ✅ passed |
-| N14 | resolves competing notification edits | Error | Concurrent channel/switch changes | No silent overwrite; explicit authorized review | Integration / Playwright | ❌ missing |
+| N14 | resolves competing notification edits | Error | Concurrent channel/switch changes | No silent overwrite; explicit authorized review | Integration / Playwright | ✅ NC3 and NF16 below |
 | N16 | completes delivery history during a channel save | Edge | Initial deliveries GET held across save | History finishes instead of remaining loading | Frontend unit | ✅ passed |
 | N17 | rejects a pre-save read after confirmation | Edge | Old settings GET ignores abort then resolves | Confirmed channel remains visible | Frontend unit | ✅ passed |
 | N18 | reads current settings on every transport call | Edge | Repeated transport reads | Second response is observed, not compatibility GET cache | Frontend unit | ✅ passed |
@@ -82,7 +84,7 @@ query owner and transport together; keep backend authorization and secret maskin
   6.50 s. Existing enabled gating and server data remain intact.
 - Real Chromium + FastAPI: existing `settings.spec.ts` notification create/delete
   lifecycle passed (1 test, 10.2 s; 47.8 s including startup). This does not yet
-  verify competing edits; N14 remains pending.
+  verify competing edits; N14 was pending at this checkpoint (covered by NF16 below).
 - Frontend app/UI/domain typecheck passed. Frontend formatting passed across
   776 files. Initial lint found an unused PrinterRead import after extracting
   printer options; removing it restored the lint gate. Vite build passed in
@@ -95,11 +97,11 @@ ownership is reused. No latency, startup, memory or bundle-performance improveme
 is claimed from test timings or code size. Full suites, coverage floors and remote
 required CI remain part of final integration, not this focused checkpoint.
 
-The remaining notification work is the conditional backend/channel/master-switch
+At the read-owner checkpoint, the remaining notification work was the conditional backend/channel/master-switch
 contract, explicit conflict/uncertain-save recovery and its real-browser coverage.
 This increment alone does not close the notifications workflow or M9.
 
-## Conditional backend contract — next increment
+## Conditional backend contract — checkpoint `ba3272f6`
 
 The master switch has its own version, independent from vault/Search settings and
 channel rows. Each channel binds its version to database history and a persisted
@@ -145,8 +147,8 @@ The master switch and each channel expose required EditingBase fields; HTTP writ
 accept the established `conditional-v1` header and strong If-Match. Responses are
 captured before commit. Opted-in missing bases return 428 and stale/foreign history
 returns 412. Unversioned legacy calls still work and advance the same versions.
-The first-party frontend carries the read/receipt fields but does not submit
-conditional edits yet; no end-user conflict-protection claim is made at this point.
+At this backend checkpoint, the first-party frontend carried read/receipt fields
+but did not submit conditional edits yet. The client cutover is recorded below.
 
 Evidence:
 
@@ -175,9 +177,86 @@ Evidence:
   channel/settings editing fields and the two optional request headers; legacy
   request bodies remain unchanged.
 
-Remaining work is the first-party conditional write cutover, captured draft bases,
+Remaining work at that checkpoint was the first-party conditional write cutover, captured draft bases,
 conflict/uncertain recovery, and real-browser proof. The existing notification
 scope implementation also treats an empty printer ID list as all printers
 (`notifications._channel_subscribes`); review the editor's empty-selection behavior
 at that cutover rather than claiming that explicit-empty already means no printers.
 No application performance improvement or remote CI completion is claimed here.
+
+## First-party editor cutover — matrix recorded before tests, assessed below
+
+Existing channels capture a masked snapshot only when editing starts. Updates send
+only deliberate changes against that captured editing base. Background reads do
+not rebase drafts. A conflict or uncertain update requires a fresh authorized
+review, followed by explicit adoption or a revised save. Recreated channel/history
+identities require adoption and clear old credential input. The master switch uses
+its own captured intent and the same review policy. No generic form framework is
+introduced. Rollback pairs the UI/transport precondition changes; retain the
+additive backend schema and compatibility contract.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| NF1 | sends the captured channel precondition | Happy | Update known channel | Exact If-Match/contract headers; advancing receipt | Frontend API | ✅ `frontend/src/lib/api/__tests__/notifications.test.ts::sends the captured channel precondition` |
+| NF2 | sends the captured switch precondition | Happy | Toggle known switch | Exact master If-Match; advancing receipt | Frontend API | ✅ `frontend/src/lib/api/__tests__/notifications.test.ts::sends the captured switch precondition` |
+| NF3 | rejects invalid notification acknowledgements | Error | Wrong history/version/ID | No successful acknowledgement | Frontend API | ✅ `frontend/src/lib/api/__tests__/notifications.test.ts::rejects invalid notification acknowledgements` |
+| NF4 | retains the original channel editing base after refresh | Edge | Draft then newer GET | PATCH uses original base and deliberate fields only | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::retains the original channel editing base after refresh` |
+| NF5 | requires review after a conflicting channel save | Error | 412 | Draft retained; normal save blocked; explicit review available | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::requires review after a conflicting channel save` |
+| NF6 | saves deliberate changes against the reviewed channel | Happy | Same-history authorized review | Revised PATCH uses reviewed base; untouched fields omitted | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::saves deliberate changes against the reviewed channel` |
+| NF7 | requires review after an uncertain channel save | Error | Lost/malformed acknowledgement | No automatic retry or success; draft retained for review | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::requires review after an uncertain channel save` |
+| NF8 | adopts a replacement channel before editing | Error | Review returns different history/incarnation | Revised save blocked; adoption clears old secret input | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::adopts a replacement channel before editing` |
+| NF9 | retires a missing or denied channel editor | Error | Review missing/403 | Private draft removed; no revised write | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::retires a missing or denied channel editor` |
+| NF10 | preserves a channel draft when review fails temporarily | Error | Review 503 | Draft retained; retry review available | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::preserves a channel draft when review fails temporarily` |
+| NF11 | reviews a failed master switch intent | Error | Master 412/lost response | Intent retained; explicit reviewed save uses master base | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::reviews a failed master switch intent` |
+| NF12 | retires a notification review with its session | Edge | Pending review then logout | No old review or draft published | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::retires a notification review with its session` |
+| NF13 | refuses an empty selected-printer scope | Error | All printers unchecked, no selection | Save blocked with explanation; no accidental all-printer request | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::refuses an empty selected-printer scope` |
+| NF14 | presents legacy empty scopes as all printers | Edge | Existing API scope [] | Display/editor match backend all-printer semantics | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::presents legacy empty scopes as all printers` |
+| NF15 | preserves newer observed notification receipts | Edge | Older write acknowledgement follows newer GET | Canonical cache retains newer version/history | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::preserves newer observed notification receipts` |
+| NF16 | resolves competing notification editors | Error | Two real editors change channel/switch | Conflict, deliberate review and revised save preserve server state | Playwright real | ✅ `frontend/tests/e2e-real/notifications.spec.ts::resolves competing notification editors` |
+| NF17 | requires adoption after the master history changes | Error | Review from restored history | Revised save blocked; explicit adoption displays new state | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::requires adoption after the master history changes` |
+| NF18 | preserves a newer observed master receipt | Edge | Old switch acknowledgement after newer GET | Newer observed switch remains canonical | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::preserves a newer observed master receipt` |
+| NF19 | adopts current state after history changes during review | Edge | New history observed after review snapshot | Adoption fetches current authoritative state; old preview cannot replace it | Frontend unit | ✅ `frontend/src/components/__tests__/notifications-panel.test.tsx::adopts current state after history changes during review` |
+
+### First-party acceptance results
+
+The transport now requires captured editing bases for channel and master-switch
+writes. Drafts keep the original masked snapshot across background reads; revised
+saves submit only deliberate differences against the explicitly reviewed version.
+Conflicts and uncertain acknowledgements require review. Recreated identities
+require adoption, clearing previous secret input. Adoption fetches through the
+canonical query owner so an expired preview cannot replace a newer observation.
+Confirmed receipts cannot overwrite a newer observed version/history or resurrect
+a channel removed by a later read.
+
+The editor now blocks an empty new selected-printer scope with an explanation.
+Existing empty scopes render as All printers, matching the backend's historical
+meaning; no backend scope semantics changed.
+
+- Before implementation: four new regressions failed (58 deselected, 6.08 s).
+- Initial combined run: 4 failed / 73 passed, 12.56 s. Updated obsolete transport
+  argument/full-body expectations and made the recoverable validation test return
+  its actual known 400 contract instead of an ambiguous transport error.
+- Expanded review run: 1 failed / 72 passed, 10.96 s. It exposed an old confirmed
+  receipt resurrecting a subsequently removed channel; the publisher now preserves
+  that newer observation. The next component/API run passed 91 cases, 11.64 s.
+- The expired-preview regression failed before correction (1 failed, 76 deselected,
+  3.24 s). An incomplete call-site edit produced an intermediate failed run;
+  after completing adoption through the canonical query owner, the targeted
+  selection passed 4 cases (73 deselected, 4.22 s).
+- Final component/API selection: **92 passed** (77 component, 15 API), **12.47 s**.
+- Real Chromium/FastAPI `notifications.spec.ts`: **1 passed**, 6.1 s body,
+  40.3 s including startup. Two editors exercise channel and master-switch
+  conflicts, explicit review and revised saves; untouched channel fields survive.
+  The master race holds then continues a real request without faking its response.
+  This browser run preceded the final adoption correction; it exercises revised
+  saves, while adoption is covered by the final component selection.
+- Final app/UI/domain typecheck, frontend lint and formatting passed (777 files).
+  Vite build passed in 2.31 s, with existing locale-shell/large-chunk warnings.
+  No backend files changed in this cutover; backend evidence above is unchanged.
+
+Correctness is supported by these specific assertions. Maintainability comes from
+one canonical settings owner, explicit captured edit bases and a shared command
+lifetime that keeps credentials outside mutation history. No performance gain is
+claimed: explicit adoption deliberately performs a fresh read. Full suites,
+coverage and latest-commit remote CI remain final integration work. Notification
+workflow acceptance does not close M9 or authorize advancing to M10.

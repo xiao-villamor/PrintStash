@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+- Detect competing notification channel and global-switch edits. Keep drafts for
+  explicit review after conflicts or uncertain saves; revised saves preserve
+  untouched fields. Adopting a replacement clears old credential input. Prevent
+  an empty printer selection from accidentally subscribing to all printers.
+
 - Add conditional API edits for notification channels and the global switch.
   Delivery telemetry leaves drafts valid; configuration changes and automatic
   disabling invalidate stale versions. Legacy requests remain compatible during
-  the first-party editor transition.
+  the conditional API contract.
 
 - Notification settings now show recoverable read errors instead of an invented
   Off state or empty list. Preserve drafts through transient failures, prevent

@@ -37,7 +37,10 @@ import {
 } from "@/lib/queries/settings-notifications";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
-import { parseApiError } from "@/lib/errors";
+import { ApiError, parseApiError, userMessage } from "@/lib/errors";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+import type { NotificationsSettings, NotificationChannelUpdate } from "@/types";
 
 const CARD = "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
 const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
@@ -237,8 +240,7 @@ const TARGET_FIELDS = {
   ],
 } satisfies Record<NotificationTarget, TargetField[]>;
 
-interface DraftState {
-  id: number | null; // null => creating
+interface DraftFields {
   name: string;
   target: NotificationTarget;
   config: Record<string, string>;
@@ -247,9 +249,57 @@ interface DraftState {
   enabled: boolean;
 }
 
+type DraftState = DraftFields &
+  ({ id: null; base: null } | { id: number; base: NotificationChannel });
+type ChannelReview =
+  | { phase: "idle" }
+  | { phase: "required" }
+  | { phase: "ready"; snapshot: NotificationsSettings };
+type SwitchReview = {
+  intent: { base: EditingBase; enabled: boolean };
+  snapshot: NotificationsSettings | null;
+};
+
+function draftFromChannel(channel: NotificationChannel): DraftState {
+  return {
+    id: channel.id,
+    base: channel,
+    name: channel.name,
+    target: channel.target,
+    config: Object.fromEntries(
+      Object.entries(channel.config).filter(([, value]) => value !== "********"),
+    ),
+    events: channel.events,
+    printerIds: channel.printer_ids?.length ? channel.printer_ids : null,
+    enabled: channel.enabled,
+  };
+}
+
+function channelChanges(draft: DraftFields, base: NotificationChannel): NotificationChannelUpdate {
+  const changes: NotificationChannelUpdate = {};
+  if (draft.name.trim() !== base.name) changes.name = draft.name.trim();
+  if (draft.enabled !== base.enabled) changes.enabled = draft.enabled;
+  if (JSON.stringify(draft.events) !== JSON.stringify(base.events)) changes.events = draft.events;
+  const originalScope = base.printer_ids?.length ? base.printer_ids : null;
+  if (JSON.stringify(draft.printerIds) !== JSON.stringify(originalScope))
+    changes.printer_ids = draft.printerIds;
+  const fields: TargetField[] = TARGET_FIELDS[draft.target];
+  const config = Object.fromEntries(
+    Object.entries(draft.config).filter(
+      ([key, value]) =>
+        value !== base.config[key] &&
+        value !== "********" &&
+        !(fields.some((field) => field.key === key && field.secret) && value === ""),
+    ),
+  );
+  if (Object.keys(config).length) changes.config = config;
+  return changes;
+}
+
 function emptyDraft(): DraftState {
   return {
     id: null,
+    base: null,
     name: "",
     target: "webhook",
     config: {},
@@ -313,7 +363,10 @@ export function NotificationsPanel({
 }) {
   useUiLocale();
   const [draft, setDraft] = useState<DraftState | null>(null);
-  const [busy, setBusy] = useState<number | "save" | "switch" | null>(null);
+  const [busy, setBusy] = useState<number | "save" | "switch" | "review" | null>(null);
+  const [channelReview, setChannelReview] = useState<ChannelReview>({ phase: "idle" });
+  const [switchReview, setSwitchReview] = useState<SwitchReview | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const settingsQuery = useQuery({ ...notificationSettingsOptions(deps), enabled: canEdit });
   const deliveriesQuery = useQuery({ ...notificationDeliveriesOptions(deps), enabled: canEdit });
   const printersQuery = useQuery({
@@ -328,6 +381,9 @@ export function NotificationsPanel({
     const release = onAuthChange(() => {
       setDraft(null);
       setBusy(null);
+      setChannelReview({ phase: "idle" });
+      setSwitchReview(null);
+      setError(null);
     });
     return () => {
       live.current = false;
@@ -336,34 +392,133 @@ export function NotificationsPanel({
   }, []);
   const current = (session: number) => live.current && session === getSessionVersion();
 
-  async function toggleEnabled(next: boolean) {
+  const reviewedChannel =
+    channelReview.phase === "ready"
+      ? channelReview.snapshot.channels.find((channel) => channel.id === draft?.id)
+      : null;
+  const channelReplaced = Boolean(
+    reviewedChannel && draft?.base && reviewedChannel.edit_epoch !== draft.base.edit_epoch,
+  );
+  const switchReplaced = Boolean(
+    switchReview?.snapshot &&
+    switchReview.snapshot.edit_epoch !== switchReview.intent.base.edit_epoch,
+  );
+
+  function isDenied(cause: unknown): boolean {
+    return [401, 403, 404].includes(parseApiError(cause).status);
+  }
+  function needsReview(cause: unknown): boolean {
+    const status = parseApiError(cause).status;
+    return status === 0 || status === 409 || status === 412 || status === 428 || status >= 500;
+  }
+  function retireEditor() {
+    setDraft(null);
+    setChannelReview({ phase: "idle" });
+    setSwitchReview(null);
+  }
+  async function toggleEnabled(next: boolean, revised = false) {
+    const snapshot = revised ? switchReview?.snapshot : settingsQuery.data;
+    if (!snapshot || busy !== null || (revised ? switchReplaced : switchReview !== null)) return;
+    const intent =
+      revised && switchReview
+        ? switchReview.intent
+        : { enabled: next, base: captureEditingBase(snapshot) };
     const session = getSessionVersion();
     setBusy("switch");
+    setError(null);
     try {
-      await commands.enable(next, session);
-    } catch (error) {
-      if (current(session)) deps.toast.error(error);
+      await commands.enable(intent.enabled, captureEditingBase(snapshot), session);
+      if (current(session)) setSwitchReview(null);
+    } catch (cause) {
+      if (current(session)) {
+        setError(userMessage(cause));
+        if (isDenied(cause)) retireEditor();
+        else if (needsReview(cause)) setSwitchReview({ intent, snapshot: null });
+      }
+    } finally {
+      if (current(session)) setBusy(null);
+    }
+  }
+  const startEdit = useCallback((channel: NotificationChannel) => {
+    setDraft(draftFromChannel(channel));
+    setChannelReview({ phase: "idle" });
+    setError(null);
+  }, []);
+
+  async function reviewChannel() {
+    if (!draft || draft.id === null || busy !== null) return;
+    const session = getSessionVersion();
+    setBusy("review");
+    setError(null);
+    setChannelReview({ phase: "required" });
+    try {
+      const snapshot = await commands.review(session, draft.id);
+      if (current(session)) setChannelReview({ phase: "ready", snapshot });
+    } catch (cause) {
+      if (current(session)) {
+        setError(userMessage(cause));
+        if (isDenied(cause)) retireEditor();
+      }
+    } finally {
+      if (current(session)) setBusy(null);
+    }
+  }
+  async function reviewSwitch() {
+    if (!switchReview || busy !== null) return;
+    const session = getSessionVersion();
+    setBusy("review");
+    setError(null);
+    setSwitchReview({ ...switchReview, snapshot: null });
+    try {
+      const snapshot = await commands.review(session);
+      if (current(session)) setSwitchReview({ intent: switchReview.intent, snapshot });
+    } catch (cause) {
+      if (current(session)) {
+        setError(userMessage(cause));
+        if (isDenied(cause)) retireEditor();
+      }
     } finally {
       if (current(session)) setBusy(null);
     }
   }
 
-  const startEdit = useCallback((ch: NotificationChannel) => {
-    setDraft({
-      id: ch.id,
-      name: ch.name,
-      target: ch.target,
-      // Secret values come back masked ("********"); start blank so an
-      // untouched field is sent blank and the backend keeps the stored value.
-      config: Object.fromEntries(Object.entries(ch.config).filter(([, v]) => v !== "********")),
-      events: ch.events,
-      printerIds: ch.printer_ids,
-      enabled: ch.enabled,
-    });
-  }, []);
+  async function adoptCurrent(target: number | "switch") {
+    if (busy !== null) return;
+    const session = getSessionVersion();
+    setBusy("review");
+    setError(null);
+    try {
+      const snapshot = await commands.adopt(session, target === "switch" ? undefined : target);
+      if (!current(session)) return;
+      if (target === "switch") setSwitchReview(null);
+      else {
+        const channel = snapshot.channels.find((row) => row.id === target);
+        if (!channel)
+          throw new ApiError(
+            404,
+            "notification_channel_not_found",
+            "notification_channel_not_found",
+          );
+        startEdit(channel);
+      }
+    } catch (cause) {
+      if (current(session)) {
+        setError(userMessage(cause));
+        if (isDenied(cause)) retireEditor();
+      }
+    } finally {
+      if (current(session)) setBusy(null);
+    }
+  }
 
-  async function saveDraft() {
-    if (!draft) return;
+  async function saveDraft(revised = false) {
+    if (!draft || busy !== null || (draft.printerIds !== null && draft.printerIds.length === 0))
+      return;
+    if (
+      draft.id !== null &&
+      (revised ? !reviewedChannel || channelReplaced : channelReview.phase !== "idle")
+    )
+      return;
     if (!draft.name.trim()) {
       deps.toast.error(uiText("Channel name is required."));
       return;
@@ -374,6 +529,7 @@ export function NotificationsPanel({
     }
     const session = getSessionVersion();
     setBusy("save");
+    setError(null);
     try {
       const body = {
         name: draft.name.trim(),
@@ -386,12 +542,27 @@ export function NotificationsPanel({
         await commands.create({ ...body, target: draft.target }, session);
         if (current(session)) deps.toast.success(uiText("Channel created."));
       } else {
-        await commands.update(draft.id, body, session);
+        await commands.update(
+          draft.id,
+          channelChanges(draft, draft.base),
+          captureEditingBase(revised && reviewedChannel ? reviewedChannel : draft.base),
+          session,
+        );
         if (current(session)) deps.toast.success(uiText("Channel updated."));
       }
-      if (current(session)) setDraft(null);
-    } catch (error) {
-      if (current(session)) deps.toast.error(error);
+      if (current(session)) {
+        setDraft(null);
+        setChannelReview({ phase: "idle" });
+      }
+    } catch (cause) {
+      if (current(session)) {
+        if (draft.id === null) deps.toast.error(cause);
+        else {
+          setError(userMessage(cause));
+          if (isDenied(cause)) retireEditor();
+          else if (needsReview(cause)) setChannelReview({ phase: "required" });
+        }
+      }
     } finally {
       if (current(session)) setBusy(null);
     }
@@ -446,6 +617,11 @@ export function NotificationsPanel({
     <Localized>
       <div className="space-y-4">
         {settingsFailure}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
         <fieldset
           className="min-w-0 space-y-4"
           disabled={busy !== null || Boolean(settingsQuery.error)}
@@ -467,7 +643,7 @@ export function NotificationsPanel({
               <input
                 type="checkbox"
                 checked={enabled}
-                disabled={!canEdit || busy === "switch"}
+                disabled={!canEdit || busy === "switch" || switchReview !== null}
                 onChange={(e) => toggleEnabled(e.target.checked)}
                 className="h-4 w-4 accent-primary"
               />
@@ -476,6 +652,45 @@ export function NotificationsPanel({
               </span>
             </label>
           </div>
+
+          {switchReview && (
+            <div role="status" className="space-y-2 text-sm">
+              <p>{uiText("Review the current notification setting before trying again.")}</p>
+              <p>
+                {uiText("Requested")}: {switchReview.intent.enabled ? uiText("On") : uiText("Off")}
+              </p>
+              {switchReview.snapshot && (
+                <p>
+                  {uiText("Current")}:{" "}
+                  {switchReview.snapshot.enabled ? uiText("On") : uiText("Off")}
+                </p>
+              )}
+              {switchReplaced && (
+                <p>
+                  {uiText("The database history changed. Use current values before trying again.")}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => void reviewSwitch()}>
+                  {uiText("Review current values")}
+                </Button>
+                {switchReview.snapshot && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => void adoptCurrent("switch")}>
+                      {uiText("Use current values")}
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={switchReplaced}
+                      onClick={() => void toggleEnabled(switchReview.intent.enabled, true)}
+                    >
+                      {uiText("Save revised changes")}
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {!canEdit && (
             <p className="text-xs text-muted-foreground italic">
@@ -528,7 +743,7 @@ export function NotificationsPanel({
                           {ch.events
                             .map((e) => EVENTS.find((x) => x.value === e)?.label ?? e)
                             .join(", ")}
-                          {ch.printer_ids
+                          {ch.printer_ids?.length
                             ? uiText(" · {value1} printer(s)", {
                                 value1: String(ch.printer_ids.length),
                               })
@@ -580,16 +795,62 @@ export function NotificationsPanel({
 
               {/* Draft form */}
               {draft ? (
-                <ChannelForm
-                  draft={draft}
-                  setDraft={setDraft}
-                  printers={printersQuery.data}
-                  printersError={printersQuery.error}
-                  retryPrinters={() => void printersQuery.refetch()}
-                  onSave={saveDraft}
-                  onCancel={() => setDraft(null)}
-                  saving={busy === "save"}
-                />
+                <>
+                  <ChannelForm
+                    draft={draft}
+                    setDraft={setDraft}
+                    printers={printersQuery.data}
+                    printersError={printersQuery.error}
+                    retryPrinters={() => void printersQuery.refetch()}
+                    onSave={() => void saveDraft()}
+                    onCancel={() => {
+                      setDraft(null);
+                      setChannelReview({ phase: "idle" });
+                      setError(null);
+                    }}
+                    reviewRequired={channelReview.phase !== "idle"}
+                    saving={busy === "save"}
+                  />
+                  {channelReview.phase !== "idle" && (
+                    <div role="status" className="space-y-2 text-sm">
+                      <p>{uiText("Review the current channel before saving again.")}</p>
+                      {reviewedChannel && <ChannelSnapshot channel={reviewedChannel} />}
+                      {channelReplaced && (
+                        <p>
+                          {uiText(
+                            "The channel was replaced. Use current values before editing it.",
+                          )}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => void reviewChannel()}>
+                          {uiText("Review current values")}
+                        </Button>
+                        {reviewedChannel && channelReview.phase === "ready" && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void adoptCurrent(reviewedChannel.id)}
+                            >
+                              {uiText("Use current values")}
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={
+                                channelReplaced ||
+                                (draft.printerIds !== null && draft.printerIds.length === 0)
+                              }
+                              onClick={() => void saveDraft(true)}
+                            >
+                              {uiText("Save revised changes")}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <button
                   type="button"
@@ -666,6 +927,7 @@ function ChannelForm({
   saving,
   printersError,
   retryPrinters,
+  reviewRequired,
 }: {
   draft: DraftState;
   setDraft: (d: DraftState) => void;
@@ -675,6 +937,7 @@ function ChannelForm({
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
+  reviewRequired: boolean;
 }) {
   useUiLocale();
   const fields: TargetField[] = TARGET_FIELDS[draft.target];
@@ -775,6 +1038,11 @@ function ChannelForm({
             />
             {uiText("All printers")}
           </label>
+          {scoped && draft.printerIds?.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {uiText("Select at least one printer, or choose All printers.")}
+            </p>
+          )}
           {scoped && (
             <div className="flex flex-wrap gap-3">
               {printersError ? (
@@ -831,7 +1099,11 @@ function ChannelForm({
         <div className="flex items-center gap-2 pt-1">
           <button
             type="submit"
-            disabled={saving || (scoped && (!printers || Boolean(printersError)))}
+            disabled={
+              saving ||
+              reviewRequired ||
+              (scoped && (!printers || Boolean(printersError) || draft.printerIds?.length === 0))
+            }
             className={BTN_PRIMARY}
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -843,5 +1115,33 @@ function ChannelForm({
         </div>
       </form>
     </Localized>
+  );
+}
+
+function ChannelSnapshot({ channel }: { channel: NotificationChannel }) {
+  const fields: TargetField[] = TARGET_FIELDS[channel.target];
+  return (
+    <div className="space-y-1 rounded border border-border p-3">
+      <p>
+        {uiText("Current channel")}: {channel.name}
+      </p>
+      <p>
+        {channel.target} · {channel.enabled ? uiText("On") : uiText("Off")}
+      </p>
+      <p>
+        {channel.events
+          .map((event) => EVENTS.find((entry) => entry.value === event)?.label ?? event)
+          .join(", ")}
+      </p>
+      <p>
+        {uiText("Printers")}:{" "}
+        {channel.printer_ids?.length ? channel.printer_ids.join(", ") : uiText("All printers")}
+      </p>
+      {fields.map((field) => (
+        <p key={field.key}>
+          {field.label}: {channel.config[field.key] || "—"}
+        </p>
+      ))}
+    </div>
   );
 }
