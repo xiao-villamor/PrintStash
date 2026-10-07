@@ -5,25 +5,28 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, NoReturn, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlmodel import Session
 
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
 from app.core.security import require_superuser
+from app.db.models import User
 from app.db.session import get_session
 from app.db.transactions import rollback_on_failure
-from app.modules.administration import runtime_config
+from app.modules.administration import config_edits, runtime_config
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_operations import (
     serialize_operations,
     vault_operations,
 )
+from app.schemas.editing import EditingBase, EditPrecondition
 
 router = APIRouter(prefix="/config", tags=["config"])
 
 
-class VaultConfigRead(BaseModel):
+class VaultConfigRead(EditingBase):
     derivatives_mesh_enabled: bool
     derivatives_gcode_enabled: bool
     derivatives_toolpath_enabled: bool
@@ -169,27 +172,20 @@ def enroll_storage_root(
     "",
     summary="Get current vault configuration",
     description=(
-        "Returns the effective configuration (env + DB overlay). "
+        "Returns editable configuration from a coherent persisted snapshot. "
         "Secret values are masked."
     ),
 )
 def get_config(
+    response: Response,
     _: object = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
-    from app.modules.derivatives import policy
+    return _configuration_response(session, response)
 
-    controls = policy.resolve(session)
-    cfg = runtime_config.get_effective_config(session)
-    cfg.update(
-        {
-            name.value: controls[definition].enabled
-            for definition, name in policy.SETTINGS.items()
-        }
-    )
-    provider_config = runtime_config.get_sanitized_storage_provider(session)
-    if provider_config is not None:
-        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
+
+def _configuration_response(session: Session, response: Response) -> VaultConfigRead:
+    base, cfg = config_edits.read(session)
     backend = get_backend()
     cfg.update(
         storage_tier=backend.capabilities.tier.value,
@@ -199,7 +195,8 @@ def get_config(
         storage_probe_diagnostics=backend.probe_diagnostics,
         storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
     )
-    return VaultConfigRead(**cfg)
+    response.headers["ETag"] = config_edits.etag(base)
+    return VaultConfigRead(**cfg, **base.model_dump())
 
 
 # --------------------------------------------------------------------------- #
@@ -330,14 +327,19 @@ def makerworld_disconnect(session: Session = Depends(get_session)) -> MakerWorld
 )
 def update_config(
     body: VaultConfigUpdate,
+    response: Response,
     session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> VaultConfigRead:
     from app.modules.derivatives import policy
 
+    base = config_edits.expected_base(precondition)
     with rollback_on_failure(session):
         # Reserve the configuration row before validating read-dependent edits.
-        # The final runtime-config write owns the single commit and publication.
-        policy.lock(session)
+        # This request owns the single commit and subsequent publication.
+        config = policy.lock(session)
+        config_edits.claim(session, actor, config, base)
         legacy_storage_fields = {
             "storage_backend",
             "data_dir",
@@ -448,7 +450,7 @@ def update_config(
                 apply_runtime=False,
             )
 
-        config = runtime_config.update_config(
+        runtime_config.update_config(
             session,
             storage_backend=None if new_storage_supplied else body.storage_backend,
             data_dir=None if new_storage_supplied else body.data_dir,
@@ -478,32 +480,28 @@ def update_config(
             oidc_display_name=body.oidc_display_name,
             oidc_redirect_uri=body.oidc_redirect_uri,
             oidc_allow_insecure_http=body.oidc_allow_insecure_http,
+            commit=False,
+            apply_runtime=False,
         )
 
-        if requested_provider is not None:
-            runtime_config.activate_config(config)
+        session.flush()
+        # Freeze our own receipt while this transaction still owns the row.
+        receipt = _configuration_response(session, response)
+        session.commit()
+
+        # Publish the latest committed row under its database lock. A delayed
+        # publisher cannot overwrite runtime values with an older row snapshot.
+        current = policy.lock(session)
+        try:
+            runtime_config.publish_config_edit(
+                current,
+                fields=frozenset(
+                    name
+                    for name, value in body.model_dump(exclude_unset=True).items()
+                    if value is not None and name not in changes
+                ),
+            )
+        finally:
+            session.rollback()
         policy.publish_changes(changes)
-
-        controls = policy.resolve(session)
-        cfg = runtime_config.get_effective_config(session)
-        cfg.update(
-            {
-                name.value: controls[definition].enabled
-                for definition, name in policy.SETTINGS.items()
-            }
-        )
-        provider_config = runtime_config.get_sanitized_storage_provider(session)
-        if provider_config is not None:
-            cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
-        backend = get_backend()
-        cfg.update(
-            storage_tier=backend.capabilities.tier.value,
-            storage_capabilities=backend.capabilities.as_dict(),
-            storage_operations=serialize_operations(
-                vault_operations(backend.capabilities)
-            ),
-            storage_warnings=list(backend.capabilities.warnings),
-            storage_probe_diagnostics=backend.probe_diagnostics,
-            storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
-        )
-        return VaultConfigRead(**cfg)
+        return receipt

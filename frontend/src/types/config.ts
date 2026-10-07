@@ -1,3 +1,5 @@
+import type { EditingBase } from "./editing";
+
 export interface SetupStatus {
   configured: boolean;
   setup_available?: boolean;
@@ -77,7 +79,7 @@ export interface SetupResponse {
   token_type: string;
 }
 
-export interface VaultConfigRead {
+export interface VaultConfigRead extends EditingBase {
   derivatives_mesh_enabled: boolean;
   derivatives_gcode_enabled: boolean;
   derivatives_toolpath_enabled: boolean;

@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 
 import pytest
+from fastapi import Response
 from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, create_engine
@@ -12,8 +13,9 @@ from app.core.config import settings
 from app.db.migrate import run_migrations
 from app.db.models import SystemConfig
 from app.db.url import normalize_database_url
+from app.schemas.editing import EditPrecondition
 from tests.containers import fresh_postgres_database
-from tests.factories import build_system_config
+from tests.factories import build_system_config, build_user
 
 
 @pytest.fixture
@@ -43,6 +45,7 @@ class TestConfigurationTransaction:
                 "CHECK (oidc_client_id IS DISTINCT FROM 'rejected-by-database')"
             )
         with Session(pg_config) as session:
+            actor = build_user(session, superuser=True)
             with pytest.raises(IntegrityError, match="reject_config_tail"):
                 update_config(
                     VaultConfigUpdate(
@@ -56,6 +59,9 @@ class TestConfigurationTransaction:
                         oidc_client_id="rejected-by-database",
                     ),
                     session=session,
+                    response=Response(),
+                    actor=actor,
+                    precondition=EditPrecondition(),
                 )
         with Session(pg_config) as session:
             row = session.get(SystemConfig, 1)
@@ -73,6 +79,7 @@ class TestConfigurationTransaction:
 
     def test_persists_the_accepted_mixed_patch(self, pg_config: Engine) -> None:
         with Session(pg_config) as session:
+            actor = build_user(session, superuser=True)
             receipt = update_config(
                 VaultConfigUpdate(
                     derivatives_mesh_enabled=False,
@@ -85,6 +92,9 @@ class TestConfigurationTransaction:
                     oidc_client_id="accepted-client",
                 ),
                 session=session,
+                response=Response(),
+                actor=actor,
+                precondition=EditPrecondition(),
             )
         with Session(pg_config) as session:
             row = session.get(SystemConfig, 1)

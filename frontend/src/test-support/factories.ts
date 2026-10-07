@@ -749,6 +749,7 @@ export function aVaultConfig(
   override?: Partial<import("@/types").VaultConfigRead>,
 ): import("@/types").VaultConfigRead {
   return {
+    ...anEditingBase(),
     derivatives_mesh_enabled: true,
     derivatives_gcode_enabled: true,
     derivatives_toolpath_enabled: true,

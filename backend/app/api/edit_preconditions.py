@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Header
 
-from app.modules.library.edit_preconditions import EditPrecondition
+from app.schemas.editing import EditPrecondition
 
 
 def edit_precondition(

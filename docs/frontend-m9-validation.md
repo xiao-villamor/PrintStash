@@ -535,7 +535,65 @@ Validation (2026-10-07):
 - Ruff check/format and targeted Pyright for `config_edits.py` passed.
   No full suite, schema gate, frontend build or browser suite was repeated.
 
-`config_edits.claim` is deliberately not a completed HTTP/client migration: it
-has no production caller yet. The next increment must integrate it with coherent
-configuration read/receipt bases and the API, then migrate client conflict
-recovery. M9 remains the only active milestone.
+At this checkpoint `config_edits.claim` had no production caller. The following
+HTTP increment integrates it; client conflict recovery remains pending. M9 remains
+the only active milestone.
+
+
+## Configuration HTTP editing contract (M9 API increment)
+
+Integrate the existing database claim with the actual configuration GET/PUT. The
+editing projection must use one persisted row snapshot and deployment defaults,
+rather than combine its version with a delayed process overlay. Capture a write's
+receipt before its commit releases the row; a later writer cannot replace that
+receipt. Preserve the explicit additive `conditional-v1` compatibility contract.
+The frontend's header/base/conflict migration follows this API increment.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| CH1 | returns an ETag matching the configuration editing base | Happy | Authorized configuration GET | Header matches epoch/version in body | Integration | ✅ |
+| CH2 | reads committed editable values before runtime publication | Edge | Stored OIDC value differs from process overlay | GET returns stored value with its current version | Integration | ✅ |
+| CH3 | clears an override without returning the retired runtime value | Edge | Stored override cleared while process overlay is old | GET returns deployment default with current version | Integration | ✅ |
+| CH4 | commits an edit from the reviewed base | Happy | Valid If-Match and conditional-v1 | Accepted value; advanced version; matching receipt ETag | Integration | ✅ |
+| CH5 | rejects an outdated compound patch | Error | Another writer saved after the draft base | 412 edit_conflict; no part of losing patch persisted | Integration | ✅ |
+| CH6 | requires the opted-in editing base | Error | conditional-v1 without If-Match | 428; configuration unchanged | Integration | ✅ |
+| CH7 | keeps explicit legacy write compatibility | Edge | No conditional headers | Write accepted; version advances | Integration | ✅ |
+| CH8 | rejects malformed or unsupported preconditions | Error | Weak/wildcard/wrong aggregate/invalid ETag, zero/negative/oversized versions, oversized digit input or unknown contract | 412 or 400; configuration unchanged | Integration | ✅ |
+| CH9 | rejects a base from a retired database history | Error | Authority epoch rotated after GET | 412; configuration unchanged | Integration | ✅ |
+| CH10 | returns the committed command's own receipt | Edge | Another writer commits currency or OIDC immediately after this command | PUT reports its accepted value/base; subsequent GET and runtime OIDC report later writer | Integration | ✅ |
+| CH11a | TestGetConfig.test_rejects_an_unauthenticated_caller | Error | Anonymous GET | 401; no configuration disclosed | Integration | ✅ |
+| CH11b | TestGetConfig.test_rejects_a_non_superuser | Error | Member GET | 403; no configuration disclosed | Integration | ✅ |
+| CH12a | TestUpdateConfig.test_rejects_an_unauthenticated_caller | Error | Anonymous PUT | 401; no configuration mutation | Integration | ✅ |
+| CH12b | TestUpdateConfig.test_rejects_a_non_superuser | Error | Member PUT | 403; no configuration mutation | Integration | ✅ |
+| CH13 | publishes an explicitly cleared runtime override | Edge | Successful API clear of an OIDC override | Runtime value returns to deployment default after commit | Integration | ✅ |
+
+Validation:
+
+- Initial HTTP regression selection: **14 failed in 5.92 s** before the change.
+  An intermediate S3 accessor syntax error prevented collection; it was corrected.
+- First combined selection: **76 passed, 1 failed in 14.31 s**. An unrelated edit
+  incorrectly revalidated a legacy SFTP provider. Field-scoped runtime publication
+  fixes that regression; its focused selection passed **19 tests in 6.90 s**.
+- HTTP editing, existing configuration API, library conditional-edit consumers and
+  effective runtime reads: **119 passed in 18.84 s**. This includes a real second
+  database write immediately after commit and verifies the original receipt.
+- A subsequent oversized-version regression reproduced a 500 (**1 failed in
+  4.62 s**). Signed 64-bit bounds are checked before integer conversion/database
+  binding. Malformed-header selection: **9 passed, 11 deselected in 5.03 s**.
+- PostgreSQL compound configuration transactions: **2 passed in 40.67 s**.
+  Existing schema/claim gates were not repeated; this increment changes no schema.
+- OpenAPI snapshot regeneration: **1 passed in 6.01 s**; reviewed delta is the
+  required editing-base fields, optional conditional headers and GET description.
+- Frontend configuration API: **20 passed in 2.45 s**. App and workspace package
+  typechecks passed after making the editing base required in the DTO/factory.
+- Targeted backend Pyright reports the same three existing diagnostics in
+  `runtime_config.py` (`File.sha256.is_not` and two `int(object)` diagnostics).
+  This check is not green; no new diagnostics were reported in the other five
+  changed production modules.
+
+Affected Python Ruff checks, schema formatting, frontend DTO/factory formatting
+and lint, and `git diff --check` passed.
+
+These results qualify this API increment, not M9 acceptance or final delivery.
+Frontend conditional headers, draft-base ownership and explicit conflict recovery
+remain pending. No full suite or browser suite was repeated for this increment.

@@ -20082,6 +20082,16 @@
             "title": "Derivatives Toolpath Enabled",
             "type": "boolean"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "external_libraries_enabled": {
             "default": false,
             "title": "External Libraries Enabled",
@@ -20266,6 +20276,8 @@
           }
         },
         "required": [
+          "edit_epoch",
+          "edit_version",
           "derivatives_mesh_enabled",
           "derivatives_gcode_enabled",
           "derivatives_toolpath_enabled"
@@ -24733,7 +24745,7 @@
     },
     "/api/v1/config": {
       "get": {
-        "description": "Returns the effective configuration (env + DB overlay). Secret values are masked.",
+        "description": "Returns editable configuration from a coherent persisted snapshot. Secret values are masked.",
         "operationId": "get_config_api_v1_config_get",
         "responses": {
           "200": {
@@ -24760,6 +24772,44 @@
       "put": {
         "description": "Persists configuration overrides to the database and applies them immediately. Set a field to an empty string to clear the override (fall back to env/default). Changes to ``storage_backend`` or S3 credentials require a restart of the ``storage_backend`` singleton to take full effect for file operations.",
         "operationId": "update_config_api_v1_config_put",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

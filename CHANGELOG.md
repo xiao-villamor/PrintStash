@@ -4,8 +4,10 @@
 
 - Persist vault configuration edit versions separately from operational bookkeeping,
   including changes made by legacy writers, and add the atomic editing-claim
-  operation with current administrator/session checks. The HTTP/client rollout
-  remains in progress; existing clients keep their current write contract.
+  operation with current administrator/session checks. Configuration GET returns
+  a matching editing base and ETag; conditional PUT rejects stale edits and returns
+  its own committed receipt. Client conflict recovery remains in progress; clients
+  without conditional headers retain explicit legacy compatibility.
 
 - Save compound configuration changes in one transaction so a failed final write
   cannot leave earlier policy, schedule, currency or provider changes committed.

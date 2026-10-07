@@ -84,9 +84,14 @@ The same immutable database trigger installs through migrations and fresh bootst
 backup-attempt timestamps and independently owned feature settings do not advance it.
 `administration/config_edits.claim` supplies the database compare-and-advance
 operation and rechecks current administrator/session authority; callers own rollback
-of the whole patch. It is not yet wired to a production request. Conditional HTTP
-integration, coherent editing-base reads, client conflict recovery and a backend
-reviewed-root precondition remain required before M9 closes. Local
+of the whole patch. Configuration GET now returns a coherent persisted editing
+snapshot and matching ETag. PUT accepts `If-Match`, requires it for
+`X-PrintStash-Edit-Contract: conditional-v1`, and rejects stale bases with 412.
+Legacy writes remain accepted and advance the version. A receipt is captured
+before releasing the write transaction; later commits cannot replace it. Runtime
+publication reads the latest locked row and only publishes the edited fields.
+Client conflict recovery and a backend reviewed-root precondition remain required
+before M9 closes. Local
 fingerprints and path comparisons do not provide that protection.
 
 ## Proposed directory tree

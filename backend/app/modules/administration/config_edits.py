@@ -4,12 +4,17 @@ The caller owns the complete operation's commit/rollback. A claim is not a save,
 and no process-local runtime settings are published by this database operation.
 """
 
+import re
+
 from sqlalchemy import update
 from sqlmodel import Session, col, select
 
+from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.db.models import LibraryRevision, SystemConfig, User
-from app.schemas.editing import EditingBase
+from app.schemas.editing import EditContract, EditingBase, EditPrecondition
+
+_MAX_EDIT_VERSION = str(2**63 - 1)
 
 
 def claim(
@@ -54,3 +59,63 @@ def claim(
             raise OperationError("config_permission_denied", kind=ErrorKind.FORBIDDEN)
         # Discard the caller's stale ORM snapshot before it applies the draft.
         session.refresh(config)
+
+
+def etag(base: EditingBase) -> str:
+    return f'"vault-config-e{base.edit_epoch}-v{base.edit_version}"'
+
+
+def expected_base(precondition: EditPrecondition) -> EditingBase | None:
+    if (
+        precondition.contract is not None
+        and precondition.contract != EditContract.CONDITIONAL_V1.value
+    ):
+        raise OperationError("edit_contract_invalid")
+    if precondition.if_match is None:
+        if precondition.contract is not None:
+            raise OperationError(
+                "edit_precondition_required", kind=ErrorKind.PRECONDITION_REQUIRED
+            )
+        return None
+    matched = re.fullmatch(
+        r'"vault-config-e([0-9a-f]{32})-v([1-9][0-9]*)"', precondition.if_match
+    )
+    if (
+        matched is None
+        or len(matched[2]) > len(_MAX_EDIT_VERSION)
+        or (
+            len(matched[2]) == len(_MAX_EDIT_VERSION) and matched[2] > _MAX_EDIT_VERSION
+        )
+    ):
+        raise OperationError("edit_conflict", kind=ErrorKind.PRECONDITION_FAILED)
+    return EditingBase(edit_epoch=matched[1], edit_version=int(matched[2]))
+
+
+def read(session: Session) -> tuple[EditingBase, dict]:
+    """Capture the persisted row and history epoch in one statement."""
+    from app.modules.administration import runtime_config
+    from app.modules.derivatives.policy import SettingName
+
+    config, epoch = session.exec(
+        select(SystemConfig, LibraryRevision.epoch)
+        .select_from(LibraryRevision)
+        .outerjoin(SystemConfig, col(SystemConfig.id) == 1)
+        .where(col(LibraryRevision.id) == 1)
+        .execution_options(populate_existing=True)
+    ).one()
+    # The absent singleton has its initial version; first write creates it under
+    # the existing configuration lock before the atomic claim.
+    base = EditingBase(
+        edit_epoch=epoch,
+        edit_version=1 if config is None else config.vault_edit_version,
+    )
+    values = runtime_config.get_editing_config(config)
+    for name in SettingName:
+        override = getattr(config, name.value) if config is not None else None
+        values[name.value] = (
+            getattr(settings.frozen, name.value) if override is None else override
+        )
+    provider = runtime_config.sanitized_storage_provider(config)
+    if provider is not None:
+        values["storage_provider"], values["storage_provider_config"] = provider
+    return base, values

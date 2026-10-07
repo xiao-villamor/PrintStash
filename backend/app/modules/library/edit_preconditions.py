@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-from pydantic import BaseModel
 from sqlalchemy import update
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlmodel import Session, col, select
@@ -26,22 +25,15 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.schemas.editing import EditContract as EditContract
 from app.schemas.editing import EditingBase
+from app.schemas.editing import EditPrecondition as EditPrecondition
 
 
 class EditKind(str, Enum):
     MODEL = "model"
     MULTIPART = "multipart"
     DOCUMENT = "document"
-
-
-class EditContract(str, Enum):
-    CONDITIONAL_V1 = "conditional-v1"
-
-
-class EditPrecondition(BaseModel):
-    if_match: str | None = None
-    contract: str | None = None
 
 
 def etag(kind: EditKind, id: int, version: int, epoch: str) -> str:
