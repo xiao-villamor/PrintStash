@@ -1,5 +1,11 @@
 # M8 — remaining Library surfaces
 
+> Closure correction (2026-10-07): reopened. The results below remain historical
+> evidence for implemented behaviors, but do not prove complete plan acceptance.
+> See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
+> competing-edit contracts and corrected execution order.
+
+
 Status: locally closed after M7 acceptance c4b43c25. Scope: Model/Multipart detail,
 Documents, manufacturing Builds, Search/AI, Similarity, Profiles and Statistics.
 M9 is next; M10–M11 remain pending. Preserve existing qualified owners and detailed matrices

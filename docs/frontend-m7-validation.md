@@ -1,5 +1,11 @@
 # M7 — asynchronous workflow qualification
 
+> Closure correction (2026-10-07): reopened. The results below remain historical
+> evidence for implemented behaviors, but do not prove complete plan acceptance.
+> See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
+> competing-edit contracts and corrected execution order.
+
+
 Status: locally closed after M6 acceptance e1746a46. Final delivery and CI remain open. This pass reconciles preserved M7
 work only: Inbox/nav, Task Center, uploads/archive review, events and
 printers/fleet/queues. M8–M11 remain pending. Existing per-owner matrices in
