@@ -4216,5 +4216,6 @@
   "stats.costUnavailable": "Coste no disponible",
   "storage.connectionsLoadFailed": "No se pudieron cargar las conexiones.",
   "storage.providersLoadFailed": "No se pudieron cargar los proveedores de almacenamiento.",
-  "storage.connectionUnavailable": "Esta conexión ya no está disponible. Copia el borrador que necesites antes de cancelar."
+  "storage.connectionUnavailable": "Esta conexión ya no está disponible. Copia el borrador que necesites antes de cancelar.",
+  "source.reviewChanged": "La fuente cambió durante la revisión. Revisa de nuevo la última versión."
 }

@@ -895,3 +895,40 @@ export function aPrinterFile(
     ...override,
   };
 }
+
+/** A captured Model source with an explicit editing version and absent cover. */
+export function aModelProvenance(
+  override?: Partial<import("@/types").ModelProvenanceRead>,
+): import("@/types").ModelProvenanceRead {
+  return {
+    edit_version: 1,
+    sources: [
+      {
+        id: 8,
+        provider: "printables",
+        source_item_id: "41",
+        canonical_url: "https://www.printables.com/model/41",
+        source_revision: null,
+        tags: [],
+        first_captured_at: FROZEN_NOW,
+        last_checked_at: FROZEN_NOW,
+        captures: [],
+        cover: null,
+        fields: [
+          {
+            field_name: "title",
+            captured_value: "Source title",
+            captured_origin: "confirmed",
+            user_value: null,
+            user_override_set: false,
+            effective_value: "Source title",
+            effective_origin: "confirmed",
+            captured_at: null,
+            user_updated_at: null,
+          },
+        ],
+      },
+    ],
+    ...override,
+  };
+}

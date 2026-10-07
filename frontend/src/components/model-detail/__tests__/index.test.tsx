@@ -81,7 +81,7 @@ function renderDetail(options: RenderAppOptions & { model?: ModelRead } = {}) {
       "GET /api/v1/models/1": json(model),
       "GET /api/v1/models/1/print-jobs": json([]),
       "GET /api/v1/models/1/printer-files": json([]),
-      "GET /api/v1/models/1/provenance": json({ sources: [] }),
+      "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
       "GET /api/v1/models/1/shares": json([]),
       "GET /api/v1/printers": json([]),
       ...collectionTreeRoutes([aCollection()]),

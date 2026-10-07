@@ -65,6 +65,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "filters",
     "model-detail",
     "multipart",
+    "provenance",
     "mutations",
     "navigation-state",
     "reading-position",

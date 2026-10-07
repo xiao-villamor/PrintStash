@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Duplex } from "node:stream";
 import type { SubjectCaption } from "../../src/types/captions";
 import type { SearchStatus } from "../../src/types/search";
+import type { ModelProvenanceRead, ModelSourceCoverRead } from "../../src/types/provenance";
 import type { MetadataRead } from "../../src/types/models";
 
 const now = "2026-06-04T00:24:22.000000";
@@ -252,6 +253,7 @@ const state = {
   inboxCaptured: false,
   inboxImported: false,
   sourceOverride: false,
+  sourceEditVersion: 1,
   sourceCover: true,
   browserDeviceRevoked: false,
   s3LegacyCandidate: true,
@@ -447,6 +449,7 @@ export function resetMockApiState(): void {
   state.inboxImported = false;
   inboxCollectionId = null;
   state.sourceOverride = false;
+  state.sourceEditVersion = 1;
   state.sourceCover = true;
   state.browserDeviceRevoked = false;
   state.s3LegacyCandidate = true;
@@ -579,9 +582,34 @@ function importedInboxItem() {
   };
 }
 
-function provenance() {
+function sourceCoverMetadata(): ModelSourceCoverRead {
+  return {
+    id: 1,
+    provenance_source_id: 8,
+    content_type: "image/webp",
+    size_bytes: 68,
+    updated_at: new Date(Date.parse(now) + state.sourceEditVersion).toISOString(),
+  };
+}
+
+function claimSourceEdit(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.headers["x-printstash-edit-contract"] !== "conditional-v1" || !req.headers["if-match"]) {
+    sendJson(res, { detail: "edit_precondition_required" }, 428);
+    return false;
+  }
+  if (req.headers["if-match"] !== `"model-1-v${state.sourceEditVersion}"`) {
+    sendJson(res, { detail: "edit_conflict" }, 412);
+    return false;
+  }
+  state.sourceEditVersion++;
+  res.setHeader("ETag", `"model-1-v${state.sourceEditVersion}"`);
+  return true;
+}
+
+function provenance(): ModelProvenanceRead & { schema_version: 2 } {
   return {
     schema_version: 2,
+    edit_version: state.sourceEditVersion,
     sources: [
       {
         id: 8,
@@ -592,6 +620,7 @@ function provenance() {
         first_captured_at: now,
         last_checked_at: now,
         captures: [],
+        cover: state.sourceCover ? sourceCoverMetadata() : null,
         fields: [
           {
             field_name: "description",
@@ -1170,11 +1199,13 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/models/1/provenance") {
+    res.setHeader("ETag", `"model-1-v${state.sourceEditVersion}"`);
     sendJson(res, provenance());
     return;
   }
   if (url.pathname === "/api/v1/models/1/provenance/8" && req.method === "PATCH") {
     drainRequest(req, () => {
+      if (!claimSourceEdit(req, res)) return;
       state.sourceOverride = !state.sourceOverride;
       sendJson(res, provenance());
     });
@@ -1185,30 +1216,20 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       if (!state.sourceCover) {
         sendJson(res, { detail: "source_cover_not_found" }, 404);
       } else {
-        sendJson(res, {
-          id: 1,
-          provenance_source_id: 8,
-          content_type: "image/webp",
-          size_bytes: 68,
-          updated_at: now,
-        });
+        sendJson(res, sourceCoverMetadata());
       }
       return;
     }
     if (req.method === "PUT") {
       drainRequest(req, () => {
+        if (!claimSourceEdit(req, res)) return;
         state.sourceCover = true;
-        sendJson(res, {
-          id: 1,
-          provenance_source_id: 8,
-          content_type: "image/webp",
-          size_bytes: 68,
-          updated_at: now,
-        });
+        sendJson(res, sourceCoverMetadata());
       });
       return;
     }
     if (req.method === "DELETE") {
+      if (!claimSourceEdit(req, res)) return;
       state.sourceCover = false;
       res.writeHead(204);
       res.end();
@@ -1373,7 +1394,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/models/1") {
-    sendJson(res, model);
+    sendJson(res, { ...model, edit_version: state.sourceEditVersion });
     return;
   }
   if (url.pathname === "/api/v1/models/1/printer-files") {

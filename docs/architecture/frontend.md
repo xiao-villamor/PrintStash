@@ -169,6 +169,17 @@ owned compatibility adapter can translate legacy successful writes into affected
 keys; remove it after its last consumer. Do not maintain two independent policies
 for a migrated endpoint.
 
+Source editing is owned by `features/library/provenance.ts`. The provenance DTO
+contains its Model editing version and nullable cover metadata; components must
+not pair it with a later version fetched independently to authorize a write.
+Freeze the field/cover command at the user's gesture. Conflict or unknown outcome
+retains that command and requires fresh Model/Source reads with matching versions
+before explicit retry. Permissions come from that reviewed Model. Source
+acknowledgements retire earlier reads; cover image cache identity follows the
+returned cover metadata, while all bytes still use authenticated asset leases.
+The Source endpoint clients require a version; no transport cache or generic
+form/repository layer is added. See [the Source validation record](../library-provenance-editing-validation.md).
+
 Events are hints to obtain authorized state. Reconnect resync must recover missed
 notices; socket generation/disposal prevents late-ticket connections from reviving
 a dead subscription. Browser focus and offline recovery are part of the same

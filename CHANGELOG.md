@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Protect Model Source edits and private cover changes against concurrent writes.
+  Keep field drafts and selected files after conflicts or uncertain responses,
+  require explicit review before retrying, and share one Source read across its
+  metadata and cover controls. Prevent delayed reads from replacing confirmed edits.
+
 - Load the Library route immediately and defer upload, tag, multipart creation
   and ZIP review forms until opened. Prioritize cards and the bounded tree,
   release auxiliary reads after paint or explicit interaction, and share the
