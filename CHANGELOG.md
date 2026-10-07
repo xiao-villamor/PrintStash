@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve each Library history entry's filters and reading position when returning
+  from Model or Multipart detail. Bound restoration after cache eviction, show a
+  clear reset for missing anchors, keep rapid folder transitions coherent, and
+  retire private snapshots when the session or access changes. Remove ignored
+  scroll options and no-op route refresh/prefetch methods from the navigation API.
+
 - Preserve the reading position when a confirmed Favorites removal takes its
   card out of the current grid, including delayed rendering and queued scroll events.
 

@@ -20,6 +20,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelDetail } from "@/components/model-detail";
@@ -74,23 +75,36 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
   };
 }
 
+function DetailLocation() {
+  const location = useLocation();
+  return (
+    <output aria-label="Current detail location">{location.pathname + location.search}</output>
+  );
+}
+
 function renderDetail(options: RenderAppOptions & { model?: ModelRead } = {}) {
   const { model = aModel(), seed = [], routes = {}, ...rest } = options;
-  return renderApp(<ModelDetail model={model} />, {
-    seed: [[queryKeys.tags, []], [queryKeys.printers, []], ...seed],
-    routes: {
-      "GET /api/v1/models/1": json(model),
-      "GET /api/v1/models/1/print-jobs": json([]),
-      "GET /api/v1/models/1/printer-files": json([]),
-      "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
-      "GET /api/v1/models/1/shares": json([]),
-      "GET /api/v1/printers": json([]),
-      ...collectionTreeRoutes([aCollection()]),
-      "GET /api/v1/tags": json([]),
-      ...routes,
+  return renderApp(
+    <>
+      <ModelDetail model={model} />
+      <DetailLocation />
+    </>,
+    {
+      seed: [[queryKeys.tags, []], [queryKeys.printers, []], ...seed],
+      routes: {
+        "GET /api/v1/models/1": json(model),
+        "GET /api/v1/models/1/print-jobs": json([]),
+        "GET /api/v1/models/1/printer-files": json([]),
+        "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
+        "GET /api/v1/models/1/shares": json([]),
+        "GET /api/v1/printers": json([]),
+        ...collectionTreeRoutes([aCollection()]),
+        "GET /api/v1/tags": json([]),
+        ...routes,
+      },
+      ...rest,
     },
-    ...rest,
-  });
+  );
 }
 
 /** Open the header's actions menu, which is where every write action lives. */
@@ -850,11 +864,38 @@ describe("ModelDetail", () => {
       );
     });
 
+    it.each([
+      { label: "collection", collection: "parts/tools", expected: "/?c=parts%2Ftools" },
+      { label: "root", collection: null, expected: "/" },
+    ])("returns to the deleted Model $label destination", async ({ collection, expected }) => {
+      const user = userEvent.setup();
+      renderDetail({
+        at: "/models/1",
+        model: aModel({
+          collection,
+          collection_id: collection === null ? null : 1,
+          collection_label: collection === null ? null : "Tools",
+        }),
+        routes: { "DELETE /api/v1/models/1": json(null, 204) },
+      });
+      await openActions(user);
+      await user.click(screen.getByRole("menuitem", { name: /Delete model/ }));
+
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }),
+      );
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("Current detail location").textContent).toBe(expected),
+      );
+    });
+
     it("stays on the page when the delete is refused", async () => {
       // Navigating away from a model that still exists loses the user's place
       // for nothing.
       const user = userEvent.setup();
       renderDetail({
+        at: "/models/1",
         routes: { "DELETE /api/v1/models/1": json({ detail: "model_in_use" }, 409) },
       });
       await openActions(user);
@@ -864,7 +905,12 @@ describe("ModelDetail", () => {
         within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }),
       );
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Current detail location").textContent).toBe("/models/1");
     });
   });
 

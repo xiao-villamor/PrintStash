@@ -317,7 +317,6 @@ function ModelDetailPresentation({
       // Return to the folder the model lived in, not the root — deleting one
       // model shouldn't kick the user out of the collection they were browsing.
       router.push(model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/");
-      router.refresh();
     } catch (e) {
       toast.error(e);
       setDeleting(false);

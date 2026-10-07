@@ -1,15 +1,10 @@
 "use client";
 
 /**
- * Navigation shim backed by React Router.
+ * Application navigation backed by React Router.
  *
- * Mirrors the small slice of the `next/navigation` + `next/link` API the app
- * actually used, so the migration off Next is mostly an import-path swap:
- *   `next/navigation` / `next/link` → `@/lib/navigation`.
- *
- * `useSearchParams` returns the read-only `URLSearchParams` directly (matching
- * Next's shape), so components that build a query string by hand and then call
- * `router.replace(...)` keep working unchanged.
+ * Push and replace update the URL; Back and Forward traverse browser history.
+ * Server data and library reading position are owned by their feature modules.
  */
 
 import {
@@ -19,19 +14,11 @@ import {
 } from "react-router-dom";
 import { useMemo } from "react";
 
-/** Next's `NavigateOptions` (e.g. `{ scroll: false }`) — accepted, ignored. */
-interface NavOptions {
-  scroll?: boolean;
-}
-
 export interface AppRouter {
-  push: (href: string, options?: NavOptions) => void;
-  replace: (href: string, options?: NavOptions) => void;
+  push: (href: string) => void;
+  replace: (href: string) => void;
   back: () => void;
   forward: () => void;
-  /** Next's server-data refresh has no analogue in a client SPA — no-op. */
-  refresh: () => void;
-  prefetch: (href: string) => void;
 }
 
 export function useRouter(): AppRouter {
@@ -42,8 +29,6 @@ export function useRouter(): AppRouter {
       replace: (href: string) => navigate(href, { replace: true }),
       back: () => navigate(-1),
       forward: () => navigate(1),
-      refresh: () => {},
-      prefetch: () => {},
     }),
     [navigate],
   );

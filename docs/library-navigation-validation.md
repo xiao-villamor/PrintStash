@@ -68,9 +68,9 @@ Implementation order: first qualify exact source links and snapshot identity, th
 | 7 | reconstructs only the previously loaded pages after cache eviction | Edge | Evicted Query; saved entry with N pages | At most N pages; anchor restored if available | Feature/browser | ✅ |
 | 8 | resets clearly when the old anchor cannot be restored | Error | Deleted anchor or incompatible cursor | Bounded recovery then visible reset | Browser | ✅ |
 | 9 | preserves the reading anchor after confirmed favourite removal | Edge | Visible favourite removed after ACK | Next surviving content stays at its offset | Browser | ✅ `tests/e2e/library-navigation.spec.ts::preserves the grid/list reading anchor after removing a confirmed favorite` (available Model/Multipart gestures) |
-| 10 | retires private history metadata on session/access change | Edge | Session retired while detail open | No old restoration/cache/DOM reused | Feature/browser | ❌ |
+| 10 | retires private history metadata on session/access change | Edge | Session retired while detail open | No old restoration/cache/DOM reused | Feature/browser | ✅ `tests/e2e/library-snapshot.spec.ts::retires private Library history when signing out` and `when access changes` |
 | 11 | chooses a safe fallback for direct detail links | Edge | No known history origin or unsafe return URL | Same-origin Library URL; no external redirect | Component | ✅ |
-| 12 | resolves rapid navigation using one displayed identity | Edge | A→B→C with out-of-order reads | Heading, cards, link target and restoration belong together | Component/browser | ❌ |
+| 12 | resolves rapid navigation using one displayed identity | Edge | A→B→C with out-of-order reads | Heading, cards, link target and restoration belong together | Component/browser | ✅ `tests/e2e/library-snapshot.spec.ts::keeps one coherent snapshot during rapid collection navigation` |
 
 This matrix is the pre-implementation contract. No scroll/history acceptance is claimed from the earlier folder-navigation tests alone.
 
@@ -232,3 +232,13 @@ navigation-state, ModelGrid and suite-hygiene (4 files, 102.47s). All eight rows
 above now have named assertions. The earlier timeouts did not reproduce in the
 isolated checks or the serial complete affected gates; they remain documented as
 observed timing failures rather than claimed product fixes.
+
+
+## Final M5 browser acceptance
+
+The remaining private-retirement and rapid-navigation rows above are now covered
+by the [snapshot browser matrix](library-snapshot-browser-validation.md), which
+also qualifies repeated-URL history entries and real-backend paged detail return.
+Earlier open-row notes in this document describe historical increments, not the
+latest browser acceptance. The [navigation API matrix](library-navigation-api-validation.md)
+covers removal of misleading no-op methods and ignored options.

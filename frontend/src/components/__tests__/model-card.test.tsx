@@ -11,6 +11,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelCard } from "@/components/model-card";
@@ -70,7 +71,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function CardLocation() {
+  const location = useLocation();
+  return <output aria-label="Current card location">{location.pathname}</output>;
+}
+
 describe("ModelCard", () => {
+  it("opens the Model detail from its card", async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <>
+        <ModelCard model={model} />
+        <CardLocation />
+      </>,
+    );
+    const link = screen.getByRole("link", { name: /Cam Holder v4/ });
+    expect(link).toHaveAttribute("href", "/models/1");
+
+    await user.click(link);
+
+    expect(screen.getByLabelText("Current card location")).toHaveTextContent("/models/1");
+  });
+
   it("does not convert on hover", async () => {
     const user = userEvent.setup();
     const { requests } = renderCard({ mesh_file_id: 7 });
@@ -136,9 +158,8 @@ describe("ModelCard", () => {
   });
 
   it("shows revision status alongside a custom revision label", () => {
-    // The card links to the model detail route and prefetches it on hover, so
-    // it needs a real router; `thumbnail_url: null` keeps the thumbnail hook
-    // from touching the network.
+    // The card links to the model detail route, so it needs a real router.
+    // `thumbnail_url: null` keeps the thumbnail hook from touching the network.
     renderApp(<ModelCard model={model} />);
 
     expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(

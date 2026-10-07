@@ -694,7 +694,7 @@ export function SettingsPanel() {
     if (section === "overview") params.delete("section");
     else params.set("section", section);
     const query = params.toString();
-    router.replace(query ? `/settings?${query}` : "/settings", { scroll: false });
+    router.replace(query ? `/settings?${query}` : "/settings");
   }
 
   useEffect(() => {

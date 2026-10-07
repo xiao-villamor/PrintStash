@@ -19,7 +19,7 @@ without a changed contract is not an increment.
 | HTTP transport        | `lib/api/request`: typed error parsing, auth, cancellation, session checks, JSON/forms/actions/protected bytes.                         | Remove the second JSON freshness cache and transport knowledge of feature invalidation.           |
 | Typed endpoints       | Existing domain endpoint files under `lib/api/`.                                                                                        | Keep actual HTTP/domain contracts explicit; no generic repository layer.                          |
 | Feature remote state  | `features/<feature>/queries.ts`: key/options factories; `mutations.ts`: commands with declared affected reads.                          | Multiple surfaces observe one freshness/invalidation policy.                                      |
-| Library navigation    | `features/library/url.ts`, `browse.ts`, `history.ts`.                                                                                   | One URL codec, one page order, one restoration policy for the nested scroll container.            |
+| Library navigation    | `features/library/url.ts`, `filters.ts`, `browse.ts`, `navigation.tsx`, `navigation-state.ts`, `reading-position.ts`.                                                                                   | One URL codec, one page order, one restoration policy for the nested scroll container.            |
 | Event policy          | Event transport owns connections; feature adapters classify notices as read invalidation, controlled-refresh hint or authorized resync. | Events cannot independently install unvalidated private entity data or bypass stable-list policy. |
 | Local operation state | Workflow controller where upload bytes, cancellation and retries have a lifecycle.                                                      | Client transfer progress does not get confused with the durable server Job.                       |
 | Protected assets      | `lib/assets`: acquire/release, viewport admission, byte budget, cancellation and session disposal.                                      | Mounted images cannot lose their object URL to an unaware LRU.                                    |
@@ -228,6 +228,24 @@ Restore the actual `main` scroll container only after matching list data/layout
 are ready. Prefer entity anchor plus offset, then bounded fallback. Cache eviction,
 changed viewport, a deleted anchor and session loss each need an explicit outcome.
 Do not add private Query persistence simply to preserve navigation within a tab.
+
+The implemented Library navigation interface is `LibraryItemLink` / `LibraryBackLink`.
+Links carry a validated same-origin Library return URL plus the originating Router
+entry identity. Ordinary Back reuses the immediate registered entry; modified
+clicks remain native, and unknown origins use the URL fallback. `navigation-state`
+keeps at most 64 entry records containing only session identity, URL, container
+positions, anchors and loaded-page counts. It clears on session/access retirement;
+it never stores entity responses. `reading-position` restores grid/list containers
+after the matching snapshot settles, requests no more than the recorded page
+counts after Query GC, and displays a reset notice if the anchor cannot be restored.
+Two visits to the same URL retain separate bookmarks. The displayed snapshot,
+including breadcrumbs and command targets, owns its origin while another route loads.
+
+`lib/navigation.ts` exposes only push, replace, Back and Forward. Do not add route
+refresh, route prefetch or scroll options without an actual implementation and an
+observable contract. Query options own real data prefetch; feature commands own
+invalidation; Library owns reading-position recovery.
+
 
 ## Existing-to-future owner map
 

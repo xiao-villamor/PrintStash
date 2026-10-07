@@ -73,7 +73,7 @@ export function LibrarySearch() {
       if (next) updated.set("q", next);
       else updated.delete("q");
       setPublished(next);
-      router.replace(updated.size ? `/?${updated}` : "/", { scroll: false });
+      router.replace(updated.size ? `/?${updated}` : "/");
     }, 250);
     return () => {
       if (publishTimer.current !== undefined) window.clearTimeout(publishTimer.current);
@@ -97,7 +97,7 @@ export function LibrarySearch() {
     const updated = new URLSearchParams(params);
     updated.delete("parse");
     updated.set("mode", "lexical");
-    router.push(`/search?${updated}`, { scroll: false });
+    router.push(`/search?${updated}`);
   }
   function submit() {
     setOpen(false);
@@ -114,7 +114,7 @@ export function LibrarySearch() {
     if (next) updated.set("q", next);
     else updated.delete("q");
     setPublished(next);
-    router.replace(updated.size ? `/?${updated}` : "/", { scroll: false });
+    router.replace(updated.size ? `/?${updated}` : "/");
   }
   function changeValue(next: string) {
     setValue(next);
@@ -123,11 +123,11 @@ export function LibrarySearch() {
     setDebounced("");
     setPublished("");
     if (pathname === "/search") {
-      router.replace("/", { scroll: false });
+      router.replace("/");
     } else {
       const updated = new URLSearchParams(params);
       updated.delete("q");
-      router.replace(updated.size ? `/?${updated}` : "/", { scroll: false });
+      router.replace(updated.size ? `/?${updated}` : "/");
     }
   }
   if (!visible) return <span className="flex-1" />;

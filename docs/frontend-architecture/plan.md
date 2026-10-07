@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M4 are closed locally in dependency order. M5 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M5 are closed locally in dependency order. M6 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -185,7 +185,11 @@ closed with its [acceptance consolidation](../frontend-m4-closure-validation.md)
 conditional editing, restored-history identity, confirmed Favorites reading position
 and interrupted-batch recovery are qualified. The broad backend run's single stale
 field expectation was corrected and the214-test affected contract selection passed;
-the original failed invocation remains explicit. M5 is now the only active target.
+the original failed invocation remains explicit. M5 is locally closed with its
+[history/navigation acceptance](../frontend-m5-closure-validation.md): bounded
+restoration, coherent rapid navigation, private retirement, repeated URL entries,
+real paged detail return, and removal of ignored navigation APIs are qualified.
+M6 is now the only active target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own
@@ -193,8 +197,8 @@ acceptance and removal criteria are satisfied.
 
 Work implemented ahead of this order is preserved with its actual qualification
 results. It is not discarded, counted as a closed goal, or rerun without a
-specific need. The qualified M5 refresh checkpoint and pending navigation work
-remain recorded in their feature validation documents. M1 is locally closed with
+specific need. The qualified M5 refresh and navigation work
+is consolidated in its closure record. M1 is locally closed with
 its explicit M10 compatibility deadline. Later work waits for its stated
 prerequisites. Final delivery and
 remote CI remain M11 work; no full-suite or performance improvement is claimed here.

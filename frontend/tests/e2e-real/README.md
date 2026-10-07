@@ -159,3 +159,7 @@ AI Search settings: the Settings browser flow waits for loaded AI data, visits g
 `provenance.spec.ts` imports an actual browser capture, edits its Source metadata,
 creates a competing conditional edit, and verifies that the retained draft is
 persisted only after reviewing the current source version and explicitly retrying.
+
+`library-navigation.spec.ts` returns from real Model detail to a paginated Library,
+checking entry identity and scroll geometry in desktop grid and mobile list layouts,
+including browser Forward/Back. It seeds and cleans up a unique scale fixture.

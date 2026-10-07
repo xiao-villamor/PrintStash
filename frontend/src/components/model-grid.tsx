@@ -534,21 +534,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const tags = value;
     params.delete("tag");
     tags.forEach((tag) => params.append("tag", tag));
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
   function setSelectedPrinterId(value: number | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("printer_presence");
     if (value !== null) params.set("printer_id", String(value));
     else params.delete("printer_id");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
   function setSelectedPrinterPresence(value: "any" | "none" | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("printer_id");
     if (value !== null) params.set("printer_presence", value);
     else params.delete("printer_presence");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
   const savedViewsOwner = useSavedViews(savedViewsEnabled);
   const savedViews = savedViewsOwner.views;
@@ -619,8 +619,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const canonicalLibraryHref = `/?${libraryFilters.params}`;
   const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
   useEffect(() => {
-    if (currentLocationHref !== canonicalLibraryHref)
-      router.replace(canonicalLibraryHref, { scroll: false });
+    if (currentLocationHref !== canonicalLibraryHref) router.replace(canonicalLibraryHref);
   }, [currentLocationHref, canonicalLibraryHref, router]);
   useEffect(() => {
     if (
@@ -782,7 +781,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (path) params.set("c", path);
     else params.delete("c");
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/", { scroll: false });
+    router.push(qs ? `/?${qs}` : "/");
   }
 
   function handleLibraryViewChange(view: LibraryViewMode) {
@@ -791,7 +790,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("v", "models");
     params.set("type", view);
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
 
   useEffect(() => {
@@ -799,7 +798,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("upload");
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }, [uploadRequested, searchParams, router]);
 
   const query = searchParams.get("q") ?? "";
@@ -811,7 +810,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     params.delete(key);
     values.forEach((value) => params.append(key, value));
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
   // One builder per folder-scoped query, shared by the live queries and the
@@ -833,7 +832,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
     const params = writeLibraryFilters(filters, canViewPrinters);
-    router.replace(`/?${params}`, { scroll: false });
+    router.replace(`/?${params}`);
   }
 
   function applySavedView(view: SavedViewRead) {
@@ -1721,7 +1720,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     if (next) params.set("favorites", "true");
     else params.delete("favorites");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
 
   function toggleSelectMode() {
@@ -1732,7 +1731,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   function selectSort(value: SortKey) {
     const params = new URLSearchParams(searchParams);
     params.set("sort", value);
-    router.replace(`/?${params}`, { scroll: false });
+    router.replace(`/?${params}`);
     localStorage.setItem("ps-vault-sort", value);
   }
 
@@ -1750,7 +1749,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("q");
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
   function clearAllFilters() {
@@ -1778,7 +1777,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     ])
       params.delete(key);
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
   const activeFilterItems: { label: string; onRemove: () => void }[] = (() => {
@@ -1828,7 +1827,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onRemove: () => {
             const params = new URLSearchParams(searchParams.toString());
             params.delete(key);
-            router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+            router.replace(params.size ? `/?${params}` : "/");
           },
         });
     }
@@ -1962,7 +1961,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);
                 else params.delete(key);
-                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+                router.replace(params.size ? `/?${params}` : "/");
               }}
               onClearAll={clearAllFilters}
             />
@@ -2006,7 +2005,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);
                 else params.delete(key);
-                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+                router.replace(params.size ? `/?${params}` : "/");
               }}
               onClearAll={clearAllFilters}
             />
@@ -2502,7 +2501,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onChange={(view) => {
               const params = new URLSearchParams(searchParams.toString());
               params.set("v", view);
-              router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+              router.replace(params.size ? `/?${params}` : "/");
             }}
             className="border-b border-border px-4 pt-3 sm:px-6"
             tabClassName="px-3 py-2 text-sm font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -3262,7 +3261,6 @@ function ModelListRow({
   draggable?: boolean;
 }) {
   useUiLocale();
-  const router = useRouter();
   const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
@@ -3279,7 +3277,6 @@ function ModelListRow({
               }
             : undefined
         }
-        onMouseEnter={() => router.prefetch(`/models/${model.id}`)}
         onClick={(e) => {
           if (selectable) {
             e.preventDefault();

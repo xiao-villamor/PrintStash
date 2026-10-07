@@ -6,7 +6,6 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { LibraryItemLink } from "@/features/library/navigation";
-import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
 import { FileText, Star, Tags, ScanSearch } from "lucide-react";
@@ -184,7 +183,6 @@ function ModelCardInner({
   onEditTags?: (model: ModelListItem) => void;
 }) {
   useUiLocale();
-  const router = useRouter();
   const [dragging, setDragging] = useState(false);
   const starMutation = useLibraryStar();
   const starred =
@@ -204,12 +202,6 @@ function ModelCardInner({
     } catch (error) {
       toast.error(error);
     }
-  }
-
-  // Hover intent: prefetch the detail route (server-rendered payload) and warm
-  // the STL into the browser cache so the 3D viewer opens without a spinner.
-  function handleHover() {
-    router.prefetch(`/models/${model.id}`);
   }
 
   return (
@@ -233,8 +225,6 @@ function ModelCardInner({
             ? "border-primary ring-2 ring-primary-soft"
             : "border-border hover:border-primary"
         }`}
-        onMouseEnter={handleHover}
-        onTouchStart={handleHover}
       >
         {selectable && (
           <div className="absolute left-2 top-2 z-10">

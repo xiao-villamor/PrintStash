@@ -76,7 +76,7 @@ function SearchContent() {
     next.delete("parse");
     if (canParse && (!!parsed.error || !!result?.reason)) next.set("parse_error", "1");
     else next.delete("parse_error");
-    router.replace(`/search?${next}`, { scroll: false });
+    router.replace(`/search?${next}`);
   }, [
     wantsParse,
     preference.isPending,
