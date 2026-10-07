@@ -385,3 +385,46 @@ enrollment cannot prove the path reviewed by the client. These remain required M
 work before milestone closure; frontend fingerprints are not a substitute. The
 inventory/cache consumers and remaining administration/entry workflows are also
 still open.
+
+
+## Configuration transaction prerequisite (M9, locally qualified)
+
+The conditional-edit contract requires a single atomic write. The existing PUT
+commits derivative controls, flags, schedule and currency independently before
+persisting the remaining settings. This increment removes those intermediate
+commits; it does not yet claim version-conflict protection. Runtime publication
+and derivative wake-up hints must follow a successful commit. Rollback is a
+revert of this increment; no schema or public payload changes are involved.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| CT1 | rejects the entire configuration patch when its final database write fails | Error | Mixed derivative, flag, schedule, currency and OIDC patch, with/without a typed provider; database rejects the final field | Every previously stored field and effective runtime setting remains unchanged | Integration | ✅ `integration/api/v1/test_config.py::TestConfigurationTransaction::test_rejects_the_entire_patch_when_the_final_database_write_fails` |
+| CT2 | publishes a successfully committed mixed configuration patch | Happy | Mixed controls, flags, schedule, currency and runtime settings | Response and subsequent GET expose all accepted fields | Integration | ✅ `integration/api/v1/test_config.py::TestConfigurationTransaction::test_publishes_a_successfully_committed_mixed_patch` |
+| CT3 | clears runtime overrides in a mixed configuration patch | Edge | Existing string and integer overrides; empty string and minus one with a flag change | DB overrides cleared; GET returns configured defaults | Integration | ✅ `integration/api/v1/test_config.py::TestConfigurationTransaction::test_clears_runtime_overrides_in_a_mixed_patch` |
+| CT4 | retains standalone derivative policy command behavior | Happy | Direct policy command without caller-owned transaction | Fresh session reads the accepted producer control | Integration | ✅ `integration/modules/derivatives/test_policy.py::TestResolution::test_independent_sessions_read_the_saved_policy` |
+| CT5 | PostgreSQL rejects the whole mixed patch on a failed final write | Error | Real PostgreSQL rejects the OIDC field after other controls were staged | All persisted fields remain at the original values | Integration | ✅ `integration/postgres/test_config_transactions.py::TestConfigurationTransaction::test_rejects_the_whole_patch_after_a_failed_final_write` |
+| CT6 | PostgreSQL persists the accepted mixed patch | Happy | Real PostgreSQL accepts controls, flags, schedule, currency and runtime settings | Fresh session reads every accepted value | Integration | ✅ `integration/postgres/test_config_transactions.py::TestConfigurationTransaction::test_persists_the_accepted_mixed_patch` |
+
+Validation (2026-10-07):
+
+- Initial regression: **1 failed, 2 passed** in 29.73 s. A final database
+  rejection left earlier flag, schedule, currency and derivative edits saved.
+- First fix: **3 passed** in 3.84 s. Affected-owner selection (config API,
+  derivative policy, backup schedule, runtime configuration/overlay/storage):
+  **239 passed, 1 failed** in 18.45 s. The additional typed-provider fixture
+  attempted a forbidden namespace change and received 409 before the injected
+  failure. It now starts with an existing WebDAV configuration and changes its
+  credential. Corrected regression selection: **4 passed** in 4.06 s.
+- PostgreSQL transaction cases: **2 passed** in 39.94 s, using the repository's
+  container fixture. No migration or public API schema changed.
+- Ruff check passed for all six touched Python files. Formatting was applied to
+  the changed blocks; unrelated Python 3.14 exception-format changes were reverted.
+- Targeted Pyright reported **3 errors** in unchanged `runtime_config.py` lines
+  120 and 803 (`File.sha256.is_not` and the integer fallback conversion).
+  Those exact expressions also exist at the pre-increment commit. This is not
+  a green type gate; resolution remains part of final validation.
+- No complete suite, frontend build or browser suite was run for this backend-only
+  prerequisite. Full delivery gates remain due at M11. No performance claim.
+
+This removes partial database commits. It does **not** yet provide conditional
+edit versions, reviewed-root enforcement, or complete M9 acceptance.

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Save compound configuration changes in one transaction so a failed final write
+  cannot leave earlier policy, schedule, currency or provider changes committed.
+
 - Share current-storage configuration with Settings and migration receipts, retain
   newer credential drafts, expose failed reads with recovery, and retire private
   storage views and root-enrollment confirmations when access is lost. Keep the

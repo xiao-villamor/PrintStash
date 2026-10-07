@@ -75,9 +75,12 @@ publish centrally; edits typed while a save is pending remain drafts. Migration
 activation/recovery invalidates the configuration projection after canceling older
 reads, so current-location summaries follow the accepted storage transition.
 `settings-storage-root.ts` scopes explicit enrollment to its view/session and checks
-the currently observed reviewed path. Atomic configuration edits and a backend
-reviewed-root precondition remain required before M9 closes; local fingerprints
-and path comparisons do not provide that protection.
+the currently observed reviewed path. The configuration PUT now stages its owned
+policy/flag/schedule/provider writes and commits them together before publishing
+runtime values or derivative hints. A database failure rolls back the whole patch.
+Conditional configuration edit versions and a backend reviewed-root precondition
+remain required before M9 closes; local fingerprints and path comparisons do not
+provide that protection.
 
 ## Proposed directory tree
 

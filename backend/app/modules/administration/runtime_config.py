@@ -883,6 +883,7 @@ def update_backup_schedule(
     time_utc: str | None = None,
     manual_local_enabled: bool | None = None,
     automatic_local_enabled: bool | None = None,
+    commit: bool = True,
 ) -> SystemConfig:
     from app.modules.backups.backup_schedule import update_schedule
 
@@ -892,6 +893,7 @@ def update_backup_schedule(
         time_utc=time_utc,
         manual_local_enabled=manual_local_enabled,
         automatic_local_enabled=automatic_local_enabled,
+        commit=commit,
     )
 
 
@@ -1001,33 +1003,40 @@ def currency(session: Session) -> str:
     return (config.currency if config and config.currency else None) or "USD"
 
 
-def set_currency(session: Session, code: str) -> SystemConfig:
-    config = get_or_create(session)
+def set_currency(session: Session, code: str, *, commit: bool = True) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.currency = code.upper() if code else None
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 
-def set_external_libraries_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_external_libraries_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.external_libraries_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 
-def set_auto_mark_known_good(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_auto_mark_known_good(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.auto_mark_known_good = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 

@@ -98,7 +98,9 @@ def require_enabled(session: Session, definition: JobKind) -> None:
         )
 
 
-def update(session: Session, changes: dict[SettingName, bool | None]) -> None:
+def update(
+    session: Session, changes: dict[SettingName, bool | None], *, commit: bool = True
+) -> None:
     """Persist all supplied controls together, then publish latency hints."""
     if not changes:
         return
@@ -107,7 +109,15 @@ def update(session: Session, changes: dict[SettingName, bool | None]) -> None:
         setattr(config, name, value)
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
+    if commit:
+        session.commit()
+        publish_changes(changes)
+
+
+def publish_changes(changes: dict[SettingName, bool | None]) -> None:
+    """Publish producer wake-up hints only after the caller commits its controls."""
+    if not changes:
+        return
     from app.modules.work.events import derivative_policy_changed
     from app.modules.work.submission import nudge
 

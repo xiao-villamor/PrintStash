@@ -12,6 +12,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.security import require_superuser
 from app.db.session import get_session
+from app.db.transactions import rollback_on_failure
 from app.modules.administration import runtime_config
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_operations import (
@@ -331,162 +332,178 @@ def update_config(
     body: VaultConfigUpdate,
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
-    legacy_storage_fields = {
-        "storage_backend",
-        "data_dir",
-        "thumb_dir",
-        "s3_bucket",
-        "s3_endpoint_url",
-        "s3_region",
-        "s3_access_key",
-        "s3_secret_key",
-    }
-    new_storage_supplied = (
-        body.storage_provider is not None or body.storage_provider_config is not None
-    )
-    legacy_storage_supplied = bool(body.model_fields_set & legacy_storage_fields)
-    if new_storage_supplied and legacy_storage_supplied:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="mixed_storage_provider_input",
-        )
-    if (body.storage_provider is None) != (body.storage_provider_config is None):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="storage_provider_and_config_required",
-        )
-    if body.storage_backend is not None and body.storage_backend not in (
-        "",
-        "local",
-        "s3",
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="storage_backend must be 'local' or 's3'",
-        )
-
-    try:
-        namespace_change, requested_provider = (
-            runtime_config.storage_namespace_change_requires_migration(
-                session,
-                storage_backend=body.storage_backend,
-                data_dir=body.data_dir,
-                thumb_dir=body.thumb_dir,
-                s3_bucket=body.s3_bucket,
-                s3_endpoint_url=body.s3_endpoint_url,
-                s3_region=body.s3_region,
-                storage_provider=body.storage_provider,
-                storage_provider_config=body.storage_provider_config,
-            )
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        ) from exc
-    if namespace_change:
-        # Runtime remapping would make row-derived keys point at a new root or
-        # bucket. There is intentionally no in-place shortcut: a future storage
-        # migration must copy, verify, and atomically switch every exact object.
-        if runtime_config.is_configured(session) or runtime_config.has_storage_state(
-            session
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="storage_migration_required",
-            )
-
     from app.modules.derivatives import policy
 
-    changes = {
-        name: getattr(body, name)
-        for name in policy.SettingName
-        if name in body.model_fields_set
-    }
-    policy.update(session, changes)
-
-    if body.auto_mark_known_good is not None:
-        runtime_config.set_auto_mark_known_good(session, body.auto_mark_known_good)
-
-    if body.external_libraries_enabled is not None:
-        runtime_config.set_external_libraries_enabled(
-            session, body.external_libraries_enabled
-        )
-
-    if (
-        body.automatic_backups_enabled is not None
-        or body.automatic_backup_time_utc is not None
-        or body.manual_local_backup_enabled is not None
-        or body.automatic_local_backup_enabled is not None
-    ):
-        runtime_config.update_backup_schedule(
-            session,
-            enabled=body.automatic_backups_enabled,
-            time_utc=body.automatic_backup_time_utc,
-            manual_local_enabled=body.manual_local_backup_enabled,
-            automatic_local_enabled=body.automatic_local_backup_enabled,
-        )
-
-    if body.currency is not None:
-        runtime_config.set_currency(session, body.currency)
-
-    if requested_provider is not None:
-        runtime_config.update_storage_provider(
-            session,
-            provider=body.storage_provider or "",
-            raw_config=body.storage_provider_config or {},
-        )
-
-    runtime_config.update_config(
-        session,
-        storage_backend=None if new_storage_supplied else body.storage_backend,
-        data_dir=None if new_storage_supplied else body.data_dir,
-        thumb_dir=None if new_storage_supplied else body.thumb_dir,
-        s3_bucket=None if new_storage_supplied else body.s3_bucket,
-        s3_endpoint_url=None if new_storage_supplied else body.s3_endpoint_url,
-        s3_region=None if new_storage_supplied else body.s3_region,
-        s3_access_key=None if new_storage_supplied else body.s3_access_key,
-        s3_secret_key=None if new_storage_supplied else body.s3_secret_key,
-        backup_retention_days=body.backup_retention_days,
-        storage_min_free_bytes=body.storage_min_free_bytes,
-        trash_retention_days=body.trash_retention_days,
-        model_thumbnail_width=body.model_thumbnail_width,
-        backup_s3_bucket=body.backup_s3_bucket,
-        backup_s3_endpoint_url=body.backup_s3_endpoint_url,
-        backup_s3_region=body.backup_s3_region,
-        backup_s3_access_key=body.backup_s3_access_key,
-        backup_s3_secret_key=body.backup_s3_secret_key,
-        oidc_enabled=body.oidc_enabled,
-        oidc_issuer_url=body.oidc_issuer_url,
-        oidc_client_id=body.oidc_client_id,
-        oidc_client_secret=body.oidc_client_secret,
-        oidc_scopes=body.oidc_scopes,
-        oidc_username_claim=body.oidc_username_claim,
-        oidc_groups_claim=body.oidc_groups_claim,
-        oidc_admin_groups=body.oidc_admin_groups,
-        oidc_display_name=body.oidc_display_name,
-        oidc_redirect_uri=body.oidc_redirect_uri,
-        oidc_allow_insecure_http=body.oidc_allow_insecure_http,
-    )
-
-    controls = policy.resolve(session)
-    cfg = runtime_config.get_effective_config(session)
-    cfg.update(
-        {
-            name.value: controls[definition].enabled
-            for definition, name in policy.SETTINGS.items()
+    with rollback_on_failure(session):
+        # Reserve the configuration row before validating read-dependent edits.
+        # The final runtime-config write owns the single commit and publication.
+        policy.lock(session)
+        legacy_storage_fields = {
+            "storage_backend",
+            "data_dir",
+            "thumb_dir",
+            "s3_bucket",
+            "s3_endpoint_url",
+            "s3_region",
+            "s3_access_key",
+            "s3_secret_key",
         }
-    )
-    provider_config = runtime_config.get_sanitized_storage_provider(session)
-    if provider_config is not None:
-        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
-    backend = get_backend()
-    cfg.update(
-        storage_tier=backend.capabilities.tier.value,
-        storage_capabilities=backend.capabilities.as_dict(),
-        storage_operations=serialize_operations(vault_operations(backend.capabilities)),
-        storage_warnings=list(backend.capabilities.warnings),
-        storage_probe_diagnostics=backend.probe_diagnostics,
-        storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
-    )
-    return VaultConfigRead(**cfg)
+        new_storage_supplied = (
+            body.storage_provider is not None
+            or body.storage_provider_config is not None
+        )
+        legacy_storage_supplied = bool(body.model_fields_set & legacy_storage_fields)
+        if new_storage_supplied and legacy_storage_supplied:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="mixed_storage_provider_input",
+            )
+        if (body.storage_provider is None) != (body.storage_provider_config is None):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="storage_provider_and_config_required",
+            )
+        if body.storage_backend is not None and body.storage_backend not in (
+            "",
+            "local",
+            "s3",
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="storage_backend must be 'local' or 's3'",
+            )
+
+        try:
+            namespace_change, requested_provider = (
+                runtime_config.storage_namespace_change_requires_migration(
+                    session,
+                    storage_backend=body.storage_backend,
+                    data_dir=body.data_dir,
+                    thumb_dir=body.thumb_dir,
+                    s3_bucket=body.s3_bucket,
+                    s3_endpoint_url=body.s3_endpoint_url,
+                    s3_region=body.s3_region,
+                    storage_provider=body.storage_provider,
+                    storage_provider_config=body.storage_provider_config,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        if namespace_change:
+            # Runtime remapping would make row-derived keys point at a new root or
+            # bucket. There is intentionally no in-place shortcut: a future storage
+            # migration must copy, verify, and atomically switch every exact object.
+            if runtime_config.is_configured(
+                session
+            ) or runtime_config.has_storage_state(session):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="storage_migration_required",
+                )
+
+        changes = {
+            name: getattr(body, name)
+            for name in policy.SettingName
+            if name in body.model_fields_set
+        }
+        policy.update(session, changes, commit=False)
+
+        if body.auto_mark_known_good is not None:
+            runtime_config.set_auto_mark_known_good(
+                session, body.auto_mark_known_good, commit=False
+            )
+
+        if body.external_libraries_enabled is not None:
+            runtime_config.set_external_libraries_enabled(
+                session, body.external_libraries_enabled, commit=False
+            )
+
+        if (
+            body.automatic_backups_enabled is not None
+            or body.automatic_backup_time_utc is not None
+            or body.manual_local_backup_enabled is not None
+            or body.automatic_local_backup_enabled is not None
+        ):
+            runtime_config.update_backup_schedule(
+                session,
+                enabled=body.automatic_backups_enabled,
+                time_utc=body.automatic_backup_time_utc,
+                manual_local_enabled=body.manual_local_backup_enabled,
+                automatic_local_enabled=body.automatic_local_backup_enabled,
+                commit=False,
+            )
+
+        if body.currency is not None:
+            runtime_config.set_currency(session, body.currency, commit=False)
+
+        if requested_provider is not None:
+            runtime_config.update_storage_provider(
+                session,
+                provider=body.storage_provider or "",
+                raw_config=body.storage_provider_config or {},
+                commit=False,
+                apply_runtime=False,
+            )
+
+        config = runtime_config.update_config(
+            session,
+            storage_backend=None if new_storage_supplied else body.storage_backend,
+            data_dir=None if new_storage_supplied else body.data_dir,
+            thumb_dir=None if new_storage_supplied else body.thumb_dir,
+            s3_bucket=None if new_storage_supplied else body.s3_bucket,
+            s3_endpoint_url=None if new_storage_supplied else body.s3_endpoint_url,
+            s3_region=None if new_storage_supplied else body.s3_region,
+            s3_access_key=None if new_storage_supplied else body.s3_access_key,
+            s3_secret_key=None if new_storage_supplied else body.s3_secret_key,
+            backup_retention_days=body.backup_retention_days,
+            storage_min_free_bytes=body.storage_min_free_bytes,
+            trash_retention_days=body.trash_retention_days,
+            model_thumbnail_width=body.model_thumbnail_width,
+            backup_s3_bucket=body.backup_s3_bucket,
+            backup_s3_endpoint_url=body.backup_s3_endpoint_url,
+            backup_s3_region=body.backup_s3_region,
+            backup_s3_access_key=body.backup_s3_access_key,
+            backup_s3_secret_key=body.backup_s3_secret_key,
+            oidc_enabled=body.oidc_enabled,
+            oidc_issuer_url=body.oidc_issuer_url,
+            oidc_client_id=body.oidc_client_id,
+            oidc_client_secret=body.oidc_client_secret,
+            oidc_scopes=body.oidc_scopes,
+            oidc_username_claim=body.oidc_username_claim,
+            oidc_groups_claim=body.oidc_groups_claim,
+            oidc_admin_groups=body.oidc_admin_groups,
+            oidc_display_name=body.oidc_display_name,
+            oidc_redirect_uri=body.oidc_redirect_uri,
+            oidc_allow_insecure_http=body.oidc_allow_insecure_http,
+        )
+
+        if requested_provider is not None:
+            runtime_config.activate_config(config)
+        policy.publish_changes(changes)
+
+        controls = policy.resolve(session)
+        cfg = runtime_config.get_effective_config(session)
+        cfg.update(
+            {
+                name.value: controls[definition].enabled
+                for definition, name in policy.SETTINGS.items()
+            }
+        )
+        provider_config = runtime_config.get_sanitized_storage_provider(session)
+        if provider_config is not None:
+            cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
+        backend = get_backend()
+        cfg.update(
+            storage_tier=backend.capabilities.tier.value,
+            storage_capabilities=backend.capabilities.as_dict(),
+            storage_operations=serialize_operations(
+                vault_operations(backend.capabilities)
+            ),
+            storage_warnings=list(backend.capabilities.warnings),
+            storage_probe_diagnostics=backend.probe_diagnostics,
+            storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
+        )
+        return VaultConfigRead(**cfg)
