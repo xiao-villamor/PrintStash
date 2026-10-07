@@ -8,7 +8,15 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { ApiError, parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  backupCatalogKeys,
+  backupSourcesOptions,
+  unownedLocalBackupsOptions,
+  unownedS3BackupsOptions,
+  unownedRemoteBackupsOptions,
+} from "@/lib/queries/settings-backup-catalog";
+import { storageConnectionsOptions } from "@/lib/queries/settings-storage";
 import {
   apiKeysOptions,
   adminUsersOptions,
@@ -117,12 +125,7 @@ import {
   getActiveGcPlan,
   getLatestRelease,
   getVaultConfig,
-  listBackupSources,
-  listUnownedS3Backups,
-  listUnownedLocalBackups,
-  listUnownedRemoteBackups,
   listTrash,
-  listStorageConnections,
   purgeModel,
   restoreBackup,
   restoreModel,
@@ -455,6 +458,7 @@ function SettingsCard({
 export function SettingsPanel() {
   useUiLocale();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { locale, t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -622,7 +626,7 @@ export function SettingsPanel() {
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
   const remoteConfig = useVaultConfig({
-    enabled: !!user?.is_superuser && ["design", "previews"].includes(activeSection),
+    enabled: !!user?.is_superuser && ["design", "previews", "backup"].includes(activeSection),
     retry: false,
   });
   const configCommand = useVaultConfigCommand();
@@ -647,21 +651,86 @@ export function SettingsPanel() {
   const [trashOperations, setTrashOperations] = useState<StorageOperations>();
   const [backingUp, setBackingUp] = useState(false);
   const [backupRunRefresh, setBackupRunRefresh] = useState(0);
-  const [backups, setBackups] = useState<BackupMeta[]>([]);
-  const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
-  const [unownedS3Backups, setUnownedS3Backups] = useState<UnownedS3BackupCandidate[]>([]);
-  const [unownedRemoteBackups, setUnownedRemoteBackups] = useState<UnownedRemoteBackupCandidate[]>(
-    [],
+  const backupEnabled = !!user?.is_superuser && activeSection === "backup";
+  const ownedBackupRead = useQuery({ ...backupSourcesOptions(), enabled: backupEnabled });
+  const localBackupRead = useQuery({ ...unownedLocalBackupsOptions(), enabled: backupEnabled });
+  const s3BackupRead = useQuery({ ...unownedS3BackupsOptions(), enabled: backupEnabled });
+  const remoteBackupRead = useQuery({ ...unownedRemoteBackupsOptions(), enabled: backupEnabled });
+  const backupConnectionRead = useQuery({ ...storageConnectionsOptions(), enabled: backupEnabled });
+  const backupsDenied =
+    ownedBackupRead.isError &&
+    [401, 403, 404].includes(parseApiError(ownedBackupRead.error).status);
+  const backups = user?.is_superuser && !backupsDenied ? (ownedBackupRead.data ?? []) : [];
+  const unownedBackups =
+    user?.is_superuser && !localBackupRead.isError ? (localBackupRead.data ?? []) : [];
+  const unownedS3Backups =
+    user?.is_superuser && !s3BackupRead.isError ? (s3BackupRead.data ?? []) : [];
+  const unownedRemoteBackups =
+    user?.is_superuser && !remoteBackupRead.isError ? (remoteBackupRead.data ?? []) : [];
+  const backupsLoading = [ownedBackupRead, localBackupRead, s3BackupRead, remoteBackupRead].some(
+    (read) => read.isFetching,
   );
-  const [backupsLoading, setBackupsLoading] = useState(false);
-  const [backupRetentionDays, setBackupRetentionDays] = useState("30");
+  const backupDiscoveryFailed =
+    localBackupRead.isError || s3BackupRead.isError || remoteBackupRead.isError;
+  const backupConfigUnavailable = !remoteConfigData || remoteConfig.isError;
+  // Only deliberate edits live in these drafts; refreshed DTOs stay in Query.
+  const [backupRetentionDraft, setBackupRetentionDays] = useState<string | null>(null);
+  const backupRetentionDays =
+    backupRetentionDraft ?? String(remoteConfigData?.backup_retention_days ?? 30);
   const parsedBackupRetentionDays = parseBackupRetentionDays(backupRetentionDays);
   const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
-  const [backupConnections, setBackupConnections] = useState<StorageConnection[]>([]);
-  const [automaticBackupsEnabled, setAutomaticBackupsEnabled] = useState(false);
-  const [automaticBackupTimeUtc, setAutomaticBackupTimeUtc] = useState("02:00");
-  const [manualLocalBackupEnabled, setManualLocalBackupEnabled] = useState(true);
-  const [automaticLocalBackupEnabled, setAutomaticLocalBackupEnabled] = useState(true);
+  const [backupConnectionDrafts, setBackupConnectionDrafts] = useState<
+    Record<
+      number,
+      Partial<Pick<StorageConnection, "manual_backup_enabled" | "automatic_backup_enabled">>
+    >
+  >({});
+  const backupConnections = !backupConnectionRead.isError
+    ? (backupConnectionRead.data ?? [])
+        .filter((connection) => connection.purpose === "backup" || connection.purpose === "both")
+        .map((connection) => ({ ...connection, ...backupConnectionDrafts[connection.id] }))
+    : [];
+  const [automaticBackupsDraft, setAutomaticBackupsEnabled] = useState<boolean | null>(null);
+  const automaticBackupsEnabled =
+    automaticBackupsDraft ?? remoteConfigData?.automatic_backups_enabled ?? false;
+  const [automaticBackupTimeDraft, setAutomaticBackupTimeUtc] = useState<string | null>(null);
+  const automaticBackupTimeUtc =
+    automaticBackupTimeDraft ?? remoteConfigData?.automatic_backup_time_utc ?? "02:00";
+  const [manualLocalBackupDraft, setManualLocalBackupEnabled] = useState<boolean | null>(null);
+  const manualLocalBackupEnabled =
+    manualLocalBackupDraft ?? remoteConfigData?.manual_local_backup_enabled ?? true;
+  const [automaticLocalBackupDraft, setAutomaticLocalBackupEnabled] = useState<boolean | null>(
+    null,
+  );
+  const automaticLocalBackupEnabled =
+    automaticLocalBackupDraft ?? remoteConfigData?.automatic_local_backup_enabled ?? true;
+  // Receipt publication is migrated with exact-source commands in the next bounded backup step.
+  function setBackups(update: (current: BackupMeta[]) => BackupMeta[]) {
+    queryClient.setQueryData<BackupMeta[]>(backupCatalogKeys.owned, (previous) =>
+      update(previous ?? []),
+    );
+  }
+  function setUnownedBackups(
+    update: (current: UnownedBackupCandidate[]) => UnownedBackupCandidate[],
+  ) {
+    queryClient.setQueryData<UnownedBackupCandidate[]>(backupCatalogKeys.local, (previous) =>
+      update(previous ?? []),
+    );
+  }
+  function setUnownedS3Backups(
+    update: (current: UnownedS3BackupCandidate[]) => UnownedS3BackupCandidate[],
+  ) {
+    queryClient.setQueryData<UnownedS3BackupCandidate[]>(backupCatalogKeys.s3, (previous) =>
+      update(previous ?? []),
+    );
+  }
+  function setUnownedRemoteBackups(
+    update: (current: UnownedRemoteBackupCandidate[]) => UnownedRemoteBackupCandidate[],
+  ) {
+    queryClient.setQueryData<UnownedRemoteBackupCandidate[]>(backupCatalogKeys.remote, (previous) =>
+      update(previous ?? []),
+    );
+  }
   const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [deleteBackupTarget, setDeleteBackupTarget] = useState<BackupMeta | null>(null);
@@ -761,59 +830,25 @@ export function SettingsPanel() {
     }
   }, [activeSection, loadTrash]);
 
-  const loadBackups = useCallback(
-    async (preserve?: BackupMeta) => {
-      if (!user?.is_superuser) {
-        setBackups([]);
-        return;
-      }
-      setBackupsLoading(true);
-      try {
-        const [owned, unowned, unownedS3, unownedRemote, config, connections] =
-          await Promise.allSettled([
-            listBackupSources(),
-            listUnownedLocalBackups(),
-            listUnownedS3Backups(),
-            listUnownedRemoteBackups(),
-            getVaultConfig(),
-            listStorageConnections(),
-          ]);
-        if (owned.status === "rejected") throw owned.reason;
-        const refreshedBackups = owned.value;
-        setBackups(
-          preserve &&
-            !refreshedBackups.some((item) => backupSourceKey(item) === backupSourceKey(preserve))
-            ? [preserve, ...refreshedBackups]
-            : refreshedBackups,
-        );
-        // The discovery endpoint is additive. Older servers may return 404, in
-        // which case owned backups remain fully usable and the candidate panel
-        // simply stays empty.
-        setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
-        setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
-        setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
-        if (config.status === "fulfilled") {
-          setBackupRetentionDays(String(config.value.backup_retention_days ?? 30));
-          setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
-          setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
-          setManualLocalBackupEnabled(config.value.manual_local_backup_enabled ?? true);
-          setAutomaticLocalBackupEnabled(config.value.automatic_local_backup_enabled ?? true);
-        }
-        setBackupConnections(
-          connections.status === "fulfilled"
-            ? connections.value.filter(
-                (connection) => connection.purpose === "backup" || connection.purpose === "both",
-              )
-            : [],
-        );
-      } catch (e) {
-        toast.error(e);
-      } finally {
-        setBackupsLoading(false);
-      }
-    },
-    [user],
-  );
+  async function loadBackups(preserve?: BackupMeta) {
+    if (!user?.is_superuser) return;
+    const session = getSessionVersion();
+    await Promise.all([
+      ownedBackupRead.refetch(),
+      localBackupRead.refetch(),
+      s3BackupRead.refetch(),
+      remoteBackupRead.refetch(),
+      remoteConfig.refetch(),
+      backupConnectionRead.refetch(),
+    ]);
+    if (preserve && accountCurrent(session)) {
+      setBackups((current) =>
+        current.some((item) => backupSourceKey(item) === backupSourceKey(preserve))
+          ? current
+          : [preserve, ...current],
+      );
+    }
+  }
 
   async function confirmAdoptBackup() {
     if (!adoptTarget) return;
@@ -875,15 +910,6 @@ export function SettingsPanel() {
       setAdoptingRemoteBackup(false);
     }
   }
-
-  useEffect(() => {
-    if (activeSection === "backup") {
-      // Same shape as the trash listing above: opening Backup starts the listing fetch,
-      // and only the loading flag is written before the await.
-      // oxlint-disable-next-line react/set-state-in-effect -- fetch-on-open of an external listing
-      loadBackups();
-    }
-  }, [activeSection, loadBackups]);
 
   async function saveAutoMarkKnownGood(next: boolean) {
     if (!user?.is_superuser || !remoteConfigData || remoteConfig.isError || configCommand.isPending)
@@ -1018,7 +1044,7 @@ export function SettingsPanel() {
   }
 
   async function saveBackupRetention() {
-    if (parsedBackupRetentionDays === null) return;
+    if (parsedBackupRetentionDays === null || backupConfigUnavailable) return;
     setBackupRetentionBusy(true);
     try {
       await updateVaultConfig({ backup_retention_days: parsedBackupRetentionDays });
@@ -1035,14 +1061,15 @@ export function SettingsPanel() {
     field: "manual_backup_enabled" | "automatic_backup_enabled",
     value: boolean,
   ) {
-    setBackupConnections((current) =>
-      current.map((connection) =>
-        connection.id === connectionId ? { ...connection, [field]: value } : connection,
-      ),
-    );
+    setBackupConnectionDrafts((current) => ({
+      ...current,
+      [connectionId]: { ...current[connectionId], [field]: value },
+    }));
   }
 
   async function saveBackupPolicy() {
+    if (backupConfigUnavailable || backupConnectionRead.isError || !backupConnectionRead.data)
+      return;
     const manualDestinationSelected =
       manualLocalBackupEnabled ||
       backupConnections.some(
@@ -1081,7 +1108,12 @@ export function SettingsPanel() {
       setAutomaticBackupTimeUtc(config.automatic_backup_time_utc);
       setManualLocalBackupEnabled(config.manual_local_backup_enabled);
       setAutomaticLocalBackupEnabled(config.automatic_local_backup_enabled);
-      setBackupConnections(connections);
+      queryClient.setQueryData<StorageConnection[]>(
+        storageConnectionsOptions().queryKey,
+        (previous) =>
+          previous?.map((row) => connections.find((saved) => saved.id === row.id) ?? row),
+      );
+      setBackupConnectionDrafts({});
       toast.success(t("settings.backupPolicySaved"));
     } catch (e) {
       toast.error(e);
@@ -1804,7 +1836,7 @@ export function SettingsPanel() {
           confirmLabel={uiText("Create preview")}
         />
         <ConfirmModal
-          open={restoreTarget !== null}
+          open={restoreTarget !== null && !backupsDenied && !!user?.is_superuser}
           onClose={() => setRestoreTarget(null)}
           onConfirm={confirmRestoreBackup}
           busy={restoringBackup}
@@ -1817,7 +1849,7 @@ export function SettingsPanel() {
           confirmLabel={uiText("Restore")}
         />
         <ConfirmModal
-          open={deleteBackupTarget !== null}
+          open={deleteBackupTarget !== null && !backupsDenied && !!user?.is_superuser}
           onClose={() => {
             if (deletingBackup === null) setDeleteBackupTarget(null);
           }}
@@ -3037,6 +3069,11 @@ export function SettingsPanel() {
 
             {activeSection === "backup" && (
               <div className="space-y-6 animate-panel-in">
+                {(remoteConfig.isError || backupConnectionRead.isError) && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {uiText("Could not load backup settings.")}
+                  </p>
+                )}
                 <SettingsCard
                   icon={RefreshCw}
                   title={t("settings.backupRetentionTitle")}
@@ -3048,6 +3085,7 @@ export function SettingsPanel() {
                       disabled={
                         !user?.is_superuser ||
                         backupRetentionBusy ||
+                        backupConfigUnavailable ||
                         parsedBackupRetentionDays === null
                       }
                       className={BTN_PRIMARY}
@@ -3069,7 +3107,9 @@ export function SettingsPanel() {
                         min={0}
                         max={365}
                         value={backupRetentionDays}
-                        disabled={!user?.is_superuser || backupRetentionBusy}
+                        disabled={
+                          !user?.is_superuser || backupRetentionBusy || backupConfigUnavailable
+                        }
                         onChange={(event) => setBackupRetentionDays(event.target.value)}
                         aria-invalid={parsedBackupRetentionDays === null}
                         aria-describedby={
@@ -3098,7 +3138,14 @@ export function SettingsPanel() {
                     <button
                       type="button"
                       onClick={saveBackupPolicy}
-                      disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                      disabled={
+                        !user?.is_superuser ||
+                        backupPolicyBusy ||
+                        backupsLoading ||
+                        backupConfigUnavailable ||
+                        backupConnectionRead.isError ||
+                        !backupConnectionRead.data
+                      }
                       className={cn(BTN_PRIMARY, "w-full sm:w-auto")}
                     >
                       {backupPolicyBusy ? (
@@ -3125,7 +3172,14 @@ export function SettingsPanel() {
                           checked={automaticBackupsEnabled}
                           onChange={setAutomaticBackupsEnabled}
                           ariaLabel={t("settings.backupAutomaticEnable")}
-                          disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                          disabled={
+                            !user?.is_superuser ||
+                            backupPolicyBusy ||
+                            backupsLoading ||
+                            backupConfigUnavailable ||
+                            backupConnectionRead.isError ||
+                            !backupConnectionRead.data
+                          }
                         />
                       </label>
                       <label className="text-xs text-muted-foreground">
@@ -3166,7 +3220,14 @@ export function SettingsPanel() {
                               checked={manualLocalBackupEnabled}
                               onChange={setManualLocalBackupEnabled}
                               ariaLabel={t("settings.backupLocalManual")}
-                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              disabled={
+                                !user?.is_superuser ||
+                                backupPolicyBusy ||
+                                backupsLoading ||
+                                backupConfigUnavailable ||
+                                backupConnectionRead.isError ||
+                                !backupConnectionRead.data
+                              }
                             />
                           </div>
                           <div className="flex justify-center">
@@ -3174,7 +3235,14 @@ export function SettingsPanel() {
                               checked={automaticLocalBackupEnabled}
                               onChange={setAutomaticLocalBackupEnabled}
                               ariaLabel={t("settings.backupLocalAutomatic")}
-                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              disabled={
+                                !user?.is_superuser ||
+                                backupPolicyBusy ||
+                                backupsLoading ||
+                                backupConfigUnavailable ||
+                                backupConnectionRead.isError ||
+                                !backupConnectionRead.data
+                              }
                             />
                           </div>
                         </div>
@@ -3207,7 +3275,14 @@ export function SettingsPanel() {
                                 ariaLabel={t("settings.backupUseManual", {
                                   name: connection.name,
                                 })}
-                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                                disabled={
+                                  !user?.is_superuser ||
+                                  backupPolicyBusy ||
+                                  backupsLoading ||
+                                  backupConfigUnavailable ||
+                                  backupConnectionRead.isError ||
+                                  !backupConnectionRead.data
+                                }
                               />
                             </div>
                             <div className="flex justify-center">
@@ -3223,7 +3298,14 @@ export function SettingsPanel() {
                                 ariaLabel={t("settings.backupUseAutomatic", {
                                   name: connection.name,
                                 })}
-                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                                disabled={
+                                  !user?.is_superuser ||
+                                  backupPolicyBusy ||
+                                  backupsLoading ||
+                                  backupConfigUnavailable ||
+                                  backupConnectionRead.isError ||
+                                  !backupConnectionRead.data
+                                }
                               />
                             </div>
                           </div>
@@ -3326,6 +3408,16 @@ export function SettingsPanel() {
                   }
                 >
                   <div className="divide-y divide-border">
+                    {ownedBackupRead.isError && (
+                      <p role="alert" className="p-4 text-sm text-destructive">
+                        {uiText("Could not load backup sources.")}
+                      </p>
+                    )}
+                    {backupDiscoveryFailed && (
+                      <p role="alert" className="p-4 text-sm text-destructive">
+                        {uiText("Some backup sources could not be loaded.")}
+                      </p>
+                    )}
                     {!user?.is_superuser ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Superuser access is required.")}
@@ -3334,7 +3426,9 @@ export function SettingsPanel() {
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Loading...")}
                       </p>
-                    ) : backups.length === 0 &&
+                    ) : !ownedBackupRead.isError &&
+                      !backupDiscoveryFailed &&
+                      backups.length === 0 &&
                       unownedBackups.length === 0 &&
                       unownedS3Backups.length === 0 &&
                       unownedRemoteBackups.length === 0 ? (

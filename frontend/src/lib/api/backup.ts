@@ -147,12 +147,14 @@ export function listBackups(): Promise<BackupMeta[]> {
 }
 
 /** List every exact source, including replicas and ambiguous collisions. */
-export function listBackupSources(): Promise<BackupMeta[]> {
-  return getJson<BackupMeta[]>("/api/v1/backups/sources");
+export function listBackupSources(options: GetJsonOptions = {}): Promise<BackupMeta[]> {
+  return getJson<BackupMeta[]>("/api/v1/backups/sources", options);
 }
 
-export function listUnownedLocalBackups(): Promise<UnownedBackupCandidate[]> {
-  return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local");
+export function listUnownedLocalBackups(
+  options: GetJsonOptions = {},
+): Promise<UnownedBackupCandidate[]> {
+  return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local", options);
 }
 
 export function adoptLocalBackup(filename: string): Promise<BackupMeta> {
@@ -163,12 +165,16 @@ export function adoptLocalBackup(filename: string): Promise<BackupMeta> {
   );
 }
 
-export function listUnownedS3Backups(): Promise<UnownedS3BackupCandidate[]> {
-  return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3");
+export function listUnownedS3Backups(
+  options: GetJsonOptions = {},
+): Promise<UnownedS3BackupCandidate[]> {
+  return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3", options);
 }
 
-export function listUnownedRemoteBackups(): Promise<UnownedRemoteBackupCandidate[]> {
-  return getJson<UnownedRemoteBackupCandidate[]>("/api/v1/backups/unowned-remote");
+export function listUnownedRemoteBackups(
+  options: GetJsonOptions = {},
+): Promise<UnownedRemoteBackupCandidate[]> {
+  return getJson<UnownedRemoteBackupCandidate[]>("/api/v1/backups/unowned-remote", options);
 }
 
 export function adoptS3Backup(

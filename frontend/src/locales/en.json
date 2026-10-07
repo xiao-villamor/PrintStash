@@ -4241,5 +4241,8 @@
   "librarySources.adminRequired": "Superuser access is required.",
   "Selected source unavailable": "Selected source unavailable",
   "Could not load upload destinations.": "Could not load upload destinations.",
-  "Choose an available destination before uploading.": "Choose an available destination before uploading."
+  "Choose an available destination before uploading.": "Choose an available destination before uploading.",
+  "Could not load backup sources.": "Could not load backup sources.",
+  "Some backup sources could not be loaded.": "Some backup sources could not be loaded.",
+  "Could not load backup settings.": "Could not load backup settings."
 }

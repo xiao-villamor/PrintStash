@@ -28,6 +28,7 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { aCollectionPermission, aPrinterPermission } from "@/test-support/permissions";
 import { aUser, aApiKey } from "@/test-support/account";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { storageConnectionKeys } from "@/lib/queries/settings-storage";
 import { queryKeys } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
 import { BROWSER_EXTENSION_SETUP_STORAGE_KEY } from "@/lib/browser-extension-setup";
@@ -36,6 +37,7 @@ import {
   aJob,
   aPrinter,
   aStorageConnection,
+  aVaultConfig,
   vaultStats,
 } from "@/test-support/factories";
 import {
@@ -54,7 +56,7 @@ const HEALTH = {
   storage: { status: "ok", backend: "local" },
 };
 
-const VAULT_CONFIG = {
+const VAULT_CONFIG = aVaultConfig({
   storage_backend: "local",
   data_dir: "/data/files",
   backup_retention_days: 30,
@@ -66,7 +68,7 @@ const VAULT_CONFIG = {
   trash_retention_days: 30,
   model_thumbnail_width: 640,
   currency: "USD",
-};
+});
 
 const VAULT_STATS = vaultStats();
 
@@ -857,6 +859,108 @@ describe("SettingsPanel", () => {
       };
     }
 
+    it("distinguishes an unavailable backup catalog from empty storage", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json({ detail: "unavailable" }, 503) },
+      });
+      expect(await screen.findByText("Could not load backup sources.")).toBeVisible();
+      expect(screen.queryByText("No backups found.")).toBeNull();
+    });
+    it("recovers the owned backup catalog explicitly", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("Could not load backup sources.");
+      app.route({ "GET /api/v1/backups/sources": json([BACKUP]) });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      expect(await screen.findByText(BACKUP.backup_id)).toBeVisible();
+      expect(screen.queryByText("Could not load backup sources.")).toBeNull();
+      expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    });
+    it("preserves an unsaved backup retention during refresh", async () => {
+      const app = renderSettings({ at: "/settings?section=backup" });
+      await screen.findByText("No backups found.");
+      const retention = screen.getByLabelText("Retention (days)");
+      await userEvent.clear(retention);
+      await userEvent.type(retention, "14");
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+        ).toHaveLength(2),
+      );
+      await screen.findByText("No backups found.");
+      expect(retention).toHaveValue(14);
+    });
+    it("preserves an unsaved backup schedule during refresh", async () => {
+      renderSettings({ at: "/settings?section=backup" });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Enable automatic backups"));
+      const schedule = screen.getByLabelText("Daily time (UTC)");
+      fireEvent.change(schedule, { target: { value: "04:30" } });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      await screen.findByText("No backups found.");
+      expect(schedule).toHaveValue("04:30");
+      expect(screen.getByLabelText("Enable automatic backups")).toBeChecked();
+    });
+    it("blocks backup policy until configuration is available", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/config": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("No backups found.");
+      expect(await screen.findByText("Could not load backup settings.")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled();
+    });
+    it("cancels an abandoned backup catalog read", async () => {
+      const held = Promise.withResolvers<Response>();
+      let signal: AbortSignal | null | undefined;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": (_url, init) => {
+            signal = init?.signal;
+            return held.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      app.unmount();
+      await act(async () => {
+        held.resolve(json([]));
+        await held.promise;
+      });
+      expect(signal?.aborted).toBe(true);
+    });
+    it("hides denied backup rows after refresh", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      expect(screen.getByRole("dialog")).toBeVisible();
+      app.route({ "GET /api/v1/backups/sources": json({ detail: "forbidden" }, 403) });
+      // A refresh can also originate from another observer while confirmation is open.
+      await act(async () => {
+        await app.client.invalidateQueries();
+      });
+      await screen.findByText("Could not load backup sources.");
+      await waitFor(() => expect(screen.queryByText(BACKUP.backup_id)).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+    it("distinguishes failed backup discovery from no candidates", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/unowned-local": json({ detail: "unavailable" }, 503) },
+      });
+      expect(await screen.findByText("Some backup sources could not be loaded.")).toBeVisible();
+      expect(screen.queryByText("No backups found.")).toBeNull();
+    });
+
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
@@ -966,6 +1070,35 @@ describe("SettingsPanel", () => {
           { manual_backup_enabled: true, automatic_backup_enabled: true },
         ]),
       );
+    });
+
+    it("preserves source-only connections when saving backup policy", async () => {
+      const backup = aStorageConnection({
+        id: 7,
+        name: "Backup destination",
+        purpose: "backup",
+        manual_backup_enabled: true,
+      });
+      const library = aStorageConnection({ id: 9, name: "Source connection", purpose: "library" });
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([backup, library]),
+          "PUT /api/v1/config": json(VAULT_CONFIG),
+          "PATCH /api/v1/storage-connections/7": json({ ...backup, manual_backup_enabled: false }),
+        },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Use Backup destination for manual backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+          ...backup,
+          manual_backup_enabled: false,
+        }),
+      );
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual(library);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
     it("refuses to save a manual policy without a destination", async () => {

@@ -132,3 +132,48 @@ source details, blocks dispatch, and offers explicit retry/selection. Existing
 Vault submissions and M7's accepted upload lifetime remain qualified. Rollback
 this consumer and its observable destination tests together, retaining the
 shared source owner. M9 remains active; aggregate backup ownership is next.
+
+## Aggregate backup workflow: ordered preflight
+
+The actual Settings backup surface still copies four remote catalogs plus config
+and connection DTOs. `loadBackups` overwrites unsaved policy/retention on refresh,
+turns discovery errors into empty lists, and leaves stale private rows after a
+failed owned-catalog refresh. Its read lifetime is not attached to the view.
+First migrate these reads and form drafts; then qualify exact-source destructive
+commands, publication receipts and accepted backup Jobs in the same M9 workflow.
+The existing backup-run owner remains canonical. No server-version conflict
+contract is invented for the unversioned global configuration.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| B1 | distinguishes an unavailable backup catalog from empty storage | Error | Owned source GET503 | Error visible; no empty-storage claim | Frontend unit | ✅ settings-panel.test.tsx |
+| B2 | recovers the owned backup catalog explicitly | Error | Failed read then Refresh succeeds | Catalog replaces failure; no command dispatched | Frontend unit | ✅ settings-panel.test.tsx |
+| B3 | preserves an unsaved backup retention during refresh | Conflict | Draft14 while server30 | Refresh retains14 | Frontend unit | ✅ settings-panel.test.tsx |
+| B4 | preserves an unsaved backup schedule during refresh | Conflict | Draft04:30 while server02:00 | Refresh retains04:30 | Frontend unit | ✅ settings-panel.test.tsx |
+| B5 | blocks backup policy until configuration is available | Error | Config503 | Visible settings failure; no enabled save from fabricated defaults | Frontend unit | ✅ settings-panel.test.tsx |
+| B6 | cancels an abandoned backup catalog read | Edge | Held GET then unmount | Native signal aborted | Frontend unit | ✅ settings-panel.test.tsx |
+| B7 | hides denied backup rows after refresh | Permission | Warm rows then403 | Exact private source/confirmation hidden; no destructive dispatch | Frontend unit | ✅ settings-panel.test.tsx |
+| B8 | distinguishes failed backup discovery from no candidates | Error | Discovery503 with owned catalog healthy | Explicit recovery, no false empty-storage claim | Frontend unit | ✅ settings-panel.test.tsx |
+| B9 | preserves source-only connections when saving backup policy | Happy | Shared catalog includes library-only connection | Backup acknowledgment leaves unrelated source connection available | Frontend unit | ✅ settings-panel.test.tsx |
+
+### Backup read/form checkpoint (workflow remains open)
+
+Initial8/8 REDs included one incorrect schedule label; corrected it to the existing
+Daily time (UTC),then that case separately failed on lost04:30 as intended.
+After migration36passed/2failed: the Save policy button still missed the unavailable
+configuration guard, and the denial test checked the exiting confirmation before
+its close completed. Added the guard; awaited the actual read failure and dialog
+removal. Full affected Settings/API/history gate215/4files51.97s passed.
+
+Two subsequent controls (visible settings-read error and preserving a library-only
+connection through a backup-policy ACK) passed2/2 4.94s. Types/lint,format765files,
+repository/i18n12/2files3.87s passed. These invocations overlap; they are not a
+unique aggregate coverage count. Existing jsdom download/navigation warnings remain.
+
+Four independent canonical read projections replace the copied backup catalogs.
+Signals cancel abandoned reads. Only missing404 discovery routes retain historical
+empty support; supported-route failures remain recoverable errors. Drafts contain
+edited policy fields rather than refreshed full DTOs. The existing destructive/
+publication handlers still need migration; four explicitly marked local Query
+update adapters must be removed in the next bounded backup command step before
+M9 can close. Real backup/browser qualification follows that complete workflow.

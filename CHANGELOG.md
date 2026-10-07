@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve unsaved backup settings during catalog refresh, distinguish failed
+  source discovery from empty storage, cancel abandoned reads, and hide owned
+  backup details after access denial.
+
 - Keep an upload's selected source when it becomes unavailable and require an
   explicit available destination before dispatch. Share source updates, recover
   failed catalog reads, and avoid admin-only reads for member uploads.
