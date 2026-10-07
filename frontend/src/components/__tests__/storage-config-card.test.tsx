@@ -285,6 +285,12 @@ describe("StorageConfigCard", () => {
           requestsWithMethod("POST").some((call) => call.url.includes("storage-roots/enroll")),
         ).toBe(true),
       );
+      expect(
+        JSON.parse(
+          requestsWithMethod("POST").find((call) => call.url.includes("storage-roots/enroll"))!
+            .body,
+        ),
+      ).toEqual({ role: "data", confirm: true, expected_path: "/data/files" });
       expect(await screen.findByText(/Storage root enrolled/i)).toBeVisible();
     });
 
@@ -870,6 +876,26 @@ describe("Storage configuration ownership", () => {
     act(() => clearLogin());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("dismisses enrollment after a server-side root change", async () => {
+    const app = renderCard({
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+      routes: {
+        "POST /api/v1/config/storage-roots/enroll": json({ detail: "storage_review_changed" }, 409),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    expect(await screen.findByText(/changed during review/)).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
   });
   it("refuses enrollment after the reviewed root changes", async () => {
     const app = renderCard({

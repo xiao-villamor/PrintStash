@@ -135,6 +135,11 @@ class StorageRootEnrollment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     role: Literal["data", "thumb"]
     confirm: bool = False
+    expected_path: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Exact reviewed local root path; omitted by legacy role-only clients.",
+    )
 
 
 @router.post(
@@ -154,8 +159,10 @@ def enroll_storage_root(
         raise HTTPException(status_code=409, detail="storage_backend_not_local")
     from app.modules.storage.storage_backend.local import enroll_legacy_local_root
 
-    identity = runtime_config.ensure_storage_identity(session)
     root = settings.data_dir if body.role == "data" else settings.thumb_dir
+    if body.expected_path is not None and str(root) != body.expected_path:
+        raise HTTPException(status_code=409, detail="storage_review_changed")
+    identity = runtime_config.ensure_storage_identity(session)
     enrolled = enroll_legacy_local_root(
         root,
         role=body.role,

@@ -81,7 +81,8 @@ The configuration transport and command owner now require an editing base for ev
 first-party write. The backend retains its documented legacy-client compatibility;
 legacy writes advance the version but remain unprotected themselves. This cutover
 covers vault configuration, not every editable aggregate. Remote connection edit
-versions and the reviewed-root enrollment precondition remain separate open work.
+versions remain separate open work. Local-root enrollment now carries its exact
+reviewed path through the separate enrollment command.
 
 ### Implemented backup seam (M9 increment)
 
@@ -114,8 +115,16 @@ publish centrally; edits typed while a save is pending remain drafts. Migration
 activation/recovery invalidates the configuration projection after canceling older
 reads, so current-location summaries follow the accepted storage transition.
 `settings-storage-root.ts` scopes explicit enrollment to its view/session and checks
-the currently observed reviewed path. The configuration PUT now stages its owned
-policy/flag/schedule/provider writes and commits them together before publishing
+the currently observed reviewed path. The first-party enrollment transport requires
+that path and sends it as `expected_path`. The API captures the active local root
+once, rejects a different reviewed path with 409 `storage_review_changed` before
+identity or marker writes, then enrolls the captured root. Path comparison is exact;
+it does not resolve symlinks. A changed-root response closes confirmation and asks
+for fresh review. Legacy requests omitting the path retain role-only compatibility
+and do not receive this protection. Filesystem identity after a mount/symlink
+replacement remains subject to the existing enrollment and marker checks.
+
+The configuration PUT now stages its owned policy/flag/schedule/provider writes and commits them together before publishing
 runtime values or derivative hints. A database failure rolls back the whole patch.
 `SystemConfig.vault_edit_version` now advances transactionally for every editable
 vault configuration field, including legacy SQL/ORM writes and provider credentials.
@@ -129,9 +138,9 @@ snapshot and matching ETag. PUT accepts `If-Match`, requires it for
 Legacy writes remain accepted and advance the version. A receipt is captured
 before releasing the write transaction; later commits cannot replace it. Runtime
 publication reads the latest locked row and only publishes the edited fields.
-The remaining Settings conflict recovery and a backend reviewed-root precondition remain required
-before M9 closes. Local
-fingerprints and path comparisons do not provide that protection.
+The remaining Settings conflict recovery and other editable-aggregate contracts
+remain required before M9 closes. The root-enrollment precondition is independent
+of vault configuration edit versions.
 
 ## Proposed directory tree
 

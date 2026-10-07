@@ -755,29 +755,124 @@ class TestMakerWorld:
 
 
 class TestStorageRootEnrollment:
+    @pytest.mark.parametrize("role", ["data", "thumb"], ids=["data", "thumb"])
+    def test_rejects_an_unobserved_root_change(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+        role: str,
+        db_session: Session,
+    ) -> None:
+        before = db_session.get(SystemConfig, 1)
+        identity_before = before.storage_identity if before is not None else None
+        reviewed = Path(_overlay[f"{role}_dir"])
+        replacement = tmp_path / f"replacement-{role}"
+        replacement.mkdir()
+        _overlay[f"{role}_dir"] = replacement
+
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": role, "confirm": True, "expected_path": str(reviewed)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_review_changed"
+        assert not (reviewed / ".printstash-storage-root.json").exists()
+        assert not (replacement / ".printstash-storage-root.json").exists()
+        db_session.expire_all()
+        after = db_session.get(SystemConfig, 1)
+        assert (
+            after.storage_identity if after is not None else None
+        ) == identity_before
+
+    def test_rejects_a_different_path_to_the_same_root(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+    ) -> None:
+        root = Path(_overlay["data_dir"])
+        root.mkdir()
+        alias = tmp_path / "reviewed-alias"
+        alias.symlink_to(root, target_is_directory=True)
+
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(alias)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_review_changed"
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_enrollment_for_a_nonlocal_backend(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        _overlay["storage_backend"] = "s3"
+        root = Path(_overlay["data_dir"])
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(root)},
+            headers=auth_headers,
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_backend_not_local"
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_member_root_enrollment(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        root = Path(_overlay["data_dir"])
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(root)},
+            headers=user_headers("root-member"),
+        )
+        assert response.status_code == 403, response.text
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_an_empty_reviewed_path(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": ""},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422, response.text
+        assert not (
+            Path(_overlay["data_dir"]) / ".printstash-storage-root.json"
+        ).exists()
+
     def test_requires_an_explicit_confirmation(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
         response = client.post(
             "/api/v1/config/storage-roots/enroll",
-            json={"role": "data"},
+            json={"role": "data", "expected_path": str(_overlay["data_dir"])},
             headers=auth_headers,
         )
 
         assert response.status_code == 400, response.text
         assert response.json()["detail"] == "storage_root_confirmation_required"
 
+    @pytest.mark.parametrize("reviewed", [False, True], ids=["legacy", "reviewed"])
     def test_superuser_can_enroll_an_existing_markerless_root(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
+        reviewed: bool,
     ) -> None:
         root = Path(_overlay["data_dir"])
         root.mkdir(parents=True, exist_ok=True)
 
         response = client.post(
             "/api/v1/config/storage-roots/enroll",
-            json={"role": "data", "confirm": True},
+            json={
+                "role": "data",
+                "confirm": True,
+                **({"expected_path": str(root)} if reviewed else {}),
+            },
             headers=auth_headers,
         )
 

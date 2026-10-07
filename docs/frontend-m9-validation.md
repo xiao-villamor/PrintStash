@@ -918,3 +918,42 @@ Temporary optional-base/legacy-publication branches are removed. The backend's
 legacy compatibility is unchanged and is explicitly outside conditional protection.
 M9 still includes the reviewed-root contract, remaining administrative query owners
 and independent editable-aggregate contracts. M10 and M11 have not been advanced.
+
+## Reviewed local-root enrollment (M9 increment verified)
+
+The first-party confirmation sends the exact reviewed path. The backend captures
+its active local root, compares that path before identity/marker writes, and uses
+that same captured root for enrollment. Legacy requests without a reviewed path
+retain the old role-only behavior for compatibility; the first-party transport
+requires the path. This does not prove filesystem identity after a mount/symlink
+replacement; existing enrollment/marker checks retain that responsibility.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| RE1 | rejects an unobserved root change | Error | Data/thumb root changes after review | 409; no identity write; neither path receives a marker | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_rejects_an_unobserved_root_change` |
+| RE2 | superuser can enroll an existing markerless root | Happy | Matching reviewed path or legacy request | Exact root marker created | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_superuser_can_enroll_an_existing_markerless_root` |
+| RE3 | rejects member root enrollment | Error | Member confirms current root | 403; no marker | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_rejects_member_root_enrollment` |
+| RE4 | rejects an empty reviewed path | Edge | Empty explicit path | 422; no marker | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_rejects_an_empty_reviewed_path` |
+| RE5 | POSTs an explicit confirmation for the selected root role | Happy | Reviewed role and path | Both sent with confirmation | Frontend unit | ✅ `src/lib/api/__tests__/config.test.ts::enrollStorageRoot::POSTs an explicit confirmation for the selected root role` |
+| RE6 | offers explicit enrollment for a missing legacy marker | Happy | Operator confirms displayed path | Request carries displayed path | Frontend unit | ✅ `src/components/__tests__/storage-config-card.test.tsx::offers explicit enrollment for a missing legacy marker` |
+| RE7 | dismisses enrollment after a server-side root change | Error | Server returns storage_review_changed | Confirmation closed; changed-root message; no retry | Frontend unit | ✅ `src/components/__tests__/storage-config-card.test.tsx::dismisses enrollment after a server-side root change` |
+| RE8 | rejects a different path to the same root | Error | Reviewed symlink alias differs from configured path | 409; no marker | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_rejects_a_different_path_to_the_same_root` |
+| RE9 | rejects enrollment for a nonlocal backend | Error | S3 active; reviewed local path supplied | 409 storage_backend_not_local; no marker | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_rejects_enrollment_for_a_nonlocal_backend` |
+| RE10 | requires an explicit confirmation | Error | Reviewed path without confirmation | 400 storage_root_confirmation_required | Integration | ✅ `integration/api/v1/test_config.py::TestStorageRootEnrollment::test_requires_an_explicit_confirmation` |
+
+Focused verification:
+
+- Backend enrollment selection: **9 passed**, 61 deselected in **5.52 s**.
+- Complete affected config API and StorageConfigCard Vitest files: **81 passed** in **9.68 s**.
+- OpenAPI snapshot update test: **1 passed** in **5.75 s**; inspected diff adds only nullable optional `expected_path` with a nonempty-string constraint.
+- Frontend typecheck (app/UI/domain), scoped oxlint/oxfmt, backend scoped Ruff, and scoped backend Pyright (0 errors/warnings) passed.
+
+Preserved red runs: backend **3 failed / 4 passed** in **6.53 s**, because
+`expected_path` was forbidden; UI **2 failed / 5 passed / 45 skipped** in **5.74 s**,
+because the request omitted the path and the new dismissal assertion ran during
+the existing exit animation. The latter now waits for observable dialog removal;
+no production dialog behavior changed. Logs are retained locally under
+`/tmp/printstash-m9-root-{red,ui-red,green,ui-green,openapi,types,backend-types}.log`.
+No full suite, coverage gate, browser server or build was run for this bounded
+contract regression. M9 remains open pending its reopened M7/M8 prerequisites
+and remaining administration work.

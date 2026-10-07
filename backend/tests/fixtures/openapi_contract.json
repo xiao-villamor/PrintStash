@@ -19004,6 +19004,19 @@
             "title": "Confirm",
             "type": "boolean"
           },
+          "expected_path": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact reviewed local root path; omitted by legacy role-only clients.",
+            "title": "Expected Path"
+          },
           "role": {
             "enum": [
               "data",

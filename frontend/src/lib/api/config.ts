@@ -77,12 +77,13 @@ export function getHealthDetails<T>(): Promise<T> {
 
 export function enrollStorageRoot(
   role: StorageRootRole,
+  expectedPath: string,
   options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<StorageRootEnrollmentRead> {
   return requestApi<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", {
     method: "POST",
     headers: jsonHeaders(),
-    body: JSON.stringify({ role, confirm: true }),
+    body: JSON.stringify({ role, confirm: true, expected_path: expectedPath }),
     signal: options.signal,
   });
 }

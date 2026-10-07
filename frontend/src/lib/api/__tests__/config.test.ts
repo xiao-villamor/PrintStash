@@ -145,10 +145,10 @@ describe("enrollStorageRoot", () => {
   it("POSTs an explicit confirmation for the selected root role", async () => {
     respondWith({ enrolled: true, role: "data", restart_required: true });
 
-    await enrollStorageRoot("data");
+    await enrollStorageRoot("data", "/reviewed/files");
 
     expectRequest("/api/v1/config/storage-roots/enroll", "POST");
-    expect(lastBody()).toEqual({ role: "data", confirm: true });
+    expect(lastBody()).toEqual({ role: "data", confirm: true, expected_path: "/reviewed/files" });
   });
 });
 

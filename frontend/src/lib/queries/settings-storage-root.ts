@@ -60,7 +60,9 @@ export function useStorageRootEnrollment() {
     }
     try {
       assertReviewed();
-      const receipt = await enrollStorageRoot(target.role, { signal: controller.signal });
+      const receipt = await enrollStorageRoot(target.role, target.path, {
+        signal: controller.signal,
+      });
       assertCurrent();
       return receipt;
     } catch (error) {
