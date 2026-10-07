@@ -1,6 +1,6 @@
 # M9 — administration and entry route qualification
 
-Status: active after M8 acceptance5a00f537. M0–M8 closed locally; M10–M11 pending.
+Status: M9 locally accepted after M8. Final integrated qualification and remote CI remain M11. Earlier checkpoint sections below retain their historical status; the acceptance summary supersedes their remaining-work lists.
 
 ## Ordered work and boundaries
 
@@ -977,3 +977,29 @@ bases, explicit review/adoption/revised saves, session retirement, extension
 adapter compatibility and a real two-editor browser flow. See the complete matrix
 in `frontend-m9-provider-validation.md`. Next M9 seam: notifications; subsequent
 remote source/connection edit contracts and remaining Settings reads stay open.
+
+## M9 local acceptance
+
+The ordered administration cutover is complete through `35e866e7`. Configuration,
+accounts/permissions, OIDC, setup and public-share contracts retain their earlier
+qualified owners; backup commands and migration preserve durable Jobs and explicit
+recovery. Independent editable aggregates now have captured bases and deliberate
+conflict review: browser names (`35ec1ea4`), notifications (`f7c6abb4`), reusable
+connections (`5d68126c`) and external sources (`18efe0c7`). The latter two include
+atomic backend claims, schema upgrades and concurrent-session coverage. Their
+specific matrices are linked below; legacy clients remain explicitly outside the
+opted-in conditional contract and are not claimed protected.
+
+- [Provider/browser contract](frontend-m9-provider-validation.md)
+- [Notification contract](frontend-m9-notifications-validation.md)
+- [Reusable connection contract](frontend-m9-storage-edit-validation.md)
+- [External source contract](frontend-m9-source-edit-validation.md)
+- [Final Settings status/Trash/GC ownership](frontend-m9-settings-reads-validation.md)
+
+Settings health, releases, Trash and GC no longer keep effect-owned remote copies.
+The remaining Settings state represents drafts, confirmations, local preferences,
+command progress or outcomes. Its deadline timer displays quarantine eligibility;
+it is not a second remote freshness owner. All applicable M9 behavior rows have
+local evidence. This accepts M9, not final delivery: M10 removes the named transport
+compatibility bridge and finishes platform boundaries; M11 reconciles every ledger
+row, qualifies the integrated branch and obtains latest-commit green PR checks.

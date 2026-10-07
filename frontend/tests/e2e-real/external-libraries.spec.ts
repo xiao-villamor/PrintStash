@@ -358,83 +358,87 @@ test.describe("mounted library source root recovery", () => {
   });
 });
 
-test("resolves competing source editors", async ({ page, context }) => {
-  const stamp = `source-edit-${Date.now()}`;
-  await page.goto("/settings?section=libraries");
-  const config = await (await page.request.get("/api/v1/config")).json();
-  expect(
-    (await page.request.put("/api/v1/config", { data: { external_libraries_enabled: true } })).ok(),
-  ).toBe(true);
-  const connectionResponse = await page.request.post("/api/v1/storage-connections", {
-    data: {
-      name: stamp,
-      kind: "s3",
-      purpose: "library",
-      configuration: { bucket: "unused-source-edit-bucket" },
-      secrets: { access_key: "FakeSourceEditAccess", secret_key: "FakeSourceEditSecret" },
-    },
-  });
-  expect(connectionResponse.status()).toBe(201);
-  const connection = await connectionResponse.json();
-  const created = await page.request.post("/api/v1/libraries", {
-    data: {
-      name: stamp,
-      source_kind: "s3",
-      connection_id: connection.id,
-      source_prefix: "models",
-      scan_schedule: "",
-    },
-  });
-  expect(created.status()).toBe(201);
-  const source = await created.json();
-  const second = await context.newPage();
-  const release = Promise.withResolvers<void>();
-  try {
+test.describe("source conditional editing", () => {
+  test("resolves competing source editors", async ({ page, context }) => {
+    const stamp = `source-edit-${Date.now()}`;
     await page.goto("/settings?section=libraries");
-    await second.goto("/settings?section=libraries");
-    const endpoint = `/api/v1/libraries/${source.id}`;
-    const held = Promise.withResolvers<void>();
-    await second.route(`**${endpoint}`, async (route) => {
-      if (route.request().method() === "PATCH") {
-        held.resolve();
-        await release.promise;
-      }
-      await route.continue();
+    const config = await (await page.request.get("/api/v1/config")).json();
+    expect(
+      (
+        await page.request.put("/api/v1/config", { data: { external_libraries_enabled: true } })
+      ).ok(),
+    ).toBe(true);
+    const connectionResponse = await page.request.post("/api/v1/storage-connections", {
+      data: {
+        name: stamp,
+        kind: "s3",
+        purpose: "library",
+        configuration: { bucket: "unused-source-edit-bucket" },
+        secrets: { access_key: "FakeSourceEditAccess", secret_key: "FakeSourceEditSecret" },
+      },
     });
-    const conflict = second.waitForResponse(
-      (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
-    );
-    await second.getByRole("switch", { name: "Auto-scan enabled" }).click();
-    await held.promise;
-    const accepted = page.waitForResponse(
-      (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
-    );
-    await page.getByLabel(`Scan schedule ${stamp}`, { exact: true }).selectOption("0 0 * * *");
-    expect((await accepted).status()).toBe(200);
-    release.resolve();
-    expect((await conflict).status()).toBe(412);
-    await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
-    await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
-    await second.getByRole("button", { name: "Review current values" }).click();
-    await expect(
-      second.getByRole("region", { name: "Latest saved version" }).getByText("Daily (midnight)"),
-    ).toBeVisible();
-    const revised = second.waitForResponse(
-      (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
-    );
-    await second.getByRole("button", { name: "Save revised changes" }).click();
-    expect((await revised).status()).toBe(200);
-    await expect(second.getByLabel(`Scan schedule ${stamp}`, { exact: true })).toHaveValue(
-      "0 0 * * *",
-    );
-    await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
-  } finally {
-    release.resolve();
-    await second.close();
-    await page.request.delete(`/api/v1/libraries/${source.id}`);
-    await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
-    await page.request.put("/api/v1/config", {
-      data: { external_libraries_enabled: config.external_libraries_enabled },
+    expect(connectionResponse.status()).toBe(201);
+    const connection = await connectionResponse.json();
+    const created = await page.request.post("/api/v1/libraries", {
+      data: {
+        name: stamp,
+        source_kind: "s3",
+        connection_id: connection.id,
+        source_prefix: "models",
+        scan_schedule: "",
+      },
     });
-  }
+    expect(created.status()).toBe(201);
+    const source = await created.json();
+    const second = await context.newPage();
+    const release = Promise.withResolvers<void>();
+    try {
+      await page.goto("/settings?section=libraries");
+      await second.goto("/settings?section=libraries");
+      const endpoint = `/api/v1/libraries/${source.id}`;
+      const held = Promise.withResolvers<void>();
+      await second.route(`**${endpoint}`, async (route) => {
+        if (route.request().method() === "PATCH") {
+          held.resolve();
+          await release.promise;
+        }
+        await route.continue();
+      });
+      const conflict = second.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await second.getByRole("switch", { name: "Auto-scan enabled" }).click();
+      await held.promise;
+      const accepted = page.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await page.getByLabel(`Scan schedule ${stamp}`, { exact: true }).selectOption("0 0 * * *");
+      expect((await accepted).status()).toBe(200);
+      release.resolve();
+      expect((await conflict).status()).toBe(412);
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
+      await second.getByRole("button", { name: "Review current values" }).click();
+      await expect(
+        second.getByRole("region", { name: "Latest saved version" }).getByText("Daily (midnight)"),
+      ).toBeVisible();
+      const revised = second.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await second.getByRole("button", { name: "Save revised changes" }).click();
+      expect((await revised).status()).toBe(200);
+      await expect(second.getByLabel(`Scan schedule ${stamp}`, { exact: true })).toHaveValue(
+        "0 0 * * *",
+      );
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+    } finally {
+      release.resolve();
+      await second.close();
+      await page.request.delete(`/api/v1/libraries/${source.id}`);
+      await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
+      await page.request.put("/api/v1/config", {
+        data: { external_libraries_enabled: config.external_libraries_enabled },
+      });
+    }
+  });
 });
